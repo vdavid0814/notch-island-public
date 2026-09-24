@@ -8,6 +8,14 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case hover(Bool)
     /// Logs presentation, stage and where SwiftUI actually placed the island.
     case state
+    /// The AirPods-connected banner with sample batteries.
+    case airPods
+    /// The timer widget's ruler moves on to its next unit (hours → minutes → seconds).
+    case timerUnit
+    /// Siri opened on its app gallery (as ⌘Space then ⌘1).
+    case siriApps
+    /// Switches the island's surface style, as the Settings cards do (animated).
+    case surface(IslandGlassStyle)
 }
 
 /// Everything the app can be asked to do from outside the island: the menu bar menu and the
@@ -18,6 +26,10 @@ nonisolated enum AppCommand: Sendable, Equatable {
     case media(MediaCommand)
     case startTimer(minutes: Double), cancelTimer, startStopwatch
     case showSettings
+    /// Settings on one tab (`settings/widgets`…).
+    case showSettingsPane(IslandSettingsPane)
+    /// A widget's editor in Settings ▸ Widgets (`widget/timer`…).
+    case editWidget(IslandWidgetKind)
     /// The widget editor (Customize Island).
     case customize
     /// ⌘Space (Siri or Spotlight), from the notch.
@@ -38,12 +50,13 @@ nonisolated enum AppCommand: Sendable, Equatable {
     /// `notchisland:media/next` work. Unknown routes and malformed parameters return nil (so the
     /// caller can log them) instead of guessing.
     ///
-    ///     open[?page=home|shelf|timer]   close   pin   settings   customize   siri
+    ///     open[?page=home|shelf|timer]   close   pin   settings[/general|widgets|activities|permissions|about]
+    ///     customize   widget/<kind>   siri
     ///     media/play|pause|toggle|next|previous
     ///     timer[?minutes=N]   timer/cancel   stopwatch
     ///     demo/media|charging|unplug|low|timerdone|drop|shelf|reset
     ///     demo/volume[?level=0…1]   demo/brightness[?level=0…1]
-    ///     demo/hover[?inside=1|0]   demo/state
+    ///     demo/hover[?inside=1|0]   demo/state   demo/surface?style=smoked|black|fade   demo/airpods
     static func parse(_ url: URL) -> AppCommand? {
         guard url.scheme?.lowercased() == scheme,
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -66,6 +79,11 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "close": return .close
         case "pin": return .togglePin
         case "settings": return .showSettings
+        case let route where route.hasPrefix("widget/"):
+            let name = String(route.dropFirst("widget/".count))
+            return IslandWidgetKind.allCases.first { $0.rawValue.lowercased() == name }.map { .editWidget($0) }
+        case let route where route.hasPrefix("settings/"):
+            return IslandSettingsPane.named(String(route.dropFirst("settings/".count))).map { .showSettingsPane($0) }
         case "customize": return .customize
         case "assistant", "siri": return .assistant
 
@@ -101,6 +119,11 @@ nonisolated enum AppCommand: Sendable, Equatable {
             default: return nil
             }
         case "demo/state": return .demo(.state)
+        case "demo/airpods": return .demo(.airPods)
+        case "demo/timerunit": return .demo(.timerUnit)
+        case "demo/siriapps": return .demo(.siriApps)
+        case "demo/surface":
+            return query["style"].flatMap { IslandGlassStyle(rawValue: $0.lowercased()) }.map { .demo(.surface($0)) }
 
         default: return nil
         }

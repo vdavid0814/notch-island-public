@@ -22,8 +22,6 @@ import AppKit
     var screen: () -> NSScreen? = { nil }
     /// The notch in global AppKit coordinates.
     var notchRect: () -> CGRect? = { nil }
-    /// The widest the island gets (the open panel), for the zone's width.
-    var widestIsland: () -> CGFloat = { 0 }
     /// Whether the island is open (the strip stays while it is).
     var isIslandOpen: () -> Bool = { false }
     /// A click landed on the strip: our own window, so the assistant's outside-click monitor (a
@@ -95,8 +93,7 @@ import AppKit
         geometry = BandCoverPolicy.Geometry(
             screen: screen.frame,
             band: FullscreenMonitor.menuBarBand(of: screen) + 1,
-            notch: notch,
-            widestIsland: widestIsland()
+            notch: notch
         )
     }
 
@@ -131,8 +128,9 @@ import AppKit
 
 /// When the band is covered. Pure, so the rules are testable without a screen.
 nonisolated enum BandCoverPolicy {
-    /// Beside the widest island, the zone reaches this far further on each side.
-    static let sideMargin: CGFloat = 60
+    /// Beside the notch, the zone reaches this far on each side: just past the compact pill, so
+    /// the menu bar stays reachable everywhere else (the user marked this width).
+    static let sideMargin: CGFloat = 48
     /// How far below the band the zone begins, so the strip is up before the pointer gets there.
     static let approachDepth: CGFloat = 120
     /// The pointer must be this far below the band before the strip may go.
@@ -149,7 +147,6 @@ nonisolated enum BandCoverPolicy {
         /// Height of the covered band (the menu bar plus a point).
         let band: CGFloat
         let notch: CGRect
-        let widestIsland: CGFloat
 
         var bandRect: CGRect {
             CGRect(x: screen.minX, y: screen.maxY - band, width: screen.width, height: band)
@@ -157,7 +154,7 @@ nonisolated enum BandCoverPolicy {
 
         /// Around the notch, from `approachDepth` below the band up to the top of the screen.
         var zone: CGRect {
-            let half = max(widestIsland, notch.width) / 2 + BandCoverPolicy.sideMargin
+            let half = notch.width / 2 + BandCoverPolicy.sideMargin
             let bottom = bandRect.minY - BandCoverPolicy.approachDepth
             return CGRect(x: notch.midX - half, y: bottom, width: 2 * half, height: screen.maxY - bottom)
         }

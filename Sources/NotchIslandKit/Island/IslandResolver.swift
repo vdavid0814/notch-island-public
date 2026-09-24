@@ -11,6 +11,8 @@ nonisolated struct IslandInputs: Sendable, Equatable {
     var isHidden: Bool = false
     /// The assistant (Siri in the notch) is open: it outranks everything, including hiding.
     var wantsAssistant: Bool = false
+    /// Settings is open in the island: below the assistant, above everything else.
+    var wantsSettings: Bool = false
     /// How much of the assistant shows (see `AssistantRoom`).
     var assistantRoom: AssistantRoom = .field
     var wantsExpanded: Bool = false
@@ -32,6 +34,7 @@ nonisolated enum IslandResolver {
     /// they are always there to fall back to.
     static func resolve(_ i: IslandInputs) -> IslandPresentation {
         if i.wantsAssistant { return .assistant(i.assistantRoom) }
+        if i.wantsSettings { return .settings }
         if i.wantsExpanded { return .expanded(i.page) }
         if i.isHidden {
             // Only the direct answer to something the user just did gets through.

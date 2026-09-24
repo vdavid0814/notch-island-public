@@ -387,24 +387,6 @@ private struct AboutSettings: View {
 
 // MARK: - Shared pieces
 
-/// A status word with a meaningful system colour on the symbol only; the text stays primary.
-private struct StatusLabel: View {
-    let title: String
-    let tone: SettingsFormat.Tone
-
-    var body: some View {
-        Label {
-            Text(title)
-        } icon: {
-            switch tone {
-            case .ok: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-            case .attention: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            case .neutral: Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
 /// The words Settings shows for system state. Pure, so the copy is testable.
 nonisolated enum SettingsFormat {
     nonisolated enum Tone: Sendable, Equatable { case ok, attention, neutral }

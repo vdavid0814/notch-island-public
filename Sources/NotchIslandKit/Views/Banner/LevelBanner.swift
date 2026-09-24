@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Volume / brightness: the level's symbol and percentage flank the notch, the native slider sits
-/// below with the range's end symbols, like the system's own sound and display sliders.
+/// Volume / brightness under the notch: one row with the level's symbol (for volume, the mute
+/// button), the native slider and the percentage. Nothing in the ears beside the notch — the symbol
+/// and the number sit with the slider they describe.
 struct LevelBanner: View {
     let kind: LevelKind
 
@@ -10,33 +11,72 @@ struct LevelBanner: View {
     var body: some View {
         let reading = model.levels.reading(kind)
         BannerLayout(kind: .level(kind)) {
-            LevelSymbol(kind: kind, reading: reading)
+            EmptyView()
         } headerTrailing: {
-            LevelValue(reading: reading)
+            EmptyView()
         } row: {
-            if kind == .volume {
-                Button {
-                    model.levels.toggleMute()
-                } label: {
-                    Label(reading.isMuted ? "Unmute" : "Mute", systemImage: reading.isMuted ? "speaker.slash.fill" : "speaker.fill")
-                        .labelStyle(.iconOnly)
-                        .contentTransition(.symbolEffect(.replace))
-                        .frame(width: 18)
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .help(reading.isMuted ? "Unmute" : "Mute")
-            } else {
-                Image(systemName: "sun.min.fill")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18)
-                    .accessibilityHidden(true)
-            }
-            LevelSlider(kind: kind)
-            Image(systemName: kind == .volume ? "speaker.wave.3.fill" : "sun.max.fill")
-                .foregroundStyle(.secondary)
+            LevelLeadingSymbol(kind: kind, reading: reading)
                 .frame(width: 22)
-                .accessibilityHidden(true)
+            LevelSlider(kind: kind)
+            LevelValue(reading: reading)
+                .font(.callout.weight(.semibold).monospacedDigit())
+                .frame(minWidth: 44, alignment: .trailing)
+        }
+    }
+}
+
+/// The minimal style (`LevelHUDStyle.pill`): a pill beside the notch like Now Playing's, the
+/// level's symbol in the leading ear and a small slider in the trailing one.
+struct LevelPill: View {
+    let kind: LevelKind
+
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let layout = model.layout
+        let split = NotchSplit(
+            layout: layout,
+            presentation: .banner(.levelPill(kind)),
+            outerInset: Metrics.Compact.inset + 4,
+            clearance: Metrics.Compact.notchClearance + 4
+        )
+        let reading = model.levels.reading(kind)
+        NotchSplitBand(split: split, height: layout.notch.height) {
+            LevelLeadingSymbol(kind: kind, reading: reading)
+                .font(.system(size: layout.notch.height * 0.42, weight: .semibold))
+        } trailing: {
+            LevelSlider(kind: kind)
+                .controlSize(.mini)
+        }
+    }
+}
+
+/// Left of a level's slider: for volume the mute button (its symbol follows the level), for
+/// brightness the level's symbol.
+struct LevelLeadingSymbol: View {
+    let kind: LevelKind
+    let reading: LevelReading
+
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if kind == .volume {
+            Button {
+                model.levels.toggleMute()
+            } label: {
+                Label {
+                    Text(reading.isMuted ? "Unmute" : "Mute")
+                } icon: {
+                    LevelSymbol(kind: kind, reading: reading)
+                }
+                .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            // As bright as the brightness symbol (a borderless button would grey it).
+            .foregroundStyle(reading.isMuted ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+            .help(reading.isMuted ? "Unmute" : "Mute")
+        } else {
+            LevelSymbol(kind: kind, reading: reading)
         }
     }
 }
@@ -65,15 +105,14 @@ struct LevelValue: View {
             if reading.isMuted {
                 Text("Muted")
             } else {
-                // A cross-fade, not `.numericText`: its rolling digits are drawn blurred and scaled
-                // at a new size every frame, and each one lands in CoreGraphics' glyph cache, which
-                // never gives them back (measured: about 290 KB more heap per level change).
+                // Changes in place, unanimated: a cross-fade of every step looked smeared while a key
+                // is held, and `.numericText` leaks glyphs (its rolling digits are drawn at a new
+                // size every frame and CoreGraphics' glyph cache keeps them: ~290 KB per change).
                 Text(IslandFormat.percent(reading.value))
-                    .contentTransition(.opacity)
             }
         }
         .foregroundStyle(.secondary)
-        .animation(Motion.content, value: IslandFormat.percentValue(reading.value))
+        .transaction { $0.animation = nil }
     }
 }
 

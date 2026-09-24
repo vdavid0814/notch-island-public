@@ -108,20 +108,40 @@ nonisolated struct AssistantAnswer: Sendable, Equatable {
 /// for files means the user's privacy-protected folders.
 nonisolated struct AssistantSources: Sendable {
     var apps: @Sendable (_ query: String, _ limit: Int) async -> [AssistantHit]
-    var files: @Sendable (_ query: String, _ limit: Int) async -> [AssistantHit]
-    var recentFiles: @Sendable () async -> [AssistantHit]
+    var files: @Sendable (_ query: String, _ limit: Int, _ scope: FileScope) async -> [AssistantHit]
+    var recentFiles: @Sendable (_ scope: FileScope) async -> [AssistantHit]
     var allApps: @Sendable () async -> [AssistantHit]
     var shortcuts: @Sendable () async -> [String]
     var isUnsupportedLanguage: @Sendable (String) -> Bool
 
     static let live = AssistantSources(
         apps: { await AssistantSearch.apps(matching: $0, limit: $1) },
-        files: { await AssistantSearch.files(matching: $0, limit: $1) },
-        recentFiles: { await AssistantSearch.recentFiles() },
+        files: { await AssistantSearch.files(matching: $0, limit: $1, scope: $2) },
+        recentFiles: { await AssistantSearch.recentFiles(scope: $0) },
         allApps: { await AssistantSearch.allApps() },
         shortcuts: { await AssistantSearch.shortcuts() },
         isUnsupportedLanguage: { AssistantModel.isUnsupportedLanguage($0) }
     )
+}
+
+/// Where files are looked for (Settings ▸ Siri ▸ Files) and how a name must match.
+nonisolated struct FileScope: Sendable, Equatable {
+    var paths: [String]
+    /// The query may sit anywhere in the name (else at a word's start).
+    var anywhere: Bool
+    /// How far back the recent files go.
+    var days: Int
+
+    init(paths: [String] = SiriFolder.allCases.map(\.path), anywhere: Bool = false, days: Int = 30) {
+        self.paths = paths
+        self.anywhere = anywhere
+        self.days = days
+    }
+
+    init(_ settings: SiriSettings) {
+        self.init(paths: SiriFolder.allCases.filter { settings.folders.contains($0) }.map(\.path),
+                  anywhere: settings.matching != .wordStart, days: settings.recentDays)
+    }
 }
 
 /// Siri in the notch: the query, the live search, the list's selection, and answers from the
@@ -162,6 +182,8 @@ nonisolated struct AssistantSources: Sendable {
     @ObservationIgnored var onClose: (() -> Void)?
     /// Runs an island action; the app also closes the assistant (or lets the panel take its place).
     @ObservationIgnored var onCommand: ((AppCommand) -> Void)?
+    /// The user's Siri settings, read as they are needed (so a change applies at once).
+    @ObservationIgnored var settings: () -> SiriSettings = { SiriSettings() }
     /// Whether something is playing: the Now Playing actions are listed only with a track.
     @ObservationIgnored var mediaState: () -> MediaState = { .none }
     nonisolated enum MediaState: Sendable { case none, paused, playing }
@@ -194,17 +216,16 @@ nonisolated struct AssistantSources: Sendable {
     /// Files reads running that may be waiting on the system's folder-access prompt.
     @ObservationIgnored private var fileAccessReads = 0
 
-    /// Pause after a keystroke before searching.
+    /// Pause after a keystroke before searching (the default of `SiriSettings.searchDelay`).
     static let searchDelay: Duration = .milliseconds(120)
-    /// Root search: hits of each kind.
+    /// Root search: hits of each kind (the default of `SiriSettings.resultsPerKind`).
     static let rootHitLimit = 3
     static let rootActionLimit = 2
     /// Columns of the Applications gallery (↑/↓ move by a row of them).
-    static let galleryColumns = 7
-    static let instructions = """
-        You are Siri, in the notch of the user's Mac. Answer the question directly and briefly, in a \
-        few sentences at most, in the same language as the question. No preamble.
-        """
+    var galleryColumns: Int { settings().galleryColumns }
+
+    /// Apple Intelligence answers here: it is available and the user has not turned it off.
+    private var answersWithIntelligence: Bool { intelligenceAvailable && settings().usesIntelligence }
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -215,35 +236,55 @@ nonisolated struct AssistantSources: Sendable {
     /// ↓ is pressed, the suggestions' height for up to three rows, the full list beyond that (and
     /// for the gallery and answers, which scroll).
     var room: AssistantRoom {
-        if answer != nil || category == .applications { return .list }
+        if answer != nil { return .list }
+        if category == .applications { return .gallery }
         if needsList { return rows.count <= AssistantCategory.allCases.count ? .suggestions : .list }
-        return revealsSuggestions || isPointerOver ? .suggestions : .field
+        return revealsSuggestions || hoverReveals ? .suggestions : .field
     }
+
+    /// The pointer over Siri brings the suggestions down (unless the user turned that off).
+    private var hoverReveals: Bool { isPointerOver && settings().hoverRevealsSuggestions }
 
     /// A folder-access prompt may have the keyboard: the assistant must not close when it loses it.
     var isAwaitingFileAccess: Bool { fileAccessReads > 0 }
 
     /// The rows can be seen and chosen (the field alone shows none).
-    private var rowsAreShowing: Bool { needsList || revealsSuggestions || isPointerOver }
+    private var rowsAreShowing: Bool { needsList || revealsSuggestions || hoverReveals }
 
     var rows: [AssistantRow] {
         let text = trimmedQuery
+        let settings = settings()
         switch category {
         case .applications:
-            guard !text.isEmpty else { return allApps.map(AssistantRow.hit) }
-            return AssistantSearch.rank(allApps.filter { AssistantMatch.matches($0.name, text) }, for: text)
+            let gallery = settings.gallerySort == .name
+                ? allApps.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                : allApps
+            guard !text.isEmpty else { return gallery.map(AssistantRow.hit) }
+            return AssistantSearch.rank(gallery.filter { AssistantMatch.matches($0.name, text, settings.matching) }, for: text)
                 .map(AssistantRow.hit)
         case .files:
             return files.map(AssistantRow.hit)
         case .actions:
             return actions(matching: text).map(AssistantRow.action)
         case nil:
-            guard !text.isEmpty else { return AssistantCategory.allCases.map(AssistantRow.category) }
-            var rows = apps.map(AssistantRow.hit) + files.map(AssistantRow.hit)
-            rows += actions(matching: text).prefix(Self.rootActionLimit).map(AssistantRow.action)
-            let ask: [AssistantRow] = intelligenceAvailable ? [.askIntelligence] : []
+            guard !text.isEmpty else { return settings.categories.map(AssistantRow.category) }
+            let hits = (settings.showsApplications ? apps.map(AssistantRow.hit) : [])
+                + (settings.showsFiles ? files.map(AssistantRow.hit) : [])
+                + (settings.showsActions ? actions(matching: text).prefix(Self.rootActionLimit).map(AssistantRow.action) : [])
+            let intelligence = answersWithIntelligence
+            // A question is answered on Return: the answer comes first, above any hits (Apple
+            // Intelligence here, ChatGPT without it).
+            if Self.looksLikeQuestion(text), intelligence || settings.offersChatGPT {
+                let answer: AssistantRow = intelligence ? .askIntelligence : .askChatGPT
+                return [answer] + hits + [.searchWeb, .askChatGPT, .askIntelligence].filter {
+                    $0 != answer && ($0 != .askIntelligence || intelligence) && ($0 != .askChatGPT || settings.offersChatGPT)
+                }
+            }
+            var rows = hits
+            let ask: [AssistantRow] = intelligence ? [.askIntelligence] : []
             if !languageUnsupported { rows += ask }
-            rows += [.searchWeb, .askChatGPT]
+            rows += [.searchWeb]
+            if settings.offersChatGPT { rows += [.askChatGPT] }
             if languageUnsupported { rows += ask }
             return rows
         }
@@ -251,15 +292,18 @@ nonisolated struct AssistantSources: Sendable {
 
     /// The island's actions (Now Playing ones only with a track), then the user's shortcuts.
     func actions(matching text: String) -> [AssistantAction] {
+        let settings = settings()
         var island: [IslandAction] = switch mediaState() {
         case .playing: [.pause, .next, .previous]
         case .paused: [.play, .next, .previous]
         case .none: []
         }
         island += [.timer, .stopwatch, .shelf, .customize, .settings]
-        let all = island.map(AssistantAction.island) + (shortcuts ?? []).map(AssistantAction.shortcut)
+        if !settings.includesIslandActions { island = [] }
+        let all = island.map(AssistantAction.island)
+            + (settings.includesShortcuts ? (shortcuts ?? []) : []).map(AssistantAction.shortcut)
         guard !text.isEmpty else { return all }
-        return all.filter { AssistantMatch.matches($0.title, text) }
+        return all.filter { AssistantMatch.matches($0.title, text, settings.matching) }
     }
 
     // MARK: Lifecycle
@@ -272,6 +316,9 @@ nonisolated struct AssistantSources: Sendable {
         } else {
             intelligenceAvailable = false
         }
+        // The app list is read ahead (one Spotlight query, off the main thread), so the gallery
+        // opens full.
+        loadLists(for: .applications, query: "")
     }
 
     /// The assistant closed: cancel everything and forget the query and the lists.
@@ -363,6 +410,8 @@ nonisolated struct AssistantSources: Sendable {
     /// ⌘1, ⌘2, ⌘3, or a suggestion row; nil goes back to the root. The query stays, so a search
     /// can be narrowed to one kind.
     func open(_ category: AssistantCategory?) {
+        // A suggestion the user switched off does not open by its shortcut either.
+        if let category, !settings().categories.contains(category) { return }
         if answer != nil {
             askTask?.cancel()
             answer = nil
@@ -397,7 +446,7 @@ nonisolated struct AssistantSources: Sendable {
         case .askIntelligence:
             ask()
         case .searchWeb:
-            guard let url = AssistantActions.webSearchURL(for: text) else { return }
+            guard let url = AssistantActions.webSearchURL(for: text, engine: settings().searchEngine) else { return }
             onClose?()
             NSWorkspace.shared.open(url)
         case .askChatGPT:
@@ -412,13 +461,14 @@ nonisolated struct AssistantSources: Sendable {
     /// Hungary came back as "Paris").
     func ask() {
         let question = trimmedQuery
-        guard intelligenceAvailable, !question.isEmpty else { return }
+        guard answersWithIntelligence, !question.isEmpty else { return }
+        let length = settings().answerLength
         askTask?.cancel()
         answer = AssistantAnswer(question: question)
         askTask = Task { [weak self] in
-            let session = LanguageModelSession(instructions: Self.instructions)
+            let session = LanguageModelSession(instructions: length.instructions)
             do {
-                let options = GenerationOptions(temperature: 0.3, maximumResponseTokens: 400)
+                let options = GenerationOptions(temperature: 0.3, maximumResponseTokens: length.maximumTokens)
                 for try await snapshot in session.streamResponse(to: question, options: options) {
                     guard !Task.isCancelled, let self, self.answer?.question == question else { return }
                     self.answer?.text = snapshot.content
@@ -449,8 +499,9 @@ nonisolated struct AssistantSources: Sendable {
         // hit from an earlier, shorter query.
         let text = trimmedQuery
         if !text.isEmpty {
-            apps = apps.filter { AssistantMatch.matches($0.name, text) }
-            files = files.filter { AssistantMatch.matches($0.name, text) }
+            let matching = settings().matching
+            apps = apps.filter { AssistantMatch.matches($0.name, text, matching) }
+            files = files.filter { AssistantMatch.matches($0.name, text, matching) }
         }
         search(now: false)
     }
@@ -478,12 +529,19 @@ nonisolated struct AssistantSources: Sendable {
                 return
             }
         }
-        let withFiles = category == .files || filesEnabled
+        let settings = settings()
+        let withFiles = category == .files || (filesEnabled && settings.showsFiles && !settings.folders.isEmpty)
         let sources = sources
-        let hitLimit = Self.rootHitLimit
+        let hitLimit = settings.resultsPerKind
+        let scope = FileScope(settings)
+        let delay = settings.searchDelay
+        // Word starts are what Spotlight can match; anywhere and fuzzy match the app list in memory.
+        let inMemoryApps: [AssistantHit]? = settings.matching == .wordStart || allApps.isEmpty ? nil
+            : Array(AssistantSearch.rank(allApps.filter { AssistantMatch.matches($0.name, text, settings.matching) }, for: text)
+                .prefix(hitLimit))
         searchTask = Task { [weak self] in
-            if !now {
-                try? await Task.sleep(for: Self.searchDelay, tolerance: .milliseconds(20))
+            if !now, delay > 0 {
+                try? await Task.sleep(for: .seconds(delay), tolerance: .milliseconds(20))
                 guard !Task.isCancelled else { return }
             }
             // The first files read may wait on the system's folder-access prompt.
@@ -493,10 +551,10 @@ nonisolated struct AssistantSources: Sendable {
             var foundFiles: [AssistantHit] = []
             var unsupported = false
             if category == .files {
-                foundFiles = text.isEmpty ? await sources.recentFiles() : await sources.files(text, 30)
+                foundFiles = text.isEmpty ? await sources.recentFiles(scope) : await sources.files(text, 30, scope)
             } else {
-                async let apps = sources.apps(text, hitLimit)
-                async let files = withFiles ? sources.files(text, hitLimit) : []
+                async let apps = Self.apps(text, hitLimit, inMemory: inMemoryApps, sources: sources)
+                async let files = withFiles ? sources.files(text, hitLimit, scope) : []
                 (foundApps, foundFiles) = await (apps, files)
                 // Once per pause, not per keystroke: the recogniser is not free.
                 unsupported = sources.isUnsupportedLanguage(text)
@@ -517,10 +575,18 @@ nonisolated struct AssistantSources: Sendable {
         }
     }
 
+    /// The root's apps: already matched in memory, or from Spotlight.
+    nonisolated private static func apps(_ text: String, _ limit: Int, inMemory: [AssistantHit]?,
+                                         sources: AssistantSources) async -> [AssistantHit] {
+        if let inMemory { return inMemory }
+        return await sources.apps(text, limit)
+    }
+
     /// Every app for Applications; the shortcuts for Actions and for root queries.
     private func loadLists(for category: AssistantCategory?, query: String) {
         let needsApps = category == .applications && allApps.isEmpty
-        let needsShortcuts = shortcuts == nil && (category == .actions || (category == nil && !query.isEmpty))
+        let needsShortcuts = shortcuts == nil && settings().includesShortcuts
+            && (category == .actions || (category == nil && !query.isEmpty))
         guard needsApps || needsShortcuts, loadTask == nil else { return }
         let sources = sources
         loadTask = Task { [weak self] in
@@ -554,12 +620,37 @@ nonisolated struct AssistantSources: Sendable {
 
     /// For tests: waits for the searches and loads in flight.
     func settle() async {
-        await searchTask?.value
-        await loadTask?.value
-        await searchTask?.value
+        // A finished load may start the next one (the task is single-flight).
+        while let task = loadTask ?? searchTask {
+            await task.value
+            if task == loadTask { loadTask = nil }
+            if task == searchTask { searchTask = nil }
+        }
     }
 
     // MARK: Language
+
+    /// First words that make a query a question (English and Hungarian).
+    nonisolated static let questionWords: Set<String> = [
+        "what", "who", "whom", "whose", "why", "how", "when", "where", "which", "is", "are", "was", "were",
+        "can", "could", "does", "do", "did", "will", "would", "should", "explain", "tell", "define",
+        "mi", "mit", "mik", "ki", "kit", "kik", "miért", "hogyan", "hogy", "mikor", "hol", "honnan", "hova",
+        "melyik", "mennyi", "hány", "milyen", "mekkora", "meddig", "mennyibe", "van", "lehet", "kell",
+        "magyarázd", "mondd", "írj", "számold",
+    ]
+
+    /// A question rather than a name to look up: it ends with a question mark, starts with a
+    /// question word, or is a sentence (three words or more). "safari" and "system settings" are
+    /// look-ups; "what is 2+2" and "mennyi az idő" are questions.
+    nonisolated static func looksLikeQuestion(_ text: String) -> Bool {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return false }
+        if text.hasSuffix("?") { return true }
+        let words = text.split(whereSeparator: \.isWhitespace)
+        if words.count >= 3 { return true }
+        guard words.count >= 2, let first = words.first else { return false }
+        return questionWords.contains(first.lowercased())
+    }
 
     /// True only when the recogniser is confident (short words are unreliable, measured) and the
     /// model's supported languages do not include it. Compared by base language: the recogniser
@@ -587,15 +678,33 @@ nonisolated struct AssistantSources: Sendable {
 /// Matching names against what the user typed, the way Spotlight does: case and accents do not
 /// matter, and every typed word must start a word of the name (or the name itself).
 nonisolated enum AssistantMatch {
-    static func matches(_ name: String, _ query: String) -> Bool {
+    /// Whether `name` matches what was typed, in the user's matching mode (`SiriMatching`).
+    static func matches(_ name: String, _ query: String, _ mode: SiriMatching = .wordStart) -> Bool {
         let name = fold(name)
         let query = fold(query).trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return true }
         if name.hasPrefix(query) { return true }
         let words = name.split { !$0.isLetter && !$0.isNumber }
-        return query.split(whereSeparator: \.isWhitespace).allSatisfy { token in
-            words.contains { $0.hasPrefix(token) }
+        let tokens = query.split(whereSeparator: \.isWhitespace)
+        let wordStarts = tokens.allSatisfy { token in words.contains { $0.hasPrefix(token) } }
+        switch mode {
+        case .wordStart:
+            return wordStarts
+        case .anywhere:
+            return wordStarts || tokens.allSatisfy { name.contains($0) }
+        case .fuzzy:
+            return wordStarts || tokens.allSatisfy { name.contains($0) } || isSubsequence(query.filter { !$0.isWhitespace }, of: name)
         }
+    }
+
+    /// Every character of `needle` in `haystack`, in order ("sfr" in "safari").
+    static func isSubsequence(_ needle: String, of haystack: String) -> Bool {
+        var remaining = needle[...]
+        for character in haystack where character == remaining.first {
+            remaining = remaining.dropFirst()
+            if remaining.isEmpty { return true }
+        }
+        return remaining.isEmpty
     }
 
     private static func fold(_ text: String) -> String {
@@ -606,7 +715,9 @@ nonisolated enum AssistantMatch {
 /// Row icons, kept while the assistant is open (a list re-renders on every keystroke and hover).
 @MainActor enum AssistantIcons {
     private static var cache: [String: NSImage] = [:]
+    private static var thumbnails: [String: NSImage] = [:]
 
+    /// Full icons for the few rows of a list.
     static func icon(for hit: AssistantHit) -> NSImage {
         if let icon = cache[hit.url.path] { return icon }
         let icon: NSImage = switch hit.kind {
@@ -621,6 +732,33 @@ nonisolated enum AssistantMatch {
         return icon
     }
 
+    /// A gallery icon, drawn once at the size it is shown (2x) off the main thread: a hundred full
+    /// icons, looked up and scaled on the main thread as the gallery scrolled in, were what made
+    /// it slow to open. Only cells on screen ask (the grid is lazy).
+    static func cachedThumbnail(for hit: AssistantHit) -> NSImage? { thumbnails[hit.url.path] }
+
+    static func thumbnail(for hit: AssistantHit, points: CGFloat) async -> NSImage? {
+        let key = hit.url.path
+        if let image = thumbnails[key] { return image }
+        let path = hit.url.resolvingSymlinksInPath().path
+        guard let cgImage = await render(path: path, pixels: Int(points * 2)), !Task.isCancelled else { return nil }
+        let image = NSImage(cgImage: cgImage, size: NSSize(width: points, height: points))
+        thumbnails[key] = image
+        return image
+    }
+
+    @concurrent private static func render(path: String, pixels: Int) async -> CGImage? {
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        var rect = CGRect(x: 0, y: 0, width: pixels, height: pixels)
+        guard let source = icon.cgImage(forProposedRect: &rect, context: nil, hints: nil),
+              let context = CGContext(data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(source, in: CGRect(x: 0, y: 0, width: pixels, height: pixels))
+        return context.makeImage()
+    }
+
     static var shortcuts: NSImage {
         if let icon = cache[AssistantSearch.shortcutsApp] { return icon }
         let icon = NSWorkspace.shared.icon(forFile: AssistantSearch.shortcutsApp)
@@ -628,13 +766,16 @@ nonisolated enum AssistantMatch {
         return icon
     }
 
-    static func purge() { cache = [:] }
+    static func purge() {
+        cache = [:]
+        thumbnails = [:]
+    }
 }
 
 /// Hand-offs to other apps.
 @MainActor enum AssistantActions {
-    static func webSearchURL(for query: String) -> URL? {
-        handOffURL("https://www.google.com/search", query: query)
+    static func webSearchURL(for query: String, engine: SiriSearchEngine = .google) -> URL? {
+        handOffURL(engine.base, query: query)
     }
 
     static func chatGPTURL(for query: String) -> URL? {

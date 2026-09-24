@@ -12,6 +12,8 @@ import AppKit
     private(set) var clock: PlaybackClock?
     /// Decoded once per distinct image.
     private(set) var artwork: NSImage?
+    /// The cover's colour, made readable as an accent (Now Playing widgets tint themselves with it).
+    private(set) var artworkColor: ArtworkColor?
     private(set) var status: MediaSourceStatus = .off
     /// Playing, or paused less than `pauseGrace` ago.
     private(set) var isActive = false
@@ -313,15 +315,18 @@ import AppKit
         artworkTask = nil
         guard let bytes else {
             if artwork != nil { artwork = nil }
+            if artworkColor != nil { artworkColor = nil }
             return
         }
         // The previous image stays up for the few milliseconds the decode takes instead of flashing
         // the placeholder.
         artworkTask = Task { [weak self] in
             let image = await ArtworkDecoder.decode(bytes)
+            let color = if let image { await ArtworkDecoder.averageColor(image)?.accent } else { ArtworkColor?.none }
             guard !Task.isCancelled, let self, self.artworkBytes == bytes else { return }
             self.artworkTask = nil
             self.artwork = image.map { NSImage(cgImage: $0, size: .zero) }
+            if self.artworkColor != color { self.artworkColor = color }
         }
     }
 }

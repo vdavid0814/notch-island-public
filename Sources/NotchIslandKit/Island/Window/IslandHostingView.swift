@@ -22,6 +22,9 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
     var onPointerEntered: (() -> Void)?
     var onPointerExited: (() -> Void)?
     var onClick: (() -> Void)?
+    /// A scroll over the island (trackpad swipe or wheel); true when it was used (then SwiftUI's
+    /// scroll views under it do not get it).
+    var onScroll: ((NSEvent) -> Bool)?
     var onDragEntered: (() -> Void)?
     var onDragExited: (() -> Void)?
     var onDrop: (([URL]) -> Bool)?
@@ -99,6 +102,14 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
         let inside = region.contains(convert(event.locationInWindow, from: nil))
         super.mouseDown(with: event)
         if inside { onClick?() }
+    }
+
+    // MARK: Scroll
+
+    override func scrollWheel(with event: NSEvent) {
+        let inside = region.contains(convert(event.locationInWindow, from: nil))
+        if inside, onScroll?(event) == true { return }
+        super.scrollWheel(with: event)
     }
 
     // MARK: Hover

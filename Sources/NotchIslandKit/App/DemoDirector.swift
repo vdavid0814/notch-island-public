@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Runs `notchisland://demo/…`: injects fake state so every island presentation can be shown and
 /// screenshotted on demand, and takes all of it back out on `demo/reset`.
@@ -51,6 +52,15 @@ import Foundation
             model.controller.simulatePointer(inside: inside)
         case .state:
             model.logIslandState()
+        case .airPods:
+            model.airPodsConnected(.demo)
+        case .siriApps:
+            model.controller.openAssistant()
+            model.assistant.open(.applications)
+        case .timerUnit:
+            NotificationCenter.default.post(name: .demoNextTimerUnit, object: nil)
+        case .surface(let style):
+            withAnimation(.spring(duration: 0.25)) { model.preferences.glassStyle = style }
         }
     }
 
@@ -157,4 +167,9 @@ private extension PowerState {
             isLowPowerMode: false
         )
     }
+}
+
+extension Notification.Name {
+    /// `demo/timerunit`: the timer widget switches its ruler's unit, as a tap on the marker does.
+    static let demoNextTimerUnit = Notification.Name("com.davidvarga.notchisland.demo.nextTimerUnit")
 }

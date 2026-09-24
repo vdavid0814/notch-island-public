@@ -15,9 +15,16 @@ struct TickingClock: View {
     let countsDown: Bool
     var prefix = ""
 
+    /// Previews (Settings' widget gallery) show the time without ticking.
+    @Environment(\.isWidgetPreview) private var isPreview
+
     var body: some View {
-        TimelineView(.periodic(from: phase, by: 1)) { context in
-            Text(prefix + IslandFormat.clock(Self.value(at: context.date, anchor: anchor, countsDown: countsDown)))
+        if isPreview {
+            Text(prefix + IslandFormat.clock(Self.value(at: .now, anchor: anchor, countsDown: countsDown)))
+        } else {
+            TimelineView(.periodic(from: phase, by: 1)) { context in
+                Text(prefix + IslandFormat.clock(Self.value(at: context.date, anchor: anchor, countsDown: countsDown)))
+            }
         }
     }
 
@@ -87,18 +94,21 @@ extension StatusTint {
         case .none: AnyShapeStyle(.primary)
         case .charging: AnyShapeStyle(.green)
         case .low: AnyShapeStyle(.red)
-        case .lowPower: AnyShapeStyle(.orange)
+        case .lowPower: AnyShapeStyle(.yellow)
         }
     }
 }
 
 extension PowerState {
-    /// Header / widget battery glyph tint: red when low on battery, orange in Low Power Mode, green
-    /// while charging, otherwise primary.
+    /// Header / widget battery tint, as the user asked for it: green while charging, red below 20 %,
+    /// yellow in Low Power Mode, otherwise white (primary).
     var tint: StatusTint {
         if isCharging { return .charging }
-        if level <= 10 { return .low }
+        if level < Self.lowLevel { return .low }
         if isLowPowerMode { return .lowPower }
         return .none
     }
+
+    /// Below this the battery reads red.
+    static let lowLevel = 20
 }

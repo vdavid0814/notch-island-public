@@ -50,7 +50,9 @@ import Testing
         #expect(IslandScale.compact.factor == 0.9)
         #expect(IslandScale.standard.factor == 1.0)
         #expect(IslandScale.large.factor == 1.15)
-        #expect(IslandScale.allCases.map(\.title) == ["Compact", "Standard", "Large"])
+        #expect(IslandScale.extraSmall.factor < IslandScale.small.factor)
+        #expect(IslandScale.small.factor < IslandScale.compact.factor)
+        #expect(IslandScale.allCases.map(\.title) == ["Extra Small", "Small", "Standard", "Large", "Extra Large"])
         #expect(IslandScale.large.id == "large")
     }
 
@@ -528,7 +530,7 @@ import Testing
     }
 
     @Test func policyTimings() {
-        #expect(IslandController.closeGrace == 0.3)
+        #expect(IslandController.closeGrace == Preferences.defaultCloseDelay)
         #expect(IslandController.unvisitedTimeout == 6)
         #expect(IslandController.dropLinger == 1.5)
         #expect(IslandController.dragEndClearDelay == 0.45)

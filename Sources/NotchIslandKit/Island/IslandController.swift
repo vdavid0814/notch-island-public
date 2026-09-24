@@ -48,8 +48,8 @@ nonisolated extension BannerKind {
     /// island out from under it.
     var isInteractive: Bool {
         switch self {
-        case .level, .timerFinished: true
-        case .power, .dropTarget: false
+        case .level, .levelPill, .timerFinished: true
+        case .power, .dropTarget, .airPods: false
         }
     }
 
@@ -58,8 +58,8 @@ nonisolated extension BannerKind {
     /// presses, so a Control Center or AirPods change stays invisible there.)
     var showsWhileHidden: Bool {
         switch self {
-        case .level: true
-        case .power, .timerFinished, .dropTarget: false
+        case .level, .levelPill: true
+        case .power, .timerFinished, .dropTarget, .airPods: false
         }
     }
 }
@@ -70,8 +70,9 @@ nonisolated extension BannerKind {
     /// While the pointer is over the space a closing island is leaving (not over the island as it now
     /// is), hover-open looks again this often until the pointer reaches the island or leaves.
     static let hoverPollInterval: TimeInterval = 0.08
-    /// Pointer left the expanded island: wait this long before closing.
-    static let closeGrace: TimeInterval = 0.3
+    /// Pointer left the expanded island: wait this long before closing (the default of the user's
+    /// `Preferences.closeDelay`).
+    static let closeGrace: TimeInterval = Preferences.defaultCloseDelay
     /// Opened without the pointer: close if it has not arrived by then.
     static let unvisitedTimeout: TimeInterval = 6
     /// After a drop, stay on the shelf this long regardless of the pointer.
@@ -91,6 +92,10 @@ nonisolated extension BannerKind {
     private let unvisitedTimer = DelayedAction()
     private let dropLingerTimer = DelayedAction()
     private let dragEndTimer = DelayedAction()
+    /// Re-checks the pointer against the assistant's real shape (see `updateAssistantHover`).
+    private let assistantHoverCheck = DelayedAction()
+    /// How often, while the pointer is in the hover region but not yet over the assistant.
+    static let assistantHoverInterval: TimeInterval = 0.05
 
     private var isStarted = false
     /// Invalidates observation callbacks registered before the last start/stop.
@@ -109,6 +114,8 @@ nonisolated extension BannerKind {
     private var isHidden = false
     /// The assistant is open (see `openAssistant`).
     private var wantsAssistant = false
+    /// Settings is open in the island (see `openSettings`).
+    private var wantsSettings = false
     private let bandGuard = NotchBandGuard()
 
     /// Tracking-area state from the hosting view (exact island rect).
@@ -126,14 +133,10 @@ nonisolated extension BannerKind {
         }
         bandGuard.screen = { [weak model] in model?.notchScreen }
         bandGuard.notchRect = { [weak model] in model?.metrics?.notchRect }
-        bandGuard.widestIsland = { [weak model] in
-            guard let layout = model?.layout else { return 0 }
-            return layout.size(for: .expanded(.home)).width
-        }
         bandGuard.isIslandOpen = { [weak model] in model?.island.presentation.isOpen ?? false }
         bandGuard.coverClicked = { [weak self] in
             guard let self, !self.model.assistant.isAwaitingFileAccess else { return }
-            self.closeAssistant()
+            self.closeKeyboardOverlay()
         }
     }
 
@@ -217,12 +220,13 @@ nonisolated extension BannerKind {
 
     /// Explicit close (menu, URL, a close button): also releases the pin, and closes the assistant.
     func collapse() {
-        let closesAssistant = wantsAssistant
+        let closesOverlay = wantsAssistant || wantsSettings
         wantsAssistant = false
+        wantsSettings = false
         close(releasingPin: true)
         // close() returns early when nothing was expanded (the assistant clears wantsExpanded), and
         // wantsAssistant is not observed: resolve here or the assistant stays on screen.
-        if closesAssistant { inputsChanged() }
+        if closesOverlay { inputsChanged() }
     }
 
     // MARK: Assistant
@@ -238,6 +242,31 @@ nonisolated extension BannerKind {
         wantsAssistant = true
         openWasUserInitiated = true
         inputsChanged()
+    }
+
+    /// Settings in the island, on `pane`. It takes the open panel's or the assistant's place.
+    func openSettings(pane: IslandSettingsPane? = nil) {
+        for timer in [hoverDwell, closeTimer, unvisitedTimer] { timer.cancel() }
+        if let pane { model.settingsPane = pane }
+        wantsExpanded = false
+        wantsAssistant = false
+        if model.island.isPinned { model.island.isPinned = false }
+        guard !wantsSettings else { return }
+        wantsSettings = true
+        openWasUserInitiated = true
+        inputsChanged()
+    }
+
+    func closeSettings() {
+        guard wantsSettings else { return }
+        wantsSettings = false
+        inputsChanged()
+    }
+
+    /// Esc, a click outside, or the island losing the keyboard: whichever of the two is open.
+    func closeKeyboardOverlay() {
+        closeAssistant()
+        closeSettings()
     }
 
     func closeAssistant() {
@@ -283,11 +312,46 @@ nonisolated extension BannerKind {
         expand(userInitiated: true)
     }
 
+    // MARK: Swipe to Siri
+
+    /// Downward scroll collected over the closed island (points; the gesture's own direction).
+    private var swipeDown: CGFloat = 0
+    private var swipeFired = false
+    private var lastSwipeEvent: TimeInterval = 0
+
+    /// Two fingers swiped down on the notch — or the wheel turned down over it — open Siri, once per
+    /// gesture, when the user has that on (Settings ▸ Siri). Only on a closed island (idle, pill or
+    /// notice): an open panel's own scroll views keep their scrolling.
+    func scrolled(_ event: NSEvent) -> Bool {
+        let settings = model.preferences.siri
+        guard settings.swipeOpens, !model.island.presentation.isOpen else { return false }
+        // A new gesture (or a wheel turned again after a pause) starts from zero.
+        if event.phase == .began || (event.phase.isEmpty && event.momentumPhase.isEmpty
+                                     && event.timestamp - lastSwipeEvent > 0.35) {
+            swipeDown = 0
+            swipeFired = false
+        }
+        lastSwipeEvent = event.timestamp
+        if event.phase == .ended || event.phase == .cancelled || !event.momentumPhase.isEmpty {
+            return swipeFired
+        }
+        // Fingers moving down: with natural scrolling the delta is positive.
+        let delta = event.isDirectionInvertedFromDevice ? event.scrollingDeltaY : -event.scrollingDeltaY
+        let points = event.hasPreciseScrollingDeltas ? delta : delta * 10
+        swipeDown = max(0, swipeDown + points)
+        if !swipeFired, swipeDown >= settings.swipeDistance {
+            swipeFired = true
+            openAssistant()
+        }
+        return true
+    }
+
     // MARK: Drag and drop
 
     func dragEntered() {
         // A file dragged onto the notch goes to the shelf, over whatever the assistant was doing.
         wantsAssistant = false
+        wantsSettings = false
         if !model.island.isDropTargeted { model.island.isDropTargeted = true }
         expand(page: .shelf, userInitiated: true)
     }
@@ -349,7 +413,11 @@ nonisolated extension BannerKind {
             if applied.isOpen != from.isOpen { bandGuard.islandChanged() }
             // The assistant's query, search and answers live only while it is on screen.
             if applied.isAssistant, !from.isAssistant { model.assistant.begin() }
-            if from.isAssistant, !applied.isAssistant { model.assistant.end() }
+            if from.isAssistant, !applied.isAssistant {
+                model.assistant.end()
+                assistantHoverCheck.cancel()
+                model.assistant.isPointerOver = false
+            }
         }
         syncPointerMonitor()
         reconcile()
@@ -361,6 +429,7 @@ nonisolated extension BannerKind {
             // on its own turn, and resolving first would flash the pill as a video goes full screen.
             isHidden: isHidden || model.hidesForFullscreenVideo,
             wantsAssistant: wantsAssistant,
+            wantsSettings: wantsSettings,
             assistantRoom: model.assistant.room,
             wantsExpanded: wantsExpanded,
             page: model.island.page,
@@ -441,7 +510,7 @@ nonisolated extension BannerKind {
         case .closeAfterGrace:
             unvisitedTimer.cancel()
             if !closeTimer.isPending {
-                closeTimer.schedule(after: Self.closeGrace) { [weak self] in self?.autoClose() }
+                closeTimer.schedule(after: model.preferences.closeDelay) { [weak self] in self?.autoClose() }
             }
         case .closeIfNeverVisited:
             closeTimer.cancel()
@@ -512,18 +581,43 @@ nonisolated extension BannerKind {
             Log.island.info("pointer \(inside ? "entered" : "left", privacy: .public)")
         }
         model.island.setHovering(inside)
-        model.assistant.isPointerOver = inside
         if inside {
             pointerHasVisited = true
         } else {
             suppressHoverOpenUntilExit = false
             hoverDwell.cancel()
         }
-        // Over the assistant's field the suggestions come down; away, the field goes back up.
         if model.island.presentation.isAssistant {
-            inputsChanged()
+            updateAssistantHover()
         } else {
+            if model.assistant.isPointerOver { model.assistant.isPointerOver = false }
             reconcile()
+        }
+    }
+
+    /// Over the assistant's field the suggestions come down; away, the field goes back up.
+    ///
+    /// "Over" is the real pointer on the assistant's current shape, not the hover region: while the
+    /// suggestions fold away the region is still the larger island, and a pointer brought back
+    /// quickly re-entered it and opened them again before it reached the field. While the pointer
+    /// is in the region but not on the shape, this checks again every 50 ms (no tracking event
+    /// comes for moves inside the region).
+    private func updateAssistantHover() {
+        guard model.island.presentation.isAssistant else {
+            assistantHoverCheck.cancel()
+            return
+        }
+        let over = pointerInside && isPointerOverIsland
+        if model.assistant.isPointerOver != over {
+            model.assistant.isPointerOver = over
+            inputsChanged()
+        }
+        if pointerInside, !over {
+            assistantHoverCheck.schedule(after: Self.assistantHoverInterval) { [weak self] in
+                self?.updateAssistantHover()
+            }
+        } else {
+            assistantHoverCheck.cancel()
         }
     }
 
@@ -536,7 +630,7 @@ nonisolated extension BannerKind {
     /// Hover and clicks open the island except over a banner with its own controls.
     private var canOpenFromPointer: Bool {
         return switch model.island.presentation {
-        case .expanded, .assistant: false
+        case .expanded, .assistant, .settings: false
         case .banner(let kind): !kind.isInteractive
         case .idle, .compact: true
         }

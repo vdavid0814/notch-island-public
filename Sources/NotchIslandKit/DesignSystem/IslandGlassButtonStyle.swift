@@ -1,76 +1,54 @@
 import SwiftUI
 
-/// The island's button: a capsule (or circle) of the island's own glass, as in the CAD app's
-/// `NavyGlassButtonStyle`.
-///
-/// Not the native `.glass` style, because its glass is `.regular` and its height follows the
-/// control size by the system's own metrics; here every control wears `IslandGlass` and takes its
-/// height from `Metrics.Control`, so buttons, chips and the segmented switcher line up in one row.
-struct IslandGlassButtonStyle: ButtonStyle {
-    nonisolated enum Shape: Sendable {
-        /// Text (or text and symbol) padded inside a capsule.
-        case capsule
-        /// A capsule that takes the width it is offered, so a row of chips shares its row equally
-        /// and ends flush with its neighbours. The width, not the padding, sets its size.
-        case chip
-        /// A lone symbol in a circle as wide as it is tall.
-        case circle
+/// The island's buttons are the system's own Liquid Glass buttons (`.glass`, `.glassProminent`):
+/// native metrics, press feedback, hover and accessibility, sized by the control size like any
+/// other macOS button. A circle shows its symbol only (the title stays the accessibility label).
+nonisolated enum IslandButtonShape: Sendable {
+    case capsule, circle
+}
+
+extension View {
+    func islandButton(_ shape: IslandButtonShape = .capsule, prominent: Bool = false) -> some View {
+        modifier(IslandButtonModifier(shape: shape, prominent: prominent))
     }
 
-    var shape: Shape = .capsule
-    /// The row's primary action (Start, Done, play/pause): accent-tinted glass with a white label.
-    var isProminent = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        // A nested view, because a `ButtonStyle` itself does not receive environment updates.
-        IslandGlassButton(configuration: configuration, shape: shape, isProminent: isProminent)
+    /// The timer's one action (Start, Pause, Done): prominent glass in the timer's colour, like the
+    /// iPhone's orange "Start Timer"; a circle with the symbol when there is no room for the title.
+    func timerAction(iconOnly: Bool, tint: Color) -> some View {
+        islandButton(iconOnly ? .circle : .capsule, prominent: true)
+            .tint(tint)
     }
 }
 
-extension ButtonStyle where Self == IslandGlassButtonStyle {
-    static var islandGlass: IslandGlassButtonStyle { IslandGlassButtonStyle() }
+private struct IslandButtonModifier: ViewModifier {
+    let shape: IslandButtonShape
+    let prominent: Bool
 
-    static func islandGlass(_ shape: IslandGlassButtonStyle.Shape = .capsule, prominent: Bool = false) -> IslandGlassButtonStyle {
-        IslandGlassButtonStyle(shape: shape, isProminent: prominent)
-    }
-}
+    /// A widget drawn as a picture (Settings' gallery): each glass button there would keep its own
+    /// backdrop buffers (sixteen widgets of them cost ~130 MB of graphics memory, measured), so the
+    /// pictures use the system's plain bordered buttons in the same shape.
+    @Environment(\.isWidgetPreview) private var isPreview
 
-private struct IslandGlassButton: View {
-    let configuration: ButtonStyleConfiguration
-    let shape: IslandGlassButtonStyle.Shape
-    let isProminent: Bool
-
-    @Environment(\.controlSize) private var controlSize
-    @Environment(\.isEnabled) private var isEnabled
-
-    var body: some View {
-        let height = Metrics.Control.height(controlSize)
-        let isCircle = shape == .circle
-        let padding: CGFloat = switch shape {
-        case .capsule: Metrics.Control.horizontalPadding(controlSize)
-        case .chip: Metrics.Spacing.xSmall
-        case .circle: 0
+    func body(content: Content) -> some View {
+        Group {
+            if isPreview {
+                if prominent {
+                    content.buttonStyle(.borderedProminent)
+                } else {
+                    content.buttonStyle(.bordered)
+                }
+            } else if prominent {
+                content.buttonStyle(.glassProminent)
+            } else {
+                content.buttonStyle(.glass)
+            }
         }
-        configuration.label
-            .labelStyle(IslandButtonLabelStyle(iconOnly: isCircle))
-            .font(Metrics.Control.font(controlSize))
-            .lineLimit(1)
-            .foregroundStyle(isProminent ? AnyShapeStyle(Color.white) : AnyShapeStyle(.primary))
-            // Dim the label, not the glass: a disabled control is still a piece of the surface.
-            .opacity(isEnabled ? 1 : 0.4)
-            .frame(maxWidth: shape == .chip ? .infinity : nil)
-            .padding(.horizontal, padding)
-            .frame(width: isCircle ? height : nil, height: height)
-            .frame(minWidth: height)
-            .contentShape(.capsule)
-            // A circle is a capsule as wide as it is tall, so one shape serves both.
-            .islandGlass(isProminent ? IslandGlass.active : IslandGlass.control, in: .capsule)
-            .modifier(IslandPressFeedback(isPressed: configuration.isPressed))
+        .buttonBorderShape(shape == .circle ? .circle : .capsule)
+        .labelStyle(IslandButtonLabelStyle(iconOnly: shape == .circle))
     }
 }
 
-/// Symbol and title closer together than the default label spacing, as in the CAD buttons; a
-/// circle shows the symbol alone (the title stays the accessibility label).
+/// A circle shows the symbol alone; a capsule its symbol and title.
 private struct IslandButtonLabelStyle: LabelStyle {
     let iconOnly: Bool
 
@@ -86,17 +64,12 @@ private struct IslandButtonLabelStyle: LabelStyle {
     }
 }
 
-/// The CAD app's press feedback (`CadPressFeedback`): a slight shrink and fade while held. Under
-/// Reduce Motion there is no shrink and the fade is immediate.
-struct IslandPressFeedback: ViewModifier {
-    let isPressed: Bool
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func body(content: Content) -> some View {
-        content
-            .scaleEffect(isPressed && !reduceMotion ? 0.98 : 1)
-            .opacity(isPressed ? 0.84 : 1)
-            .animation(reduceMotion ? nil : IslandGlass.press, value: isPressed)
+extension View {
+    /// Every row of mutually exclusive choices (pages, sizes, backgrounds, categories): the
+    /// system's tab bar — a segmented control in the tabs role — with the capsule corners of the
+    /// system's buttons.
+    func choiceBar() -> some View {
+        pickerStyle(.tabs)
+            .buttonBorderShape(.capsule)
     }
 }

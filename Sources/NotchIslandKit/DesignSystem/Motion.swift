@@ -7,7 +7,7 @@ nonisolated enum Motion {
     /// Length of the open and close animations the user may pick (Settings ▸ General), in seconds.
     static let durationRange: ClosedRange<Double> = 0.2...1.5
     /// The default length: the open spring's own duration.
-    static let defaultDuration: Double = 0.46
+    static let defaultDuration: Double = 0.4
 
     /// Opening overshoots slightly (about 2 %), so the panel lands the way the
     /// hardware island does.
@@ -61,6 +61,9 @@ nonisolated enum Motion {
             // The assistant grows out of the open panel, and shrinks back to it.
             if to.isAssistant, !from.isAssistant { return .spring(openSpring(duration: duration)) }
             if from.isAssistant, !to.isAssistant { return .spring(closeSpring(duration: duration)) }
+            // Settings grows out of the open panel too, and shrinks back to it.
+            if to.isSettings, !from.isSettings { return .spring(openSpring(duration: duration)) }
+            if from.isSettings, !to.isSettings { return .spring(closeSpring(duration: duration)) }
             // The assistant's field growing into its list and back: the open and close springs,
             // shortened like a morph, since only the bottom edge moves.
             if case .assistant(let a) = from, case .assistant(let b) = to, a != b {

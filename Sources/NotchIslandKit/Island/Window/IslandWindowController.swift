@@ -91,12 +91,14 @@ import SwiftUI
     private weak var previousKeyWindow: NSWindow?
     private var resignObserver: (any NSObjectProtocol)?
     private var outsideClickMonitor: Any?
+    /// Esc for Settings (the assistant handles its own: it steps back before it closes).
+    private var escapeMonitor: Any?
 
     /// The assistant has the keyboard exactly while it is on screen.
     private func keyboardFollows(from: IslandPresentation, to: IslandPresentation) {
-        if to.isAssistant, !from.isAssistant {
+        if to.takesKeyboard, !from.takesKeyboard {
             takeKeyboard()
-        } else if from.isAssistant, !to.isAssistant {
+        } else if from.takesKeyboard, !to.takesKeyboard {
             giveKeyboardBack()
         }
     }
@@ -119,20 +121,35 @@ import SwiftUI
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, !self.model.assistant.isAwaitingFileAccess else { return }
-                self.model.controller.closeAssistant()
+                // Our own popovers, menus and the colour panel take the keyboard for a moment and
+                // give it back; only another app's window ends the assistant or Settings. Judged a
+                // turn later, once the new key window is known.
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if NSApp.isActive, let key = NSApp.keyWindow, key !== self.panel { return }
+                    if NSApp.isActive, NSApp.keyWindow === self.panel { return }
+                    self.model.controller.closeKeyboardOverlay()
+                }
             }
+        }
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            // Only Esc in the panel itself: in a popover it closes the popover first.
+            guard event.keyCode == 53, let self, self.model.island.presentation.isSettings,
+                  event.window === self.panel else { return event }
+            self.model.controller.closeSettings()
+            return nil
         }
         // A global monitor sees only clicks in other apps' windows: exactly the clicks outside.
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
             guard let self, !self.model.assistant.isAwaitingFileAccess else { return }
-            self.model.controller.closeAssistant()
+            self.model.controller.closeKeyboardOverlay()
         }
     }
 
     /// After a folder-access prompt: the assistant is still open but no longer key, so keystrokes
     /// would go elsewhere. Takes the keyboard back (the user just answered a prompt it caused).
     func assistantNeedsKeyboard() {
-        guard let panel, panel.acceptsKeyboard, model.island.presentation.isAssistant, !panel.isKeyWindow else { return }
+        guard let panel, panel.acceptsKeyboard, model.island.presentation.takesKeyboard, !panel.isKeyWindow else { return }
         panel.makeKey()
         NSApp.activate()
     }
@@ -143,6 +160,8 @@ import SwiftUI
         resignObserver = nil
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
         outsideClickMonitor = nil
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+        escapeMonitor = nil
         guard let panel, panel.acceptsKeyboard else { return }
         if panel.isKeyWindow {
             if let previous = previousKeyWindow, previous.isVisible, previous !== panel {
@@ -185,6 +204,7 @@ import SwiftUI
         hosting.onPointerEntered = { [weak model] in model?.controller.pointerEntered() }
         hosting.onPointerExited = { [weak model] in model?.controller.pointerExited() }
         hosting.onClick = { [weak model] in model?.controller.clicked() }
+        hosting.onScroll = { [weak model] event in model?.controller.scrolled(event) ?? false }
         hosting.onDragEntered = { [weak model] in model?.controller.dragEntered() }
         hosting.onDragExited = { [weak model] in model?.controller.dragExited() }
         hosting.onDrop = { [weak model] urls in model?.controller.dropped(urls) ?? false }
@@ -211,6 +231,8 @@ import SwiftUI
     // MARK: Staging
 
     private func willTransition(from: IslandPresentation, to: IslandPresentation) {
+        // Covering macOS's AirPods card: raised while ours grows, is shown and shrinks.
+        if Self.covers(to) || Self.covers(from) { panel?.level = IslandPanel.coveringLevel }
         guard let metrics else { return }
         let layout = model.layout
         let fromRect = StageGeometry.islandFrame(for: from, layout: stagedLayout ?? layout, metrics: metrics)
@@ -236,8 +258,17 @@ import SwiftUI
         let layout = model.layout
         settle.schedule(after: Motion.settleDuration(for: model.preferences.animationDuration)) { [weak self] in
             guard let self, self.model.island.presentation == target, self.model.layout == layout else { return }
+            if !Self.covers(target) { self.panel?.level = IslandPanel.restingLevel }
             self.stageResting(for: target)
         }
+    }
+
+    /// The AirPods card, when the user chose to cover macOS's own with it.
+    private static func covers(_ presentation: IslandPresentation) -> Bool {
+        if case .banner(.airPods) = presentation {
+            return AirPodsSystemCard.current == .cover
+        }
+        return false
     }
 
     private func stageResting(for presentation: IslandPresentation) {

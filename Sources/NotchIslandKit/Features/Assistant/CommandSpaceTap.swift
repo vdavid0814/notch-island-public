@@ -20,6 +20,11 @@ import os
     /// The space bar (`kVK_Space`).
     nonisolated static let spaceKeyCode: Int64 = 49
 
+    /// The modifier held with Space (Settings ▸ Siri ▸ Shortcut); takes effect on the next press.
+    func setModifiers(_ modifiers: CGEventFlags) {
+        shared.setModifiers(modifiers)
+    }
+
     /// Idempotent. Without Accessibility nothing is created (the tap could not swallow anything).
     func start() {
         guard !isRunning, AXIsProcessTrusted() else { return }
@@ -48,16 +53,18 @@ import os
         Log.app.notice("⌘Space tap stopped")
     }
 
-    /// The decision for one key event. Pure, for tests: ⌘Space alone (no Shift, Option or Control,
-    /// which other shortcuts use) is ours; its key-up and repeats go with it.
-    nonisolated static func swallows(keyCode: Int64, isDown: Bool, flags: CGEventFlags, pressed: inout Bool) -> Bool {
+    /// The decision for one key event. Pure, for tests: Space with exactly the chosen modifier
+    /// (⌘ by default; no other of Shift, Option, Control, Command, which other shortcuts use) is
+    /// ours; its key-up and repeats go with it.
+    nonisolated static func swallows(keyCode: Int64, isDown: Bool, flags: CGEventFlags,
+                                     modifiers wanted: CGEventFlags = .maskCommand, pressed: inout Bool) -> Bool {
         guard keyCode == spaceKeyCode else { return false }
         if !isDown {
             defer { pressed = false }
             return pressed
         }
         let modifiers = flags.intersection([.maskCommand, .maskShift, .maskAlternate, .maskControl])
-        if modifiers == .maskCommand {
+        if modifiers == wanted {
             pressed = true
             return true
         }
@@ -70,6 +77,7 @@ nonisolated private final class CommandSpaceTapShared: Sendable {
     private struct State {
         var activeGeneration: UInt64?
         var runLoop: CFRunLoop?
+        var modifiers: CGEventFlags = .maskCommand
     }
 
     private let lock = OSAllocatedUnfairLock(uncheckedState: State())
@@ -101,6 +109,14 @@ nonisolated private final class CommandSpaceTapShared: Sendable {
         }
     }
 
+    func setModifiers(_ modifiers: CGEventFlags) {
+        lock.withLockUnchecked { $0.modifiers = modifiers }
+    }
+
+    var modifiers: CGEventFlags {
+        lock.withLockUnchecked { $0.modifiers }
+    }
+
     func isActive(_ generation: UInt64) -> Bool {
         lock.withLockUnchecked { $0.activeGeneration == generation }
     }
@@ -109,11 +125,13 @@ nonisolated private final class CommandSpaceTapShared: Sendable {
 /// Confined to the tap thread.
 nonisolated private final class CommandSpaceTapSession {
     let deliver: @Sendable () -> Void
+    let shared: CommandSpaceTapShared
     var port: CFMachPort?
     var pressed = false
 
-    init(deliver: @escaping @Sendable () -> Void) {
+    init(deliver: @escaping @Sendable () -> Void, shared: CommandSpaceTapShared) {
         self.deliver = deliver
+        self.shared = shared
     }
 
     func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -124,7 +142,8 @@ nonisolated private final class CommandSpaceTapSession {
         case .keyDown, .keyUp:
             let isDown = type == .keyDown
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-            guard CommandSpaceTap.swallows(keyCode: keyCode, isDown: isDown, flags: event.flags, pressed: &pressed) else {
+            guard CommandSpaceTap.swallows(keyCode: keyCode, isDown: isDown, flags: event.flags,
+                                           modifiers: shared.modifiers, pressed: &pressed) else {
                 return Unmanaged.passUnretained(event)
             }
             let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
@@ -138,7 +157,7 @@ nonisolated private final class CommandSpaceTapSession {
 
 nonisolated private enum CommandSpaceTapThread {
     static func run(generation: UInt64, shared: CommandSpaceTapShared, deliver: @escaping @Sendable () -> Void) {
-        let session = CommandSpaceTapSession(deliver: deliver)
+        let session = CommandSpaceTapSession(deliver: deliver, shared: shared)
         let callback: CGEventTapCallBack = { _, type, event, refcon in
             guard let refcon else { return Unmanaged.passUnretained(event) }
             return Unmanaged<CommandSpaceTapSession>.fromOpaque(refcon).takeUnretainedValue().handle(type, event)

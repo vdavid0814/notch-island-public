@@ -111,8 +111,8 @@ struct PreferencesTests {
         Self.withDefaults { defaults in
             let preferences = Preferences(defaults: defaults)
             #expect(preferences.openOnHover)
-            #expect(preferences.hoverDelay == 0.22)
-            #expect(preferences.scale == .standard)
+            #expect(preferences.hoverDelay == Preferences.defaultHoverDelay)
+            #expect(preferences.scale == .compact)  // shown as "Standard"
             #expect(preferences.hapticsEnabled)
             #expect(preferences.showNowPlaying)
             #expect(preferences.showPowerAlerts)
@@ -166,7 +166,7 @@ struct PreferencesTests {
             defaults.set("yes", forKey: "ni2.openOnHover")
             var preferences = Preferences(defaults: defaults)
             #expect(preferences.hoverDelay == Preferences.hoverDelayRange.upperBound)
-            #expect(preferences.scale == .standard)
+            #expect(preferences.scale == .compact)  // shown as "Standard"
             #expect(preferences.openOnHover)
 
             defaults.set(-1.0, forKey: "ni2.hoverDelay")
@@ -175,7 +175,7 @@ struct PreferencesTests {
 
             defaults.set(Double.nan, forKey: "ni2.hoverDelay")
             preferences = Preferences(defaults: defaults)
-            #expect(preferences.hoverDelay == 0.22)
+            #expect(preferences.hoverDelay == Preferences.defaultHoverDelay)
         }
     }
 
@@ -184,7 +184,7 @@ struct PreferencesTests {
             defaults.set(0.7, forKey: "dwellDelay")
             defaults.set(false, forKey: "haptics")
             let preferences = Preferences(defaults: defaults)
-            #expect(preferences.hoverDelay == 0.22)
+            #expect(preferences.hoverDelay == Preferences.defaultHoverDelay)
             #expect(preferences.hapticsEnabled)
         }
     }
@@ -473,9 +473,9 @@ struct AppModelWiringTests {
             model.levels.onChange?(.volume, .island)
             #expect(model.banners.current == nil)
             model.levels.onChange?(.brightness, .external)
-            #expect(model.banners.current == .level(.brightness))
+            #expect(model.banners.current == .levelPill(.brightness))
             model.levels.onChange?(.volume, .key)
-            #expect(model.banners.current == .level(.volume))
+            #expect(model.banners.current == .levelPill(.volume))
         }
         Self.withModel { model in
             model.preferences.showLevelHUD = false

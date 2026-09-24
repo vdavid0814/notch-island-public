@@ -55,23 +55,24 @@ nonisolated enum AssistantSearch {
         }
     }
 
-    @concurrent static func files(matching query: String, limit: Int) async -> [AssistantHit] {
+    @concurrent static func files(matching query: String, limit: Int, scope: FileScope = FileScope()) async -> [AssistantHit] {
         // Desktop, Documents, Downloads and iCloud Drive are privacy-protected: the first search
         // there asks the user for access (one prompt per folder). `AssistantModel` therefore
         // reads files only once the user has asked for them.
         let term = escaped(query)
-        guard !term.isEmpty else { return [] }
-        let predicate = """
-            kMDItemDisplayName == "\(term)*"cdw && \(fileFilter)
-            """
-        let hits = run(predicate, scopes: fileScopes, fetch: max(40, limit * 3), kind: .file)
+        guard !term.isEmpty, !scope.paths.isEmpty else { return [] }
+        // Word starts ("q*"cdw), or anywhere in the name ("*q*"cd).
+        let pattern = scope.anywhere ? "\"*\(term)*\"cd" : "\"\(term)*\"cdw"
+        let predicate = "kMDItemDisplayName == \(pattern) && \(fileFilter)"
+        let hits = run(predicate, scopes: scope.paths, fetch: max(40, limit * 3), kind: .file)
         return Array(rank(hits, for: query).prefix(limit))
     }
 
     /// Files used in the last month, most recent first (the Files suggestion).
-    @concurrent static func recentFiles(limit: Int = 30) async -> [AssistantHit] {
-        let predicate = "kMDItemLastUsedDate >= $time.today(-30) && \(fileFilter)"
-        let hits = run(predicate, scopes: fileScopes, fetch: 400, kind: .file)
+    @concurrent static func recentFiles(limit: Int = 30, scope: FileScope = FileScope()) async -> [AssistantHit] {
+        guard !scope.paths.isEmpty else { return [] }
+        let predicate = "kMDItemLastUsedDate >= $time.today(-\(max(1, scope.days))) && \(fileFilter)"
+        let hits = run(predicate, scopes: scope.paths, fetch: 400, kind: .file)
         let sorted = hits.sorted { ($0.lastUsed ?? .distantPast) > ($1.lastUsed ?? .distantPast) }
         return Array(sorted.prefix(limit))
     }

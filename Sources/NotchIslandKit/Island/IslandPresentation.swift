@@ -26,10 +26,24 @@ nonisolated enum PowerEvent: Sendable, Equatable {
 
 nonisolated enum BannerKind: Sendable, Equatable {
     case level(LevelKind)
+    /// The minimal level style (`LevelHUDStyle.pill`): beside the notch only, pill-sized.
+    case levelPill(LevelKind)
     case power(PowerEvent)
     case timerFinished
     /// A file drag is in progress somewhere on screen.
     case dropTarget
+    /// Headphones connected: their picture, name and batteries.
+    case airPods(AirPodsInfo)
+}
+
+nonisolated extension BannerKind {
+    /// The level a volume or brightness banner shows, in either style.
+    var levelKind: LevelKind? {
+        switch self {
+        case .level(let kind), .levelPill(let kind): kind
+        default: nil
+        }
+    }
 }
 
 nonisolated enum CompactActivity: Sendable, Equatable {
@@ -64,9 +78,9 @@ nonisolated enum ExpandedPage: String, Sendable, Equatable, CaseIterable, Identi
 
 /// How much of the assistant shows, as in the system's Search window: only the field until the
 /// pointer comes over it (or ↓), then the suggestions below it; a full list once there is a query,
-/// an open suggestion or an answer.
+/// an open suggestion or an answer; and a larger window for the app gallery.
 nonisolated enum AssistantRoom: Int, Sendable, Equatable, Comparable, CaseIterable {
-    case field, suggestions, list
+    case field, suggestions, list, gallery
 
     static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
 }
@@ -83,6 +97,8 @@ nonisolated enum IslandPresentation: Sendable, Equatable {
     /// Siri in the notch: search and ask, with the keyboard (`AssistantView`), as tall as what it
     /// shows needs.
     case assistant(AssistantRoom)
+    /// Settings, grown out of the notch as a larger window (`IslandSettingsView`).
+    case settings
 
     var isIdle: Bool { self == .idle }
 
@@ -96,6 +112,13 @@ nonisolated enum IslandPresentation: Sendable, Equatable {
         return false
     }
 
+    /// Hugs the notch at its height: the compact pill, and the minimal level pill.
+    var isPillShaped: Bool {
+        if case .compact = self { return true }
+        if case .banner(.levelPill) = self { return true }
+        return false
+    }
+
     var isExpanded: Bool {
         if case .expanded = self { return true }
         return false
@@ -106,9 +129,14 @@ nonisolated enum IslandPresentation: Sendable, Equatable {
         return false
     }
 
+    var isSettings: Bool { self == .settings }
+
+    /// Takes the keyboard while on screen (typing, arrows, Esc): the assistant and Settings.
+    var takesKeyboard: Bool { isAssistant || isSettings }
+
     /// Open by the user and large: the expanded panel or the assistant. Both keep the band guard's
     /// strip up and end with the close spring.
-    var isOpen: Bool { isExpanded || isAssistant }
+    var isOpen: Bool { isExpanded || isAssistant || isSettings }
 
     /// Identity for content transitions. Changes with the kind of content on
     /// screen, never with the data inside it.
@@ -120,16 +148,22 @@ nonisolated enum IslandPresentation: Sendable, Equatable {
             "compact.\(activity)"
         case .banner(.level(let kind)):
             "banner.level.\(kind.rawValue)"
+        case .banner(.levelPill(let kind)):
+            "banner.levelPill.\(kind.rawValue)"
         case .banner(.power):
             "banner.power"
         case .banner(.timerFinished):
             "banner.timerFinished"
         case .banner(.dropTarget):
             "banner.dropTarget"
+        case .banner(.airPods):
+            "banner.airPods"
         case .expanded(let page):
             "expanded.\(page.rawValue)"
         case .assistant:
             "assistant"
+        case .settings:
+            "settings"
         }
     }
 }

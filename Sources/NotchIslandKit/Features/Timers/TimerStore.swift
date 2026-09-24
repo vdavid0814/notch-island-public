@@ -21,15 +21,24 @@ import Observation
     private(set) var countdown: CountdownState = .idle
     private(set) var stopwatch: StopwatchState = .idle
 
-    /// The Timer page slider, clamped to `draftRange`.
-    var draftMinutes: Double {
-        get { storedDraftMinutes }
+    /// The countdown the ruler has set up, in whole seconds (see `TimerDraftUnits`).
+    var draftDuration: TimeInterval {
+        get { storedDraft }
         set {
             guard newValue.isFinite else { return }
-            storedDraftMinutes = min(max(newValue, Self.draftRange.lowerBound), Self.draftRange.upperBound)
+            storedDraft = min(max(newValue.rounded(), 1), Self.maximumDuration - 1)
         }
     }
-    private var storedDraftMinutes: Double = 5
+    private var storedDraft: TimeInterval = 5 * 60
+
+    /// The draft in minutes, clamped to `draftRange` (the minutes-only ruler).
+    var draftMinutes: Double {
+        get { storedDraft / 60 }
+        set {
+            guard newValue.isFinite else { return }
+            draftDuration = min(max(newValue, Self.draftRange.lowerBound), Self.draftRange.upperBound) * 60
+        }
+    }
 
     /// Fired exactly once per countdown, when it reaches zero.
     @ObservationIgnored var onFinished: (() -> Void)?

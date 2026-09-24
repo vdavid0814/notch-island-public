@@ -28,7 +28,7 @@ struct IslandRootView: View {
         ZStack(alignment: .top) {
             island
         }
-        .environment(\.islandGlassStyle, model.preferences.glassStyle)
+        .environment(\.islandGlassStyle, model.effectiveGlassStyle)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .ignoresSafeArea()
     }
@@ -80,7 +80,7 @@ private struct GlassIsland: View {
     let reducesWork: Bool
     let thumbnails: ThumbnailCache
     @Environment(\.islandEmergence) private var emergence
-    @Environment(\.islandGlassStyle) private var glassStyle
+    @Environment(\.islandGlassStyle) private var chosenStyle
     /// Fade style only: the glass is switched off while the island is a black pill at the notch's
     /// height (it would be sampling a backdrop nobody can see); see `glassRetirement`.
     @State private var isGlassRetired: Bool?
@@ -96,6 +96,16 @@ private struct GlassIsland: View {
         let bottomRadius = geometry.bottomRadius
         let shoulderRadius = geometry.shoulderRadius
         let reveal = min(max(emergence, 0), 1)
+        // Settings is a large page: it grows in without the blur (an offscreen pass over the whole
+        // page each frame) and on plain black. Live glass the size of the screen under it cost
+        // ~40 MB while open and ~300 MB more at its peak (measured) for a surface its own window
+        // colour hides; its faint see-through look comes from the system's window vibrancy
+        // instead (`SettingsBackdrop`), which the window server draws.
+        let isOpaquePage = presentation.isSettings
+        // The AirPods card lies over macOS's own card to hide it: glass would let it show through.
+        let coversSystemCard: Bool = if case .banner(.airPods) = presentation { AirPodsSystemCard.current == .cover } else { false }
+        let glassStyle = isOpaquePage || coversSystemCard ? IslandGlassStyle.black : chosenStyle
+        let blursGrowth = !(reduceMotion || reducesWork || isOpaquePage)
         let wantsGlass = glassStyle != .fade || contentSize.height > notch.height + 0.5
         let showsGlass = wantsGlass || isGlassRetired == false
         let silhouette = IslandShape(bottomRadius: bottomRadius, shoulderRadius: shoulderRadius, retraction: retraction)
@@ -112,10 +122,10 @@ private struct GlassIsland: View {
             IslandContent(presentation: presentation, thumbnails: thumbnails)
                 .frame(width: contentSize.width, height: contentSize.height, alignment: .top)
                 .id(presentation.surfaceKey)
-                .transition(.islandContent(reduceMotion: reduceMotion || lightContentSwap))
+                .transition(.islandContent(reduceMotion: reduceMotion || lightContentSwap || isOpaquePage))
         }
         .opacity(reveal)
-        .blur(radius: reduceMotion || reducesWork ? 0 : 6 * (1 - reveal))
+        .blur(radius: blursGrowth ? 6 * (1 - reveal) : 0)
         // The island's panel never becomes key (it must not steal focus), so by default every
         // control in it would draw in the inactive, desaturated style of a background window.
         // Like Control Center, it is a surface the user operates directly: draw controls active.
@@ -134,8 +144,10 @@ private struct GlassIsland: View {
         // `rimInset` larger than the outline, so its rim falls outside the outline clip that
         // `EmergenceProgress` applies around the container.
         .islandGlass(in: surface, isEnabled: showsGlass)
+        .environment(\.islandGlassStyle, glassStyle)
         .padding(.top, -IslandLayout.overdraw)
         .task(id: wantsGlass) { await glassRetirement(wantsGlass: wantsGlass) }
+
     }
 
     /// Glass comes back at once when the island grows past the notch (under the black band, so the
@@ -200,6 +212,8 @@ private struct IslandContent: View {
             ExpandedView(page: page, thumbnails: thumbnails)
         case .assistant:
             AssistantView()
+        case .settings:
+            IslandSettingsView()
         }
     }
 }

@@ -19,12 +19,16 @@ import Observation
     let banners = BannerCenter()
     let media = MediaController()
     let power = PowerMonitor()
+    let airPods = AirPodsMonitor()
+    let stats = SystemStatsMonitor()
     let levels = LevelsController()
     let shelf = ShelfStore()
     let timers = TimerStore()
     let widgets = WidgetStore()
     let fullscreen = FullscreenMonitor()
     let assistant = AssistantModel()
+    /// Control Center switches for the Controls and Keyboard widgets.
+    let controls = SystemControls()
     @ObservationIgnored private let commandSpaceTap = CommandSpaceTap()
     let permissions = PermissionCenter()
     let activity = SystemActivity()
@@ -38,7 +42,8 @@ import Observation
     /// Recomputed from `metrics` and `preferences.scale`; the window controller observes it to
     /// re-stage the panel when either changes.
     var layout: IslandLayout {
-        IslandLayout(notch: metrics?.notchSize ?? Self.fallbackNotchSize, scale: preferences.scale)
+        IslandLayout(notch: metrics?.notchSize ?? Self.fallbackNotchSize, scale: preferences.scale,
+                     screen: metrics?.screenFrame.size ?? .zero, siri: preferences.siri.layout)
     }
 
     /// Created at the end of `init` (it needs `self`) and never replaced, hence not observed.
@@ -87,10 +92,13 @@ import Observation
             return self.media.isPlaying ? .playing : .paused
         }
         assistant.onFileAccessSettled = { [weak self] in self?.windowController?.assistantNeedsKeyboard() }
+        assistant.settings = { [weak preferences] in preferences?.siri ?? SiriSettings() }
+        commandSpaceTap.setModifiers(preferences.siri.shortcut.modifiers)
         // Like the system's ⌘Space: opens Siri, and closes it again.
         commandSpaceTap.onPress = { [weak self] in
             guard let self else { return }
             if self.island.presentation.isAssistant {
+                guard self.preferences.siri.shortcutCloses else { return }
                 self.controller.closeAssistant()
             } else {
                 self.controller.openAssistant()
@@ -112,6 +120,7 @@ import Observation
         activity.start()
         launchAtLogin.refresh()
         power.start()
+        airPods.start()
         shelf.pruneMissingInBackground()
 
         // The window controller must exist before the island controller applies its first
@@ -142,6 +151,7 @@ import Observation
         FeatureState.actions(from: appliedFeatures, to: .off).forEach(run)
         appliedFeatures = nil
         power.stop()
+        airPods.stop()
         activity.stop()
         permissions.stop()
         windowController?.stop()
@@ -179,6 +189,11 @@ import Observation
             timers.startStopwatch()
         case .showSettings:
             showSettings()
+        case .showSettingsPane(let pane):
+            settingsPane = pane
+            showSettings()
+        case .editWidget(let kind):
+            editWidget(kind)
         case .customize:
             showCustomize()
         case .assistant:
@@ -188,13 +203,50 @@ import Observation
         }
     }
 
-    func showCustomize() {
-        let editor = customizeWindow ?? WidgetEditorWindowController(model: self)
-        customizeWindow = editor
-        editor.show()
+    /// The style the island is drawn in: the user's, except in Low Power Mode, where it is plain
+    /// black — no glass sampling its backdrop, no fade gradient (the user asked for it).
+    var effectiveGlassStyle: IslandGlassStyle {
+        activity.isLowPowerMode ? .black : preferences.glassStyle
     }
 
+    /// The Settings tab shown in the island; remembered across launches.
+    var settingsPane: IslandSettingsPane = IslandSettingsPane.named(
+        UserDefaults.standard.string(forKey: IslandSettingsPane.key) ?? ""
+    ) ?? .general {
+        didSet { UserDefaults.standard.set(settingsPane.rawValue, forKey: IslandSettingsPane.key) }
+    }
+
+    /// A widget whose editor Settings ▸ Widgets should open (from the island's context menu).
+    var editingWidget: IslandWidgetKind?
+
+    func editWidget(_ kind: IslandWidgetKind) {
+        editingWidget = kind
+        settingsPane = .widgets
+        showSettings()
+    }
+
+    /// Settings grows out of the notch; without a notch screen (nothing to grow out of) it opens as
+    /// a window.
     func showSettings() {
+        if isRunning, metrics != nil {
+            controller.openSettings()
+        } else {
+            showSettingsWindow()
+        }
+    }
+
+    /// The widget editor is Settings' Widgets tab.
+    func showCustomize() {
+        if isRunning, metrics != nil {
+            controller.openSettings(pane: .widgets)
+        } else {
+            let editor = customizeWindow ?? WidgetEditorWindowController(model: self)
+            customizeWindow = editor
+            editor.show()
+        }
+    }
+
+    func showSettingsWindow() {
         let settings = settingsWindow ?? SettingsWindowController(model: self)
         settingsWindow = settings
         settings.show()
@@ -223,10 +275,22 @@ import Observation
         windowController.logState()
     }
 
+    /// Settings ▸ Siri changed the shortcut: the key tap listens for the new modifier at once.
+    func siriShortcutChanged(_ shortcut: SiriShortcut) {
+        commandSpaceTap.setModifiers(shortcut.modifiers)
+    }
+
     // MARK: Wiring
 
     private func wireFeatureEvents() {
         power.onEvent = { [weak self] event in self?.powerEvent(event) }
+        airPods.onConnect = { [weak self] info in self?.airPodsConnected(info) }
+        airPods.systemCard = { [weak self] in self?.preferences.airPodsSystemCard ?? .cover }
+        airPods.onUpdate = { [weak self] info in
+            // Only into the card still up for these headphones.
+            guard let self, case .airPods(let shown)? = self.banners.current, shown.name == info.name, shown != info else { return }
+            self.banners.post(.airPods(info), duration: self.preferences.airPodsDuration)
+        }
         levels.onChange = { [weak self] kind, source in self?.levelChanged(kind, source: source) }
         timers.onFinished = { [weak self] in self?.timerFinished() }
         dragMonitor.onDragBegan = { [weak self] in self?.externalDragBegan() }
@@ -237,7 +301,14 @@ import Observation
         // Passive: nothing appears by itself over a full-screen video (the banner would also count
         // down invisibly and pop out stale afterwards).
         guard preferences.showPowerAlerts, appliedFeatures?.hidden != true else { return }
-        banners.post(.power(event), duration: 3)
+        banners.post(.power(event), duration: preferences.powerDuration)
+        haptics.play(.alert)
+    }
+
+    func airPodsConnected(_ info: AirPodsInfo) {
+        // Passive, like a power notice: nothing appears by itself over a full-screen video.
+        guard preferences.showAirPods, appliedFeatures?.hidden != true else { return }
+        banners.post(.airPods(info), duration: preferences.airPodsDuration)
         haptics.play(.alert)
     }
 
@@ -249,7 +320,8 @@ import Observation
         if appliedFeatures?.hidden == true, source != .key { return }
         // A key press is the user asking to see the level; a change made elsewhere is only a notice
         // and must not bury a banner already up (a power event, a finished timer).
-        banners.post(.level(kind), duration: 1.6, preempting: source == .key)
+        let banner: BannerKind = preferences.levelStyle == .pill ? .levelPill(kind) : .level(kind)
+        banners.post(banner, duration: preferences.levelDuration, preempting: source == .key)
         // Only a key press is felt; a Control Center slider drag (`.external`) must not buzz.
         if source == .key { haptics.play(.tick) }
     }

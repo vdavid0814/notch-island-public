@@ -95,8 +95,7 @@ import Testing
     let geometry = BandCoverPolicy.Geometry(
         screen: CGRect(x: 0, y: 0, width: 1280, height: 832),
         band: 30,
-        notch: CGRect(x: 562, y: 804, width: 156, height: 28),
-        widestIsland: 540
+        notch: CGRect(x: 562, y: 804, width: 156, height: 28)
     )
     let t0 = Date(timeIntervalSinceReferenceDate: 0)
 
@@ -107,8 +106,8 @@ import Testing
     }
 
     @Test func zoneReachesBesideAndBelowTheNotch() {
-        // Widest island 540 → ±270, plus 60 on each side, from 120 pt below the band to the top.
-        #expect(geometry.zone == CGRect(x: 310, y: 682, width: 660, height: 150))
+        // The notch ± 48 (just past the compact pill), from 120 pt below the band to the top.
+        #expect(geometry.zone == CGRect(x: 514, y: 682, width: 252, height: 150))
         #expect(geometry.bandRect == CGRect(x: 0, y: 802, width: 1280, height: 30))
     }
 

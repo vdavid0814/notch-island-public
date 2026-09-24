@@ -66,7 +66,7 @@ private struct ShelfActions: View {
             }
             .help("Remove everything from the shelf")
         }
-        .buttonStyle(.islandGlass)
+        .islandButton()
         // Secondary to the files: one control size down, like the home page's side column.
         .controlSize(Metrics.Control.smaller(controlSize))
         .animation(Motion.content, value: items.count)

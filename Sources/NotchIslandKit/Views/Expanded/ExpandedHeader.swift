@@ -14,7 +14,7 @@ struct ExpandedHeader: View {
             PagePicker()
         } trailing: {
             ZStack(alignment: .trailing) {
-                if case .level(let kind)? = model.banners.current {
+                if let kind = model.banners.current?.levelKind {
                     LevelCapsule(kind: kind)
                         .transition(.blurReplace)
                 } else {
@@ -29,17 +29,25 @@ struct ExpandedHeader: View {
     }
 }
 
-/// The pages as an icon-only liquid segment.
+/// The pages as the system's tab picker, symbols only (the titles are the tooltips and the
+/// accessibility labels).
 private struct PagePicker: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         @Bindable var island = model.island
-        IslandLiquidSegment(
-            items: ExpandedPage.allCases.map { .init(value: $0, title: $0.title, systemImage: $0.systemImage) },
-            selection: $island.page,
-            iconOnly: true
-        )
+        Picker("Page", selection: $island.page) {
+            ForEach(ExpandedPage.allCases, id: \.self) { page in
+                Label(page.title, systemImage: page.systemImage)
+                    .labelStyle(.iconOnly)
+                    .controlHelp(page.title)
+                    .tag(page)
+            }
+        }
+        // The system's tab bar (a segmented control in the tabs role): a glass capsule whose
+        // selection slides between the pages.
+        .choiceBar()
+        .labelsHidden()
         .fixedSize()
     }
 }
@@ -60,8 +68,8 @@ private struct HeaderAccessories: View {
             } label: {
                 Label("Siri", systemImage: "siri")
             }
-            .buttonStyle(.islandGlass(.circle))
-            .help("Siri")
+            .islandButton(.circle)
+            .controlHelp("Siri")
             let isPinned = model.island.isPinned
             Button {
                 model.controller.togglePinned()
@@ -70,37 +78,27 @@ private struct HeaderAccessories: View {
                     .contentTransition(.symbolEffect(.replace))
             }
             // Pinned is a mode, so it reads as an active control, like a CAD toggle that is on.
-            .buttonStyle(.islandGlass(.circle, prominent: isPinned))
-            .help(isPinned ? "Unpin — close when the pointer leaves" : "Pin — keep open")
+            .islandButton(.circle, prominent: isPinned)
+            .controlHelp(isPinned ? "Unpin — close when the pointer leaves" : "Pin — keep open")
             Button {
                 model.showSettings()
             } label: {
                 Label("Settings", systemImage: "gearshape")
             }
-            .buttonStyle(.islandGlass(.circle))
-            .help("Settings")
+            .islandButton(.circle)
+            .controlHelp("Settings")
         }
     }
 }
 
-/// "76%" with the battery symbol; green while charging, red when low, orange in Low Power Mode.
+/// The battery with its percentage inside, like the Mac's menu bar: white (also while charging),
+/// yellow in Low Power Mode, red below 20 %.
 struct BatteryIndicator: View {
     let state: PowerState
 
     var body: some View {
-        HStack(spacing: Metrics.Spacing.xSmall) {
-            Text(IslandFormat.percent(Double(state.level) / 100))
-                .font(.caption.weight(.medium).monospacedDigit())
-                .foregroundStyle(.secondary)
-                .contentTransition(.opacity)
-            Image(systemName: IslandFormat.batterySymbol(level: state.level, charging: state.isCharging))
-                .symbolRenderingMode(state.tint == .low ? .monochrome : .hierarchical)
-                .foregroundStyle(state.tint.style)
-                .imageScale(.large)
-        }
-        .animation(Motion.content, value: state.level)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("Battery \(IslandFormat.percent(Double(state.level) / 100))"))
+        // Smaller than the menu bar's, so it sits level with the symbols in the header buttons beside it.
+        BatteryGlyph(level: state.level, isCharging: state.isCharging, tint: state.tint, height: 9)
     }
 }
 
@@ -121,5 +119,26 @@ private struct LevelCapsule: View {
                 .font(.caption.monospacedDigit())
                 .frame(minWidth: 32, alignment: .trailing)
         }
+    }
+}
+
+extension EnvironmentValues {
+    /// Off where the header is only a picture (Settings' widget stage).
+    @Entry var showsControlHelp = true
+}
+
+extension View {
+    /// `help(_:)`, unless the environment turns tooltips off.
+    func controlHelp(_ text: String) -> some View {
+        modifier(ControlHelp(text: text))
+    }
+}
+
+private struct ControlHelp: ViewModifier {
+    let text: String
+    @Environment(\.showsControlHelp) private var showsHelp
+
+    func body(content: Content) -> some View {
+        content.help(showsHelp ? text : "")
     }
 }

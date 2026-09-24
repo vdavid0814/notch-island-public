@@ -32,6 +32,10 @@ import Foundation
     @discardableResult
     func setFrame(_ rect: GridRect, for kind: IslandWidgetKind) -> Bool { board.setFrame(rect, for: kind) }
 
+    func update(_ kind: IslandWidgetKind, _ change: (inout IslandWidget) -> Void) {
+        board.update(kind, change)
+    }
+
     func setOption(_ option: WidgetOption, _ on: Bool, for kind: IslandWidgetKind) {
         board.setOption(option, on, for: kind)
     }

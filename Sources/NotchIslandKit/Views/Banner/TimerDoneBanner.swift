@@ -24,12 +24,12 @@ struct TimerDoneBanner: View {
                 model.timers.add(seconds: 60)
                 model.banners.dismiss(.timerFinished)
             }
-            .buttonStyle(.islandGlass)
+            .islandButton()
             Button("Done") {
                 model.timers.acknowledge()
                 model.banners.dismiss(.timerFinished)
             }
-            .buttonStyle(.islandGlass(prominent: true))
+            .islandButton(prominent: true)
         }
         .onAppear { ring.toggle() }
     }

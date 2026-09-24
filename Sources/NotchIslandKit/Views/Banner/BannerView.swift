@@ -7,9 +7,11 @@ struct BannerView: View {
     var body: some View {
         switch kind {
         case .level(let level): LevelBanner(kind: level)
+        case .levelPill(let level): LevelPill(kind: level)
         case .power(let event): PowerBanner(event: event)
         case .timerFinished: TimerDoneBanner()
         case .dropTarget: DropBanner()
+        case .airPods(let info): AirPodsBanner(info: info)
         }
     }
 }

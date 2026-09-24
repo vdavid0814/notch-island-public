@@ -8,6 +8,12 @@ import AppKit
 /// controller offsets the island, and inside a display cycle it makes SwiftUI invalidate its
 /// transform on every constraints pass until AppKit throws.
 final class IslandPanel: NSPanel {
+    /// Above the menu bar, below open menus and Control Center.
+    static let restingLevel = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+    /// While the AirPods card is up in "cover" mode: above macOS's own AirPods card (a
+    /// `popUpMenu`-level window, 101), which it hides.
+    static let coveringLevel = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)
+
     private var stagedFrame: NSRect?
 
     init(contentRect: NSRect) {
@@ -18,7 +24,7 @@ final class IslandPanel: NSPanel {
         super.init(contentRect: contentRect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         // Above the menu bar, deliberately below open menus and Control Center
         // (popUpMenu), so a pulled-down menu that lands under the island wins.
-        level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+        level = Self.restingLevel
         // All Spaces + fullScreenAuxiliary put the panel over full-screen apps
         // (the level alone does not); stationary keeps Mission Control from
         // moving it, as with the menu bar; ignoresCycle keeps it out of ⌘`.

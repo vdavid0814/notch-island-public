@@ -34,7 +34,7 @@ enum IslandGlass {
     static func material(_ role: Role, style: IslandGlassStyle) -> Glass {
         switch role {
         case .surface: style.material
-        case .control: style.material.interactive()
+        case .control: style.controlMaterial.interactive()
         case .active: Glass.clear.tint(Color.accentColor.opacity(0.62)).interactive()
         case .thumb: Glass.clear.interactive()
         }
@@ -95,8 +95,12 @@ nonisolated enum IslandGlassStyle: String, Sendable, CaseIterable, Identifiable,
         }
     }
 
-    /// The smoked glass every glass role is made of.
-    var material: Glass { .clear.tint(Color.black.opacity(0.5)) }
+    /// The island's smoked glass: a little darker than the CAD app's (0.5), so the surface stays
+    /// closer to the black of the notch it hangs from while still showing what is behind it.
+    var material: Glass { .clear.tint(Color.black.opacity(0.62)) }
+
+    /// Glass under controls: the CAD app's smoke, so buttons read a shade lighter than the surface.
+    var controlMaterial: Glass { .clear.tint(Color.black.opacity(0.5)) }
 }
 
 extension EnvironmentValues {
@@ -120,20 +124,20 @@ private struct IslandGlassModifier<S: Shape>: ViewModifier {
     @Environment(\.islandGlassStyle) private var style
 
     func body(content: Content) -> some View {
-        if role == .surface, !style.hasGlassSurface {
-            // Solid black: no glass is drawn (or sampled) under it.
-            content.background(Color.black, in: shape)
-        } else {
-            // `.identity` rather than removing the modifier: the view keeps its identity (and its
-            // state) when the glass is switched off and on.
-            content.glassEffect(isEnabled ? IslandGlass.material(role, style: style) : .identity, in: shape)
-        }
+        // One structure for every style: switching the style must never change the content's
+        // identity. A branch here rebuilt everything on the island — with Settings open, SwiftUI's
+        // key-view loop over the rebuilt form never terminated and the app hung at 100% CPU.
+        // Solid black draws no glass (`.identity`, nothing sampled) and a black fill instead.
+        let isSolid = role == .surface && !style.hasGlassSurface
+        content
+            .background(Color.black.opacity(isSolid ? 1 : 0), in: shape)
+            .glassEffect(isEnabled && !isSolid ? IslandGlass.material(role, style: style) : .identity, in: shape)
     }
 }
 
 private extension View {
     /// Share of the island below the notch band that stays solid black in the fade style.
-    static var fadeHold: CGFloat { 0.12 }
+    static var fadeHold: CGFloat { 0.18 }
 }
 
 extension View {

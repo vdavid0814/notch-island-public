@@ -4,7 +4,66 @@ Turns the MacBook notch into a Dynamic-Island-style surface made of Liquid Glass
 Rest the pointer on the notch and it grows into a panel; music, timers, battery
 events, volume/brightness and dropped files live there the rest of the time.
 
-Version 2 is a from-scratch rewrite: Swift 6, SwiftUI, macOS 27.
+**Current version: v0.3** (the previous release was v0.2).
+Swift 6, SwiftUI, macOS 27.
+
+> ⚠️ **v0.3 is an early, feature-heavy build.** It may use **more battery** than
+> v0.2, and there may still be **memory leaks** or stutters in places that were
+> not tested for long. If you rely on NotchIsland every day and want the calmer
+> build, v0.2 is still on the [Releases](https://github.com/vdavid0814/notch-island-public/releases) page.
+
+---
+
+## What's new in v0.3
+
+**Settings, rebuilt inside the notch**
+- Settings grows out of the notch as a large page: sidebar of Liquid Glass, a soft
+  black-to-grey fade, and an ⓘ next to every option that explains it on hover.
+- Settings that change the look show small pictures: surface style, island size,
+  a live preview of the open/close animation, the volume style, AirPods, battery.
+
+**Look**
+- Island surface: **Liquid Glass**, **Black** or **Fade** (black at the notch fading
+  into glass). Switching between them no longer freezes the app.
+- Five sizes: Extra Small, Small, **Standard** (default), Large, Extra Large.
+- Header: native tab bar for Home / Shelf / Timer, a menu-bar-style battery icon.
+- Widgets sit closer to the island's edge, with the same gap at the side and bottom.
+
+**Widgets**
+- Arrange the Home page on a live copy of your desktop: drag to move, drag a corner
+  to resize (smoother now), arrow keys, ⌘-click several widgets to change their
+  colour, background and opacity together.
+- Every widget: colour, background (None / Plate / Colour / Artwork) with an opacity
+  slider; one-cell widgets are always a single circle.
+- Labels adapt to every size instead of being cut to “…”.
+- **New widgets:** Date & Time, System (CPU and memory), and Control Center style
+  controls — Calculator, Voice Memos, Screenshot, Notes, Lock Screen, Focus, Clock,
+  Home — next to Wi-Fi, Bluetooth, AirDrop, Dark Mode, Night Shift, Keep Awake,
+  Microphone.
+- Now Playing: a wide, thick progress line with larger times; neutral buttons that
+  can each get their own colour and opacity.
+- Timer: set hours and seconds too, a cleaner ruler when switching units.
+
+**Live Activities**
+- **AirPods connected:** picture, name, and the battery of the left and right
+  earbud and the case. It covers macOS's own AirPods card (or waits for it, or
+  stays away — your choice).
+- Volume and brightness: **Minimal** style beside the notch (default) or the banner
+  under it; how long every notice stays up is adjustable.
+
+**Siri in the notch**
+- Many new options: shortcut (⌘/⌥/⌃ Space), swipe down on the notch to open,
+  search delay, matching (word starts / anywhere / fuzzy), results per kind, which
+  folders to search, app gallery columns / rows / order, answer length, web search
+  engine, window width and list height.
+- Inside Applications, Files or Actions a click on the field goes back.
+
+**Performance**
+- Settings used to take up to ~700 MB of memory while opening; now ~100 MB.
+- Previews and background checks only run while they are on screen.
+
+**New defaults:** hover delay 100 ms, close delay 100 ms, animation 400 ms,
+volume/brightness Minimal for 1.5 s, AirPods card 5 s.
 
 ---
 
@@ -75,8 +134,8 @@ To read persisted logs: `/usr/bin/log show --last 5m --predicate 'subsystem == "
   AirDrop or share them.
 * **Timers** — countdown (with a finish banner, sound and haptic) and stopwatch.
 
-Settings live in a normal macOS window (menu bar icon ▸ Settings…, the gear in
-the island, or `notchisland://settings`).
+Settings open in the notch (menu bar icon ▸ Settings…, the gear in the island,
+or `notchisland://settings`).
 
 ---
 

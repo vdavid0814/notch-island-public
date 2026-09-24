@@ -20,13 +20,15 @@ struct AssistantView: View {
     var body: some View {
         let layout = model.layout
         let assistant = model.assistant
+        // Laid out at the largest size of the current kind: the list, or the gallery's window.
+        let fullRoom: AssistantRoom = assistant.room == .gallery ? .gallery : .list
         let split = NotchSplit(
             layout: layout,
-            presentation: .assistant(.list),
+            presentation: .assistant(fullRoom),
             outerInset: Metrics.Expanded.horizontalInset,
             clearance: Metrics.notchClearance
         )
-        let fullHeight = layout.size(for: .assistant(.list)).height
+        let fullHeight = layout.size(for: .assistant(fullRoom)).height
         let isGallery = assistant.category == .applications && assistant.answer == nil
         // Below the field nothing shows while the island is only the field (the rows would peek
         // out under it); they fade in with the island's growth.
@@ -61,11 +63,11 @@ struct AssistantView: View {
         }
         .frame(height: fullHeight, alignment: .top)
         .onKeyPress(.upArrow) {
-            assistant.moveSelection(by: isGallery ? -AssistantModel.galleryColumns : -1)
+            assistant.moveSelection(by: isGallery ? -assistant.galleryColumns : -1)
             return .handled
         }
         .onKeyPress(.downArrow) {
-            assistant.moveSelection(by: isGallery ? AssistantModel.galleryColumns : 1)
+            assistant.moveSelection(by: isGallery ? assistant.galleryColumns : 1)
             return .handled
         }
         .onKeyPress(.leftArrow) {
@@ -115,17 +117,34 @@ struct AssistantView: View {
         @Bindable var assistant = assistant
         let isResponding = assistant.answer?.isResponding == true
         return HStack(spacing: Metrics.Spacing.medium) {
-            if let category = assistant.category {
-                category.tile
-            } else {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
+            Group {
+                if let category = assistant.category {
+                    category.tile
+                } else {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                }
+                TextField(assistant.category?.title ?? String(localized: "Search or Ask"), text: $assistant.query)
+                    .textFieldStyle(.plain)
+                    .font(.title3)
+                    .focused($isFieldFocused)
+                    .onSubmit { assistant.activateSelection() }
             }
-            TextField(assistant.category?.title ?? String(localized: "Search or Ask"), text: $assistant.query)
-                .textFieldStyle(.plain)
-                .font(.title3)
-                .focused($isFieldFocused)
-                .onSubmit { assistant.activateSelection() }
+            // Inside Applications, Files or Actions a click on the field goes back to the three
+            // suggestions (the query stays), as Esc does. A layer over the field takes the click:
+            // the text field itself (AppKit) swallows it before a gesture sees it. Typing still
+            // goes to the field, which keeps the keyboard.
+            .overlay {
+                if assistant.category != nil {
+                    Color.clear
+                        .contentShape(.rect)
+                        .onTapGesture {
+                            withAnimation(Motion.content) { assistant.open(nil) }
+                            focusField()
+                        }
+                        .help("Back to Applications, Files and Actions")
+                }
+            }
             Button {
                 AssistantActions.startDictation()
             } label: {
@@ -222,16 +241,14 @@ private struct RowsList: View {
 private struct AppGallery: View {
     let assistant: AssistantModel
 
-    private let columns = Array(
-        repeating: GridItem(.flexible(), spacing: Metrics.Spacing.xSmall),
-        count: AssistantModel.galleryColumns
-    )
-
     var body: some View {
+        // The user's column count (Settings ▸ Siri ▸ App Gallery); the window widens with it.
+        let columns = Array(repeating: GridItem(.flexible(), spacing: IslandLayout.galleryRowSpacing),
+                            count: assistant.galleryColumns)
         let rows = assistant.rows
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVGrid(columns: columns, spacing: Metrics.Spacing.xSmall) {
+                LazyVGrid(columns: columns, spacing: IslandLayout.galleryRowSpacing) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         if case .hit(let hit) = row {
                             GalleryCell(hit: hit, isSelected: index == assistant.selection)
@@ -256,20 +273,33 @@ private struct GalleryCell: View {
     let hit: AssistantHit
     let isSelected: Bool
 
+    static let iconSize: CGFloat = 48
+    @State private var icon: NSImage?
+
     var body: some View {
         VStack(spacing: Metrics.Spacing.xSmall) {
-            Image(nsImage: AssistantIcons.icon(for: hit))
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 44, height: 44)
+            Group {
+                if let icon = icon ?? AssistantIcons.cachedThumbnail(for: hit) {
+                    Image(nsImage: icon)
+                } else {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(.white.opacity(0.08))
+                        .padding(4)
+                }
+            }
+            .frame(width: Self.iconSize, height: Self.iconSize)
+            .task(id: hit.url) {
+                guard AssistantIcons.cachedThumbnail(for: hit) == nil else { return }
+                icon = await AssistantIcons.thumbnail(for: hit, points: Self.iconSize)
+            }
             Text(hit.name)
                 .font(.caption)
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
-        .padding(.vertical, Metrics.Spacing.small)
         .padding(.horizontal, Metrics.Spacing.xxSmall)
-        .frame(maxWidth: .infinity)
+        // Exactly the height `IslandLayout` sizes the gallery by, so N rows fill it.
+        .frame(maxWidth: .infinity, minHeight: IslandLayout.galleryCellHeight, maxHeight: IslandLayout.galleryCellHeight)
         .background(isSelected ? Color.accentColor.opacity(0.35) : .clear, in: .rect(cornerRadius: 12, style: .continuous))
     }
 }
@@ -370,7 +400,7 @@ private struct AnswerPane: View {
                     }
                     .help("Ask ChatGPT")
                 }
-                .buttonStyle(.islandGlass(.circle))
+                .islandButton(.circle)
                 .controlSize(.small)
             }
         }

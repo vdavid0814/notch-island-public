@@ -1,6 +1,6 @@
 import AppKit
 
-/// Runs the players' AppleScript libraries in-process.
+/// Runs the players' AppleScript libraries in-process (Music: plain Apple Events, `PlayerAppleEvents`).
 ///
 /// * `NSAppleScript`, never `osascript`: a spawn costs ~28 ms of CPU before the event is even sent.
 /// * An actor whose executor is its own serial dispatch queue: `NSAppleScript` must not run
@@ -25,6 +25,10 @@ actor AppleScriptBridge {
     func run(_ handler: ScriptHandler, for player: ScriptablePlayer, argument: Double? = nil) -> Result<ScriptValue, AppleScriptFailure> {
         guard !NSRunningApplication.runningApplications(withBundleIdentifier: player.bundleID).isEmpty else {
             return .failure(.notRunning)
+        }
+        // Music takes plain Apple Events: no script to compile, scan and keep in memory.
+        if PlayerAppleEvents.bundleIDs.contains(player.bundleID) {
+            return PlayerAppleEvents.run(handler, bundleID: player.bundleID, argument: argument)
         }
         let library: NSAppleScript
         if let cached = libraries[player.bundleID] {

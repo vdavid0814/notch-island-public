@@ -60,12 +60,15 @@ nonisolated enum Metrics {
 
     /// The full panel. Values multiplied by the island scale factor where they size content.
     nonisolated enum Expanded {
-        static let horizontalInset: CGFloat = 22
+        /// From the body's edge to the header ears and the page: the same as `pageBottomInset`, so a
+        /// widget sits as far from the island's side as from its bottom.
+        static let horizontalInset: CGFloat = pageBottomInset
         /// Gap between the header band and the page. Smaller than the bottom inset: the header's
         /// controls already leave air under themselves inside the band.
         static let pageTopInset: CGFloat = 8
-        /// Room kept above the bottom edge; the 30-pt continuous corners need it.
-        static let pageBottomInset: CGFloat = 16
+        /// Room kept above the bottom edge: half the old 16 pt, still clear of the 30-pt continuous
+        /// corners for the widgets' own rounded corners.
+        static let pageBottomInset: CGFloat = 8
         static let columnSpacing: CGFloat = 20
         static let sideColumnWidth: CGFloat = 170
         /// Sized so artwork, the text/control stack beside it and the side column share one height
@@ -137,25 +140,6 @@ nonisolated enum Metrics {
             default: .small
             }
         }
-
-        /// Gap between a segmented track and its thumb (CAD: 3 pt at 31 pt).
-        static func segmentInset(_ size: ControlSize) -> CGFloat {
-            (height(size) / 10).rounded()
-        }
-
-        /// Width of an icon-only segment, relative to the thumb height: wide enough that the thumb
-        /// reads as a capsule, not a circle.
-        static let iconSegmentAspect: CGFloat = 1.5
-
-        /// Travel below which a press on the segmented switcher is a tap, not a drag.
-        static let dragThreshold: CGFloat = 4
-
-        /// How far the thumb may be pulled past either end before the rubber band stops it.
-        static let rubberLimit: CGFloat = 10
-
-        /// Swell of the thumb while it is held (CAD lifts 1.12 × 1.46; the notch band has less
-        /// headroom).
-        static let liftScale = CGSize(width: 1.08, height: 1.18)
     }
 
     /// Width of each ear either side of the notch gap, inside the island's shoulders.
@@ -173,6 +157,7 @@ nonisolated enum Metrics {
     /// sliders and blur them.
     static func controlSize(forScale factor: CGFloat) -> ControlSize {
         switch factor {
+        case ..<0.76: .mini
         case ..<0.95: .small
         case 1.1...: .large
         default: .regular

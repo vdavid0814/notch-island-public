@@ -300,56 +300,6 @@ struct GlassControlTests {
         }
     }
 
-    @Test func thumbInsetLeavesAThumb() {
-        for size in [ControlSize.mini, .small, .regular, .large] {
-            let inset = Metrics.Control.segmentInset(size)
-            #expect(inset >= 2)
-            #expect(Metrics.Control.height(size) - 2 * inset >= 16)
-        }
-    }
-}
-
-@Suite("Liquid segment geometry")
-struct SegmentGeometryTests {
-    /// Three 30-pt segments side by side, 20 pt tall.
-    let geometry = SegmentGeometry(frames: [
-        0: CGRect(x: 0, y: 0, width: 30, height: 20),
-        1: CGRect(x: 30, y: 0, width: 30, height: 20),
-        2: CGRect(x: 60, y: 0, width: 30, height: 20),
-    ])
-
-    @Test func restsOnTheSelectedSegment() {
-        #expect(geometry.thumbFrame(selected: 1, dragCentre: nil) == CGRect(x: 30, y: 0, width: 30, height: 20))
-        #expect(SegmentGeometry().thumbFrame(selected: 0, dragCentre: nil) == .zero)
-    }
-
-    @Test func followsThePointerOneToOneInsideTheTrack() {
-        let frame = geometry.thumbFrame(selected: 0, dragCentre: 52)
-        #expect(frame.midX == 52)
-        #expect(frame.size == CGSize(width: 30, height: 20))
-    }
-
-    @Test func rubberBandsPastTheEnds() {
-        let limit = Metrics.Control.rubberLimit
-        let low: CGFloat = 15, high: CGFloat = 75
-        var previous = low
-        for pull in stride(from: CGFloat(1), through: 400, by: 13) {
-            let x = geometry.rubberBand(low - pull, width: 30)
-            #expect(x < previous)
-            #expect(low - x < limit)
-            previous = x
-        }
-        #expect(geometry.rubberBand(high + 1000, width: 30) - high < limit)
-        #expect(geometry.rubberBand(40, width: 30) == 40)
-    }
-
-    @Test func landsOnTheNearestSegment() {
-        #expect(geometry.nearestIndex(to: -50) == 0)
-        #expect(geometry.nearestIndex(to: 44) == 1)
-        #expect(geometry.nearestIndex(to: 76) == 2)
-        #expect(geometry.nearestIndex(to: 900) == 2)
-        #expect(SegmentGeometry().nearestIndex(to: 10) == nil)
-    }
 }
 
 // MARK: - Thumbnails and rendering
@@ -397,5 +347,24 @@ struct RenderingTests {
         #expect(TickingClock.value(at: anchor.addingTimeInterval(-60.001), anchor: anchor, countsDown: true) == 60)
         #expect(TickingClock.value(at: anchor.addingTimeInterval(-59.5), anchor: anchor, countsDown: true) == 60)
         #expect(TickingClock.value(at: anchor.addingTimeInterval(2), anchor: anchor, countsDown: true) == 0)
+    }
+}
+
+@Suite struct PlayerAppleEventsTests {
+    @Test func stateEnumeratorsReadAsTheScriptLibraryDoes() {
+        func state(_ code: StaticString) -> String {
+            PlayerAppleEvents.stateText(NSAppleEventDescriptor(enumCode: FourCharCode(fourCC: code)))
+        }
+        #expect(state("kPSP") == "playing")
+        #expect(state("kPSp") == "paused")
+        #expect(state("kPSS") == "stopped")
+        #expect(state("kPSF") == "fast forwarding")
+    }
+
+    @Test func specifiersAreObjectSpecifiers() {
+        let track = PlayerAppleEvents.property("pTrk")
+        #expect(track.descriptorType == FourCharCode(fourCC: "obj "))
+        let artwork = PlayerAppleEvents.element("cArt", index: 1, of: track)
+        #expect(artwork.forKeyword(FourCharCode(fourCC: "from"))?.descriptorType == FourCharCode(fourCC: "obj "))
     }
 }

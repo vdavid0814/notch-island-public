@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import Foundation
 import FoundationModels
 import Testing
@@ -87,8 +88,8 @@ import Testing
     let allAppHits = hits(allApps, .app)
     return AssistantSources(
         apps: { query, limit in Array(appHits.filter { AssistantMatch.matches($0.name, query) }.prefix(limit)) },
-        files: { query, limit in Array(fileHits.filter { AssistantMatch.matches($0.name, query) }.prefix(limit)) },
-        recentFiles: { recentHits },
+        files: { query, limit, _ in Array(fileHits.filter { AssistantMatch.matches($0.name, query) }.prefix(limit)) },
+        recentFiles: { _ in recentHits },
         allApps: { allAppHits },
         shortcuts: { shortcuts },
         isUnsupportedLanguage: { _ in false }
@@ -146,7 +147,13 @@ import Testing
         #expect(model.rows.count > 3 && model.room == .list)
         model.query = ""
         model.open(.applications)
-        #expect(model.room == .list)
+        #expect(model.room == .gallery)
+    }
+
+    @Test func galleryIsTheLargestRoom() {
+        let layout = IslandLayout(notch: CGSize(width: 156, height: 28), scale: .standard)
+        let list = layout.size(for: .assistant(.list)), gallery = layout.size(for: .assistant(.gallery))
+        #expect(gallery.width > list.width && gallery.height > list.height)
     }
 
     @Test func overTheFieldTheFirstArrowMoves() {
@@ -215,7 +222,7 @@ import Testing
         model.query = "what is 2+2"
         // Before the new search lands, Return must not open WhatsApp.
         #expect(model.apps.isEmpty)
-        #expect(model.rows.first == .searchWeb || model.rows.first == .askIntelligence)
+        #expect(model.rows.first == .askChatGPT || model.rows.first == .askIntelligence)
     }
 
     @Test func aPickedRowStaysPickedWhenResultsLand() async {
@@ -285,6 +292,22 @@ import Testing
         #expect(!model.needsList && !model.revealsSuggestions)
     }
 
+    @Test func questionsAreAnsweredOnReturn() async {
+        #expect(AssistantModel.looksLikeQuestion("what is 2+2"))
+        #expect(AssistantModel.looksLikeQuestion("mennyi az idő"))
+        #expect(AssistantModel.looksLikeQuestion("weather?"))
+        #expect(AssistantModel.looksLikeQuestion("mi van"))
+        #expect(!AssistantModel.looksLikeQuestion("safari"))
+        #expect(!AssistantModel.looksLikeQuestion("system settings"))
+        let model = model(stubSources(apps: ["Whatever"]))
+        model.query = "what is the weather"
+        await model.settle()
+        let first = model.rows.first
+        #expect(first == .askIntelligence || first == .askChatGPT)
+        // Each hand-off once.
+        #expect(model.rows.filter { $0 == .askChatGPT }.count == 1)
+    }
+
     @Test func languageGateIsConservative() {
         // Single words are unreliable, so they never demote the Ask row.
         #expect(!AssistantModel.isUnsupportedLanguage("safari"))
@@ -342,5 +365,135 @@ import Testing
         #expect(!IslandPanel.isSwallowedShortcut(key("v", .command)))
         #expect(!IslandPanel.isSwallowedShortcut(key("c", .command)))
         #expect(!IslandPanel.isSwallowedShortcut(key("q", [])))
+    }
+}
+
+@Suite struct IslandSettingsTests {
+    @Test func settingsIsALargeOpenSurface() {
+        let layout = IslandLayout(notch: CGSize(width: 156, height: 28), scale: .standard)
+        let settings = layout.size(for: .settings)
+        #expect(settings.width > layout.size(for: .expanded(.home)).width)
+        #expect(IslandPresentation.settings.isOpen && IslandPresentation.settings.takesKeyboard)
+        #expect(!IslandPresentation.expanded(.home).takesKeyboard)
+        #expect(Motion.animation(from: .expanded(.home), to: .settings, reduceMotion: false) == Motion.open)
+        #expect(Motion.animation(from: .settings, to: .idle, reduceMotion: false) == Motion.close)
+    }
+
+    @Test func settingsOutranksThePanelButNotSiri() {
+        var inputs = IslandInputs()
+        inputs.wantsExpanded = true
+        inputs.wantsSettings = true
+        #expect(IslandResolver.resolve(inputs) == .settings)
+        inputs.wantsAssistant = true
+        #expect(IslandResolver.resolve(inputs).isAssistant)
+    }
+
+    @Test func settingsRoutes() {
+        #expect(AppCommand.parse(URL(string: "notchisland://settings")!) == .showSettings)
+        #expect(AppCommand.parse(URL(string: "notchisland://settings/widgets")!) == .showSettingsPane(.widgets))
+        #expect(AppCommand.parse(URL(string: "notchisland://settings/nope")!) == nil)
+    }
+}
+
+@Suite struct WidgetStyleTests {
+    @Test func oldBoardsDecodeWithDefaults() throws {
+        let json = #"{"widgets":[{"kind":"timer","frame":{"column":7,"row":0,"width":5,"height":2},"options":["ruler","readout","bogus"]}]}"#
+        let board = try JSONDecoder().decode(WidgetBoard.self, from: Data(json.utf8))
+        let timer = try #require(board.widget(.timer))
+        #expect(timer.options == [.ruler, .readout])
+        #expect(timer.tint == .automatic && timer.showsPlate && !timer.mirrored)
+    }
+
+    @Test func styleRoundTripsAndKeepsTheFrame() throws {
+        var board = WidgetBoard.standard
+        board.update(.timer) { widget in
+            widget.tint = .teal
+            widget.mirrored = true
+            widget.frame = GridRect(column: 0, row: 0, width: 1, height: 1)   // ignored
+        }
+        let data = try JSONEncoder().encode(board)
+        let decoded = try JSONDecoder().decode(WidgetBoard.self, from: data)
+        let timer = try #require(decoded.widget(.timer))
+        #expect(timer.tint == .teal && timer.mirrored)
+        #expect(timer.frame == WidgetBoard.standard.widget(.timer)?.frame)
+    }
+
+    @Test func everyControlIsItsOwnWidget() {
+        let controls = WidgetCategory.controls.kinds
+        #expect(controls.count == SystemControl.allCases.count)
+        #expect(Set(controls.compactMap(\.systemControl)) == Set(SystemControl.allCases))
+        for kind in controls {
+            #expect(kind.minimumSize == GridSize(width: 1, height: 1))
+            #expect(kind.options == [.controlName, .controlStatus])
+        }
+        var board = WidgetBoard(widgets: [])
+        let wifi = board.add(.wifi), bluetooth = board.add(.bluetooth)
+        #expect(wifi && bluetooth && board.widget(.wifi)?.frame.size == GridSize(width: 2, height: 1))
+    }
+
+    @Test func anUnknownWidgetDoesNotLoseTheBoard() throws {
+        // A board saved by the version with one combined Controls widget.
+        let json = #"{"widgets":[{"kind":"controls","frame":{"column":0,"row":0,"width":5,"height":1},"options":[]},{"kind":"timer","frame":{"column":7,"row":0,"width":5,"height":2},"options":["ruler"]}]}"#
+        let board = try JSONDecoder().decode(WidgetBoard.self, from: Data(json.utf8))
+        #expect(board.widgets.map(\.kind) == [.timer])
+    }
+
+    @Test func settingsFitsTheScreen() {
+        let screen = CGSize(width: 1280, height: 832)
+        let layout = IslandLayout(notch: CGSize(width: 156, height: 32), scale: .standard, screen: screen)
+        let size = layout.size(for: .settings)
+        #expect(size.width <= screen.width - 2 * IslandLayout.settingsSideMargin)
+        #expect(size.height <= screen.height - IslandLayout.settingsBottomMargin)
+        #expect(size.width >= 1000 && size.height >= 600)
+        let huge = IslandLayout(notch: CGSize(width: 180, height: 38), scale: .standard, screen: CGSize(width: 3000, height: 2000))
+        #expect(huge.size(for: .settings).width == IslandLayout.settingsMaximum.width)
+    }
+}
+
+
+@Suite struct SiriSettingsTests {
+    @Test func matchingModes() {
+        #expect(AssistantMatch.matches("Safari", "saf"))
+        #expect(!AssistantMatch.matches("Safari", "far"))
+        #expect(AssistantMatch.matches("Safari", "far", .anywhere))
+        #expect(!AssistantMatch.matches("Safari", "sfr", .anywhere))
+        #expect(AssistantMatch.matches("Safari", "sfr", .fuzzy))
+        #expect(!AssistantMatch.matches("Safari", "zzz", .fuzzy))
+        #expect(AssistantMatch.isSubsequence("vsc", of: "visual studio code"))
+    }
+
+    @Test func oldOrPartialValuesKeepDefaults() throws {
+        let decoded = try JSONDecoder().decode(SiriSettings.self, from: Data(#"{"galleryColumns": 40, "matching": "fuzzy"}"#.utf8))
+        #expect(decoded.galleryColumns == SiriSettings.galleryColumnsRange.upperBound)
+        #expect(decoded.matching == .fuzzy)
+        #expect(decoded.resultsPerKind == 3 && decoded.shortcut == .commandSpace && decoded.folders.count == 4)
+        let roundTrip = try JSONDecoder().decode(SiriSettings.self, from: JSONEncoder().encode(decoded))
+        #expect(roundTrip == decoded)
+    }
+
+    @Test func windowSizesFollowTheSettings() {
+        let notch = CGSize(width: 180, height: 32)
+        let standard = IslandLayout(notch: notch, scale: .standard)
+        var settings = SiriSettings()
+        #expect(IslandLayout(notch: notch, scale: .standard, siri: settings.layout).size(for: .assistant(.list))
+                == standard.size(for: .assistant(.list)))
+        settings.galleryColumns = 12
+        settings.galleryRows = 6
+        settings.panelSize = .large
+        let custom = IslandLayout(notch: notch, scale: .standard, siri: settings.layout)
+        #expect(custom.size(for: .assistant(.gallery)).width > standard.size(for: .assistant(.gallery)).width)
+        #expect(custom.size(for: .assistant(.gallery)).height > standard.size(for: .assistant(.gallery)).height)
+        #expect(custom.size(for: .assistant(.field)).width > standard.size(for: .assistant(.field)).width)
+    }
+
+    @Test func otherShortcutModifiers() {
+        var pressed = false
+        #expect(CommandSpaceTap.swallows(keyCode: 49, isDown: true, flags: .maskAlternate, modifiers: .maskAlternate, pressed: &pressed))
+        pressed = false
+        #expect(!CommandSpaceTap.swallows(keyCode: 49, isDown: true, flags: .maskCommand, modifiers: .maskAlternate, pressed: &pressed))
+    }
+
+    @Test func webSearchEngines() {
+        #expect(AssistantActions.webSearchURL(for: "a b", engine: .duckDuckGo)?.absoluteString == "https://duckduckgo.com/?q=a%20b")
     }
 }

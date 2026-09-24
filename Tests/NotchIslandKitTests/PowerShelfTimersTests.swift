@@ -892,3 +892,43 @@ private func settle(until condition: () -> Bool) async {
         #expect(!latch.isUndecided)   // our own press is never watched
     }
 }
+
+@Suite struct TimerDraftUnitsTests {
+    @Test func minutesOnlyIsTheRulerAsItWas() {
+        let units = TimerDraftUnits()
+        #expect(units.units == [.minutes] && units.range(of: .minutes) == 1...120)
+        #expect(units.normalized(95) == 120)          // whole minutes
+        #expect(units.normalized(0) == 60)            // never below a minute
+        #expect(units.value(of: .minutes, in: 300) == 5)
+    }
+
+    @Test func secondsAfterMinutes() {
+        let units = TimerDraftUnits(seconds: true)
+        #expect(units.units == [.minutes, .seconds])
+        var draft = units.duration(setting: .minutes, to: 2, in: 300)
+        #expect(draft == 120)
+        draft = units.duration(setting: .seconds, to: 45, in: draft)
+        #expect(draft == 165)
+        #expect(units.value(of: .minutes, in: draft) == 2 && units.value(of: .seconds, in: draft) == 45)
+        // 0 minutes and some seconds is a timer; 0:00 is not.
+        #expect(units.duration(setting: .minutes, to: 0, in: 45) == 45)
+        #expect(units.duration(setting: .seconds, to: 0, in: 45) == 1)
+        #expect(units.next(after: .seconds) == .minutes)
+    }
+
+    @Test func hoursWrapTheMinutes() {
+        let units = TimerDraftUnits(hours: true, seconds: true)
+        #expect(units.units == [.hours, .minutes, .seconds] && units.range(of: .minutes) == 0...59)
+        let draft = units.duration(setting: .hours, to: 1, in: 5 * 60 + 30)
+        #expect(draft == 3600 + 330)
+        #expect(units.value(of: .hours, in: draft) == 1 && units.value(of: .minutes, in: draft) == 5)
+        #expect(units.duration(setting: .minutes, to: 90, in: draft) == 3600 + 59 * 60 + 30)
+        #expect(units.next(after: .minutes) == .seconds && units.next(after: .seconds) == .hours)
+    }
+
+    @Test func switchingUnitsOffDropsWhatTheyCannotShow() {
+        let draft: TimeInterval = 2 * 3600 + 5 * 60 + 30
+        #expect(TimerDraftUnits(hours: true).normalized(draft) == 2 * 3600 + 6 * 60)
+        #expect(TimerDraftUnits(seconds: true).normalized(draft) == 120 * 60 + 59)
+    }
+}

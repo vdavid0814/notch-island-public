@@ -3,6 +3,8 @@ import CoreGraphics
 /// The user's size preference. Only the expanded panel scales: compact and
 /// banner shapes must hug the physical notch whatever the preference says.
 nonisolated enum IslandScale: String, Sendable, CaseIterable, Identifiable, Codable {
+    case extraSmall
+    case small
     case compact
     case standard
     case large
@@ -11,6 +13,8 @@ nonisolated enum IslandScale: String, Sendable, CaseIterable, Identifiable, Coda
 
     var factor: CGFloat {
         switch self {
+        case .extraSmall: 0.72
+        case .small: 0.8
         case .compact: 0.9
         case .standard: 1.0
         case .large: 1.15
@@ -19,9 +23,13 @@ nonisolated enum IslandScale: String, Sendable, CaseIterable, Identifiable, Coda
 
     var title: String {
         switch self {
-        case .compact: "Compact"
-        case .standard: "Standard"
-        case .large: "Large"
+        // Named from the middle out (the user's wish): the stored names stay, so saved choices keep
+        // their size — `compact` is shown as Standard, `standard` as Large, `large` as Extra Large.
+        case .extraSmall: "Extra Small"
+        case .small: "Small"
+        case .compact: "Standard"
+        case .standard: "Large"
+        case .large: "Extra Large"
         }
     }
 }
@@ -35,6 +43,10 @@ nonisolated enum IslandScale: String, Sendable, CaseIterable, Identifiable, Coda
 nonisolated struct IslandLayout: Sendable, Equatable {
     let notch: CGSize
     let scale: IslandScale
+    /// The screen the island is on (zero when unknown): Settings takes most of it.
+    var screen: CGSize = .zero
+    /// Siri's window proportions (Settings ▸ Siri ▸ Window).
+    var siri = SiriLayout()
 
     /// Glass extends this far above the window top, where it is clipped, so its
     /// top edge never shows a rim against the bezel.
@@ -47,6 +59,11 @@ nonisolated struct IslandLayout: Sendable, Equatable {
 
     /// Banners need room for a symbol, a native slider and a value on one row.
     static let bannerMinimumWidth: CGFloat = 380
+    /// The AirPods card (see `size(for: .banner(.airPods))`).
+    static let airPodsBannerWidth: CGFloat = 400
+    static let airPodsDetailHeight: CGFloat = 112
+    /// Each ear of the minimal level pill: the symbol on one side, a small slider on the other.
+    static let levelPillEar: CGFloat = 92
     /// The detail row a banner adds below the header band.
     static let bannerDetailHeight: CGFloat = 48
     /// Expanded panel before scaling: extra width beside the notch, its floor, and the page height.
@@ -56,6 +73,30 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     /// The assistant below its header band: the search field, a list of hits and actions, or an
     /// answer. As wide as the expanded panel, so from the header's Siri button it grows downward.
     static let assistantPageHeight: CGFloat = 280
+    /// Settings in the island: most of the screen, grown out of the notch (a full-screen feel
+    /// without leaving it). Kept this far from the screen's sides and bottom, and no larger than
+    /// the maximum on big displays.
+    static let settingsSideMargin: CGFloat = 50
+    static let settingsBottomMargin: CGFloat = 64
+    static let settingsMaximum = CGSize(width: 1180, height: 740)
+    static let settingsMinimum = CGSize(width: 820, height: 520)
+    /// Standing in for the screen before one is known (a 14-inch MacBook's default resolution).
+    static let fallbackScreen = CGSize(width: 1512, height: 982)
+    /// The app gallery (Applications ⌘1): wider and taller than the list, for nine columns of apps
+    /// and four rows of them.
+    static let assistantGalleryWidth: CGFloat = 820
+    static let assistantGalleryPageHeight: CGFloat = 440
+    /// One app in the gallery (`GalleryCell`: 6 + 48-pt icon + 4 + caption line + 6) and the space
+    /// between rows: the gallery is exactly the user's number of rows tall, never a cut-off row.
+    static let galleryCellHeight: CGFloat = 77
+    static let galleryRowSpacing: CGFloat = 4
+
+    /// The gallery page for `rows` rows: the field above them, the insets around.
+    static func galleryPageHeight(rows: Int) -> CGFloat {
+        let rows = CGFloat(max(1, rows))
+        return assistantTopInset * 2 + assistantFieldHeight + Metrics.Expanded.pageBottomInset
+            + rows * galleryCellHeight + (rows - 1) * galleryRowSpacing
+    }
     /// The assistant's field and rows (`AssistantView`), which are not scaled.
     static let assistantFieldHeight: CGFloat = 40
     static let assistantRowHeight: CGFloat = 32
@@ -86,6 +127,14 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         case .compact:
             // Never taller than the notch: a taller pill reads as a window stuck to the screen.
             return CGSize(width: notch.width + 2 * ear, height: notch.height)
+        case .banner(.airPods):
+            // Large enough to lie over macOS's own AirPods card (about 300 × 60 pt under the
+            // notch, in a 352 × 148 window with its shadow), which the island covers.
+            return CGSize(width: max(notch.width + 2 * ear, Self.airPodsBannerWidth),
+                          height: notch.height + Self.airPodsDetailHeight)
+        case .banner(.levelPill):
+            // Pill height; the trailing ear holds a small slider, so both ears are that wide.
+            return CGSize(width: notch.width + 2 * Self.levelPillEar, height: notch.height)
         case .banner:
             return CGSize(
                 width: max(notch.width + 2 * ear, Self.bannerMinimumWidth),
@@ -99,16 +148,26 @@ nonisolated struct IslandLayout: Sendable, Equatable {
                 // The header band stays exactly the notch height; only the page scales.
                 height: notch.height + (Self.expandedPageHeight * f).rounded()
             )
+        case .settings:
+            let screen = screen == .zero ? Self.fallbackScreen : screen
+            let width = min(max(screen.width - 2 * Self.settingsSideMargin, Self.settingsMinimum.width), Self.settingsMaximum.width)
+            let page = min(max(screen.height - notch.height - Self.settingsBottomMargin, Self.settingsMinimum.height),
+                           Self.settingsMaximum.height)
+            return CGSize(width: width.rounded(), height: notch.height + page.rounded())
         case .assistant(let room):
             let f = scale.factor
-            let list = (Self.assistantPageHeight * f).rounded()
+            // The user's rows and columns scale the defaults (7 list rows, a 9 × 4 gallery).
+            let list = (Self.assistantPageHeight * f * CGFloat(siri.listRows) / 7).rounded()
             let page: CGFloat = switch room {
             case .field: Self.assistantFieldPageHeight
             case .suggestions: min(Self.assistantSuggestionsPageHeight, list)
             case .list: max(list, Self.assistantSuggestionsPageHeight)
+            case .gallery: Self.galleryPageHeight(rows: siri.galleryRows)
             }
+            let panel = (max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f * siri.widthFactor).rounded()
+            let gallery = (Self.assistantGalleryWidth * f * CGFloat(siri.galleryColumns) / 9).rounded()
             return CGSize(
-                width: (max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f).rounded(),
+                width: room == .gallery ? max(panel, gallery) : panel,
                 height: notch.height + page
             )
         }
@@ -117,9 +176,9 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     func bottomRadius(for p: IslandPresentation) -> CGFloat {
         switch p {
         case .idle: min(8, notch.height / 2)
-        case .compact: notch.height / 2
+        case .compact, .banner(.levelPill): notch.height / 2
         case .banner: 24
-        case .expanded, .assistant: 30 * scale.factor
+        case .expanded, .assistant, .settings: 30 * scale.factor
         }
     }
 
@@ -127,9 +186,9 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     func shoulderRadius(for p: IslandPresentation) -> CGFloat {
         switch p {
         case .idle: 0
-        case .compact: 6
+        case .compact, .banner(.levelPill): 6
         case .banner: 8
-        case .expanded, .assistant: 10
+        case .expanded, .assistant, .settings: 10
         }
     }
 

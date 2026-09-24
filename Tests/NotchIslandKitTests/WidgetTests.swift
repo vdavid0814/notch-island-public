@@ -34,11 +34,14 @@ import Testing
         let result4 = board.add(.battery)
         #expect(result4)
         #expect(board.widget(.battery)?.frame == GridRect(column: 7, row: 2, width: 3, height: 1))
-        // Two cells left: too small for the shelf's 3 × 1 minimum.
-        let result5 = board.add(.shelf)
-        #expect(!result5)
-        let result6 = board.add(.battery)
-        #expect(!result6)  // one of each kind
+        // Two cells left: room for a control's 2 × 1 tile, then the board is full.
+        let result5 = board.add(.wifi)
+        #expect(result5)
+        #expect(board.widget(.wifi)?.frame == GridRect(column: 10, row: 2, width: 2, height: 1))
+        let result6 = board.add(.bluetooth)
+        #expect(!result6)
+        let result7 = board.add(.battery)
+        #expect(!result7)  // one of each kind
     }
 
     @Test func optionsAreLimitedToTheKind() {
@@ -105,15 +108,123 @@ import Testing
             frame: CGRect(x: 192, y: 0, width: 4 * 48 - 8 + 100, height: 40),
             from: start, kind: .timer, movesLeading: false, movesTop: false)
         #expect(wider == GridRect(column: 4, row: 0, width: 6, height: 1))
-        // Leading edge dragged far right: held at the timer's 4-column minimum.
+        // Leading edge dragged far right: held at the timer's 3-column minimum.
         let narrow = geometry.snappedResize(
             frame: CGRect(x: 400, y: 0, width: 40, height: 40),
             from: start, kind: .timer, movesLeading: true, movesTop: false)
-        #expect(narrow == GridRect(column: 4, row: 0, width: 4, height: 1))
+        #expect(narrow == GridRect(column: 5, row: 0, width: 3, height: 1))
         // Bottom edge dragged beyond the board.
         let tall = geometry.snappedResize(
             frame: CGRect(x: 192, y: 0, width: 184, height: 900),
             from: start, kind: .timer, movesLeading: false, movesTop: false)
         #expect(tall == GridRect(column: 4, row: 0, width: 4, height: 3))
+    }
+}
+
+@Suite struct WidgetElementTests {
+    @Test func version1BoardsGainTheNewElements() throws {
+        let json = #"{"widgets":[{"kind":"nowPlaying","frame":{"column":0,"row":0,"width":7,"height":3},"options":["artwork","trackInfo"],"showsPlate":false},{"kind":"stopwatch","frame":{"column":7,"row":0,"width":4,"height":1},"options":[]}]}"#
+        let board = try JSONDecoder().decode(WidgetBoard.self, from: Data(json.utf8))
+        let nowPlaying = try #require(board.widget(.nowPlaying))
+        #expect(nowPlaying.options == [.artwork, .trackInfo, .artist, .playbackButtons])
+        #expect(nowPlaying.background == .none)
+        #expect(board.widget(.stopwatch)?.options == [.readout])
+    }
+
+    @Test func version2BoardsKeepWhatWasSwitchedOff() throws {
+        var board = WidgetBoard.standard
+        board.update(.nowPlaying) { widget in
+            widget.options.remove(.artist)
+            widget.sizes[.trackInfo] = .large
+            widget.sizes[.artist] = .medium        // medium is the default: not stored
+            widget.sizes[.skipButtons] = .small    // not sizable: dropped
+            widget.layout = .cover
+            widget.background = .artwork
+        }
+        let decoded = try JSONDecoder().decode(WidgetBoard.self, from: JSONEncoder().encode(board))
+        let nowPlaying = try #require(decoded.widget(.nowPlaying))
+        #expect(!nowPlaying.shows(.artist))
+        #expect(nowPlaying.sizes == [.trackInfo: .large])
+        #expect(nowPlaying.layout == .cover && nowPlaying.background == .artwork)
+    }
+
+    @Test func layoutsAndBackgroundsAreLimitedToTheKind() {
+        var board = WidgetBoard.standard
+        board.update(.timer) { widget in
+            widget.layout = .cover
+            widget.background = .artwork
+        }
+        #expect(board.widget(.timer)?.layout == .automatic)
+        #expect(board.widget(.timer)?.background == .plate)
+    }
+
+    @Test func sizePresetsRespectTheLimits() {
+        for kind in IslandWidgetKind.allCases {
+            #expect(!kind.sizePresets.isEmpty)
+            for size in kind.sizePresets {
+                #expect(WidgetBoard(widgets: []).fits(size, kind))
+            }
+        }
+        #expect(IslandWidgetKind.wifi.sizePresets.contains(GridSize(width: 2, height: 1)))
+    }
+
+    @Test func placementPrefersTheCurrentSpotThenTheNearest() {
+        var board = WidgetBoard.standard
+        board.remove(.shelf)
+        let timer = board.widget(.timer)!.frame   // 7,0 5×2
+        // Taller: 5 × 3 fits in place now that the shelf is gone.
+        #expect(board.placement(for: .timer, size: GridSize(width: 5, height: 3), near: timer)
+                == GridRect(column: 7, row: 0, width: 5, height: 3))
+        // Wider than the room right of Now Playing: nowhere.
+        #expect(board.placement(for: .timer, size: GridSize(width: 6, height: 2), near: timer) == nil)
+        // A small widget lands next to where it was.
+        board.add(.battery)
+        let battery = board.widget(.battery)!.frame
+        #expect(board.placement(for: .battery, size: GridSize(width: 1, height: 1), near: battery)?.row == battery.row)
+    }
+
+    @Test func settingsPaneAliases() {
+        #expect(IslandSettingsPane.named("appearance") == .general)
+        #expect(IslandSettingsPane.named("permissions") == .about)
+        #expect(IslandSettingsPane.named("widgets") == .widgets)
+        #expect(AppCommand.parse(URL(string: "notchisland://settings/permissions")!) == .showSettingsPane(.about))
+    }
+
+    @Test func artworkAccentIsReadable() {
+        let black = ArtworkColor(red: 0.02, green: 0.02, blue: 0.03).accent
+        #expect(max(black.red, black.green, black.blue) >= 0.7)
+        let muddyRed = ArtworkColor(red: 0.3, green: 0.12, blue: 0.1).accent
+        #expect(muddyRed.red > muddyRed.green && muddyRed.red >= 0.7)
+        let grey = ArtworkColor(red: 0.5, green: 0.5, blue: 0.5).accent
+        #expect(abs(grey.red - grey.blue) < 0.01)
+    }
+}
+
+@Suite struct MoreWidgetsTests {
+    @Test func systemLoadReadsFromMach() throws {
+        let ticks = try #require(SystemStatsMonitor.cpuTicks())
+        #expect(ticks.total >= ticks.busy && ticks.total > 0)
+        let memory = try #require(SystemStatsMonitor.memoryUsed())
+        #expect(memory > 0 && memory <= 1)
+    }
+
+    @Test func everyNewControlIsAnActionWithSomethingToOpen() {
+        let actions: [SystemControl] = [.calculator, .voiceMemos, .screenshot, .notes, .focus, .clock, .home]
+        for control in actions {
+            #expect(control.isAction)
+            #expect(control.actionURL != nil)
+        }
+        #expect(SystemControl.lockScreen.isAction)
+        for kind in IslandWidgetKind.allCases where kind.systemControl != nil {
+            #expect(kind.category == .controls && kind.minimumSize == GridSize(width: 1, height: 1))
+        }
+    }
+
+    @Test func newWidgetsHaveElementsAndFitTheirBounds() {
+        for kind in [IslandWidgetKind.dateTime, .systemStats] {
+            #expect(!kind.options.isEmpty)
+            #expect(kind.defaultSize.width >= kind.minimumSize.width && kind.defaultSize.width <= kind.maximumSize.width)
+            #expect(!kind.summary.isEmpty && kind.title != kind.rawValue)
+        }
     }
 }
