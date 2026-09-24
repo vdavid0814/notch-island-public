@@ -8,15 +8,35 @@ Version 2 is a from-scratch rewrite: Swift 6, SwiftUI, macOS 27.
 
 ---
 
+## Download
+
+**[⬇ Download NotchIsland (.dmg)](https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg)**
+
+1. Open the downloaded `NotchIsland.dmg`.
+2. Drag **NotchIsland** onto the **Applications** folder.
+3. Open NotchIsland from Applications (or Spotlight).
+4. The first time, macOS says it cannot verify the app, because it is not
+   notarized by Apple. Click **Done**, then open **System Settings → Privacy &
+   Security**, scroll down and click **Open Anyway** next to NotchIsland, and
+   confirm. This is needed only once.
+5. Grant what it asks for: **Accessibility** (for the ⌘Space Siri and the
+   volume/brightness HUD) and **Automation** for Music or Spotify (Now Playing).
+
+Needs a MacBook with a notch (Apple silicon) and **macOS 27** or later.
+All releases: [Releases](https://github.com/vdavid0814/notch-island-public/releases).
+
+---
+
 ## Build and run
 
 ```bash
 ./Scripts/run.sh
 ```
 
-Builds the package, assembles `build/NotchIsland.app`, signs it with the stable
-Apple Development identity (so Accessibility grants survive rebuilds), replaces a
-running instance and launches it.
+Builds the package, assembles `build/NotchIsland.app`, signs it with the first
+Apple Development identity in your keychain (a stable identity keeps Accessibility
+grants across rebuilds; without one it signs ad hoc), replaces a running instance
+and launches it.
 
 | Script | Does |
 |---|---|
@@ -110,3 +130,12 @@ SwiftUI `repeatForever`; the equaliser is Core Animation on the render server.
 The panel is ordered out while the screens sleep or the session is locked.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it fits together.
+
+---
+
+## Third-party
+
+The downloadable app bundles [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
+(BSD 3-Clause License, © 2025 Jonas van den Berg and contributors) to read Now
+Playing from browsers and video apps; its license is inside the app at
+`Contents/Resources/MediaRemoteAdapter/LICENSE`.
