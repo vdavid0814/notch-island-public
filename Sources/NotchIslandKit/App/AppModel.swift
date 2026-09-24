@@ -1,0 +1,399 @@
+import AppKit
+import Observation
+
+/// The composition root: owns every store, controller and system service, and wires them together.
+///
+/// It holds no feature logic. Its jobs are (1) forwarding feature events to banners, haptics and
+/// sounds, (2) starting and stopping features when preferences, permissions or system state
+/// change, and (3) translating `AppCommand`s into intents on the stores.
+@Observable final class AppModel {
+    /// Created on first access (from `NotchIslandApp.init`, on the main actor). Creating it starts
+    /// nothing; `start()` does, once the app has finished launching.
+    static let shared = AppModel()
+
+    /// Stands in for the notch while no screen exists, so views and layout always have a size.
+    nonisolated static let fallbackNotchSize = CGSize(width: 180, height: 32)
+
+    let preferences: Preferences
+    let island = IslandModel()
+    let banners = BannerCenter()
+    let media = MediaController()
+    let power = PowerMonitor()
+    let levels = LevelsController()
+    let shelf = ShelfStore()
+    let timers = TimerStore()
+    let widgets = WidgetStore()
+    let fullscreen = FullscreenMonitor()
+    let assistant = AssistantModel()
+    @ObservationIgnored private let commandSpaceTap = CommandSpaceTap()
+    let permissions = PermissionCenter()
+    let activity = SystemActivity()
+    let haptics: Haptics
+    let launchAtLogin = LaunchAtLogin()
+
+    /// Geometry of the screen the island lives on; nil while no screen exists (clamshell with no
+    /// display, or the moment between two display configurations).
+    private(set) var metrics: NotchMetrics?
+
+    /// Recomputed from `metrics` and `preferences.scale`; the window controller observes it to
+    /// re-stage the panel when either changes.
+    var layout: IslandLayout {
+        IslandLayout(notch: metrics?.notchSize ?? Self.fallbackNotchSize, scale: preferences.scale)
+    }
+
+    /// Created at the end of `init` (it needs `self`) and never replaced, hence not observed.
+    @ObservationIgnored private(set) var controller: IslandController!
+
+    @ObservationIgnored private let dragMonitor = DragSessionMonitor()
+    @ObservationIgnored private let demo = DemoDirector()
+    @ObservationIgnored private var windowController: IslandWindowController?
+    @ObservationIgnored private var settingsWindow: SettingsWindowController?
+    @ObservationIgnored private var customizeWindow: WidgetEditorWindowController?
+
+    @ObservationIgnored private var isRunning = false
+    @ObservationIgnored private var hasStartedController = false
+    @ObservationIgnored private var hasInstalledTransitionHaptics = false
+    /// Commands that arrive before `start()`: a URL that launches the app is delivered before
+    /// `applicationDidFinishLaunching`.
+    @ObservationIgnored private var pendingCommands: [AppCommand] = []
+
+    /// The feature state last applied; nil while stopped.
+    @ObservationIgnored private var appliedFeatures: FeatureState?
+    /// Bumped by `stop()` so a re-arm that was already queued by the observation loop dies.
+    @ObservationIgnored private var featureGeneration = 0
+    /// True between a forwarded `externalDragBegan()` and its `externalDragEnded()`, so the two
+    /// always pair up even if the shelf is switched off or a drag-out flag flips mid-drag.
+    @ObservationIgnored private var isForwardingDrag = false
+
+    init(preferences: Preferences = Preferences()) {
+        self.preferences = preferences
+        haptics = Haptics(preferences: preferences)
+        controller = IslandController(model: self)
+        assistant.onClose = { [weak self] in self?.controller.closeAssistant() }
+        assistant.onCommand = { [weak self] command in
+            guard let self else { return }
+            if case .open = command {
+                // The panel takes the assistant's place, as the header's Siri button came from it.
+                self.perform(command)
+                self.controller.closeAssistant()
+            } else {
+                // Closed first, so the keyboard is handed back before a window (Settings) opens.
+                self.controller.closeAssistant()
+                self.perform(command)
+            }
+        }
+        assistant.mediaState = { [weak self] in
+            guard let self, self.preferences.showNowPlaying, self.media.item != nil else { return .none }
+            return self.media.isPlaying ? .playing : .paused
+        }
+        assistant.onFileAccessSettled = { [weak self] in self?.windowController?.assistantNeedsKeyboard() }
+        // Like the system's ⌘Space: opens Siri, and closes it again.
+        commandSpaceTap.onPress = { [weak self] in
+            guard let self else { return }
+            if self.island.presentation.isAssistant {
+                self.controller.closeAssistant()
+            } else {
+                self.controller.openAssistant()
+            }
+        }
+        wireFeatureEvents()
+    }
+
+    // MARK: Lifecycle
+
+    /// Starts every service. Idempotent. Works without a screen: the menu bar and Settings stay
+    /// usable and the window controller anchors the island once a display appears.
+    func start() {
+        guard !isRunning else { return }
+        isRunning = true
+        Log.app.notice("start")
+
+        permissions.start()
+        activity.start()
+        launchAtLogin.refresh()
+        power.start()
+        shelf.pruneMissingInBackground()
+
+        // The window controller must exist before the island controller applies its first
+        // presentation, because it stages the panel in `willTransition`.
+        let window = windowController ?? IslandWindowController(model: self)
+        windowController = window
+        window.start()
+        if !hasStartedController {
+            hasStartedController = true
+            controller.start()
+        }
+        installTransitionHaptics()
+        observeFeatures()
+
+        let queued = pendingCommands
+        pendingCommands.removeAll()
+        queued.forEach(perform)
+    }
+
+    /// Stops every service and removes every observer. Idempotent.
+    func stop() {
+        guard isRunning else { return }
+        isRunning = false
+        featureGeneration += 1
+        Log.app.notice("stop")
+
+        demo.cancel()
+        FeatureState.actions(from: appliedFeatures, to: .off).forEach(run)
+        appliedFeatures = nil
+        power.stop()
+        activity.stop()
+        permissions.stop()
+        windowController?.stop()
+    }
+
+    // MARK: Intents
+
+    func perform(_ command: AppCommand) {
+        guard isRunning else {
+            pendingCommands.append(command)
+            return
+        }
+        Log.app.info("command: \(String(describing: command), privacy: .public)")
+        switch command {
+        case .open(let page):
+            // An explicit request (menu or URL). Without the pointer the island controller closes
+            // it again after a while unless the user moves in.
+            controller.expand(page: page, pinned: false, userInitiated: true)
+        case .close:
+            controller.collapse()
+        case .togglePin:
+            controller.togglePinned()
+        case .media(let mediaCommand):
+            // With Now Playing off every media source is stopped; a command would have no target.
+            guard preferences.showNowPlaying else {
+                Log.media.info("ignored \(String(describing: mediaCommand), privacy: .public): Now Playing is off")
+                return
+            }
+            media.send(mediaCommand)
+        case .startTimer(let minutes):
+            timers.start(minutes: minutes)
+        case .cancelTimer:
+            timers.cancel()
+        case .startStopwatch:
+            timers.startStopwatch()
+        case .showSettings:
+            showSettings()
+        case .customize:
+            showCustomize()
+        case .assistant:
+            controller.openAssistant()
+        case .demo(let demoCommand):
+            demo.run(demoCommand, model: self)
+        }
+    }
+
+    func showCustomize() {
+        let editor = customizeWindow ?? WidgetEditorWindowController(model: self)
+        customizeWindow = editor
+        editor.show()
+    }
+
+    func showSettings() {
+        let settings = settingsWindow ?? SettingsWindowController(model: self)
+        settingsWindow = settings
+        settings.show()
+    }
+
+    /// Called by the window controller whenever it (re)anchors the island.
+    func updateMetrics(_ metrics: NotchMetrics?) {
+        guard metrics != self.metrics else { return }
+        self.metrics = metrics
+        if let metrics {
+            Log.window.notice("anchored on display \(metrics.displayID, privacy: .public), notch \(metrics.notchSize.width, privacy: .public)×\(metrics.notchSize.height, privacy: .public) physical: \(metrics.isPhysical, privacy: .public)")
+        } else {
+            Log.window.notice("no screen")
+        }
+        // The full-screen check needs the notch screen; at launch it may run before it is known.
+        fullscreen.refresh()
+        controller.notchGeometryChanged()
+    }
+
+    /// `demo/state`: the island as the window layer and SwiftUI see it, in the log.
+    func logIslandState() {
+        guard let windowController else {
+            Log.window.notice("state: window layer not started")
+            return
+        }
+        windowController.logState()
+    }
+
+    // MARK: Wiring
+
+    private func wireFeatureEvents() {
+        power.onEvent = { [weak self] event in self?.powerEvent(event) }
+        levels.onChange = { [weak self] kind, source in self?.levelChanged(kind, source: source) }
+        timers.onFinished = { [weak self] in self?.timerFinished() }
+        dragMonitor.onDragBegan = { [weak self] in self?.externalDragBegan() }
+        dragMonitor.onDragEnded = { [weak self] in self?.externalDragEnded() }
+    }
+
+    private func powerEvent(_ event: PowerEvent) {
+        // Passive: nothing appears by itself over a full-screen video (the banner would also count
+        // down invisibly and pop out stale afterwards).
+        guard preferences.showPowerAlerts, appliedFeatures?.hidden != true else { return }
+        banners.post(.power(event), duration: 3)
+        haptics.play(.alert)
+    }
+
+    private func levelChanged(_ kind: LevelKind, source: LevelChangeSource) {
+        // `.island`: the user is dragging the island's own slider and already sees the value.
+        guard preferences.showLevelHUD, source != .island else { return }
+        // Over a full-screen video only a key press is answered; a Control Center, AirPods or
+        // auto-brightness change stays invisible there.
+        if appliedFeatures?.hidden == true, source != .key { return }
+        // A key press is the user asking to see the level; a change made elsewhere is only a notice
+        // and must not bury a banner already up (a power event, a finished timer).
+        banners.post(.level(kind), duration: 1.6, preempting: source == .key)
+        // Only a key press is felt; a Control Center slider drag (`.external`) must not buzz.
+        if source == .key { haptics.play(.tick) }
+    }
+
+    private func timerFinished() {
+        banners.post(.timerFinished, duration: 30)
+        if preferences.timerSound {
+            NSSound(named: "Glass")?.play()
+        }
+        haptics.play(.alert)
+    }
+
+    private func externalDragBegan() {
+        // A drag that started on one of our own shelf tiles is not a drop candidate.
+        guard preferences.shelfEnabled, !shelf.isDraggingOut, !isForwardingDrag else { return }
+        isForwardingDrag = true
+        controller.externalDragBegan()
+    }
+
+    private func externalDragEnded() {
+        guard isForwardingDrag else { return }
+        isForwardingDrag = false
+        controller.externalDragEnded()
+    }
+
+    /// Open/close haptics. Chained onto whatever the island layer installed rather than replacing
+    /// it; should that layer also buzz, the per-event throttle in `Haptics` absorbs the duplicate.
+    private func installTransitionHaptics() {
+        guard !hasInstalledTransitionHaptics else { return }
+        hasInstalledTransitionHaptics = true
+        let previous = island.didTransition
+        island.didTransition = { [weak self] from, to in
+            previous?(from, to)
+            self?.transitionHaptic(from: from, to: to)
+        }
+    }
+
+    private func transitionHaptic(from: IslandPresentation, to: IslandPresentation) {
+        if to.isOpen && !from.isOpen {
+            haptics.play(.open)
+        } else if from.isOpen && !to.isOpen {
+            haptics.play(.close)
+        }
+    }
+
+    // MARK: Feature observation
+
+    private func currentFeatureState() -> FeatureState {
+        FeatureState(
+            showNowPlaying: preferences.showNowPlaying,
+            showWebMedia: preferences.showWebMedia,
+            showLevelHUD: preferences.showLevelHUD,
+            levelWidgets: widgets.needsLevels,
+            replaceSystemHUD: preferences.replaceSystemHUD,
+            accessibilityTrusted: permissions.accessibilityTrusted,
+            shelfEnabled: preferences.shelfEnabled,
+            suspended: activity.isSuspended,
+            hideInFullscreen: preferences.hideInFullscreen,
+            fullscreenActive: isPlayingVideoFullscreen,
+            fullscreenPresent: needsMenuBarGuard,
+            commandSpaceOpensSiri: preferences.commandSpaceOpensSiri
+        )
+    }
+
+    /// Re-arming observation loop. Tracking covers only the properties `currentFeatureState()`
+    /// reads, so hover-delay or size slider drags never wake it; when it does fire, only the
+    /// difference to the applied state is acted on.
+    private func observeFeatures() {
+        let generation = featureGeneration
+        let state = withObservationTracking {
+            currentFeatureState()
+        } onChange: { [weak self] in
+            // Fires in willSet on the mutating thread; the hop lands after the new value is set.
+            Task { @MainActor [weak self] in
+                guard let self, self.isRunning, self.featureGeneration == generation else { return }
+                self.observeFeatures()
+            }
+        }
+        let actions = FeatureState.actions(from: appliedFeatures, to: state)
+        appliedFeatures = state
+        guard !actions.isEmpty else { return }
+        Log.app.notice("features: \(String(describing: actions), privacy: .public)")
+        actions.forEach(run)
+    }
+
+    /// Hidden for a video playing in full screen, straight from the inputs (see `FeatureState.hidden`).
+    var hidesForFullscreenVideo: Bool {
+        preferences.hideInFullscreen && isPlayingVideoFullscreen && !activity.isSuspended
+    }
+
+    /// A full-screen app is on the notch screen, whose physical notch is where the pointer goes, and
+    /// the menu bar hides in full screen (System Settings ▸ Control Center ▸ "Automatically hide and
+    /// show the menu bar"; with it always shown there is nothing to keep hidden).
+    private var needsMenuBarGuard: Bool {
+        !fullscreen.fullscreenApps.isEmpty && (metrics?.isPhysical ?? false)
+            && !UserDefaults.standard.bool(forKey: "AppleMenuBarVisibleInFullscreen")
+    }
+
+    /// The app playing the current media (playing, or paused a moment ago) has a full-screen window:
+    /// a video watched in full screen. A full-screen app that is not the player never counts.
+    private var isPlayingVideoFullscreen: Bool {
+        guard media.isActive, let player = media.item?.bundleIdentifier else { return false }
+        return fullscreen.fullscreenApps.contains(player)
+    }
+
+    /// The screen the island lives on.
+    var notchScreen: NSScreen? {
+        guard let id = metrics?.displayID else { return nil }
+        return NSScreen.screens.first {
+            ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == id
+        }
+    }
+
+    private func run(_ action: FeatureAction) {
+        switch action {
+        case .startMedia: media.start()
+        case .stopMedia: media.stop()
+        case .setWebMedia(let enabled): media.setWebMediaEnabled(enabled)
+        case .startLevels: levels.start()
+        case .stopLevels: levels.stop()
+        case .setInterception(let enabled): levels.setInterceptionEnabled(enabled)
+        case .requestAccessibility: permissions.requestAccessibility()
+        case .startDragMonitor: dragMonitor.start()
+        case .stopDragMonitor:
+            dragMonitor.stop()
+            externalDragEnded()
+        case .setSuspended(let suspended):
+            if suspended { controller.closeAssistant() }
+            windowController?.setSuspended(suspended)
+            media.setSuspended(suspended)
+        case .setFullscreenMonitor(let enabled):
+            if enabled {
+                fullscreen.screen = { [weak self] in self?.notchScreen }
+                fullscreen.start()
+            } else {
+                fullscreen.stop()
+            }
+        case .setHidden(let hidden):
+            // Media keeps running: it is what tells us when the video stops playing.
+            controller.setHidden(hidden)
+        case .setFullscreenPresent(let present):
+            controller.setFullscreenPresent(present)
+        case .setCommandSpace(let enabled):
+            if enabled { commandSpaceTap.start() } else { commandSpaceTap.stop() }
+        }
+    }
+}

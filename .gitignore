@@ -1,0 +1,6 @@
+.build/
+build/
+.swiftpm/
+Vendor/
+.DS_Store
+xcuserdata/

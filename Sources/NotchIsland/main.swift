@@ -1,0 +1,3 @@
+import NotchIslandKit
+
+NotchIslandApp.main()

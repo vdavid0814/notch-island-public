@@ -1,0 +1,376 @@
+import AppKit
+import Observation
+import SwiftUI
+
+/// Owns the island panel and stages its frame around every transition.
+///
+/// Staging: before a transition the frame grows to cover both ends (plus
+/// `stageMargin` for overshoot); `Motion.settleDuration(for:)` later it shrinks to the
+/// resting frame of the target — exactly the notch when idle, so at rest
+/// nothing of ours sits over a menu-bar item.
+@MainActor final class IslandWindowController {
+    private unowned let model: AppModel
+
+    private var panel: IslandPanel?
+    private var hostingView: IslandHostingView<IslandWindowRoot>?
+    private let probe = StageProbe()
+    private var metrics: NotchMetrics?
+    /// The layout the current stage was computed with.
+    private var stagedLayout: IslandLayout?
+    /// Every island rect (global) covered since the last settle. A transition
+    /// that interrupts another must keep room for where the island still is,
+    /// not only for its new endpoints; nil while resting.
+    private var inFlightIslands: CGRect?
+    private var isRestagePending = false
+    private let settle = DelayedAction()
+    private var screenObserver: (any NSObjectProtocol)?
+    private var isStarted = false
+    private var isSuspended = false
+    /// Invalidates observation callbacks registered before the last start/stop.
+    private var observationGeneration = 0
+
+    init(model: AppModel) {
+        self.model = model
+    }
+
+    func start() {
+        guard !isStarted else { return }
+        isStarted = true
+        model.island.willTransition = { [weak self] from, to in
+            self?.willTransition(from: from, to: to)
+        }
+        model.island.didTransition = { [weak self] from, to in
+            self?.armSettle()
+            self?.keyboardFollows(from: from, to: to)
+        }
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.reanchor() }
+        }
+        observationGeneration += 1
+        observeLayout()
+        reanchor()
+    }
+
+    func stop() {
+        guard isStarted else { return }
+        isStarted = false
+        observationGeneration += 1
+        model.island.willTransition = nil
+        model.island.didTransition = nil
+        giveKeyboardBack()
+        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+        screenObserver = nil
+        settle.cancel()
+        inFlightIslands = nil
+        panel?.orderOut(nil)
+    }
+
+    /// Screens asleep, session locked or system sleeping: nothing is visible, so
+    /// the panel leaves the window list entirely and the window server stops
+    /// compositing it.
+    func setSuspended(_ suspended: Bool) {
+        guard suspended != isSuspended else { return }
+        isSuspended = suspended
+        if suspended {
+            giveKeyboardBack()
+            panel?.orderOut(nil)
+        } else {
+            // Displays may have changed while asleep.
+            reanchor()
+        }
+    }
+
+    // MARK: Keyboard
+
+    /// The window that was key before the assistant took the keyboard, if it was one of ours
+    /// (Settings, Customize); otherwise the keyboard goes back with `NSApp.deactivate()`.
+    private weak var previousKeyWindow: NSWindow?
+    private var resignObserver: (any NSObjectProtocol)?
+    private var outsideClickMonitor: Any?
+
+    /// The assistant has the keyboard exactly while it is on screen.
+    private func keyboardFollows(from: IslandPresentation, to: IslandPresentation) {
+        if to.isAssistant, !from.isAssistant {
+            takeKeyboard()
+        } else if from.isAssistant, !to.isAssistant {
+            giveKeyboardBack()
+        }
+    }
+
+    /// Makes the island key and the app active, so keystrokes come here. It closes the assistant
+    /// when it stops being key or when the user clicks anywhere else.
+    private func takeKeyboard() {
+        guard let panel, panel.isVisible, !panel.acceptsKeyboard else { return }
+        if let key = NSApp.keyWindow, key !== panel { previousKeyWindow = key }
+        panel.acceptsKeyboard = true
+        panel.makeKey()
+        // Key alone is not enough: the window server keeps sending keystrokes to the active app
+        // (measured). The user just asked for the assistant (a click, a URL), so the cooperative
+        // activation is granted; the app it takes over from gets it back on close (`deactivate`).
+        NSApp.activate()
+        // Except while the system asks for folder access (the first Files read): its prompt takes
+        // the keyboard and the click that answers it, and the assistant waits for the answer.
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: panel, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.model.assistant.isAwaitingFileAccess else { return }
+                self.model.controller.closeAssistant()
+            }
+        }
+        // A global monitor sees only clicks in other apps' windows: exactly the clicks outside.
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
+            guard let self, !self.model.assistant.isAwaitingFileAccess else { return }
+            self.model.controller.closeAssistant()
+        }
+    }
+
+    /// After a folder-access prompt: the assistant is still open but no longer key, so keystrokes
+    /// would go elsewhere. Takes the keyboard back (the user just answered a prompt it caused).
+    func assistantNeedsKeyboard() {
+        guard let panel, panel.acceptsKeyboard, model.island.presentation.isAssistant, !panel.isKeyWindow else { return }
+        panel.makeKey()
+        NSApp.activate()
+    }
+
+    /// Hands the keyboard back. Clearing `acceptsKeyboard` alone does not resign key (measured).
+    private func giveKeyboardBack() {
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        resignObserver = nil
+        if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
+        outsideClickMonitor = nil
+        guard let panel, panel.acceptsKeyboard else { return }
+        if panel.isKeyWindow {
+            if let previous = previousKeyWindow, previous.isVisible, previous !== panel {
+                previous.makeKey()
+            } else {
+                NSApp.deactivate()
+            }
+        }
+        panel.acceptsKeyboard = false
+        previousKeyWindow = nil
+    }
+
+    // MARK: Anchoring
+
+    /// Finds the notch screen and puts the panel there. With no screen at all
+    /// the panel stays hidden; the next screen-parameters notification retries.
+    private func reanchor() {
+        guard isStarted else { return }
+        let next = ScreenLocator.preferred()
+        if next != metrics || model.metrics != next {
+            metrics = next
+            model.updateMetrics(next)
+        }
+        guard next != nil else {
+            panel?.orderOut(nil)
+            Log.window.notice("No screen available; island hidden until one appears")
+            return
+        }
+        let panel = ensurePanel()
+        settle.cancel()
+        stageResting(for: model.island.presentation)
+        guard !isSuspended else { return }
+        panel.orderFrontRegardless()
+        hostingView?.setNeedsPointerRefresh()
+    }
+
+    private func ensurePanel() -> IslandPanel {
+        if let panel { return panel }
+        let hosting = IslandHostingView(rootView: IslandWindowRoot(model: model, probe: probe))
+        hosting.onPointerEntered = { [weak model] in model?.controller.pointerEntered() }
+        hosting.onPointerExited = { [weak model] in model?.controller.pointerExited() }
+        hosting.onClick = { [weak model] in model?.controller.clicked() }
+        hosting.onDragEntered = { [weak model] in model?.controller.dragEntered() }
+        hosting.onDragExited = { [weak model] in model?.controller.dragExited() }
+        hosting.onDrop = { [weak model] urls in model?.controller.dropped(urls) ?? false }
+        hosting.acceptsDrop = { [weak model] in
+            guard let model else { return false }
+            // A tile dragged out of our own shelf and back is not a new file.
+            return model.preferences.shelfEnabled && !model.shelf.isDraggingOut
+        }
+        let panel = IslandPanel(contentRect: metrics?.notchRect ?? .zero)
+        // A plain view is the content view, the hosting view only fills it: as a window's content
+        // view, NSHostingView resizes a non-resizable window to its SwiftUI content every frame of
+        // a transition (even with `sizingOptions = []`), which shrank the stage around the
+        // animating island, pinned at its top-left corner, and crashed AppKit's constraints pass.
+        let stage = NSView(frame: CGRect(origin: .zero, size: panel.frame.size))
+        hosting.frame = stage.bounds
+        hosting.autoresizingMask = [.width, .height]
+        stage.addSubview(hosting)
+        panel.contentView = stage
+        self.panel = panel
+        hostingView = hosting
+        return panel
+    }
+
+    // MARK: Staging
+
+    private func willTransition(from: IslandPresentation, to: IslandPresentation) {
+        guard let metrics else { return }
+        let layout = model.layout
+        let fromRect = StageGeometry.islandFrame(for: from, layout: stagedLayout ?? layout, metrics: metrics)
+        let toRect = StageGeometry.islandFrame(for: to, layout: layout, metrics: metrics)
+        grow(toCover: fromRect.union(toRect))
+    }
+
+    private func grow(toCover islands: CGRect) {
+        guard let metrics else { return }
+        settle.cancel()
+        let covered = inFlightIslands.map { $0.union(islands) } ?? islands
+        inFlightIslands = covered
+        stagedLayout = model.layout
+        // Hit/hover region = the union too: the island is visibly large while it
+        // closes, and a click on it then must not fall through.
+        apply(frame: StageGeometry.transitionFrame(covering: covered, metrics: metrics), islands: covered)
+    }
+
+    /// Shrinks to the resting frame once the springs have settled, unless
+    /// something newer happened meanwhile (which armed its own settle).
+    private func armSettle() {
+        let target = model.island.presentation
+        let layout = model.layout
+        settle.schedule(after: Motion.settleDuration(for: model.preferences.animationDuration)) { [weak self] in
+            guard let self, self.model.island.presentation == target, self.model.layout == layout else { return }
+            self.stageResting(for: target)
+        }
+    }
+
+    private func stageResting(for presentation: IslandPresentation) {
+        guard let metrics else { return }
+        let layout = model.layout
+        inFlightIslands = nil
+        stagedLayout = layout
+        apply(
+            frame: StageGeometry.restingFrame(for: presentation, layout: layout, metrics: metrics),
+            islands: StageGeometry.islandFrame(for: presentation, layout: layout, metrics: metrics)
+        )
+    }
+
+    private func apply(frame: CGRect, islands: CGRect) {
+        guard let panel, let hostingView else { return }
+        guard !hostingView.isInUpdatePass else {
+            Log.window.error("stage change requested inside the hosting view's update pass; deferred")
+            restageNextTurn()
+            return
+        }
+        panel.stage(frame)
+        hostingView.islandRect = StageGeometry.local(islands, in: frame)
+        Log.window.debug("stage \(frame.logDescription, privacy: .public) island \(islands.logDescription, privacy: .public)")
+    }
+
+    /// Re-derives the stage from the state of the next turn (the frame asked for now may be stale
+    /// by then): the in-flight union while a transition runs, else the resting frame.
+    private func restageNextTurn() {
+        guard !isRestagePending else { return }
+        isRestagePending = true
+        Task { [weak self] in
+            guard let self else { return }
+            self.isRestagePending = false
+            guard self.isStarted, let metrics = self.metrics else { return }
+            if let covered = self.inFlightIslands {
+                self.apply(frame: StageGeometry.transitionFrame(covering: covered, metrics: metrics), islands: covered)
+            } else {
+                self.stageResting(for: self.model.island.presentation)
+            }
+        }
+    }
+
+    /// `demo/state`. The probe is where SwiftUI placed a box laid out exactly like the island, so a
+    /// stale hosting size or offset shows up as `offset` ≠ 0 against the notch centre.
+    func logState() {
+        guard let panel, let hostingView, let metrics else {
+            Log.window.notice("state: no panel or no screen")
+            return
+        }
+        let presentation = model.island.presentation
+        let expected = StageGeometry.islandFrame(for: presentation, layout: model.layout, metrics: metrics)
+        let measured = probe.island.isNull ? CGRect.null : CGRect(
+            x: panel.frame.minX + probe.island.minX,
+            y: panel.frame.maxY - probe.island.maxY,
+            width: probe.island.width,
+            height: probe.island.height
+        )
+        let offset = measured.isNull ? .nan : measured.midX - metrics.notchRect.midX
+        Log.window.notice("""
+            state: \(String(describing: presentation), privacy: .public) \
+            panel \(panel.frame.logDescription, privacy: .public) visible \(panel.isVisible, privacy: .public) \
+            islandRect \(hostingView.islandRect.logDescription, privacy: .public) \
+            hosting \(hostingView.frame.logDescription, privacy: .public) \
+            swiftUI root \(self.probe.root.logDescription, privacy: .public) \
+            island \(measured.logDescription, privacy: .public) expected \(expected.logDescription, privacy: .public) \
+            offset \(offset, privacy: .public)
+            """)
+    }
+
+    // MARK: Layout changes
+
+    /// A scale change keeps the presentation, so no transition stages the
+    /// window for it; without this an island enlarged while open is clipped
+    /// (legacy bug). Metric changes arrive here too, already handled by reanchor.
+    private func observeLayout() {
+        let generation = observationGeneration
+        withObservationTracking {
+            _ = model.layout
+        } onChange: { [weak self] in
+            // onChange runs before the new value is stored: read it next turn.
+            Task { @MainActor in self?.layoutChanged(generation) }
+        }
+    }
+
+    private func layoutChanged(_ generation: Int) {
+        guard isStarted, generation == observationGeneration else { return }
+        observeLayout()
+        let layout = model.layout
+        guard let metrics, let old = stagedLayout, old != layout else { return }
+        let presentation = model.island.presentation
+        let oldRect = StageGeometry.islandFrame(for: presentation, layout: old, metrics: metrics)
+        let newRect = StageGeometry.islandFrame(for: presentation, layout: layout, metrics: metrics)
+        guard oldRect != newRect else {
+            stagedLayout = layout
+            return
+        }
+        grow(toCover: oldRect.union(newRect))
+        armSettle()
+    }
+}
+
+/// Where SwiftUI last placed the root and an island-shaped probe, in hosting-view coordinates
+/// (top-left origin). Plain storage, not observed: writing it must never re-render anything.
+final class StageProbe {
+    var root: CGRect = .null
+    var island: CGRect = .null
+}
+
+/// Concrete root type for the hosting view, so the root is not type-erased
+/// behind `AnyView`.
+private struct IslandWindowRoot: View {
+    let model: AppModel
+    let probe: StageProbe
+
+    var body: some View {
+        IslandRootView()
+            .environment(model)
+            .background(alignment: .top) {
+                // Laid out like the island (top-centred, size from the layout), never animated:
+                // it reports where the island is headed, which is what `demo/state` compares.
+                let size = model.layout.size(for: model.island.presentation)
+                Color.clear
+                    .frame(width: size.width, height: size.height)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { probe.island = $0 }
+                    .transaction { $0.animation = nil }
+            }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { probe.root = $0 }
+    }
+}
+
+extension CGRect {
+    /// Compact, locale-free form for the log: `x,y w×h`.
+    nonisolated var logDescription: String {
+        isNull ? "null" : "\(minX),\(minY) \(width)×\(height)"
+    }
+}

@@ -1,0 +1,346 @@
+import AppKit
+import Foundation
+import FoundationModels
+import Testing
+@testable import NotchIslandKit
+
+@Suite struct AssistantPresentationTests {
+    @Test func fieldGrowsIntoSuggestionsAndListAtThePanelWidth() {
+        let layout = IslandLayout(notch: CGSize(width: 156, height: 28), scale: .standard)
+        let expanded = layout.size(for: .expanded(.home))
+        let field = layout.size(for: .assistant(.field))
+        let suggestions = layout.size(for: .assistant(.suggestions))
+        let list = layout.size(for: .assistant(.list))
+        #expect(field.width == expanded.width && suggestions.width == expanded.width && list.width == expanded.width)
+        // Only the field: the top inset, the 40 pt field and the bottom inset.
+        #expect(field.height == CGFloat(28 + 8 + 40 + 12))
+        // The three suggestions exactly: three rows and their spacing, one inset between.
+        #expect(suggestions.height == field.height + 8 + 3 * 32 + 2 * 2)
+        #expect(list.height == 28 + IslandLayout.assistantPageHeight)
+        #expect(field.height < suggestions.height && suggestions.height < list.height)
+        #expect(layout.bottomRadius(for: .assistant(.field)) == layout.bottomRadius(for: .expanded(.home)))
+    }
+
+    @Test func assistantOpensAndClosesWithThePanelSprings() {
+        #expect(Motion.animation(from: .idle, to: .assistant(.field), reduceMotion: false) == Motion.open)
+        #expect(Motion.animation(from: .expanded(.home), to: .assistant(.list), reduceMotion: false) == Motion.open)
+        #expect(Motion.animation(from: .assistant(.suggestions), to: .idle, reduceMotion: false) == Motion.close)
+        #expect(Motion.animation(from: .assistant(.field), to: .expanded(.home), reduceMotion: false) == Motion.close)
+        #expect(Motion.animation(from: .expanded(.home), to: .expanded(.shelf), reduceMotion: false) == Motion.content)
+    }
+
+    @Test func roomChangesAreShortSprings() {
+        let grow = Motion.animation(from: .assistant(.field), to: .assistant(.suggestions), reduceMotion: false)
+        let shrink = Motion.animation(from: .assistant(.list), to: .assistant(.field), reduceMotion: false)
+        #expect(grow == .spring(Motion.openSpring(duration: Motion.defaultDuration * 0.7)))
+        #expect(shrink == .spring(Motion.closeSpring(duration: Motion.defaultDuration * 0.7)))
+        #expect(Motion.animation(from: .assistant(.field), to: .assistant(.list), reduceMotion: true) == Motion.reduced)
+    }
+
+    @Test func everyRoomIsOneSurface() {
+        for room in AssistantRoom.allCases {
+            let presentation = IslandPresentation.assistant(room)
+            #expect(presentation.surfaceKey == "assistant")
+            #expect(presentation.isAssistant && presentation.isOpen && !presentation.isExpanded)
+        }
+        #expect(!IslandPresentation.expanded(.home).isAssistant)
+    }
+}
+
+@Suite struct AssistantSearchTests {
+    @Test func escapesTheQueryLanguage() {
+        #expect(AssistantSearch.escaped("  a*b \"c\" \\d ") == #"a\*b \"c\" \\d"#)
+    }
+
+    @Test func ranksNamePrefixFirstThenRecentUse() {
+        func hit(_ name: String, _ days: Double) -> AssistantHit {
+            AssistantHit(kind: .file, url: URL(fileURLWithPath: "/tmp/\(name)"), name: name, contentType: nil,
+                         lastUsed: Date(timeIntervalSinceReferenceDate: days * 86_400))
+        }
+        let ranked = AssistantSearch.rank([hit("My Safari notes", 30), hit("safari old", 1), hit("Safari new", 10)],
+                                          for: "SAFARI")
+        #expect(ranked.map(\.name) == ["Safari new", "safari old", "My Safari notes"])
+    }
+
+    @Test func matchesWordPrefixesIgnoringCaseAndAccents() {
+        #expect(AssistantMatch.matches("System Settings", "sett"))
+        #expect(AssistantMatch.matches("System Settings", "sys set"))
+        #expect(AssistantMatch.matches("Zene", "zé"))
+        #expect(AssistantMatch.matches("Next Track", "next"))
+        #expect(!AssistantMatch.matches("Safari", "fari"))
+        #expect(!AssistantMatch.matches("WhatsApp", "what is"))
+        #expect(AssistantMatch.matches("Anything", "  "))
+    }
+}
+
+/// Fixed lists instead of Spotlight and `shortcuts list`.
+@MainActor func stubSources(
+    apps: [String] = [], files: [String] = [], recent: [String] = [], allApps: [String] = [], shortcuts: [String] = []
+) -> AssistantSources {
+    func hits(_ names: [String], _ kind: AssistantHit.Kind) -> [AssistantHit] {
+        names.enumerated().map { index, name in
+            AssistantHit(kind: kind, url: URL(fileURLWithPath: "/stub/\(kind)/\(name)"), name: name, contentType: nil,
+                         lastUsed: Date(timeIntervalSinceReferenceDate: Double(1000 - index)))
+        }
+    }
+    let appHits = hits(apps, .app), fileHits = hits(files, .file), recentHits = hits(recent, .file)
+    let allAppHits = hits(allApps, .app)
+    return AssistantSources(
+        apps: { query, limit in Array(appHits.filter { AssistantMatch.matches($0.name, query) }.prefix(limit)) },
+        files: { query, limit in Array(fileHits.filter { AssistantMatch.matches($0.name, query) }.prefix(limit)) },
+        recentFiles: { recentHits },
+        allApps: { allAppHits },
+        shortcuts: { shortcuts },
+        isUnsupportedLanguage: { _ in false }
+    )
+}
+
+@Suite struct AssistantModelTests {
+    func freshDefaults() -> UserDefaults {
+        let name = "AssistantModelTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    func model(_ sources: AssistantSources = stubSources(), defaults: UserDefaults? = nil) -> AssistantModel {
+        let model = AssistantModel(defaults: defaults ?? freshDefaults(), sources: sources)
+        model.begin()
+        return model
+    }
+
+    @Test func bareFieldListsTheSuggestionsButNeedsNoList() {
+        let model = model()
+        #expect(model.rows == [.category(.applications), .category(.files), .category(.actions)])
+        #expect(!model.needsList && !model.revealsSuggestions)
+        // Return on the bare field does nothing: nothing is shown to run.
+        model.activateSelection()
+        #expect(model.category == nil)
+    }
+
+    @Test func firstArrowRevealsTheSuggestionsThenMoves() {
+        let model = model()
+        model.moveSelection(by: 1)
+        #expect(model.revealsSuggestions && model.selection == 0)
+        model.moveSelection(by: 1)
+        #expect(model.selection == 1)
+        model.activateSelection()
+        #expect(model.category == .files && model.needsList)
+    }
+
+    @Test func roomFollowsWhatShows() async {
+        let model = model(stubSources(apps: ["Safari", "Safari Technology Preview", "Safe"]))
+        #expect(model.room == .field)
+        model.isPointerOver = true
+        #expect(model.room == .suggestions)
+        model.isPointerOver = false
+        #expect(model.room == .field)
+        model.moveSelection(by: 1)
+        #expect(model.room == .suggestions)
+        // Up to three rows keep the suggestions' height; more take the full list.
+        model.query = "zzqx"
+        await model.settle()
+        #expect(model.rows.count <= 3 && model.room == .suggestions)
+        model.query = "saf"
+        await model.settle()
+        #expect(model.rows.count > 3 && model.room == .list)
+        model.query = ""
+        model.open(.applications)
+        #expect(model.room == .list)
+    }
+
+    @Test func overTheFieldTheFirstArrowMoves() {
+        let model = model()
+        model.isPointerOver = true
+        model.moveSelection(by: 1)
+        #expect(model.selection == 1)
+    }
+
+    @Test func applicationsGalleryFiltersInMemory() async {
+        let model = model(stubSources(allApps: ["Safari", "Music", "System Settings", "Mail"]))
+        model.open(.applications)
+        await model.settle()
+        #expect(model.rows.count == 4)
+        model.query = "set"
+        #expect(model.rows.compactMap { if case .hit(let hit) = $0 { hit.name } else { nil } } == ["System Settings"])
+    }
+
+    @Test func actionsFollowNowPlayingAndIncludeShortcuts() async {
+        let model = model(stubSources(shortcuts: ["Find Music", "Count Songs"]))
+        model.open(.actions)
+        await model.settle()
+        var titles = model.rows.compactMap { if case .action(let action) = $0 { action.title } else { nil } }
+        #expect(!titles.contains("Pause") && titles.contains("Timer") && titles.contains("Find Music"))
+        model.mediaState = { .playing }
+        model.query = "p"
+        titles = model.rows.compactMap { if case .action(let action) = $0 { action.title } else { nil } }
+        #expect(titles.contains("Pause") && titles.contains("Previous Track") && !titles.contains("Timer"))
+    }
+
+    @Test func islandActionsGoThroughTheApp() async {
+        let model = model()
+        var commands: [AppCommand] = []
+        var closed = false
+        model.onCommand = { commands.append($0) }
+        model.onClose = { closed = true }
+        model.open(.actions)
+        model.query = "stopw"
+        model.activateSelection()
+        #expect(commands == [.startStopwatch])
+        // The app decides how to close (the panel may take the assistant's place).
+        #expect(!closed)
+    }
+
+    @Test func rootQueryListsHitsActionsThenHandOffs() async {
+        let model = model(stubSources(apps: ["Timer Pro"]))
+        model.query = "timer"
+        await model.settle()
+        let rows = model.rows
+        guard case .hit(let hit) = rows.first else {
+            Issue.record("no hit first: \(rows)")
+            return
+        }
+        #expect(hit.name == "Timer Pro")
+        #expect(rows.contains(.action(.island(.timer))))
+        #expect(rows.suffix(2) == [.searchWeb, .askChatGPT])
+        // Files are read only once the user has asked for them (the folders are protected).
+        #expect(!rows.contains { if case .hit(let hit) = $0 { hit.kind == .file } else { false } })
+    }
+
+    @Test func aLongerQueryDropsHitsThatNoLongerMatchAtOnce() async {
+        let model = model(stubSources(apps: ["WhatsApp"]))
+        model.query = "what"
+        await model.settle()
+        #expect(model.rows.first == model.apps.first.map(AssistantRow.hit))
+        model.query = "what is 2+2"
+        // Before the new search lands, Return must not open WhatsApp.
+        #expect(model.apps.isEmpty)
+        #expect(model.rows.first == .searchWeb || model.rows.first == .askIntelligence)
+    }
+
+    @Test func aPickedRowStaysPickedWhenResultsLand() async {
+        let model = model(stubSources(apps: ["Mail"]))
+        model.query = "ma"
+        await model.settle()
+        let web = model.rows.firstIndex(of: .searchWeb)!
+        model.select(.searchWeb)
+        #expect(model.selection == web)
+        model.query = "mai"
+        model.select(.searchWeb)
+        await model.settle()
+        #expect(model.rows[model.selection] == .searchWeb)
+    }
+
+    @Test func filesAreRememberedOnceTheyWereReadable() async {
+        let defaults = freshDefaults()
+        let sources = stubSources(files: ["Report.pdf"], recent: ["Report.pdf"])
+        let first = model(sources, defaults: defaults)
+        var settled = 0
+        first.onFileAccessSettled = { settled += 1 }
+        first.open(.files)
+        await first.settle()
+        #expect(settled == 1 && !first.isAwaitingFileAccess)
+        #expect(defaults.bool(forKey: AssistantModel.filesKey))
+        #expect(first.rows.count == 1)
+        let later = model(sources, defaults: defaults)
+        later.query = "rep"
+        await later.settle()
+        #expect(later.rows.contains { if case .hit(let hit) = $0 { hit.name == "Report.pdf" } else { false } })
+    }
+
+    @Test func escapeStepsBackThenCloses() async {
+        let model = model()
+        var closed = false
+        model.onClose = { closed = true }
+        model.moveSelection(by: 1)
+        model.open(.files)
+        model.query = "hello"
+        model.escape()
+        #expect(model.query.isEmpty && model.category == .files && !closed)
+        model.escape()
+        #expect(model.category == nil && model.revealsSuggestions && !closed)
+        model.escape()
+        #expect(!model.revealsSuggestions && !closed)
+        model.escape()
+        #expect(closed)
+    }
+
+    @Test func deleteInAnEmptyFieldLeavesTheSuggestion() {
+        let model = model()
+        #expect(!model.deleteBackwardInEmptyField())
+        model.open(.actions)
+        model.query = "x"
+        #expect(!model.deleteBackwardInEmptyField())
+        model.query = ""
+        #expect(model.deleteBackwardInEmptyField() && model.category == nil)
+    }
+
+    @Test func endForgetsEverything() async {
+        let model = model(stubSources(allApps: ["Safari"]))
+        model.open(.applications)
+        await model.settle()
+        model.query = "s"
+        model.end()
+        #expect(model.query.isEmpty && model.category == nil && model.allApps.isEmpty && model.answer == nil)
+        #expect(!model.needsList && !model.revealsSuggestions)
+    }
+
+    @Test func languageGateIsConservative() {
+        // Single words are unreliable, so they never demote the Ask row.
+        #expect(!AssistantModel.isUnsupportedLanguage("safari"))
+        #expect(!AssistantModel.isUnsupportedLanguage("What is the capital of France?"))
+        #expect(AssistantModel.isUnsupportedLanguage("Mi Magyarország fővárosa és hány lakosa van?"))
+    }
+
+    @Test func languageGateComparesBaseLanguages() {
+        // The recogniser says zh-Hans, the model lists zh.
+        let supported = SystemLanguageModel.default.supportedLanguages.compactMap { $0.languageCode?.identifier }
+        guard supported.contains("zh") else { return }
+        #expect(!AssistantModel.isUnsupportedLanguage("北京 是 中国 的 首都 吗 今天 天气 怎么样"))
+    }
+
+    @Test func handOffURLs() {
+        #expect(AssistantActions.webSearchURL(for: "a b&c")?.absoluteString == "https://www.google.com/search?q=a%20b%26c")
+        #expect(AssistantActions.chatGPTURL(for: "hi")?.absoluteString == "https://chatgpt.com/?q=hi")
+        // '+' would reach the search box as a space.
+        #expect(AssistantActions.webSearchURL(for: "c++ 2+2")?.absoluteString == "https://www.google.com/search?q=c%2B%2B%202%2B2")
+        #expect(AssistantActions.chatGPTURL(for: "1+1")?.absoluteString == "https://chatgpt.com/?q=1%2B1")
+    }
+}
+
+@Suite struct CommandSpaceTapTests {
+    @Test func swallowsCommandSpaceAndItsKeyUpOnly() {
+        var pressed = false
+        // ⌘Space down, a repeat, then the key-up: all ours.
+        #expect(CommandSpaceTap.swallows(keyCode: 49, isDown: true, flags: .maskCommand, pressed: &pressed))
+        #expect(CommandSpaceTap.swallows(keyCode: 49, isDown: true, flags: .maskCommand, pressed: &pressed))
+        #expect(CommandSpaceTap.swallows(keyCode: 49, isDown: false, flags: [], pressed: &pressed))
+        #expect(!pressed)
+        // Other shortcuts on Space are left alone.
+        #expect(!CommandSpaceTap.swallows(keyCode: 49, isDown: true, flags: [.maskCommand, .maskAlternate], pressed: &pressed))
+        #expect(!CommandSpaceTap.swallows(keyCode: 49, isDown: true, flags: [.maskCommand, .maskShift], pressed: &pressed))
+        #expect(!CommandSpaceTap.swallows(keyCode: 49, isDown: true, flags: .maskControl, pressed: &pressed))
+        #expect(!CommandSpaceTap.swallows(keyCode: 49, isDown: true, flags: [], pressed: &pressed))
+        // A key-up whose down we never saw (the tap armed mid-press) goes through.
+        #expect(!CommandSpaceTap.swallows(keyCode: 49, isDown: false, flags: [], pressed: &pressed))
+        // Other keys with ⌘ are never touched.
+        #expect(!CommandSpaceTap.swallows(keyCode: 12, isDown: true, flags: .maskCommand, pressed: &pressed))
+    }
+}
+
+@Suite struct IslandPanelKeyboardTests {
+    func key(_ characters: String, _ flags: NSEvent.ModifierFlags) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
+                         context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                         isARepeat: false, keyCode: 0)!
+    }
+
+    @Test func appShortcutsAreSwallowedEditingOnesAreNot() {
+        #expect(IslandPanel.isSwallowedShortcut(key("q", .command)))
+        #expect(IslandPanel.isSwallowedShortcut(key("h", [.command, .option])))
+        #expect(IslandPanel.isSwallowedShortcut(key("w", .command)))
+        #expect(!IslandPanel.isSwallowedShortcut(key("v", .command)))
+        #expect(!IslandPanel.isSwallowedShortcut(key("c", .command)))
+        #expect(!IslandPanel.isSwallowedShortcut(key("q", [])))
+    }
+}

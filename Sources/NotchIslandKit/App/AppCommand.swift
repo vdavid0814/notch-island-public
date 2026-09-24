@@ -1,0 +1,115 @@
+import Foundation
+
+/// Fake state for screenshots and visual verification. Kept in release builds on purpose: it is how
+/// the island is checked without waiting for a charger, a timer or a track change.
+nonisolated enum DemoCommand: Sendable, Equatable {
+    case media, charging, unplug, low, volume(Double), brightness(Double), timerDone, drop, shelf, reset
+    /// Pointer over / away from the island, without moving the real pointer.
+    case hover(Bool)
+    /// Logs presentation, stage and where SwiftUI actually placed the island.
+    case state
+}
+
+/// Everything the app can be asked to do from outside the island: the menu bar menu and the
+/// `notchisland://` URL scheme. An agent app has no window to click, so the scheme is also what makes
+/// it scriptable (Shortcuts, `open`, tests).
+nonisolated enum AppCommand: Sendable, Equatable {
+    case open(ExpandedPage?), close, togglePin
+    case media(MediaCommand)
+    case startTimer(minutes: Double), cancelTimer, startStopwatch
+    case showSettings
+    /// The widget editor (Customize Island).
+    case customize
+    /// ⌘Space (Siri or Spotlight), from the notch.
+    case assistant
+    case demo(DemoCommand)
+
+    static let scheme = "notchisland"
+    /// `timer` without `minutes`.
+    static let defaultTimerMinutes: Double = 5
+    /// Upper bound for URL-started timers (24 h); anything longer is almost certainly a typo.
+    static let maximumTimerMinutes: Double = 24 * 60
+    static let defaultDemoVolume = 0.6
+    static let defaultDemoBrightness = 0.4
+
+    /// Parses `notchisland://<route>[?query]`.
+    ///
+    /// Routes and parameter names are case-insensitive; both `notchisland://media/next` and
+    /// `notchisland:media/next` work. Unknown routes and malformed parameters return nil (so the
+    /// caller can log them) instead of guessing.
+    ///
+    ///     open[?page=home|shelf|timer]   close   pin   settings   customize   siri
+    ///     media/play|pause|toggle|next|previous
+    ///     timer[?minutes=N]   timer/cancel   stopwatch
+    ///     demo/media|charging|unplug|low|timerdone|drop|shelf|reset
+    ///     demo/volume[?level=0…1]   demo/brightness[?level=0…1]
+    ///     demo/hover[?inside=1|0]   demo/state
+    static func parse(_ url: URL) -> AppCommand? {
+        guard url.scheme?.lowercased() == scheme,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        else { return nil }
+
+        var segments: [String] = []
+        if let host = components.host, !host.isEmpty { segments.append(host) }
+        segments += components.path.split(separator: "/").map(String.init)
+        let route = segments.map { $0.lowercased() }.joined(separator: "/")
+
+        var query: [String: String] = [:]
+        for item in components.queryItems ?? [] where query[item.name.lowercased()] == nil {
+            query[item.name.lowercased()] = item.value ?? ""
+        }
+
+        switch route {
+        case "open":
+            guard let page = query["page"] else { return .open(nil) }
+            return ExpandedPage(rawValue: page.lowercased()).map { .open($0) }
+        case "close": return .close
+        case "pin": return .togglePin
+        case "settings": return .showSettings
+        case "customize": return .customize
+        case "assistant", "siri": return .assistant
+
+        case "media/play": return .media(.play)
+        case "media/pause": return .media(.pause)
+        case "media/toggle": return .media(.togglePlayPause)
+        case "media/next": return .media(.next)
+        case "media/previous": return .media(.previous)
+
+        case "timer":
+            guard let raw = query["minutes"] else { return .startTimer(minutes: defaultTimerMinutes) }
+            guard let minutes = Double(raw), minutes > 0, minutes <= maximumTimerMinutes else { return nil }
+            return .startTimer(minutes: minutes)
+        case "timer/cancel": return .cancelTimer
+        case "stopwatch": return .startStopwatch
+
+        case "demo/media": return .demo(.media)
+        case "demo/charging": return .demo(.charging)
+        case "demo/unplug": return .demo(.unplug)
+        case "demo/low": return .demo(.low)
+        case "demo/timerdone": return .demo(.timerDone)
+        case "demo/drop": return .demo(.drop)
+        case "demo/shelf": return .demo(.shelf)
+        case "demo/reset": return .demo(.reset)
+        case "demo/volume":
+            return level(query["level"], default: defaultDemoVolume).map { .demo(.volume($0)) }
+        case "demo/brightness":
+            return level(query["level"], default: defaultDemoBrightness).map { .demo(.brightness($0)) }
+        case "demo/hover":
+            switch query["inside"]?.lowercased() {
+            case nil, "1", "true": return .demo(.hover(true))
+            case "0", "false": return .demo(.hover(false))
+            default: return nil
+            }
+        case "demo/state": return .demo(.state)
+
+        default: return nil
+        }
+    }
+
+    /// A 0…1 level; missing means `fallback`, out of range or non-numeric means invalid.
+    private static func level(_ raw: String?, default fallback: Double) -> Double? {
+        guard let raw else { return fallback }
+        guard let value = Double(raw), (0...1).contains(value) else { return nil }
+        return value
+    }
+}
