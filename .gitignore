@@ -4,3 +4,4 @@ build/
 Vendor/
 .DS_Store
 xcuserdata/
+*.dmg
