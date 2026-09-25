@@ -73,10 +73,13 @@ struct BatteryRing: View {
     let tint: StatusTint
     var showsPercentage = true
     let diameter: CGFloat
+    /// The percentage's own size (the widget's Percentage element).
+    var percentSize: ElementSize = .medium
 
     var body: some View {
         let level = min(max(level, 0), 100)
         let line = max(3, diameter * 0.1)
+        let points = WidgetType.ringText("100%", diameter: diameter, ratio: 0.22, percentSize)
         ZStack {
             Circle().stroke(.white.opacity(0.16), lineWidth: line)
             Circle()
@@ -85,11 +88,13 @@ struct BatteryRing: View {
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 0) {
                 Image(systemName: isCharging ? "bolt.fill" : "laptopcomputer")
-                    .font(.system(size: diameter * (showsPercentage ? 0.2 : 0.34), weight: .semibold))
+                    // Gives way to a large percentage: the two share the ring's inside.
+                    .font(.system(size: showsPercentage ? min(diameter * 0.2, max(6, diameter * 0.46 - points)) : diameter * 0.34,
+                                  weight: .semibold))
                     .foregroundStyle(isCharging ? tint.style : AnyShapeStyle(.secondary))
                 if showsPercentage {
                     Text("\(level)%")
-                        .font(.system(size: diameter * 0.22, weight: .semibold, design: .rounded).monospacedDigit())
+                        .font(.system(size: points, weight: .semibold, design: .rounded).monospacedDigit())
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
                         .contentTransition(.opacity)

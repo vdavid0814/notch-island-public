@@ -24,7 +24,8 @@ struct NowPlayingCompact: View {
             // thermal pressure): the bars are decoration, the artwork already says "playing".
             EqualizerView(
                 isAnimating: media.isPlaying && !reduceMotion && !model.activity.prefersReducedWork,
-                onBattery: model.power.state.hasBattery && !model.power.state.isPluggedIn
+                onBattery: model.power.state.hasBattery && !model.power.state.isPluggedIn,
+                tint: media.artworkColor
             )
                 .frame(width: Metrics.Compact.equalizerSize.width, height: Metrics.Compact.equalizerSize.height)
                 .frame(width: glyphSide, height: glyphSide)

@@ -21,12 +21,13 @@ import Observation
     private(set) var countdown: CountdownState = .idle
     private(set) var stopwatch: StopwatchState = .idle
 
-    /// The countdown the ruler has set up, in whole seconds (see `TimerDraftUnits`).
+    /// The countdown the ruler has set up, in whole seconds (see `TimerDraftUnits`). 0 while the
+    /// ruler reads 0:00 (it is then not started).
     var draftDuration: TimeInterval {
         get { storedDraft }
         set {
             guard newValue.isFinite else { return }
-            storedDraft = min(max(newValue.rounded(), 1), Self.maximumDuration - 1)
+            storedDraft = min(max(newValue.rounded(), 0), Self.maximumDuration - 1)
         }
     }
     private var storedDraft: TimeInterval = 5 * 60

@@ -7,6 +7,22 @@ import UniformTypeIdentifiers
 /// lists everything of its kind (⌘1, ⌘2, ⌘3) and the field then filters that list.
 nonisolated enum AssistantCategory: Int, CaseIterable, Hashable, Sendable {
     case applications = 1, files, actions
+
+    /// What the user may type to find the suggestion itself: its title, and its English names in
+    /// any language (the title is localized).
+    var searchNames: [String] {
+        let english: [String] = switch self {
+        case .applications: ["Applications", "Apps"]
+        case .files: ["Files", "Documents"]
+        case .actions: ["Actions", "Shortcuts"]
+        }
+        let title = switch self {
+        case .applications: String(localized: "Applications")
+        case .files: String(localized: "Files")
+        case .actions: String(localized: "Actions")
+        }
+        return [title] + english.filter { $0 != title }
+    }
 }
 
 /// What the assistant can do with the query, in the order its list shows them.
@@ -238,7 +254,14 @@ nonisolated struct FileScope: Sendable, Equatable {
     var room: AssistantRoom {
         if answer != nil { return .list }
         if category == .applications { return .gallery }
-        if needsList { return rows.count <= AssistantCategory.allCases.count ? .suggestions : .list }
+        if needsList {
+            // An open suggestion lists everything of its kind: the full list. A query gets exactly
+            // the rows it has ("application": the suggestion and three hand-offs, not a list's
+            // worth of empty space), up to the full list, which then scrolls.
+            guard category == nil else { return .list }
+            let count = rows.count
+            return count < settings().listRows ? .rows(max(count, 1)) : .list
+        }
         return revealsSuggestions || hoverReveals ? .suggestions : .field
     }
 
@@ -280,13 +303,27 @@ nonisolated struct FileScope: Sendable, Equatable {
                     $0 != answer && ($0 != .askIntelligence || intelligence) && ($0 != .askChatGPT || settings.offersChatGPT)
                 }
             }
-            var rows = hits
+            // A suggestion typed by name ("application", "files") comes first, so Return opens it,
+            // unless a hit's name starts with the query too ("app" is more likely App Store).
+            let named = Self.categories(named: text, in: settings.categories).map(AssistantRow.category)
+            let hitStarts = (apps + files).contains { AssistantMatch.startsName($0.name, text) }
+            var rows = hitStarts ? hits + named : named + hits
             let ask: [AssistantRow] = intelligence ? [.askIntelligence] : []
             if !languageUnsupported { rows += ask }
             rows += [.searchWeb]
             if settings.offersChatGPT { rows += [.askChatGPT] }
             if languageUnsupported { rows += ask }
             return rows
+        }
+    }
+
+    /// The suggestions whose name the query spells out (three letters or more, so "a" does not
+    /// list them all): "appl", "application", "files", "shortcuts".
+    nonisolated static func categories(named text: String, in categories: [AssistantCategory]) -> [AssistantCategory] {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count >= 3 else { return [] }
+        return categories.filter { category in
+            category.searchNames.contains { AssistantMatch.startsName($0, text) }
         }
     }
 
@@ -434,6 +471,10 @@ nonisolated struct FileScope: Sendable, Equatable {
         let text = answer?.question ?? trimmedQuery
         switch row {
         case .category(let category):
+            // Opened by typing its name: the name is not a filter for the list it opens.
+            if self.category == nil, Self.categories(named: trimmedQuery, in: [category]) == [category] {
+                query = ""
+            }
             open(category)
         case .hit(let hit):
             onClose?()
@@ -695,6 +736,15 @@ nonisolated enum AssistantMatch {
         case .fuzzy:
             return wordStarts || tokens.allSatisfy { name.contains($0) } || isSubsequence(query.filter { !$0.isWhitespace }, of: name)
         }
+    }
+
+    /// The name starts with what was typed ("application" and "appl" start "Applications"); case
+    /// and accents do not matter.
+    static func startsName(_ name: String, _ query: String) -> Bool {
+        let name = fold(name)
+        let query = fold(query).trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return false }
+        return name.hasPrefix(query)
     }
 
     /// Every character of `needle` in `haystack`, in order ("sfr" in "safari").

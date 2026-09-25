@@ -111,6 +111,13 @@ struct TimerRuler: View {
 
 /// The scrolling scale of one unit. It starts on its value: set on appear it first drew at 0 and
 /// then jumped there.
+///
+/// The value is read from the scroll offset (a tick per `tickSpacing`) while the user scrolls,
+/// not from the scroll position's id: that id lagged and jumped during a fast swipe (a lazy stack
+/// reports whichever of its views it has laid out), and the ruler then pushed the scroll back
+/// while the finger was still on it — the value stuck for a few ticks and so did the haptics.
+/// Values below `minimum` are drawn as landmarks beside the scale, not as scroll targets, so the
+/// ruler ends there with the system's own rubber band instead of being scrolled back.
 private struct RulerTrack: View {
     @Binding var minutes: Int
     let range: ClosedRange<Int>
@@ -122,6 +129,7 @@ private struct RulerTrack: View {
 
     @State private var scrolled: Int?
     @State private var dragStart: Int?
+    @State private var phase: ScrollPhase = .idle
 
     init(minutes: Binding<Int>, range: ClosedRange<Int>, minimum: Int, isEditable: Bool, showsLabels: Bool,
          tint: Color, onInteraction: @escaping (Bool) -> Void) {
@@ -135,26 +143,63 @@ private struct RulerTrack: View {
         _scrolled = State(initialValue: minutes.wrappedValue)
     }
 
+    /// The first value the ruler can settle on. A ruler that only shows a value (a running
+    /// countdown) reaches 0.
+    private var first: Int { isEditable ? min(max(range.lowerBound, minimum), range.upperBound) : range.lowerBound }
+
+    /// The user's own finger or momentum is moving the ruler (not an animation of ours).
+    private var isUserScrolling: Bool {
+        phase == .tracking || phase == .interacting || phase == .decelerating
+    }
+
     var body: some View {
         GeometryReader { proxy in
-            let margin = max(0, proxy.size.width / 2 - TimerRuler.tickSpacing / 2)
+            let spacing = TimerRuler.tickSpacing
+            let margin = max(0, proxy.size.width / 2 - spacing / 2)
+            let landmarks = Array(range.lowerBound..<first)
+            ScrollViewReader { reader in
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
-                    ForEach(range, id: \.self) { minute in
+                    ForEach(first...range.upperBound, id: \.self) { minute in
                         Tick(minute: minute, isPast: minute > minutes, showsLabel: showsLabels, tint: tint)
-                            .frame(width: TimerRuler.tickSpacing)
+                            .frame(width: spacing)
                             .id(minute)
                     }
                 }
                 .scrollTargetLayout()
+                .overlay(alignment: .leading) {
+                    if !landmarks.isEmpty {
+                        HStack(spacing: 0) {
+                            ForEach(landmarks, id: \.self) { minute in
+                                Tick(minute: minute, isPast: minute > minutes, showsLabel: showsLabels, tint: tint)
+                                    .frame(width: spacing)
+                            }
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .offset(x: -CGFloat(landmarks.count) * spacing)
+                    }
+                }
             }
             .contentMargins(.horizontal, margin, for: .scrollContent)
             .scrollPosition(id: $scrolled, anchor: .center)
             .scrollTargetBehavior(.viewAligned)
             .scrollIndicators(.never)
             .scrollDisabled(!isEditable)
-            .onScrollPhaseChange { _, phase in
-                onInteraction(phase != .idle)
+            .onScrollPhaseChange { _, new in
+                phase = new
+                onInteraction(new != .idle)
+                // Settled: the tick under the marker is the value.
+                if new == .idle, let scrolled { commit(scrolled) }
+            }
+            .onScrollGeometryChange(for: Int.self) { geometry in
+                Int(((geometry.contentOffset.x + geometry.contentInsets.leading) / spacing).rounded())
+            } action: { _, index in
+                if isUserScrolling {
+                    commit(first + index)
+                } else if phase == .idle, dragStart == nil, first + index != target {
+                    // At rest off its value (the layout moved the content): back onto it at once.
+                    reader.scrollTo(target, anchor: .center)
+                }
             }
             // The mouse has no scroll gesture of its own: a drag moves the ruler a minute per tick.
             .simultaneousGesture(
@@ -165,15 +210,22 @@ private struct RulerTrack: View {
                             dragStart = minutes
                             onInteraction(true)
                         }
-                        let offset = Int((value.translation.width / TimerRuler.tickSpacing).rounded())
+                        let offset = Int((value.translation.width / spacing).rounded())
                         let target = clamp((dragStart ?? minutes) - offset)
                         if target != scrolled { scrolled = target }
+                        commit(target)
                     }
                     .onEnded { _ in
                         dragStart = nil
                         onInteraction(false)
                     }
             )
+            // On its value from the first frame, and again while the island grows around it: the
+            // scroll view drops its initial position when its width changes (it then sat on the
+            // first tick under a readout saying 9:00, and the first swipe started from there).
+            .onAppear { align(reader) }
+            .onChange(of: proxy.size.width) { align(reader) }
+            }
         }
         .mask {
             LinearGradient(
@@ -188,21 +240,32 @@ private struct RulerTrack: View {
             )
         }
         .onChange(of: minutes) { _, new in
-            if scrolled != new { withAnimation(Motion.content) { scrolled = new } }
-        }
-        .onChange(of: scrolled) { _, new in
-            guard let new, isEditable else { return }
-            let value = clamp(new)
-            if value != new {
-                // 0 is on the ruler as a landmark only.
-                withAnimation(Motion.content) { scrolled = value }
-            }
-            if value != minutes { minutes = value }
+            // Set from elsewhere (a unit switch, a reset, the running countdown): scroll there. Not
+            // while the user moves the ruler — that is where the value came from.
+            guard !isUserScrolling, dragStart == nil else { return }
+            let target = isEditable ? clamp(new) : min(max(new, range.lowerBound), range.upperBound)
+            if scrolled != target { withAnimation(Motion.content) { scrolled = target } }
         }
     }
 
+    /// Where the ruler rests: on the value.
+    private var target: Int { isEditable ? clamp(minutes) : min(max(minutes, range.lowerBound), range.upperBound) }
+
+    private func align(_ reader: ScrollViewProxy) {
+        guard !isUserScrolling, dragStart == nil else { return }
+        let target = target
+        reader.scrollTo(target, anchor: .center)
+        scrolled = target
+    }
+
+    private func commit(_ value: Int) {
+        guard isEditable else { return }
+        let value = clamp(value)
+        if value != minutes { minutes = value }
+    }
+
     private func clamp(_ value: Int) -> Int {
-        min(max(value, max(range.lowerBound, minimum)), range.upperBound)
+        min(max(value, first), range.upperBound)
     }
 }
 

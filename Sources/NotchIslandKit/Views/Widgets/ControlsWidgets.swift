@@ -105,49 +105,48 @@ struct ControlWidget: View {
             VStack(alignment: .leading, spacing: Metrics.Spacing.xSmall) {
                 ControlButtonFace(control: control, on: on, diameter: diameter)
                 Spacer(minLength: 0)
-                label(on: on, room: size.width, lineRoom: size.height - diameter - Metrics.Spacing.xSmall)
+                label(on: on, room: size.width, width: size.width, lineRoom: size.height - diameter - Metrics.Spacing.xSmall)
             }
             .frame(width: size.width, height: size.height, alignment: .leading)
         } else {
             let diameter = min(size.height, max(20, size.width * 0.32), 44)
-            HStack(spacing: max(4, diameter * 0.2)) {
+            let gap = max(4, diameter * 0.2)
+            HStack(spacing: gap) {
                 ControlButtonFace(control: control, on: on, diameter: diameter)
-                label(on: on, room: size.height * 1.4, lineRoom: size.height)
+                label(on: on, room: size.height * 1.4, width: size.width - diameter - gap, lineRoom: size.height)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(width: size.width, height: size.height, alignment: .leading)
         }
     }
 
-    /// The name and the state, in the first arrangement that fits: both, the name alone, the name
-    /// over two lines (broken only between words), then the name a size smaller, twice — and when
-    /// even that does not fit, no label at all rather than a name cut to "Blueto…". One flat list:
-    /// ViewThatFits measures a nested ViewThatFits by its widest choice.
-    private func label(on: Bool, room: CGFloat, lineRoom: CGFloat) -> some View {
-        let nameSize = WidgetType.points(room, ratio: 0.26, min: 10, max: 15, widget.size(of: .controlName))
-        let statusSize = WidgetType.points(room, ratio: 0.22, min: 9, max: 13, widget.size(of: .controlStatus))
-        let showsName = widget.shows(.controlName), showsStatus = widget.shows(.controlStatus)
-        let smaller = max(8, nameSize * 0.86), smallest = max(7.5, nameSize * 0.74)
-        let splits = showsName && control.title.split(separator: " ").count == 2
-        return ViewThatFits(in: .horizontal) {
-            if showsName, showsStatus, lineRoom >= nameSize * 1.25 + statusSize * 1.25 {
-                VStack(alignment: .leading, spacing: 0) {
-                    nameText(nameSize).lineLimit(1)
-                    Text(control.status(on: on)).font(.system(size: statusSize)).foregroundStyle(.secondary)
-                        .lineLimit(1).contentTransition(.opacity)
-                }
-                .fixedSize()
+    /// The name and the state, in the first arrangement that holds the name at (about) its best
+    /// size: both on two lines, the name alone on one, or the name over two lines (broken only
+    /// between words) — measured against the room, never a name cut to "Blueto…". The sizes are
+    /// the element sizes' (`WidgetType.fitted`): when the room caps the name, Large takes it all and
+    /// Medium and Small a step and two below, so the three always differ.
+    @ViewBuilder private func label(on: Bool, room: CGFloat, width: CGFloat, lineRoom: CGFloat) -> some View {
+        let layout = ControlLabelLayout.choose(
+            title: control.title, status: control.status(on: on), longestStatus: control.longestStatus,
+            showsName: widget.shows(.controlName), showsStatus: widget.shows(.controlStatus),
+            nameDesign: WidgetType.points(room, ratio: 0.26, min: 10, max: 15),
+            statusDesign: WidgetType.points(room, ratio: 0.22, min: 9, max: 13),
+            width: width - 2, height: lineRoom,
+            nameSize: widget.size(of: .controlName), statusSize: widget.size(of: .controlStatus),
+            minimum: Self.minimumLabelSize)
+        switch layout.arrangement {
+        case .nameAndStatus:
+            VStack(alignment: .leading, spacing: 0) {
+                nameText(layout.name).lineLimit(1)
+                Text(control.status(on: on)).font(.system(size: layout.status)).foregroundStyle(.secondary)
+                    .lineLimit(1).contentTransition(.opacity)
             }
-            line(on: on, size: nameSize, statusSize: statusSize)
-            if splits, lineRoom >= nameSize * 2.3 { twoWords(nameSize) }
-            if showsName {
-                nameText(smaller).lineLimit(1).fixedSize()
-                if splits, lineRoom >= smaller * 2.3 { twoWords(smaller) }
-                nameText(smallest).lineLimit(1).fixedSize()
-                if splits, lineRoom >= smallest * 2.3 { twoWords(smallest) }
-                // The floor: still legible on a Retina screen.
-                nameText(Self.minimumLabelSize).lineLimit(1).fixedSize()
-            }
+            .minimumScaleFactor(0.85)
+        case .line:
+            line(on: on, size: layout.name, statusSize: layout.status)
+        case .twoWords:
+            twoWords(layout.name)
+        case .none:
             Color.clear.frame(width: 0, height: 0)
         }
     }
@@ -166,7 +165,7 @@ struct ControlWidget: View {
             }
         }
         .lineLimit(1)
-        .fixedSize()
+        .minimumScaleFactor(0.85)
     }
 
     private func twoWords(_ size: CGFloat) -> some View {
@@ -175,7 +174,77 @@ struct ControlWidget: View {
                 Text(word).font(.system(size: size, weight: .semibold)).lineLimit(1)
             }
         }
-        .fixedSize()
+        .minimumScaleFactor(0.85)
+    }
+}
+
+/// How a control tile's label is laid out and how large (see `ControlWidget.label`). Pure, so the
+/// sizes can be tested without drawing.
+nonisolated struct ControlLabelLayout: Equatable, Sendable {
+    nonisolated enum Arrangement: Sendable { case nameAndStatus, line, twoWords, none }
+
+    var arrangement: Arrangement
+    var name: CGFloat
+    var status: CGFloat
+
+    static func choose(title: String, status: String, longestStatus: String, showsName: Bool, showsStatus: Bool,
+                       nameDesign: CGFloat, statusDesign: CGFloat, width: CGFloat, height: CGFloat,
+                       nameSize: ElementSize, statusSize: ElementSize, minimum: CGFloat) -> ControlLabelLayout {
+        guard showsName || showsStatus, width > 0, height > 0 else { return ControlLabelLayout(arrangement: .none, name: 0, status: 0) }
+        func nameFit(_ text: String, lines: CGFloat, height: CGFloat) -> CGFloat {
+            min(WidgetType.size(fitting: text, in: width, weight: .semibold), WidgetType.size(fittingLines: lines, in: height))
+        }
+        let statusOneLine = WidgetType.fitted(
+            statusDesign, fit: min(WidgetType.size(fitting: longestStatus, in: width), WidgetType.size(fittingLines: 1, in: height)),
+            statusSize, floor: minimum)
+        guard showsName else {
+            return ControlLabelLayout(arrangement: .line, name: 0, status: statusOneLine)
+        }
+        let nameAlone = WidgetType.fitted(nameDesign, fit: nameFit(title, lines: 1, height: height), nameSize, floor: minimum)
+        var candidates: [ControlLabelLayout] = []
+        if showsStatus {
+            // The height shared in proportion to the two design sizes.
+            let share = nameDesign / (nameDesign + statusDesign)
+            let name = WidgetType.fitted(nameDesign, fit: nameFit(title, lines: 1, height: height * share), nameSize, floor: minimum)
+            let state = WidgetType.fitted(
+                statusDesign, fit: min(WidgetType.size(fitting: longestStatus, in: width),
+                                       WidgetType.size(fittingLines: 1, in: height * (1 - share))),
+                statusSize, floor: minimum)
+            candidates.append(ControlLabelLayout(arrangement: .nameAndStatus, name: name, status: state))
+        }
+        candidates.append(ControlLabelLayout(arrangement: .line, name: nameAlone, status: statusOneLine))
+        let words = title.split(separator: " ").map(String.init)
+        if words.count == 2, let longest = words.max(by: { $0.count < $1.count }) {
+            let name = WidgetType.fitted(nameDesign, fit: nameFit(longest, lines: 2.1, height: height), nameSize, floor: minimum)
+            candidates.append(ControlLabelLayout(arrangement: .twoWords, name: name, status: statusOneLine))
+        }
+        // The first arrangement (most information first) that keeps the name within a step of the
+        // largest any of them allows. The floor itself only when nothing larger fits.
+        let best = candidates.map(\.name).max() ?? 0
+        let legible = candidates.filter { $0.fitsWithoutFloor(width: width, height: height, title: title) }
+        guard let pick = legible.first(where: { $0.name >= best * 0.88 }) ?? legible.first else {
+            return ControlLabelLayout(arrangement: .none, name: 0, status: 0)
+        }
+        return pick
+    }
+
+    /// The arrangement really fits at its size (the floor's steps may push a size past the room).
+    func fitsWithoutFloor(width: CGFloat, height: CGFloat, title: String) -> Bool {
+        let slack: CGFloat = 1.12
+        switch arrangement {
+        case .nameAndStatus:
+            return (name + status) * WidgetType.lineHeight <= height * slack
+                && WidgetType.size(fitting: title, in: width * slack, weight: .semibold) >= name
+        case .line:
+            return name == 0 || (name * WidgetType.lineHeight <= height * slack
+                && WidgetType.size(fitting: title, in: width * slack, weight: .semibold) >= name)
+        case .twoWords:
+            let longest = title.split(separator: " ").map(String.init).max { $0.count < $1.count } ?? title
+            return name * WidgetType.lineHeight * 2 <= height * slack
+                && WidgetType.size(fitting: longest, in: width * slack, weight: .semibold) >= name
+        case .none:
+            return true
+        }
     }
 }
 
@@ -271,7 +340,8 @@ struct KeyboardWidget: View {
                     LevelRing(value: level, symbol: level < 0.01 ? "light.min" : "light.max",
                               showsValue: widget.shows(.levelValue), size: size,
                               set: { controls.setKeyboardBrightness($0) },
-                              onInteraction: { model.island.isInteracting = $0 })
+                              onInteraction: { model.island.isInteracting = $0 },
+                              symbolSize: widget.size(of: .levelIcon), valueSize: widget.size(of: .levelValue))
                 } else {
                     slider(level, controls)
                 }

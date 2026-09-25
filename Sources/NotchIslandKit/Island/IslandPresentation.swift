@@ -77,12 +77,31 @@ nonisolated enum ExpandedPage: String, Sendable, Equatable, CaseIterable, Identi
 }
 
 /// How much of the assistant shows, as in the system's Search window: only the field until the
-/// pointer comes over it (or ↓), then the suggestions below it; a full list once there is a query,
-/// an open suggestion or an answer; and a larger window for the app gallery.
-nonisolated enum AssistantRoom: Int, Sendable, Equatable, Comparable, CaseIterable {
-    case field, suggestions, list, gallery
+/// pointer comes over it (or ↓), then the suggestions below it; for a query exactly as many rows
+/// as it has (up to the full list, which then scrolls); the full list for an open suggestion or an
+/// answer; and a larger window for the app gallery.
+nonisolated enum AssistantRoom: Sendable, Hashable, Comparable {
+    case field
+    /// The field and this many rows under it.
+    case rows(Int)
+    case list
+    case gallery
 
-    static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
+    /// The field and the three suggestions (Applications, Files, Actions).
+    static let suggestions = AssistantRoom.rows(3)
+
+    static let allCases: [AssistantRoom] = [.field, .suggestions, .list, .gallery]
+
+    private var rank: Double {
+        switch self {
+        case .field: 0
+        case .rows(let count): 1 + Double(min(max(count, 0), 999)) / 1000
+        case .list: 2
+        case .gallery: 3
+        }
+    }
+
+    static func < (a: Self, b: Self) -> Bool { a.rank < b.rank }
 }
 
 nonisolated enum IslandPresentation: Sendable, Equatable {

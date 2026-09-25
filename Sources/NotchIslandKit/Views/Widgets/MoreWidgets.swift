@@ -10,12 +10,17 @@ struct DateTimeWidget: View {
         TimelineView(.everyMinute) { context in
             let showsTime = widget.shows(.readout), showsDate = widget.shows(.dateLine)
             let tall = size.height >= 56
-            // "22:34" is about three times as wide as its type size: never wider than the widget.
-            let timeSize = min(WidgetType.points(tall ? size.height * 0.62 : size.height, ratio: 0.8, min: 13, max: 48,
-                                                 widget.size(of: .readout)),
-                               (size.width - 8) / 3.1)
-            let dateSize = WidgetType.points(size.height, ratio: tall ? 0.18 : 0.42, min: 9, max: 17,
-                                             widget.size(of: .dateLine))
+            // Never wider than the widget, nor taller than its share of it; below that cap S, M
+            // and L stay apart (`WidgetType.fitted`).
+            let dateSize = WidgetType.fitted(WidgetType.points(size.height, ratio: tall ? 0.18 : 0.42, min: 9, max: 17),
+                                             fit: WidgetType.size(fittingLines: 1, in: tall ? size.height * 0.34 : size.height),
+                                             widget.size(of: .dateLine), floor: 8)
+            let timeText = context.date.formatted(.dateTime.hour().minute())
+            let timeSize = WidgetType.fitted(
+                WidgetType.points(tall ? size.height * 0.62 : size.height, ratio: 0.8, min: 13, max: 48),
+                fit: min(WidgetType.size(fitting: timeText, in: size.width - 8, weight: .semibold, rounded: true, monospacedDigits: true),
+                         WidgetType.size(fittingLines: 1, in: tall && showsDate ? size.height - dateSize * WidgetType.lineHeight : size.height) * 1.08),
+                widget.size(of: .readout), floor: 11)
             let time = Text(context.date, format: .dateTime.hour().minute())
                 .font(.system(size: timeSize, weight: .semibold, design: .rounded).monospacedDigit())
             // The longest date that fits: "Thursday, 24 September", "Thu, 24 Sep", "24".
@@ -75,20 +80,25 @@ struct SystemStatsWidget: View {
                 // Rings side by side.
                 HStack(spacing: 10) {
                     ForEach(items, id: \.option) { item in
+                        let room = min(size.height - 4, size.width / CGFloat(max(items.count, 1)) - 10)
                         StatRing(title: item.title, value: item.value,
-                                 diameter: min(size.height - 16, size.width / CGFloat(max(items.count, 1)) - 10)
-                                    * widget.size(of: item.option).factor.clamped(to: 0.6...1))
+                                 diameter: WidgetType.fitted(room, fit: room, widget.size(of: item.option), floor: 20))
                     }
                 }
             } else {
                 // Bars stacked (one row) or side by side (wide).
                 let side = size.width >= 200
                 let layout = side ? AnyLayout(HStackLayout(spacing: 12)) : AnyLayout(VStackLayout(spacing: 3))
+                let rowHeight = side || items.count < 2 ? size.height : (size.height - 3) / 2
+                let barWidth = (side ? itemWidth - 12 : size.width) - 8
                 layout {
                     ForEach(items, id: \.option) { item in
+                        // The name and the value beside a bar of at least 14 pt.
+                        let fit = min(WidgetType.size(fittingLines: 1, in: rowHeight),
+                                      WidgetType.size(fitting: item.title + "100%", in: barWidth - 12 - 14, weight: .semibold))
                         StatBar(title: item.title, value: item.value,
-                                textSize: WidgetType.points(side ? size.height : size.height / 2, ratio: 0.42, min: 8, max: 13,
-                                                            widget.size(of: item.option)))
+                                textSize: WidgetType.fitted(WidgetType.points(rowHeight, ratio: 0.42, min: 8, max: 13),
+                                                            fit: fit, widget.size(of: item.option), floor: 7))
                     }
                 }
                 .padding(.horizontal, 4)

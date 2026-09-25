@@ -745,3 +745,90 @@ private func line(_ json: String) -> Data { Data(json.utf8) }
         #expect(MediaRemoteAdapterSource.watchdog.contains("exec { $ARGV[0] } @ARGV"))
     }
 }
+
+@Suite struct AdapterCommandCheckTests {
+    func state(title: String = "Video", id: String = "1", elapsed: TimeInterval = 120, duration: TimeInterval = 600,
+               playing: Bool = false, browser: Bool = false) -> AdapterTrackState {
+        var state = AdapterTrackState()
+        state.title = title
+        state.uniqueIdentifier = id
+        state.elapsed = elapsed
+        state.anchor = .now
+        state.duration = duration
+        state.isPlaying = playing
+        if browser {
+            state.bundleIdentifier = "com.apple.WebKit.GPU"
+            state.parentBundleIdentifier = "com.apple.Safari"
+        } else {
+            state.bundleIdentifier = "org.videolan.vlc"
+        }
+        return state
+    }
+
+    @Test func playIsAnsweredOnlyByAReportOfPlaying() {
+        let check = AdapterCommandCheck(kind: .play, baseline: state(), at: .now)
+        var update = AdapterUpdate()
+        update.isDiff = true
+        #expect(!check.isAnswered(by: update, now: state()))
+        update.playing = .value(true)
+        #expect(check.isAnswered(by: update, now: state(playing: true)))
+    }
+
+    @Test func unansweredPlayIsSentOnceMoreNeverToggled() throws {
+        let check = AdapterCommandCheck(kind: .play, baseline: state(), at: .now)
+        let first = try #require(check.followUp())
+        #expect(first.arguments == ["send", "0"] && !first.wakesPlayer)
+        let second = try #require(first.next)
+        #expect(second.followUp() == nil)
+    }
+
+    /// A suspended browser page answers nothing until its window comes forward (measured).
+    @Test func aBrowsersUnansweredPlayWakesItOnce() throws {
+        let check = AdapterCommandCheck(kind: .play, baseline: state(browser: true), at: .now)
+        #expect(check.isBrowser)
+        let step = try #require(check.followUp())
+        #expect(step.arguments == ["send", "0"] && step.wakesPlayer)
+        let woken = try #require(step.next)
+        #expect(woken.woke && woken.followUp() == nil)
+        #expect(woken.patience > check.patience)
+    }
+
+    @Test func nextWithoutAnotherVideoSeeksToTheEndThenWakesABrowser() throws {
+        let check = AdapterCommandCheck(kind: .next, baseline: state(browser: true), at: .now)
+        var update = AdapterUpdate()
+        update.isDiff = true
+        #expect(!check.isAnswered(by: update, now: state()))
+        #expect(check.isAnswered(by: update, now: state(title: "Next Video", id: "2")))
+        // First the seek, which needs no window forward.
+        let seek = try #require(check.followUp())
+        #expect(seek.arguments == ["seek", String(Int((600 - 0.25) * 1_000_000))] && !seek.wakesPlayer)
+        let seeking = try #require(seek.next)
+        var landed = AdapterUpdate()
+        landed.isDiff = true
+        landed.elapsed = .value(599.8)
+        #expect(seeking.isAnswered(by: landed, now: state(elapsed: 599.8)))
+        // Unanswered even so (the page is suspended): wake and send next again, then seek again.
+        let wake = try #require(seeking.followUp())
+        #expect(wake.arguments == ["send", "4"] && wake.wakesPlayer)
+        let woken = try #require(wake.next)
+        let seekAgain = try #require(woken.followUp())
+        #expect(!seekAgain.wakesPlayer && seekAgain.arguments.first == "seek")
+        #expect(try #require(seekAgain.next).followUp() == nil)
+    }
+
+    @Test func nextOnALiveStreamOfAnotherPlayerHasNothingToTry() {
+        #expect(AdapterCommandCheck(kind: .next, baseline: state(duration: 0), at: .now).followUp() == nil)
+    }
+
+    @Test func previousRestartsWhenThePageHasNoPreviousVideo() throws {
+        let check = AdapterCommandCheck(kind: .previous, baseline: state(elapsed: 120), at: .now)
+        var restarted = AdapterUpdate()
+        restarted.isDiff = true
+        restarted.elapsed = .value(0.4)
+        #expect(check.isAnswered(by: restarted, now: state(elapsed: 0.4)))
+        let step = try #require(check.followUp())
+        #expect(step.arguments == ["seek", "0"])
+        // Already at the start, not a browser: nothing to do.
+        #expect(AdapterCommandCheck(kind: .previous, baseline: state(elapsed: 1), at: .now).followUp() == nil)
+    }
+}

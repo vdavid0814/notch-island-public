@@ -39,6 +39,22 @@ nonisolated enum SystemPlayers {
         "com.brave.Browser.app.",
     ]
 
+    /// Browsers (and web apps saved from them): a page in a background tab that has been paused for
+    /// a few minutes is suspended by the browser and answers no Now Playing command until its window
+    /// is brought forward (measured with YouTube in Safari: play, toggle, seek and the keyboard's
+    /// play key all went unanswered after eight minutes).
+    static let browserIDs: Set<String> = [
+        "com.apple.Safari", "com.apple.SafariTechnologyPreview", "com.google.Chrome", "com.google.Chrome.beta",
+        "com.google.Chrome.dev", "com.google.Chrome.canary", "org.chromium.Chromium", "company.thebrowser.Browser",
+        "company.thebrowser.dia", "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition", "com.microsoft.edgemac",
+        "com.brave.Browser", "com.operasoftware.Opera", "com.vivaldi.Vivaldi", "com.kagi.kagimacOS", "app.zen-browser.zen",
+    ]
+
+    static func isBrowser(_ bundleID: String?) -> Bool {
+        guard let bundleID else { return false }
+        return browserIDs.contains(bundleID) || bundlePrefixes.contains { bundleID.hasPrefix($0) }
+    }
+
     static func contains(_ bundleID: String?) -> Bool {
         guard let bundleID else { return false }
         return bundleIDs.contains(bundleID) || bundlePrefixes.contains { bundleID.hasPrefix($0) }

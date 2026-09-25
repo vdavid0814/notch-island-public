@@ -138,13 +138,16 @@ import Testing
         #expect(model.room == .field)
         model.moveSelection(by: 1)
         #expect(model.room == .suggestions)
-        // Up to three rows keep the suggestions' height; more take the full list.
+        // A query is exactly as tall as its rows, up to the full list.
         model.query = "zzqx"
         await model.settle()
-        #expect(model.rows.count <= 3 && model.room == .suggestions)
+        #expect(model.room == .rows(model.rows.count))
         model.query = "saf"
         await model.settle()
-        #expect(model.rows.count > 3 && model.room == .list)
+        #expect(model.rows.count > 3 && model.room == .rows(model.rows.count))
+        let layout = IslandLayout(notch: CGSize(width: 156, height: 28), scale: .standard)
+        #expect(layout.size(for: .assistant(model.room)).height < layout.size(for: .assistant(.list)).height)
+        #expect(layout.size(for: .assistant(.rows(40))).height == layout.size(for: .assistant(.list)).height)
         model.query = ""
         model.open(.applications)
         #expect(model.room == .gallery)
@@ -196,6 +199,26 @@ import Testing
         #expect(commands == [.startStopwatch])
         // The app decides how to close (the panel may take the assistant's place).
         #expect(!closed)
+    }
+
+    @Test func typingASuggestionsNameOffersItFirstAndReturnOpensIt() async {
+        let model = model(stubSources(apps: ["App Store"], allApps: ["Safari", "Music"]))
+        model.query = "application"
+        await model.settle()
+        #expect(model.rows.first == .category(.applications))
+        model.activateSelection()
+        await model.settle()
+        // Its name is not a filter for the list it opens.
+        #expect(model.category == .applications && model.query.isEmpty && model.rows.count == 2)
+        model.open(nil)
+        // "app" starts an app's name: the app comes first, the suggestion after it.
+        model.query = "app"
+        await model.settle()
+        #expect(model.rows.first.map { if case .hit(let hit) = $0 { hit.name == "App Store" } else { false } } == true)
+        #expect(model.rows.contains(.category(.applications)))
+        // Too short to mean a suggestion.
+        #expect(AssistantModel.categories(named: "ap", in: AssistantCategory.allCases).isEmpty)
+        #expect(AssistantModel.categories(named: "shortcuts", in: AssistantCategory.allCases) == [.actions])
     }
 
     @Test func rootQueryListsHitsActionsThenHandOffs() async {

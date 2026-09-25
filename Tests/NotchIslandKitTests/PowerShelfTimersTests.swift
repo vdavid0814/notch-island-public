@@ -910,9 +910,16 @@ private func settle(until condition: () -> Bool) async {
         draft = units.duration(setting: .seconds, to: 45, in: draft)
         #expect(draft == 165)
         #expect(units.value(of: .minutes, in: draft) == 2 && units.value(of: .seconds, in: draft) == 45)
-        // 0 minutes and some seconds is a timer; 0:00 is not.
+        // 0 minutes and some seconds is a timer; 0:00 is not, but the ruler may pass it.
         #expect(units.duration(setting: .minutes, to: 0, in: 45) == 45)
-        #expect(units.duration(setting: .seconds, to: 0, in: 45) == 1)
+        #expect(units.duration(setting: .seconds, to: 0, in: 45) == 0)
+        #expect(!units.canStart(0) && units.canStart(45))
+        #expect(units.normalized(0) == 1)
+        // The minutes passing 0 on the way up leave the seconds at 0 (they used to snap to 0:01).
+        var passing = units.duration(setting: .minutes, to: 0, in: 300)
+        #expect(passing == 0 && units.value(of: .seconds, in: passing) == 0)
+        passing = units.duration(setting: .minutes, to: 7, in: passing)
+        #expect(passing == 420 && units.value(of: .seconds, in: passing) == 0)
         #expect(units.next(after: .seconds) == .minutes)
     }
 

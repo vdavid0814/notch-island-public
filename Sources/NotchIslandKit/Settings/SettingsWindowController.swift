@@ -47,7 +47,7 @@ import SwiftUI
             defer: true
         )
         window.contentViewController = hosting
-        window.title = "NotchIsland Settings"
+        window.title = "Settings"
         window.toolbarStyle = .unified
         window.titlebarAppearsTransparent = false
         // Ownership stays with `self.window` (ARC); AppKit's release-on-close would double-free it.

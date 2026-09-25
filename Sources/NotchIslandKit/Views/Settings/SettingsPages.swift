@@ -10,7 +10,11 @@ import SwiftUI
 /// General and appearance on one page: how the island looks first (surface cards, size), then how
 /// it opens, how it behaves, and startup.
 struct GeneralSettingsPage: View {
+    /// How far a grouped form's footer sits inside its section's edges.
+    static let footerInset: CGFloat = 10
+
     @Environment(AppModel.self) private var model
+    @AppStorage(DesktopBackdropStyle.key) private var previewWallpaper: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
 
     var body: some View {
         @Bindable var preferences = model.preferences
@@ -99,6 +103,17 @@ struct GeneralSettingsPage: View {
                     InfoLabel("Show in menu bar", "The NotchIsland menu in the menu bar. Hidden, open NotchIsland from Finder or Spotlight to come back here.")
                 }
             }
+
+            // The card is the section: as the footer, it gets none of the form's own row box
+            // (a squarer, taller box around the capsule; row backgrounds cannot be cleared here).
+            Section {
+            } header: {
+                InfoLabel("Preview Wallpaper", "The desktop behind the island in Settings' pictures and in the widget studio: your own desktop picture, the macOS default wallpaper (dark or light), or a black and white test pattern that shows exactly what the glass lets through.")
+            } footer: {
+                WallpaperCard(selection: $previewWallpaper)
+                    // A footer is inset from the section's edges: out to the width of the boxes above.
+                    .padding(.horizontal, -Self.footerInset)
+            }
         }
     }
 }
@@ -138,11 +153,20 @@ private struct SurfacePicker: View {
 private struct SurfaceThumbnail: View {
     let style: IslandGlassStyle
 
+    @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
+
     var body: some View {
         let shape = IslandShape(bottomRadius: 13, shoulderRadius: 4)
         ZStack(alignment: .top) {
-            DefaultWallpaper()
-            Rectangle().fill(.black.opacity(0.14)).frame(height: 12)
+            DesktopBackdrop(style: backdrop)
+            PreviewMenuBar(height: 12, notchWidth: 104, darkText: backdrop.prefersDarkMenuBar,
+                           backing: backdrop.menuBarBacking)
+            if style.hasGlassSurface {
+                // What the glass lets through: the same desktop, blurred, inside the island.
+                DesktopBackdrop(style: backdrop)
+                    .blur(radius: 4)
+                    .mask(alignment: .top) { shape.frame(width: 104, height: 40) }
+            }
             HStack(spacing: 6) {
                 RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.85)).frame(width: 14, height: 14)
                 VStack(alignment: .leading, spacing: 3) {

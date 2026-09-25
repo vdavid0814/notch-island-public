@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// Now Playing for every app registered with the system (Music, Spotify, Safari, YouTube, VLC, IINA)
 /// through the optional, vendored ungive/mediaremote-adapter.
@@ -50,6 +50,11 @@ final class MediaRemoteAdapterSource: MediaSource {
     private var track = AdapterTrackState()
     /// One-shot command children, retained until they exit.
     private var commands: [ObjectIdentifier: Process] = [:]
+    /// Whether the player itself last said it was playing (not an optimistic guess of ours).
+    private var reportedPlaying: Bool?
+    /// A command waiting for the player's answer, and its deadline.
+    private var check: AdapterCommandCheck?
+    private var checkTask: Task<Void, Never>?
 
     init(installation: AdapterInstallation) {
         self.installation = installation
@@ -67,8 +72,14 @@ final class MediaRemoteAdapterSource: MediaSource {
         guard isStarted else { return }
         isStarted = false
         haltChild()
+        disarm()
+        wakeTask?.cancel()
+        wakeTask = nil
+        wokeFrom = nil
+        wokeBrowser = nil
         restartPolicy = AdapterRestartPolicy()
         track = AdapterTrackState()
+        reportedPlaying = nil
     }
 
     /// Nothing is visible while suspended, and the adapter re-sends a full snapshot as soon as it
@@ -92,7 +103,31 @@ final class MediaRemoteAdapterSource: MediaSource {
     /// not read commands, and a user tap is rare enough that a second resident process is not worth it.
     func send(_ command: MediaCommand) {
         guard isStarted else { return }
-        let arguments: [String] = switch command {
+        // Toggle becomes the explicit command for the state the user sees. A browser that paused a
+        // while ago can drift from what MediaRemote last heard, and a toggle then "pauses" the
+        // paused video: the play button did nothing.
+        let command: MediaCommand = switch command {
+        case .togglePlayPause: (reportedPlaying ?? track.isPlaying ?? false) ? .pause : .play
+        default: command
+        }
+        let arguments = Self.arguments(for: command)
+        let baseline = track
+        if let current = track.snapshot {
+            track.adopt(current.applying(command, at: .now))
+            onEvent?(.nowPlaying(track.snapshot))
+        }
+        let id = runCommand(arguments)
+        // Play, next and previous are checked: the player must answer, or the command is sent the
+        // way it can take it (`AdapterCommandCheck`).
+        if let kind = AdapterCommandCheck.Kind(command) {
+            arm(AdapterCommandCheck(kind: kind, baseline: baseline, at: .now, commandID: id))
+        } else {
+            disarm()
+        }
+    }
+
+    nonisolated static func arguments(for command: MediaCommand) -> [String] {
+        switch command {
         // MediaRemote MRCommand values.
         case .play: ["send", "0"]
         case .pause: ["send", "1"]
@@ -102,14 +137,9 @@ final class MediaRemoteAdapterSource: MediaSource {
         // Microseconds.
         case .seek(let seconds): ["seek", String(Int((max(0, seconds) * 1_000_000).rounded()))]
         }
-        if let current = track.snapshot {
-            track.adopt(current.applying(command, at: .now))
-            onEvent?(.nowPlaying(track.snapshot))
-        }
-        runCommand(arguments)
     }
 
-    private func runCommand(_ arguments: [String]) {
+    @discardableResult private func runCommand(_ arguments: [String]) -> ObjectIdentifier? {
         let process = Process()
         process.executableURL = AdapterInstallation.perlURL
         process.arguments = [installation.scriptURL.path, installation.frameworkURL.path] + arguments
@@ -121,13 +151,117 @@ final class MediaRemoteAdapterSource: MediaSource {
         do {
             try process.run()
             commands[id] = process
+            return id
         } catch {
             Log.media.error("adapter command failed to launch: \(error.localizedDescription, privacy: .public)")
+            return nil
         }
     }
 
-    private func commandExited(_ id: ObjectIdentifier) {
+    private func commandExited(_ id: ObjectIdentifier, status: Int32) {
         commands[id] = nil
+        // MediaRemote refused it ("Failed to send command"): no point waiting for an answer.
+        if status != 0, let check, check.commandID == id {
+            Log.media.notice("adapter command refused (status \(status, privacy: .public))")
+            followUp()
+        }
+    }
+
+    // MARK: Command checks
+
+    private func arm(_ new: AdapterCommandCheck) {
+        checkTask?.cancel()
+        check = new
+        checkTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(new.patience), tolerance: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            self?.followUp()
+        }
+    }
+
+    private func disarm() {
+        checkTask?.cancel()
+        checkTask = nil
+        check = nil
+    }
+
+    /// The player did not answer in time (or refused): the next way of sending the command.
+    private func followUp() {
+        guard let current = check else { return }
+        checkTask?.cancel()
+        checkTask = nil
+        check = nil
+        guard let step = current.followUp() else {
+            releaseWake()
+            return
+        }
+        Log.media.notice("\(current.kind.name, privacy: .public) unanswered: sending \(step.arguments.joined(separator: " "), privacy: .public)")
+        if step.wakesPlayer, let bundleID = track.parentBundleIdentifier ?? track.bundleIdentifier {
+            wake(bundleID) { [weak self] in
+                guard let self else { return }
+                let id = self.runCommand(step.arguments)
+                if var next = step.next {
+                    next.commandID = id
+                    self.arm(next)
+                } else {
+                    self.releaseWake()
+                }
+            }
+            return
+        }
+        let id = runCommand(step.arguments)
+        if var next = step.next {
+            next.commandID = id
+            arm(next)
+        } else {
+            releaseWake()
+        }
+    }
+
+    // MARK: Waking a browser
+
+    /// The app that had the focus before a browser was brought forward, to give it back.
+    private var wokeFrom: NSRunningApplication?
+    private var wokeBrowser: String?
+    private var wakeTask: Task<Void, Never>?
+
+    /// Brings the browser forward (its suspended page resumes), then sends. The focus goes back once
+    /// the player answers or gives up (`releaseWake`).
+    private func wake(_ bundleID: String, then send: @escaping () -> Void) {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            send()
+            return
+        }
+        let front = NSWorkspace.shared.frontmostApplication
+        if front?.bundleIdentifier != bundleID {
+            wokeFrom = front
+            wokeBrowser = bundleID
+        }
+        Log.media.notice("waking \(bundleID, privacy: .public): its page did not answer")
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in }
+        wakeTask?.cancel()
+        wakeTask = Task { [weak self] in
+            // The page resumes as its window comes on screen.
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled, self != nil else { return }
+            send()
+        }
+    }
+
+    /// Gives the focus back to the app the user was in, unless they have moved on meanwhile.
+    private func releaseWake() {
+        wakeTask?.cancel()
+        wakeTask = nil
+        guard let previous = wokeFrom, let browser = wokeBrowser else { return }
+        wokeFrom = nil
+        wokeBrowser = nil
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == browser, !previous.isTerminated,
+              let url = previous.bundleURL else { return }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in }
     }
 
     // MARK: Child process
@@ -193,6 +327,12 @@ final class MediaRemoteAdapterSource: MediaSource {
     private func receive(_ update: AdapterUpdate, generation: Int) {
         guard generation == self.generation, case .running = phase else { return }
         track.apply(update, receivedAt: .now)
+        if case .value(let playing) = update.playing { reportedPlaying = playing }
+        if !update.isDiff, case .absent = update.playing { reportedPlaying = nil }
+        if let check, check.isAnswered(by: update, now: track) {
+            disarm()
+            releaseWake()
+        }
         // The snapshot goes first: when this run is a re-probe, the controller switches over on
         // `.running` and must already hold the adapter's state, or it would publish an empty frame.
         onEvent?(.nowPlaying(track.snapshot))
@@ -323,8 +463,166 @@ final class MediaRemoteAdapterSource: MediaSource {
     }
 
     private nonisolated static func commandFinished(id: ObjectIdentifier, owner: MediaRemoteAdapterSource) -> @Sendable (Process) -> Void {
-        { [weak owner] _ in
-            Task { @MainActor [weak owner] in owner?.commandExited(id) }
+        { [weak owner] process in
+            let status = process.terminationStatus
+            Task { @MainActor [weak owner] in owner?.commandExited(id, status: status) }
         }
+    }
+}
+
+/// A command sent to a player through MediaRemote, waiting for the player's answer. Pure, so the
+/// follow-ups are testable.
+///
+/// Browsers are the reason:
+/// * A page in a background tab paused for a few minutes is suspended and answers nothing (play,
+///   toggle, seek, the keyboard's play key) until its window comes forward. So a browser's
+///   unanswered command is sent again with the browser woken (`Step.wakesPlayer`): brought forward
+///   for a moment, then the user's app gets the focus back.
+/// * A page answers only the commands it registered (YouTube has "next" for its autoplay queue
+///   but rarely "previous"). An unanswered next goes to the end of this video (a web player moves
+///   on to the next one), an unanswered previous back to its start — tried first, since a seek
+///   needs no window to come forward, and only then the wake.
+/// * Other players get one more play, never a toggle (a player that did start but did not say so
+///   would stop).
+nonisolated struct AdapterCommandCheck: Sendable, Equatable {
+    nonisolated enum Kind: Sendable, Equatable {
+        case play, next, previous
+
+        init?(_ command: MediaCommand) {
+            switch command {
+            case .play: self = .play
+            case .next: self = .next
+            case .previous: self = .previous
+            default: return nil
+            }
+        }
+
+        var command: MediaCommand {
+            switch self {
+            case .play: .play
+            case .next: .next
+            case .previous: .previous
+            }
+        }
+
+        var name: String {
+            switch self {
+            case .play: "play"
+            case .next: "next"
+            case .previous: "previous"
+            }
+        }
+    }
+
+    /// What was just sent: the command itself, or the seek standing in for next or previous.
+    nonisolated enum Stage: Sendable, Equatable {
+        case command
+        case seek(TimeInterval)
+    }
+
+    /// One follow-up: what to send, whether the player must be woken first, and the check after it.
+    struct Step: Sendable, Equatable {
+        var arguments: [String]
+        var wakesPlayer = false
+        var next: AdapterCommandCheck?
+    }
+
+    var kind: Kind
+    var stage = Stage.command
+    var title: String?
+    var uniqueIdentifier: String?
+    var elapsed: TimeInterval?
+    var duration: TimeInterval?
+    /// The player is a browser (its pages can be suspended).
+    var isBrowser = false
+    /// The browser has been brought forward for this command.
+    var woke = false
+    /// The stand-in seek has been tried since the last wake.
+    var seekTried = false
+    var attempt = 1
+    var commandID: ObjectIdentifier?
+
+    init(kind: Kind, baseline: AdapterTrackState, at now: Date, commandID: ObjectIdentifier? = nil) {
+        self.kind = kind
+        title = baseline.title
+        uniqueIdentifier = baseline.uniqueIdentifier
+        duration = baseline.duration
+        elapsed = baseline.snapshot?.clock?.position(at: now)
+        isBrowser = SystemPlayers.isBrowser(baseline.parentBundleIdentifier ?? baseline.bundleIdentifier)
+        self.commandID = commandID
+    }
+
+    /// How long the player gets to answer (a browser loading the next video takes longer; a woken
+    /// one needs a moment to resume its page).
+    var patience: Double {
+        if case .seek = stage { return 1.5 }
+        return (kind == .play ? 1.2 : 2.5) + (woke ? 1 : 0)
+    }
+
+    /// The player's report that the command (or the seek standing in for it) worked.
+    func isAnswered(by update: AdapterUpdate, now state: AdapterTrackState) -> Bool {
+        if case .seek(let target) = stage {
+            if movedToAnotherItem(state) { return true }
+            if case .value(let position) = update.elapsed { return abs(position - target) < 3 }
+            return false
+        }
+        switch kind {
+        case .play:
+            if case .value(true) = update.playing { return true }
+            return false
+        case .next:
+            return movedToAnotherItem(state)
+        case .previous:
+            if movedToAnotherItem(state) { return true }
+            if case .value(let position) = update.elapsed, position < 3, (elapsed ?? 0) >= 3 { return true }
+            return false
+        }
+    }
+
+    private func movedToAnotherItem(_ state: AdapterTrackState) -> Bool {
+        if let uniqueIdentifier, let now = state.uniqueIdentifier { return now != uniqueIdentifier }
+        return state.title != title
+    }
+
+    /// Where next or previous stand in by seeking (nil: no stand-in — a live stream, or already at
+    /// the start).
+    var seekTarget: TimeInterval? {
+        switch kind {
+        case .play: nil
+        case .next: duration.flatMap { $0 > 1 ? $0 - 0.25 : nil }
+        case .previous: (elapsed ?? 0) >= 3 ? 0 : nil
+        }
+    }
+
+    /// The next way to send it (nil: nothing more to try).
+    func followUp() -> Step? {
+        switch kind {
+        case .play:
+            if isBrowser {
+                guard !woke else { return nil }
+                return Step(arguments: MediaRemoteAdapterSource.arguments(for: .play), wakesPlayer: true, next: woken())
+            }
+            guard attempt < 2 else { return nil }
+            var again = self
+            again.attempt += 1
+            return Step(arguments: MediaRemoteAdapterSource.arguments(for: .play), next: again)
+        case .next, .previous:
+            if !seekTried, let target = seekTarget {
+                var seek = self
+                seek.stage = .seek(target)
+                seek.seekTried = true
+                return Step(arguments: MediaRemoteAdapterSource.arguments(for: .seek(target)), next: seek)
+            }
+            guard isBrowser, !woke else { return nil }
+            return Step(arguments: MediaRemoteAdapterSource.arguments(for: kind.command), wakesPlayer: true, next: woken())
+        }
+    }
+
+    private func woken() -> AdapterCommandCheck {
+        var next = self
+        next.woke = true
+        next.stage = .command
+        next.seekTried = false
+        return next
     }
 }

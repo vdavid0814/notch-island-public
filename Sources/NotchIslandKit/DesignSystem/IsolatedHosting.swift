@@ -35,3 +35,28 @@ struct IsolatedHosting<Content: View>: NSViewRepresentable {
         size
     }
 }
+
+/// SwiftUI in a view graph of its own that fills whatever it is given: a large surface (Settings)
+/// whose graph — and every cache in it — goes when the surface closes.
+struct IsolatedFillHosting<Content: View>: NSViewRepresentable {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    func makeNSView(context: Context) -> NSHostingView<Content> {
+        let view = NSHostingView(rootView: content)
+        view.sizingOptions = []
+        view.safeAreaRegions = []
+        return view
+    }
+
+    func updateNSView(_ view: NSHostingView<Content>, context: Context) {
+        view.rootView = content
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSHostingView<Content>, context: Context) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions()
+    }
+}

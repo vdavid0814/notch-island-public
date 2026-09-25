@@ -15,6 +15,8 @@ struct EqualizerView: NSViewRepresentable {
     /// The compact pill's bars by default; Settings' illustrations draw a miniature.
     var size = Metrics.Compact.equalizerSize
     var barWidth = EqualizerBarsView.barWidth
+    /// The cover's colour: the bars take a faint wash of it (nil: plain white).
+    var tint: ArtworkColor?
 
     func makeNSView(context: Context) -> EqualizerBarsView {
         let view = EqualizerBarsView(frame: CGRect(origin: .zero, size: size))
@@ -25,6 +27,7 @@ struct EqualizerView: NSViewRepresentable {
     func updateNSView(_ view: EqualizerBarsView, context: Context) {
         view.frameRate = onBattery ? EqualizerBarsView.batteryFrameRate : EqualizerBarsView.frameRate
         view.barWidth = barWidth
+        view.tint = tint
         view.isAnimating = isAnimating
     }
 
@@ -70,6 +73,13 @@ final class EqualizerBarsView: NSView {
     }
 
     private let barLayers: [CALayer]
+
+    /// How much of the cover's colour the playing bars take: a hint, the bars still read as white.
+    nonisolated static let tintFraction: CGFloat = 0.4
+
+    var tint: ArtworkColor? {
+        didSet { if tint != oldValue { applyColors(animated: true) } }
+    }
 
     /// Installs the animations when playback starts and removes them when it stops. Nothing else
     /// touches them — in particular not layout, so an island resize never restarts the phase.
@@ -125,12 +135,21 @@ final class EqualizerBarsView: NSView {
 
     /// Semantic label colours, resolved for this view's appearance: CGColor has no notion of
     /// dark/light, so it is re-resolved whenever the effective appearance changes.
-    private func applyColors() {
+    private func applyColors(animated: Bool = false) {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            let color = (isAnimating ? NSColor.labelColor : NSColor.secondaryLabelColor).cgColor
+            var color = isAnimating ? NSColor.labelColor : NSColor.secondaryLabelColor
+            if isAnimating, let tint {
+                let cover = NSColor(srgbRed: tint.red, green: tint.green, blue: tint.blue, alpha: 1)
+                color = color.usingColorSpace(.sRGB)?.blended(withFraction: Self.tintFraction, of: cover) ?? color
+            }
             CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            for bar in barLayers { bar.backgroundColor = color }
+            // A new cover eases its colour in (one short render-server animation, no app work).
+            if animated {
+                CATransaction.setAnimationDuration(0.45)
+            } else {
+                CATransaction.setDisableActions(true)
+            }
+            for bar in barLayers { bar.backgroundColor = color.cgColor }
             CATransaction.commit()
         }
     }

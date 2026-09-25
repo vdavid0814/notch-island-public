@@ -63,17 +63,29 @@ struct InfoHint: View {
 
 // MARK: - Pictures
 
-/// A desktop in miniature: the default wallpaper, the menu bar, and whatever hangs from the notch.
+/// A desktop in miniature, as this Mac shows it: the preview wallpaper the user chose (General ▸
+/// Preview Wallpaper, their own desktop unless they picked another), the menu bar with its menus,
+/// status items and clock, the camera housing, and whatever hangs from the notch.
 struct MiniDesktop<Content: View>: View {
     var width: CGFloat = 150
     var height: CGFloat = 94
     @ViewBuilder var content: Content
 
+    @AppStorage(DesktopBackdropStyle.key) private var style: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
+
     var body: some View {
         ZStack(alignment: .top) {
-            DefaultWallpaper()
-            Rectangle().fill(.black.opacity(0.14)).frame(height: MiniMetrics.menuBar)
+            DesktopBackdrop(style: style)
+            PreviewMenuBar(height: MiniMetrics.menuBar, notchWidth: MiniMetrics.notchWidth + 14,
+                           darkText: style.prefersDarkMenuBar,
+                           backing: style.menuBarBacking)
             content
+                // The island floats over the desktop like the real one, with its soft shadow.
+                .shadow(color: .black.opacity(0.35), radius: 3, y: 1.5)
+            // The camera housing: whatever the island shows, the notch itself stays black.
+            UnevenRoundedRectangle(bottomLeadingRadius: 3, bottomTrailingRadius: 3, style: .continuous)
+                .fill(.black)
+                .frame(width: MiniMetrics.notchWidth, height: MiniMetrics.menuBar)
         }
         .frame(width: width, height: height)
         .clipShape(.rect(cornerRadius: 10, style: .continuous))

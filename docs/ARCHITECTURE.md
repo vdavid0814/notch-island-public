@@ -103,6 +103,20 @@ view appears inside an open never rides its spring (`withoutAnimation`). Setting
 looping animation picture is Core Animation, and the widget studio's live preview has
 a view graph of its own (`IsolatedHosting`), so neither updates all of Settings.
 
+Settings' pages run in a view graph of their own (`IsolatedFillHosting`) that goes when Settings
+closes; the decoded preview wallpapers are dropped then too (`WallpaperLibrary.purge`), and a moment
+later the allocator's freed pages are handed back (`MemoryRelief`, also after Siri closes).
+
+## Browser playback
+
+Commands to the system's Now Playing are checked (`AdapterCommandCheck`): a browser suspends a
+background tab that has been paused for a few minutes, and the page then answers no command (play,
+toggle, seek, the keyboard's play key — measured with YouTube in Safari). An unanswered command to a
+browser is sent again with the browser brought forward for a moment, then the focus goes back to the
+app the user was in. Play/pause from the island is always the explicit command, never a toggle. A
+next or previous the page did not register falls back to the end (the page's autoplay moves on) or
+the start of the video.
+
 ## Diagnostics
 
 `notchisland://demo/state` logs the presentation, staged frame, island rect and the

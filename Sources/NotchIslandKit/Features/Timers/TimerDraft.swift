@@ -56,7 +56,7 @@ nonisolated struct TimerDraftUnits: Sendable, Equatable {
     }
 
     func value(of unit: TimerUnit, in duration: TimeInterval) -> Int {
-        let total = Int(normalized(duration))
+        let total = Int(draft(duration))
         switch unit {
         case .hours: return total / 3600
         case .minutes: return hours ? total % 3600 / 60 : total / 60
@@ -70,7 +70,20 @@ nonisolated struct TimerDraftUnits: Sendable, Equatable {
         let range = range(of: unit)
         parts[unit] = min(max(value, range.lowerBound), range.upperBound)
         let total = (parts[.hours] ?? 0) * 3600 + (parts[.minutes] ?? 0) * 60 + (parts[.seconds] ?? 0)
-        return normalized(TimeInterval(total))
+        return draft(TimeInterval(total))
+    }
+
+    /// What the ruler may be set to: as `normalized`, except that with more units than minutes it
+    /// may read 0:00 on the way (the minutes passing 0 while the seconds are 0). Snapping that to
+    /// 0:01 left the seconds at 1 once the minutes moved on; 0:00 simply cannot be started.
+    func draft(_ duration: TimeInterval) -> TimeInterval {
+        guard !isMinutesOnly, duration.isFinite, duration.rounded() <= 0 else { return normalized(duration) }
+        return 0
+    }
+
+    /// The draft can be started (it is not 0:00).
+    func canStart(_ duration: TimeInterval) -> Bool {
+        draft(duration) >= 1
     }
 
     /// What these units can express: whole minutes without seconds, at most 120 minutes without

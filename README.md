@@ -4,11 +4,48 @@ Turns the MacBook notch into a Dynamic-Island-style surface made of Liquid Glass
 Rest the pointer on the notch and it grows into a panel; music, timers, battery
 events, volume/brightness and dropped files live there the rest of the time.
 
-**Current version: v0.3.1** (the energy and memory update of v0.3).
+**Current version: v0.3.2**.
 Swift 6, SwiftUI, macOS 27.
 
-> v0.3.1 fixes the extra battery use and the memory peaks of v0.3 — nothing looks or
-> behaves differently. Older builds are on the [Releases](https://github.com/vdavid0814/notch-island-public/releases) page.
+> Older builds are on the [Releases](https://github.com/vdavid0814/notch-island-public/releases) page.
+
+---
+
+## What's new in v0.3.2
+
+Browser playback that resumes reliably, a preview-wallpaper picker, widget element sizes
+that always differ, timer and Siri fixes, and less memory after Settings.
+
+**Now Playing**
+- **Safari (and other browsers) resume after a long pause.** A browser suspends a background tab that has been paused for a few minutes, and the page then ignores every Now Playing command (play, toggle, seek, even the keyboard's play key). An unanswered play is now sent again with the browser brought forward for a moment; the focus then returns to the app you were in.
+- Play and pause from the island are always the explicit command, never a toggle, so a paused video is never "paused" again.
+- **Next and previous work on web videos.** When a page does not handle them, next goes to the end of the video (the page's autoplay moves on) and previous back to its start.
+- The equalizer bars beside the notch take a faint tint of the cover's colour.
+
+**Widgets**
+- **Small, Medium and Large always look different.** Text is measured against the room it has; where the room caps it, Large takes all of it and Medium and Small a step and two below. Rings (battery, volume, brightness, CPU/RAM) and the percentage and icon inside them follow their element sizes too.
+- The widget search in Settings is the system's own search field.
+
+**Timer**
+- Dragging the minutes past 0 no longer leaves the seconds at 0:01; 0:00 can be passed through and cannot be started.
+- The ruler reads its value from the scroll itself: no jumps back while scrolling, a haptic on every step, and it starts on its value when the island reopens.
+
+**Siri**
+- Typing a suggestion's name ("application", "files", "shortcuts") lists it first, so Return opens it.
+- The window is as tall as the results it shows, up to the full list.
+
+**Settings**
+- **Preview Wallpaper** (General): your own desktop, the macOS default wallpaper in dark or light, or a black-and-white test pattern — used by every picture in Settings and by the widget studio. "Your Desktop" now shows the wallpaper that is really on screen, including the system's moving wallpapers.
+- The pictures of each setting show a real menu bar, the notch and the chosen wallpaper.
+- The widget studio always shows the whole island.
+- The title bar reads just "Settings".
+
+**Memory**
+- After Settings closes: ~57–88 MB instead of ~119 MB. The decoded wallpapers are released, Settings runs in a view graph of its own that goes with it, and freed memory is handed back to the system after Settings and Siri close.
+
+**Known issues**
+- Settings ▸ Widgets left open uses ~10 % CPU in this build (measured over 20-second windows); being investigated.
+- Opening and closing the island costs about the same CPU as in v0.3.1.
 
 ---
 

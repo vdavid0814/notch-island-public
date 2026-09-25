@@ -99,6 +99,8 @@ struct AssistantView: View {
         // Focus is asked for once the panel is key (the field editor does not take first responder
         // in a window that is not key yet), a turn later, and again whenever the panel becomes key.
         .onAppear { focusField() }
+        // Its lists, icons and the answer pane go with it: give their memory back.
+        .onDisappear { MemoryRelief.afterLargeSurfaceClosed() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             guard note.object is IslandPanel else { return }
             focusField()

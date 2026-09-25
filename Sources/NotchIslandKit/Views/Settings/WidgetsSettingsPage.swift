@@ -19,7 +19,7 @@ struct WidgetsSettingsPage: View {
     @State private var group: Set<IslandWidgetKind> = []
     @State private var thumbnails = ThumbnailCache()
     @State private var notice: String?
-    @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = .system
+    @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
 
     var body: some View {
         ScrollViewReader { scroller in
@@ -123,7 +123,8 @@ private struct StudioStage: View {
                     selection = nil
                     group = []
                 }
-            PreviewMenuBar(height: layout.notch.height, notchWidth: island.width)
+            PreviewMenuBar(height: layout.notch.height, notchWidth: island.width, darkText: backdrop.prefersDarkMenuBar,
+                           backing: backdrop.menuBarBacking)
                 .allowsHitTesting(false)
             // In a graph of its own: the live widgets on it (clocks, readings) keep ticking, and
             // each tick would otherwise update all of Settings (`IsolatedHosting`).
@@ -707,9 +708,8 @@ private struct WidgetStoreView: View {
                         .foregroundStyle(SettingsPalette.secondary)
                 }
                 Spacer(minLength: 0)
-                TextField("Search", text: $search, prompt: Text("Search"))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 180)
+                NativeSearchField(text: $search, prompt: "Search Widgets")
+                    .frame(width: 200)
             }
             Picker("Category", selection: $category) {
                 Text("All").tag(WidgetCategory?.none)
@@ -879,6 +879,41 @@ extension WidgetCategory {
         case .controls: "switch.2"
         case .system: "sun.max.fill"
         case .tools: "wrench.and.screwdriver.fill"
+        }
+    }
+}
+
+/// The system's own search field (`NSSearchField`): the capsule with the magnifier and the clear
+/// button, exactly as in Finder or System Settings.
+struct NativeSearchField: NSViewRepresentable {
+    @Binding var text: String
+    var prompt: String
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = prompt
+        field.sendsSearchStringImmediately = true
+        field.delegate = context.coordinator
+        field.controlSize = .large
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        context.coordinator.text = $text
+        if field.stringValue != text { field.stringValue = text }
+        field.placeholderString = prompt
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var text: Binding<String>
+
+        init(text: Binding<String>) { self.text = text }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSSearchField else { return }
+            text.wrappedValue = field.stringValue
         }
     }
 }

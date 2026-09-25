@@ -50,6 +50,70 @@ nonisolated enum WidgetType {
         (min(max(room * ratio, lower), upper) * size.factor).rounded()
     }
 
+    /// An element's size (a type size, or a ring's diameter) where the room may cap it: `design`
+    /// is what Medium draws when there is room, `fit` the most the room takes. S, M and L always
+    /// differ: with room each is its factor of the design; where the room caps them, Large takes
+    /// all of it and Medium and Small a step and two below. (Scaling first and capping after made
+    /// Large and Medium the same size — the cap — in most widgets.)
+    static func fitted(_ design: CGFloat, fit: CGFloat, _ size: ElementSize, floor lower: CGFloat = 7) -> CGFloat {
+        let share: CGFloat = switch size {
+        case .small: 0.72
+        case .medium: 0.86
+        case .large: 1
+        }
+        // At the floor the steps stay apart too (a little over it rather than all three equal).
+        let step: CGFloat = switch size {
+        case .small: 0
+        case .medium: 0.75
+        case .large: 1.5
+        }
+        let value = min(design * size.factor, max(fit, 0) * share)
+        return (max(value, lower + step) * 2).rounded() / 2
+    }
+
+    /// The largest type size at which `text` fits `width` on one line (the system font, as the
+    /// widgets draw it).
+    static func size(fitting text: String, in width: CGFloat, weight: NSFont.Weight = .regular,
+                     rounded: Bool = false, monospacedDigits: Bool = false) -> CGFloat {
+        guard width.isFinite else { return .greatestFiniteMagnitude }
+        guard !text.isEmpty, width > 0 else { return width > 0 ? .greatestFiniteMagnitude : 0 }
+        let reference: CGFloat = 100
+        var font = monospacedDigits
+            ? NSFont.monospacedDigitSystemFont(ofSize: reference, weight: weight)
+            : NSFont.systemFont(ofSize: reference, weight: weight)
+        if rounded, let descriptor = font.fontDescriptor.withDesign(.rounded) {
+            font = NSFont(descriptor: descriptor, size: reference) ?? font
+        }
+        let measured = (text as NSString).size(withAttributes: [.font: font]).width
+        guard measured > 0 else { return .greatestFiniteMagnitude }
+        // A hair of slack: SwiftUI's text rounds its width up to whole pixels.
+        return reference * width / measured * 0.97
+    }
+
+    /// How wide `text` is at a type size.
+    static func textWidth(_ text: String, size: CGFloat, weight: NSFont.Weight = .semibold) -> CGFloat {
+        let fit = Self.size(fitting: text, in: 100, weight: weight, rounded: true, monospacedDigits: true)
+        return fit >= .greatestFiniteMagnitude ? 0 : size * 100 / fit
+    }
+
+    /// The largest type size whose lines fit `height`.
+    static func size(fittingLines lines: CGFloat = 1, in height: CGFloat) -> CGFloat {
+        max(0, height) / (lineHeight * max(lines, 1))
+    }
+
+    /// The system font's line height per point of type size.
+    static let lineHeight: CGFloat = 1.2
+
+    /// A number inside a ring of `diameter` (a battery's or a level's percentage): `ratio` of the
+    /// diameter at Medium, never wider than the ring's inside.
+    static func ringText(_ text: String, diameter: CGFloat, ratio: CGFloat, _ size: ElementSize,
+                         lines: CGFloat = 2) -> CGFloat {
+        let inside = max(0, diameter - 2 * max(3, diameter * 0.1) * 1.4)
+        let fit = min(Self.size(fitting: text, in: inside, weight: .semibold, rounded: true, monospacedDigits: true),
+                      Self.size(fittingLines: lines, in: inside))
+        return fitted(diameter * ratio, fit: fit, size, floor: 6)
+    }
+
     /// The control size for a button element.
     static func controlSize(_ base: ControlSize, _ size: ElementSize) -> ControlSize {
         switch size {
@@ -444,6 +508,8 @@ struct TimerWidget: View {
     /// The unit the ruler sets (with Hours or Seconds on): tap a part of the time, or the unit under
     /// the marker, to move on.
     @State private var editing: TimerUnit = .minutes
+    /// The button row's actions (Start; Pause, +1 and Cancel): the time gets the rest of the row.
+    @State private var actionsWidth: CGFloat = 0
 
     /// Orange, like the iPhone's timer, unless the widget has its own tint.
     private var accent: Color { widget.tint.color ?? TimerRuler.tint }
@@ -472,17 +538,17 @@ struct TimerWidget: View {
             HStack(spacing: Metrics.Spacing.medium) {
                 actions(timers)
                     .ownDirection()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { actionsWidth = $0 }
                 Spacer(minLength: 0)
                 if widget.shows(.readout) {
-                    let points = WidgetType.points(rowHeight, ratio: 0.72, min: 12, max: 44, widget.size(of: .readout))
-                    // One size for every part of the time: the largest that fits. (A shrink-to-fit on
-                    // the row shrank each part on its own — a big "0" beside a small ":05:00".)
+                    let points = readoutPoints(timers, rowHeight: rowHeight)
+                    // One size for every part of the time. (A shrink-to-fit on the row shrank each
+                    // part on its own — a big "0" beside a small ":05:00".) The size is measured to
+                    // fit; the smaller ones only catch a measurement that came out short.
                     ViewThatFits(in: .horizontal) {
                         readout(timers, points: points)
                         readout(timers, points: points * 0.85)
-                        readout(timers, points: points * 0.72)
-                        readout(timers, points: points * 0.6)
-                        readout(timers, points: points * 0.5)
+                        readout(timers, points: points * 0.7)
                     }
                     .foregroundStyle(accent.opacity(timers.countdown.isPaused ? 0.55 : 1))
                     .ownDirection()
@@ -501,7 +567,7 @@ struct TimerWidget: View {
         }
         // Switching Hours or Seconds off drops what they can no longer show.
         .onChange(of: draftUnits, initial: true) { _, units in
-            let normalized = units.normalized(timers.draftDuration)
+            let normalized = units.draft(timers.draftDuration)
             if normalized != timers.draftDuration { timers.draftDuration = normalized }
             if !units.units.contains(editing) { editing = .minutes }
         }
@@ -549,6 +615,31 @@ struct TimerWidget: View {
         case .paused, .finished:
             TimerRuler(minutes: .constant(Self.minutesLeft(timers.countdown, at: .now)), isEditable: false,
                        showsLabels: showsLabels, tint: accent, markerSize: markerSize)
+        }
+    }
+
+    /// The time's type size: the row's height sets its design size, and the room beside the
+    /// buttons caps it — below that cap, so S, M and L stay apart (`WidgetType.fitted`).
+    private func readoutPoints(_ timers: TimerStore, rowHeight: CGFloat) -> CGFloat {
+        let design = WidgetType.points(rowHeight, ratio: 0.72, min: 12, max: 44)
+        let room = size.width - actionsWidth - Metrics.Spacing.medium
+        let fit = min(WidgetType.size(fitting: readoutText(timers), in: room, rounded: true, monospacedDigits: true),
+                      WidgetType.size(fittingLines: 1, in: rowHeight))
+        return WidgetType.fitted(design, fit: fit, widget.size(of: .readout), floor: 10)
+    }
+
+    /// The time as it reads now (a running countdown only gets shorter).
+    private func readoutText(_ timers: TimerStore) -> String {
+        switch timers.countdown {
+        case .idle:
+            let units = draftUnits
+            if units.isMinutesOnly { return IslandFormat.clock(timers.draftDuration) }
+            return units.units.enumerated().map { index, unit in
+                let value = units.value(of: unit, in: timers.draftDuration)
+                return index == 0 ? "\(value)" : String(format: "%02d", value)
+            }.joined(separator: ":")
+        default:
+            return IslandFormat.clock((timers.countdown.remaining(at: .now) ?? 0).rounded(.up))
         }
     }
 
@@ -606,6 +697,8 @@ struct TimerWidget: View {
                 if wide { Text("Start Timer") } else { Label("Start", systemImage: "play.fill") }
             }
             .timerAction(iconOnly: !wide, tint: accent)
+            // 0:00, on the way to another time: nothing to count down.
+            .disabled(!draftUnits.canStart(timers.draftDuration))
         case .running, .paused:
             Button {
                 timers.countdown.isPaused ? timers.resume() : timers.pause()
@@ -657,6 +750,8 @@ struct StopwatchWidget: View {
     let size: CGSize
 
     @Environment(AppModel.self) private var model
+    /// The buttons beside the time: it gets the rest of the row.
+    @State private var buttonsWidth: CGFloat = 0
 
     var body: some View {
         let timers = model.timers
@@ -664,38 +759,53 @@ struct StopwatchWidget: View {
         HStack(spacing: Metrics.Spacing.medium) {
             if widget.shows(.readout) {
                 StopwatchReadout(state: timers.stopwatch)
-                    .font(.system(size: WidgetType.points(size.height, ratio: 0.55, min: 15, max: 40, widget.size(of: .readout)),
-                                  weight: .regular, design: .rounded).monospacedDigit())
+                    .font(.system(size: readoutPoints(timers), weight: .regular, design: .rounded).monospacedDigit())
                     .foregroundStyle(running ? .primary : .secondary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.5)
+                    // Only for a measurement that came out short: the size is fitted already.
+                    .minimumScaleFactor(0.7)
                     .frame(maxWidth: .infinity, alignment: widget.mirrored ? .trailing : .leading)
                     .ownDirection()
             } else {
                 Spacer(minLength: 0)
             }
-            if widget.shows(.resetButton), timers.isStopwatchActive {
-                Button {
-                    timers.resetStopwatch()
-                } label: {
-                    Label("Reset", systemImage: "arrow.counterclockwise")
+            HStack(spacing: Metrics.Spacing.medium) {
+                if widget.shows(.resetButton), timers.isStopwatchActive {
+                    Button {
+                        timers.resetStopwatch()
+                    } label: {
+                        Label("Reset", systemImage: "arrow.counterclockwise")
+                    }
+                    .islandButton(.circle)
+                    .help("Reset")
                 }
-                .islandButton(.circle)
-                .help("Reset")
+                Button {
+                    running ? timers.pauseStopwatch() : timers.startStopwatch()
+                } label: {
+                    Label(running ? "Pause" : "Start", systemImage: running ? "pause.fill" : "play.fill")
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .islandButton(.circle, prominent: true)
+                .help(running ? "Pause" : "Start")
             }
-            Button {
-                running ? timers.pauseStopwatch() : timers.startStopwatch()
-            } label: {
-                Label(running ? "Pause" : "Start", systemImage: running ? "pause.fill" : "play.fill")
-                    .contentTransition(.symbolEffect(.replace))
-            }
-            .islandButton(.circle, prominent: true)
-            .help(running ? "Pause" : "Start")
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { buttonsWidth = $0 }
             if !widget.shows(.readout) { Spacer(minLength: 0) }
         }
         .mirroredSides(widget.mirrored)
         .frame(width: size.width, height: size.height)
         .animation(Motion.content, value: timers.stopwatch)
+    }
+
+    /// Sized for the widest time it will show before the next redraw of the widget (the digits
+    /// tick on their own): "00:00" under an hour, "0:00:00" from the fifty-ninth minute.
+    private func readoutPoints(_ timers: TimerStore) -> CGFloat {
+        let elapsed = timers.stopwatch.elapsed(at: .now)
+        let template = elapsed >= 59 * 60 ? "0:00:00" : "00:00"
+        let room = size.width - buttonsWidth - Metrics.Spacing.medium
+        let fit = min(WidgetType.size(fitting: template, in: room, rounded: true, monospacedDigits: true),
+                      WidgetType.size(fittingLines: 1, in: size.height))
+        return WidgetType.fitted(WidgetType.points(size.height, ratio: 0.55, min: 15, max: 40), fit: fit,
+                                 widget.size(of: .readout), floor: 11)
     }
 }
 
@@ -712,7 +822,13 @@ struct ShelfWidget: View {
         let items = model.shelf.items
         let side = (min(size.height - 34, 64) * widget.size(of: .previews).factor).rounded()
         let showsPreviews = widget.shows(.previews) && side >= 22 && !items.isEmpty
-        let labelSize = WidgetType.points(size.height, ratio: 0.3, min: 11, max: 15, widget.size(of: .shelfCount))
+        // The row under the previews (or the whole widget): its height and, beside the tray and
+        // the chevron, the shortest wording ("Drop", or the count) cap the type.
+        let rowHeight = showsPreviews ? max(20, size.height - side - Metrics.Spacing.small) : size.height
+        let labelFit = min(WidgetType.size(fittingLines: 1, in: rowHeight),
+                           WidgetType.size(fitting: items.isEmpty ? "Drop files" : "\(items.count) items", in: size.width * 0.62, weight: .medium))
+        let labelSize = WidgetType.fitted(WidgetType.points(size.height, ratio: 0.3, min: 11, max: 15), fit: labelFit,
+                                          widget.size(of: .shelfCount), floor: 9)
         VStack(spacing: Metrics.Spacing.small) {
             if showsPreviews {
                 ScrollView(.horizontal) {
@@ -813,12 +929,16 @@ struct BatteryWidget: View {
     }
 
     private func ring(_ state: PowerState) -> some View {
-        let diameter = min(size.width, size.height) * widget.size(of: .batteryGlyph).factor.clamped(to: 0.6...1)
+        let side = min(size.width, size.height)
+        let diameter = WidgetType.fitted(side, fit: side, widget.size(of: .batteryGlyph), floor: 20)
+        let timeSize = WidgetType.fitted(11, fit: WidgetType.size(fittingLines: 1, in: size.height - diameter - Metrics.Spacing.xSmall),
+                                         widget.size(of: .timeRemaining), floor: 8)
         return VStack(spacing: Metrics.Spacing.xSmall) {
             BatteryRing(level: state.level, isCharging: state.isCharging, tint: state.tint,
-                        showsPercentage: widget.shows(.percentage) && diameter >= 40, diameter: diameter)
-            if widget.shows(.timeRemaining), size.height - diameter >= 16, let text = remaining(state) {
-                Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
+                        showsPercentage: widget.shows(.percentage) && diameter >= 40, diameter: diameter,
+                        percentSize: widget.size(of: .percentage))
+            if widget.shows(.timeRemaining), size.height - diameter >= 14, let text = remaining(state) {
+                Text(text).font(.system(size: timeSize)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
             }
         }
     }
@@ -827,11 +947,25 @@ struct BatteryWidget: View {
     // widget is tall). Without the battery element, the percentage alone, large.
     private func glyph(_ state: PowerState) -> some View {
         let tall = size.height >= 70
-        let glyphHeight = min(WidgetType.points(size.height, ratio: tall ? 0.3 : 0.5, min: 11, max: 34,
-                                                widget.size(of: .batteryGlyph)),
-                              size.width / 2.8)
-        let percentSize = WidgetType.points(size.height, ratio: 0.42, min: 13, max: 34, widget.size(of: .percentage))
-        let timeSize = WidgetType.points(size.height, ratio: 0.18, min: 10, max: 15, widget.size(of: .timeRemaining))
+        let time = widget.shows(.timeRemaining) && (size.width >= 110 || tall) ? remaining(state) : nil
+        // Beside the battery (or the percentage), the time left takes what the other leaves.
+        let share: CGFloat = time == nil || tall ? 1 : 0.5
+        let glyphHeight = WidgetType.fitted(
+            WidgetType.points(size.height, ratio: tall ? 0.3 : 0.5, min: 11, max: 34),
+            fit: min((size.width - 8) * share / 2.35, size.height * (tall ? 0.5 : 0.8)),
+            widget.size(of: .batteryGlyph), floor: 9)
+        let percentText = state.hasBattery ? IslandFormat.percent(Double(state.level) / 100) : "—"
+        let percentSize = WidgetType.fitted(
+            WidgetType.points(size.height, ratio: 0.42, min: 13, max: 34),
+            fit: min(WidgetType.size(fitting: "100%", in: (size.width - 8) * share, weight: .semibold, rounded: true, monospacedDigits: true),
+                     WidgetType.size(fittingLines: tall && time != nil ? 1.6 : 1, in: size.height)),
+            widget.size(of: .percentage), floor: 10)
+        let besideWidth = widget.shows(.batteryGlyph) ? glyphHeight * 2.35 : WidgetType.textWidth(percentText, size: percentSize)
+        let timeSize = WidgetType.fitted(
+            WidgetType.points(size.height, ratio: 0.18, min: 10, max: 15),
+            fit: min(WidgetType.size(fitting: time ?? "", in: tall ? size.width - 8 : size.width - besideWidth - Metrics.Spacing.medium - 8),
+                     WidgetType.size(fittingLines: 1, in: tall ? size.height * 0.3 : size.height)),
+            widget.size(of: .timeRemaining), floor: 8)
         let layout = tall ? AnyLayout(VStackLayout(spacing: Metrics.Spacing.small))
                           : AnyLayout(HStackLayout(spacing: Metrics.Spacing.medium))
         return layout {
@@ -840,14 +974,14 @@ struct BatteryWidget: View {
                              showsPercentage: widget.shows(.percentage), height: glyphHeight)
                     .ownDirection()
             } else if widget.shows(.percentage) {
-                Text(state.hasBattery ? IslandFormat.percent(Double(state.level) / 100) : "—")
+                Text(percentText)
                     .font(.system(size: percentSize, weight: .semibold, design: .rounded).monospacedDigit())
                     .foregroundStyle(state.tint.style)
                     .contentTransition(.opacity)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
             }
-            if widget.shows(.timeRemaining), let text = remaining(state), size.width >= 110 || tall {
+            if let text = time {
                 Text(text)
                     .font(.system(size: timeSize))
                     .foregroundStyle(.secondary)
@@ -882,7 +1016,8 @@ struct LevelWidget: View {
             LevelRing(value: reading.value, symbol: IslandFormat.levelSymbol(kind, reading: reading),
                       showsValue: widget.shows(.levelValue), size: size,
                       set: { model.levels.set(kind, to: $0) },
-                      onInteraction: { model.island.isInteracting = $0 })
+                      onInteraction: { model.island.isInteracting = $0 },
+                      symbolSize: widget.size(of: .levelIcon), valueSize: widget.size(of: .levelValue))
                 .disabled(!reading.isAvailable)
         } else {
             let iconSize = WidgetType.points(size.height, ratio: 0.42, min: 13, max: 22, widget.size(of: .levelIcon))
@@ -927,12 +1062,21 @@ struct LevelRing: View {
     let size: CGSize
     let set: (Double) -> Void
     var onInteraction: (Bool) -> Void = { _ in }
+    /// The widget's Icon and Value elements.
+    var symbolSize: ElementSize = .medium
+    var valueSize: ElementSize = .medium
 
     @State private var dragStart: Double?
 
     var body: some View {
         let diameter = min(size.width, size.height)
         let line = max(3, diameter * 0.1)
+        let showsNumber = showsValue && diameter >= 44
+        let valuePoints = WidgetType.ringText("100%", diameter: diameter, ratio: 0.18, valueSize)
+        let inside = diameter - 2 * line * 1.4
+        let symbolPoints = WidgetType.fitted(diameter * (showsNumber ? 0.24 : 0.34),
+                                             fit: showsNumber ? max(6, inside * 0.75 - valuePoints * WidgetType.lineHeight) : inside * 0.8,
+                                             symbolSize, floor: 7)
         ZStack {
             Circle().stroke(.white.opacity(0.16), lineWidth: line)
             Circle()
@@ -941,11 +1085,11 @@ struct LevelRing: View {
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 0) {
                 Image(systemName: symbol)
-                    .font(.system(size: diameter * (showsValue && diameter >= 44 ? 0.24 : 0.34), weight: .semibold))
+                    .font(.system(size: symbolPoints, weight: .semibold))
                     .contentTransition(.symbolEffect(.replace))
-                if showsValue, diameter >= 44 {
+                if showsNumber {
                     Text(IslandFormat.percent(value))
-                        .font(.system(size: diameter * 0.18, weight: .semibold, design: .rounded).monospacedDigit())
+                        .font(.system(size: valuePoints, weight: .semibold, design: .rounded).monospacedDigit())
                         .foregroundStyle(.secondary)
                         // The ring moves; the number just changes (a cross-fade per step smeared).
                         .transaction { $0.animation = nil }
@@ -987,7 +1131,12 @@ struct AssistantWidget: View {
     var body: some View {
         let tall = size.height >= 70
         let showsLabel = widget.shows(.assistantLabel)
-        let labelSize = WidgetType.points(size.height, ratio: tall ? 0.16 : 0.4, min: 11, max: 17, widget.size(of: .assistantLabel))
+        let iconSide = tall ? min(size.height * 0.4, 40) : min(size.height * 0.6, 22)
+        let labelFit = min(WidgetType.size(fittingLines: 1, in: tall ? size.height - iconSide * 1.2 - Metrics.Spacing.small : size.height),
+                           WidgetType.size(fitting: "Siri", in: tall ? size.width - 8 : size.width - iconSide * 1.3 - Metrics.Spacing.small - 8,
+                                           weight: .semibold))
+        let labelSize = WidgetType.fitted(WidgetType.points(size.height, ratio: tall ? 0.16 : 0.4, min: 11, max: 17), fit: labelFit,
+                                          widget.size(of: .assistantLabel), floor: 9)
         Button {
             model.perform(.assistant)
         } label: {

@@ -103,13 +103,10 @@ struct IslandSettingsView: View {
         )
         VStack(spacing: 0) {
             NotchSplitBand(split: split, height: layout.notch.height) {
-                Label {
-                    Text("NotchIsland Settings")
-                } icon: {
-                    AppMark(side: 18)
-                }
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
+                // Only the window's name: the app's mark and version head the sidebar below.
+                Text("Settings")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
             } trailing: {
                 Button {
                     model.controller.closeSettings()
@@ -134,16 +131,14 @@ struct IslandSettingsView: View {
                     topTrailingRadius: 16,
                     style: .continuous
                 )
-                HStack(spacing: 0) {
-                    SettingsSidebar(selection: Binding(get: { model.settingsPane }, set: { model.settingsPane = $0 }))
-                        .frame(width: 236)
-                        // Liquid Glass, smoked towards the black of the island.
-                        .glassEffect(Glass.regular.tint(Color.black.opacity(0.45)), in: sidebarShape)
-                        .padding(.leading, layout.shoulderRadius(for: .settings) + gap)
-                        .padding(.bottom, gap)
-                        .padding(.top, 4)
-                    SettingsDetail(pane: model.settingsPane)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // In a view graph of its own, dropped with it when Settings closes: in the island's
+                // graph, the pages' caches outlived them (measured: ~70 MB kept after one visit).
+                IsolatedFillHosting {
+                    SettingsPages(sidebarShape: sidebarShape,
+                                  sidebarLeading: layout.shoulderRadius(for: .settings) + gap, gap: gap)
+                        .environment(model)
+                        .environment(\.colorScheme, .dark)
+                        .environment(\.appearsActive, true)
                 }
                 .transition(.opacity)
             } else {
@@ -152,6 +147,10 @@ struct IslandSettingsView: View {
         }
         .background { SettingsBackdrop() }
         .environment(\.colorScheme, .dark)
+        .onDisappear {
+            WallpaperLibrary.shared.purge()
+            MemoryRelief.afterLargeSurfaceClosed()
+        }
         .task {
             // Most of the growth first (its tail is too small to see a frame drop in).
             try? await Task.sleep(for: .seconds(model.preferences.animationDuration * 0.9))
@@ -162,6 +161,29 @@ struct IslandSettingsView: View {
             guard !Task.isCancelled else { return }
             model.permissions.refresh()
             model.launchAtLogin.refresh()
+        }
+    }
+}
+
+/// The sidebar and the page beside it.
+private struct SettingsPages: View {
+    let sidebarShape: UnevenRoundedRectangle
+    let sidebarLeading: CGFloat
+    let gap: CGFloat
+
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 0) {
+            SettingsSidebar(selection: Binding(get: { model.settingsPane }, set: { model.settingsPane = $0 }))
+                .frame(width: 236)
+                // Liquid Glass, smoked towards the black of the island.
+                .glassEffect(Glass.regular.tint(Color.black.opacity(0.45)), in: sidebarShape)
+                .padding(.leading, sidebarLeading)
+                .padding(.bottom, gap)
+                .padding(.top, 4)
+            SettingsDetail(pane: model.settingsPane)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }

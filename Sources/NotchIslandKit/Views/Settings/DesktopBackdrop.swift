@@ -1,136 +1,63 @@
 import AppKit
-import ImageIO
 import SwiftUI
 
-/// What the widget studio and the surface previews show behind the island.
-nonisolated enum DesktopBackdropStyle: String, CaseIterable, Identifiable, Sendable {
-    /// The system's default wallpaper look: deep blue light folding over itself.
-    case system
-    /// The picture on this Mac's desktop.
-    case desktop
-
-    nonisolated static let key = "ni2.studio.backdrop"
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .system: "macOS Default"
-        case .desktop: "Your Desktop"
-        }
-    }
-}
-
-/// A desktop for previews: the default macOS wallpaper, drawn as a mesh gradient (sharp at any
-/// size, nothing to load), or the user's own desktop picture, downsampled off the main thread.
-struct DesktopBackdrop: View {
-    var style: DesktopBackdropStyle = .system
-
-    @State private var picture: NSImage?
-
-    var body: some View {
-        ZStack {
-            DefaultWallpaper()
-            if style == .desktop, let picture {
-                Image(nsImage: picture)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .transition(.opacity)
-            }
-        }
-        .clipped()
-        .animation(.easeOut(duration: 0.25), value: picture == nil)
-        .task(id: style) {
-            guard style == .desktop else {
-                picture = nil
-                return
-            }
-            guard let url = NSScreen.main.flatMap({ NSWorkspace.shared.desktopImageURL(for: $0) }) else { return }
-            picture = await Self.load(url).map { NSImage(cgImage: $0, size: .zero) }
-        }
-        .accessibilityHidden(true)
-    }
-
-    @concurrent private static func load(_ url: URL) async -> CGImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
-        else { return nil }
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: 1800,
-        ] as CFDictionary)
-    }
-}
-
-/// The macOS default wallpaper's look — layers of blue light over a deep navy, brightest in a
-/// band across the middle — as a mesh gradient.
-struct DefaultWallpaper: View {
-    var body: some View {
-        MeshGradient(
-            width: 4, height: 4,
-            points: [
-                [0, 0], [0.33, 0], [0.66, 0], [1, 0],
-                [0, 0.36], [0.28, 0.30], [0.7, 0.42], [1, 0.3],
-                [0, 0.7], [0.36, 0.64], [0.62, 0.74], [1, 0.66],
-                [0, 1], [0.33, 1], [0.66, 1], [1, 1],
-            ],
-            colors: [
-                Color(red: 0.02, green: 0.06, blue: 0.22), Color(red: 0.03, green: 0.10, blue: 0.32),
-                Color(red: 0.05, green: 0.16, blue: 0.42), Color(red: 0.04, green: 0.10, blue: 0.30),
-                Color(red: 0.06, green: 0.28, blue: 0.62), Color(red: 0.20, green: 0.52, blue: 0.92),
-                Color(red: 0.36, green: 0.70, blue: 0.98), Color(red: 0.10, green: 0.36, blue: 0.74),
-                Color(red: 0.10, green: 0.20, blue: 0.58), Color(red: 0.44, green: 0.62, blue: 0.96),
-                Color(red: 0.16, green: 0.34, blue: 0.80), Color(red: 0.28, green: 0.24, blue: 0.70),
-                Color(red: 0.05, green: 0.06, blue: 0.24), Color(red: 0.12, green: 0.12, blue: 0.40),
-                Color(red: 0.08, green: 0.10, blue: 0.34), Color(red: 0.14, green: 0.08, blue: 0.32),
-            ],
-            smoothsColors: true
-        )
-    }
-}
-
-/// The menu bar across the top of a preview desktop: the Apple menu and an app's menus on the
-/// left, status items and the clock on the right; the island covers the middle. Each side shows
-/// as many items as fit beside the island, never a truncated menu.
+/// The menu bar across the top of a preview desktop, as macOS draws it: no bar of its own, just
+/// the Apple menu and an app's menus on the left, status items and the clock on the right, in
+/// white over a dark wallpaper and in black over a light one; the island covers the middle. Each
+/// side shows as many items as fit beside the island, never a truncated menu. Everything scales
+/// with `height`, so the same bar tops the widget studio's stage and the smallest pictures.
 struct PreviewMenuBar: View {
     let height: CGFloat
     /// The island's width: the part of the bar it covers.
     let notchWidth: CGFloat
+    /// Over a light wallpaper the menu bar's text is dark.
+    var darkText = false
+    /// A shade behind the whole bar (over the checkerboard, where no text colour would read).
+    var backing: Double = 0
 
     var body: some View {
         GeometryReader { proxy in
-            let side = max(0, (proxy.size.width - notchWidth) / 2 - 22)
+            let inset = height * 0.5
+            let side = max(0, (proxy.size.width - notchWidth) / 2 - inset - height * 0.4)
             HStack(spacing: 0) {
                 ViewThatFits(in: .horizontal) {
-                    menus(["Finder", "File", "Edit", "View", "Go", "Window"])
-                    menus(["Finder", "File", "Edit", "View"])
-                    menus(["Finder", "File"])
+                    menus(["Finder", "File", "Edit", "View", "Go", "Window", "Help"])
+                    menus(["Finder", "File", "Edit", "View", "Go"])
+                    menus(["Finder", "File", "Edit"])
+                    menus(["Finder"])
                     menus([])
                 }
                 .frame(width: side, alignment: .leading)
                 Spacer(minLength: 0)
                 ViewThatFits(in: .horizontal) {
-                    status(showsIcons: 3, showsDate: true)
-                    status(showsIcons: 3, showsDate: false)
-                    status(showsIcons: 1, showsDate: false)
+                    status(icons: Self.statusIcons, showsDate: true)
+                    status(icons: Self.statusIcons, showsDate: false)
+                    status(icons: Array(Self.statusIcons.suffix(2)), showsDate: false)
+                    status(icons: [], showsDate: false)
                     EmptyView()
                 }
                 .frame(width: side, alignment: .trailing)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, inset)
             .frame(width: proxy.size.width, height: height)
         }
         .frame(height: height)
-        .font(.system(size: height * 0.42, weight: .medium))
-        .foregroundStyle(.white.opacity(0.92))
-        .background(.black.opacity(0.12))
+        .font(.system(size: height * 0.44, weight: .medium))
+        .foregroundStyle(darkText ? Color.black.opacity(0.85) : Color.white.opacity(0.95))
+        // The system's faint shade under the menu bar, which keeps its text legible anywhere.
+        .background(LinearGradient(colors: [(darkText ? Color.white : Color.black).opacity(0.14), .clear],
+                                   startPoint: .top, endPoint: .bottom))
+        .background(.black.opacity(backing))
+        .shadow(color: .black.opacity(darkText ? 0 : 0.25), radius: height * 0.06)
         .accessibilityHidden(true)
     }
 
+    /// Control Center, Wi-Fi and the battery, as on a MacBook's menu bar.
+    static let statusIcons = ["battery.75percent", "wifi", "switch.2"]
+
     private func menus(_ titles: [String]) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: "apple.logo").font(.system(size: height * 0.46, weight: .semibold))
+        HStack(spacing: height * 0.62) {
+            Image(systemName: "apple.logo").font(.system(size: height * 0.5, weight: .semibold))
             ForEach(Array(titles.enumerated()), id: \.offset) { index, title in
                 Text(title).fontWeight(index == 0 ? .bold : .medium)
             }
@@ -138,12 +65,11 @@ struct PreviewMenuBar: View {
         .fixedSize()
     }
 
-    private func status(showsIcons: Int, showsDate: Bool) -> some View {
-        HStack(spacing: 12) {
-            ForEach(Array(["switch.2", "wifi", "battery.75percent"].suffix(showsIcons)), id: \.self) {
-                Image(systemName: $0)
-            }
-            Text(Date.now, format: showsDate ? .dateTime.weekday(.abbreviated).hour().minute() : .dateTime.hour().minute())
+    private func status(icons: [String], showsDate: Bool) -> some View {
+        HStack(spacing: height * 0.55) {
+            ForEach(icons, id: \.self) { Image(systemName: $0) }
+            Text(Date.now, format: showsDate ? .dateTime.month(.abbreviated).day().weekday(.abbreviated).hour().minute()
+                                             : .dateTime.hour().minute())
         }
         .fixedSize()
     }

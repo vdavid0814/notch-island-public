@@ -109,8 +109,11 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     /// Only the field.
     static var assistantFieldPageHeight: CGFloat { assistantTopInset + assistantFieldHeight + assistantBottomInset }
     /// The field and the three suggestions under it.
-    static var assistantSuggestionsPageHeight: CGFloat {
-        let rows = CGFloat(AssistantCategory.allCases.count)
+    static var assistantSuggestionsPageHeight: CGFloat { assistantRowsPageHeight(3) }
+
+    /// The field and `count` rows under it.
+    static func assistantRowsPageHeight(_ count: Int) -> CGFloat {
+        let rows = CGFloat(max(count, 1))
         return assistantFieldPageHeight + assistantTopInset + rows * assistantRowHeight + (rows - 1) * assistantRowSpacing
     }
 
@@ -160,7 +163,7 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             let list = (Self.assistantPageHeight * f * CGFloat(siri.listRows) / 7).rounded()
             let page: CGFloat = switch room {
             case .field: Self.assistantFieldPageHeight
-            case .suggestions: min(Self.assistantSuggestionsPageHeight, list)
+            case .rows(let count): min(Self.assistantRowsPageHeight(count), max(list, Self.assistantSuggestionsPageHeight))
             case .list: max(list, Self.assistantSuggestionsPageHeight)
             case .gallery: Self.galleryPageHeight(rows: siri.galleryRows)
             }

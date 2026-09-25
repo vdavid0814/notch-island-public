@@ -64,6 +64,13 @@ nonisolated enum SystemControl: String, Sendable, Codable, CaseIterable, Identif
         }
     }
 
+    /// The longer of its two states ("Muted" beside "On"): a label sized for it does not change
+    /// size when the state flips.
+    var longestStatus: String {
+        let on = status(on: true), off = status(on: false)
+        return on.count >= off.count ? on : off
+    }
+
     /// Opens something rather than switching (no state to show).
     var isAction: Bool {
         switch self {
