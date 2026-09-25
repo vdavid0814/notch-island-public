@@ -470,7 +470,7 @@ struct SegmentBar: NSViewRepresentable {
         control.role = .tabs
         control.borderShape = .capsule
         control.segmentDistribution = .fillEqually
-        control.controlSize = .large
+        control.controlSize = .extraLarge
         control.setContentHuggingPriority(.defaultLow, for: .horizontal)
         return control
     }
@@ -483,7 +483,7 @@ struct SegmentBar: NSViewRepresentable {
             if index < images.count, control.image(forSegment: index) !== images[index] {
                 control.setImage(images[index], forSegment: index)
             }
-            control.setImageScaling(.scaleNone, forSegment: index)
+            control.setImageScaling(.scaleProportionallyDown, forSegment: index)
         }
         if control.selectedSegment != selection { control.selectedSegment = selection }
     }
@@ -508,12 +508,12 @@ struct SegmentBar: NSViewRepresentable {
 /// A wallpaper's small picture for a segment: filled, rounded, with a hairline edge. A bitmap,
 /// since a segment's image is an image, not a view.
 @MainActor enum WallpaperSwatch {
-    static let size = CGSize(width: 28, height: 16)
+    static let size = CGSize(width: 36, height: 21)
     static let radius: CGFloat = 4
     /// Transparent room around the picture, so it does not touch the segment's top and bottom
     /// (the segment's height is the system's), and after it before the title.
     static let margin: CGFloat = 2
-    static let verticalMargin: CGFloat = 5
+    static let verticalMargin: CGFloat = 4
     static let gap: CGFloat = 7
 
     /// The picture, or (while it loads, and for the checkerboard) the drawn wallpaper.
@@ -531,6 +531,8 @@ struct SegmentBar: NSViewRepresentable {
         bitmap.size = canvas
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
+        // The bitmap is in pixels, the drawing below in points.
+        context.cgContext.scaleBy(x: scale, y: scale)
         defer { NSGraphicsContext.restoreGraphicsState() }
         let draw = { () -> Bool in
             let rect = CGRect(origin: CGPoint(x: margin, y: verticalMargin), size: size)

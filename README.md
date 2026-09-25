@@ -4,6 +4,10 @@ Turns the MacBook notch into a Dynamic-Island-style surface made of Liquid Glass
 Rest the pointer on the notch and it grows into a panel; music, timers, battery
 events, volume/brightness and dropped files live there the rest of the time.
 
+<p align="center">
+  <img src="docs/NotchIsland.png" width="220" alt="NotchIsland">
+</p>
+
 <h2 align="center">
   <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.3.2 (.dmg)</a>
 </h2>
