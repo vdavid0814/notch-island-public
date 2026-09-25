@@ -4,10 +4,25 @@ Turns the MacBook notch into a Dynamic-Island-style surface made of Liquid Glass
 Rest the pointer on the notch and it grows into a panel; music, timers, battery
 events, volume/brightness and dropped files live there the rest of the time.
 
-**Current version: v0.3.2**.
-Swift 6, SwiftUI, macOS 27.
+<h2 align="center">
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.3.2 (.dmg)</a>
+</h2>
+<p align="center">
+  <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
+</p>
 
-> Older builds are on the [Releases](https://github.com/vdavid0814/notch-island-public/releases) page.
+### All versions
+
+| Version | Released | Download | Release notes |
+|---|---|---|---|
+| **v0.3.2** (latest) | 25 Sep 2026 | [NotchIsland.dmg](https://github.com/vdavid0814/notch-island-public/releases/download/v0.3.2/NotchIsland.dmg) | [Notes](https://github.com/vdavid0814/notch-island-public/releases/tag/v0.3.2) |
+| v0.3.1 | 25 Sep 2026 | [NotchIsland.dmg](https://github.com/vdavid0814/notch-island-public/releases/download/v0.3.1/NotchIsland.dmg) | [Notes](https://github.com/vdavid0814/notch-island-public/releases/tag/v0.3.1) |
+| v0.3 | 24 Sep 2026 | [NotchIsland.dmg](https://github.com/vdavid0814/notch-island-public/releases/download/v0.3/NotchIsland.dmg) | [Notes](https://github.com/vdavid0814/notch-island-public/releases/tag/v0.3) |
+| v0.2 (2.0.0) | 24 Sep 2026 | [NotchIsland.dmg](https://github.com/vdavid0814/notch-island-public/releases/download/v2.0.0/NotchIsland.dmg) | [Notes](https://github.com/vdavid0814/notch-island-public/releases/tag/v2.0.0) |
+
+Every version, with its notes: **[Releases page](https://github.com/vdavid0814/notch-island-public/releases)**.
+
+Swift 6, SwiftUI, macOS 27.
 
 ---
 
