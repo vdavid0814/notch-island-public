@@ -16,6 +16,9 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case siriApps
     /// Switches the island's surface style, as the Settings cards do (animated).
     case surface(IslandGlassStyle)
+    /// Holds every island spring this long after its start (nil: runs them again), so single frames
+    /// of a transition can be compared.
+    case freeze(TimeInterval?)
 }
 
 /// Everything the app can be asked to do from outside the island: the menu bar menu and the
@@ -57,6 +60,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
     ///     demo/media|charging|unplug|low|timerdone|drop|shelf|reset
     ///     demo/volume[?level=0…1]   demo/brightness[?level=0…1]
     ///     demo/hover[?inside=1|0]   demo/state   demo/surface?style=smoked|black|fade   demo/airpods
+    ///     demo/freeze[?t=seconds]
     static func parse(_ url: URL) -> AppCommand? {
         guard url.scheme?.lowercased() == scheme,
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -124,6 +128,10 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "demo/siriapps": return .demo(.siriApps)
         case "demo/surface":
             return query["style"].flatMap { IslandGlassStyle(rawValue: $0.lowercased()) }.map { .demo(.surface($0)) }
+        case "demo/freeze":
+            guard let raw = query["t"] else { return .demo(.freeze(nil)) }
+            guard let time = TimeInterval(raw), time >= 0 else { return nil }
+            return .demo(.freeze(time))
 
         default: return nil
         }

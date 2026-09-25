@@ -258,6 +258,8 @@ import SwiftUI
         let layout = model.layout
         settle.schedule(after: Motion.settleDuration(for: model.preferences.animationDuration)) { [weak self] in
             guard let self, self.model.island.presentation == target, self.model.layout == layout else { return }
+            // Springs held mid-way (`demo/freeze`) have not settled: the stage stays large.
+            guard LeanSpring.frozenTime == nil else { return }
             if !Self.covers(target) { self.panel?.level = IslandPanel.restingLevel }
             self.stageResting(for: target)
         }

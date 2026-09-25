@@ -61,6 +61,8 @@ import SwiftUI
             NotificationCenter.default.post(name: .demoNextTimerUnit, object: nil)
         case .surface(let style):
             withAnimation(.spring(duration: 0.25)) { model.preferences.glassStyle = style }
+        case .freeze(let time):
+            LeanSpring.frozenTime = time
         }
     }
 

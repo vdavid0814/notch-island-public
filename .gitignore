@@ -5,3 +5,6 @@ Vendor/
 .DS_Store
 xcuserdata/
 *.dmg
+Scripts/perf/frames/backdrop
+Scripts/perf/frames/pixels
+build-ref/

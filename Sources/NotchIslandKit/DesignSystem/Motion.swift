@@ -105,6 +105,10 @@ nonisolated struct LeanSpring: CustomAnimation {
     /// Remaining distance, as a share of the whole move, at which the spring counts as settled.
     static let settledFraction = 0.003
 
+    /// `demo/freeze`: holds every island spring at this time after its start, for comparing single
+    /// frames of a transition. nil (always, outside that) runs them normally.
+    nonisolated(unsafe) static var frozenTime: TimeInterval?
+
     func animate<V: VectorArithmetic>(value: V, time: TimeInterval, context: inout AnimationContext<V>) -> V? {
         let end: TimeInterval
         if let cached = context.state[EndTime.self] {
@@ -113,6 +117,7 @@ nonisolated struct LeanSpring: CustomAnimation {
             end = endTime(for: value)
             context.state[EndTime.self] = end
         }
+        if let frozen = Self.frozenTime { return spring.value(target: value, time: min(time, frozen)) }
         if time >= end { return nil }
         return spring.value(target: value, time: time)
     }
