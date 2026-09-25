@@ -97,7 +97,10 @@ nonisolated enum IslandGlassStyle: String, Sendable, CaseIterable, Identifiable,
 
     /// The island's smoked glass: a little darker than the CAD app's (0.5), so the surface stays
     /// closer to the black of the notch it hangs from while still showing what is behind it.
-    var material: Glass { .clear.tint(Color.black.opacity(0.62)) }
+    var material: Glass { .clear.tint(Color.black.opacity(Self.smokeOpacity)) }
+
+    /// The black of the surface glass's tint.
+    static let smokeOpacity = 0.62
 
     /// Glass under controls: the CAD app's smoke, so buttons read a shade lighter than the surface.
     var controlMaterial: Glass { .clear.tint(Color.black.opacity(0.5)) }
@@ -148,26 +151,41 @@ extension View {
         background {
             if style == .fade {
                 GeometryReader { proxy in
-                    let height = max(proxy.size.height, 1)
-                    // A little below the notch band before the fade starts, so the black reads as
-                    // hanging from the notch rather than ending exactly at its edge.
-                    let solid = min((solidDepth + (height - solidDepth) * Self.fadeHold) / height, 1)
-                    let clear = solid + (1 - solid) * 0.85
                     shape.fill(Color.black).mask {
-                        LinearGradient(
-                            stops: [
-                                .init(color: .black, location: 0),
-                                .init(color: .black, location: solid),
-                                .init(color: .black.opacity(0.7), location: solid + (clear - solid) * 0.3),
-                                .init(color: .black.opacity(0.25), location: solid + (clear - solid) * 0.7),
-                                .init(color: .clear, location: clear),
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
+                        LinearGradient(stops: Self.fadeStops(solidDepth: solidDepth, height: proxy.size.height),
+                                       startPoint: .top, endPoint: .bottom)
                     }
                 }
             }
         }
+    }
+
+    /// The same shade over the top `height` points of a larger canvas (the island's window): the
+    /// island's surface is `height` tall this frame, the canvas keeps its size (see `IslandRootView`).
+    func islandSurfaceShade(_ style: IslandGlassStyle, solidDepth: CGFloat, height: CGFloat, in shape: some Shape) -> some View {
+        background {
+            if style == .fade {
+                shape.fill(Color.black).mask(alignment: .top) {
+                    LinearGradient(stops: Self.fadeStops(solidDepth: solidDepth, height: height),
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: max(height, 1))
+                }
+            }
+        }
+    }
+
+    private static func fadeStops(solidDepth: CGFloat, height: CGFloat) -> [Gradient.Stop] {
+        let height = max(height, 1)
+        // A little below the notch band before the fade starts, so the black reads as hanging from
+        // the notch rather than ending exactly at its edge.
+        let solid = min((solidDepth + (height - solidDepth) * Self.fadeHold) / height, 1)
+        let clear = solid + (1 - solid) * 0.85
+        return [
+            .init(color: .black, location: 0),
+            .init(color: .black, location: solid),
+            .init(color: .black.opacity(0.7), location: solid + (clear - solid) * 0.3),
+            .init(color: .black.opacity(0.25), location: solid + (clear - solid) * 0.7),
+            .init(color: .clear, location: clear),
+        ]
     }
 }

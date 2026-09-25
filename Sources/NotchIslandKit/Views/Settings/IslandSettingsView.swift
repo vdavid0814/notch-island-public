@@ -178,7 +178,7 @@ private struct SettingsBackdrop: View {
         ZStack {
             // What shows faintly through: the desktop, blurred by the window server as behind any
             // translucent macOS window (live Liquid Glass here cost hundreds of MB, see
-            // `GlassIsland`).
+            // `IslandRootView`).
             WindowVibrancy()
             LinearGradient(stops: Self.stops, startPoint: .top, endPoint: .bottom)
         }

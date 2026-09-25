@@ -81,13 +81,27 @@ for active controls, fully clear for the sliding selection thumb. The panel is
 pinned to `darkAqua`. The glass exists only while something is visible and extends
 above the window top (clipped) so its top edge never draws a rim against the bezel.
 
+The island is drawn on a canvas the size of its window, which changes only when the
+window is re-staged. A transition animates the drawn outline (`IslandSurface`, an
+animatable modifier that is also the insertion/removal transition), never a frame, and
+the content inside keeps its size and place, so a morph neither re-lays it out nor
+re-renders it. The surface glass is the island's body as a system rounded rectangle
+(`IslandGlassBody`): Liquid Glass draws that analytically, while any other path is
+rasterised again for every size (~100 MB of window-server textures per open). The two
+small concave shoulders beside it are filled with the glass's smoke, and the outline
+clip around the container gives the exact silhouette.
+
 ## Energy
 
 Every signal is pushed by the system; there are no repeating timers. One-shot
 deadlines (banner expiry, hover dwell, timer completion) are cancellable tasks
 owned by exactly one object each. The equaliser is four `CABasicAnimation`s on the
-render server; the scrubber's `TimelineView` exists only while the Now Playing card
-is on screen and playing.
+render server, and so is the Now Playing progress line (`PlayedLine`, one linear
+animation at 2 fps); the running times tick once a second, only while on screen.
+Island springs end once they are visually settled (`LeanSpring`), and state set as a
+view appears inside an open never rides its spring (`withoutAnimation`). Settings'
+looping animation picture is Core Animation, and the widget studio's live preview has
+a view graph of its own (`IsolatedHosting`), so neither updates all of Settings.
 
 ## Diagnostics
 

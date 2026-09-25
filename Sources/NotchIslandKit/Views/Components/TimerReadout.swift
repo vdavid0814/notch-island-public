@@ -30,10 +30,16 @@ struct TickingClock: View {
 
     /// A tick boundary in the past: the shown second changes exactly a whole number of seconds
     /// from the anchor.
+    ///
+    /// Whole days before the anchor rather than just before now: a phase derived from the current
+    /// time differed on every render, and a new phase is a new schedule, which the timeline starts
+    /// over (and the island redraws) each time its parent re-renders.
     private var phase: Date {
-        let offset = anchor.timeIntervalSinceNow
-        return offset <= 0 ? anchor : anchor.addingTimeInterval(-(offset.rounded(.up) + 1))
+        anchor.addingTimeInterval(-Self.phaseLead)
     }
+
+    /// Far enough back that the phase lies in the past for any clock the island shows.
+    static let phaseLead: TimeInterval = 7 * 86_400
 
     /// Whole seconds shown at `date`: elapsed rounded down, remaining rounded up (0:01 until it
     /// actually reaches zero), as the system's timer text shows them. The nudge absorbs a tick

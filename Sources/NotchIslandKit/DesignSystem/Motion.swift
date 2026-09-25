@@ -26,11 +26,12 @@ nonisolated enum Motion {
         Spring(duration: duration * 0.38 / defaultDuration, bounce: 0.14)
     }
 
-    static let open: Animation = .spring(openSpring())
-    static let close: Animation = .spring(closeSpring())
-    static let morph: Animation = .spring(morphSpring())
-    /// Content swaps that keep the island's size (switching expanded pages).
-    static let content: Animation = .smooth(duration: 0.24)
+    static let open: Animation = .lean(openSpring())
+    static let close: Animation = .lean(closeSpring())
+    static let morph: Animation = .lean(morphSpring())
+    /// Content swaps that keep the island's size (switching expanded pages). `.smooth` is a spring
+    /// without bounce.
+    static let content: Animation = .lean(Spring(duration: 0.24, bounce: 0))
     /// Reduce Motion: a short flat fade replaces every spring.
     static let reduced: Animation = .easeInOut(duration: 0.18)
 
@@ -55,23 +56,81 @@ nonisolated enum Motion {
     ) -> Animation {
         if reduceMotion { return reduced }
         switch (from.isOpen, to.isOpen) {
-        case (false, true): return .spring(openSpring(duration: duration))
-        case (true, false): return .spring(closeSpring(duration: duration))
+        case (false, true): return .lean(openSpring(duration: duration))
+        case (true, false): return .lean(closeSpring(duration: duration))
         case (true, true):
             // The assistant grows out of the open panel, and shrinks back to it.
-            if to.isAssistant, !from.isAssistant { return .spring(openSpring(duration: duration)) }
-            if from.isAssistant, !to.isAssistant { return .spring(closeSpring(duration: duration)) }
+            if to.isAssistant, !from.isAssistant { return .lean(openSpring(duration: duration)) }
+            if from.isAssistant, !to.isAssistant { return .lean(closeSpring(duration: duration)) }
             // Settings grows out of the open panel too, and shrinks back to it.
-            if to.isSettings, !from.isSettings { return .spring(openSpring(duration: duration)) }
-            if from.isSettings, !to.isSettings { return .spring(closeSpring(duration: duration)) }
+            if to.isSettings, !from.isSettings { return .lean(openSpring(duration: duration)) }
+            if from.isSettings, !to.isSettings { return .lean(closeSpring(duration: duration)) }
             // The assistant's field growing into its list and back: the open and close springs,
             // shortened like a morph, since only the bottom edge moves.
             if case .assistant(let a) = from, case .assistant(let b) = to, a != b {
                 let spring = b > a ? openSpring(duration: duration * 0.7) : closeSpring(duration: duration * 0.7)
-                return .spring(spring)
+                return .lean(spring)
             }
             return content
-        case (false, false): return .spring(morphSpring(duration: duration))
+        case (false, false): return .lean(morphSpring(duration: duration))
         }
+    }
+}
+
+/// Runs `body` in a transaction that animates nothing. For state set as a view appears inside the
+/// island's open: set in the open's transaction, it rode the open's spring (a system widget's bars
+/// grew from zero with it), and every frame re-laid the content out (measured).
+@MainActor func withoutAnimation(_ body: () -> Void) {
+    var transaction = Transaction(animation: nil)
+    transaction.disablesAnimations = true
+    withTransaction(transaction, body)
+}
+
+nonisolated extension Animation {
+    /// A spring that costs only the frames it is seen in (`LeanSpring`).
+    static func lean(_ spring: Spring) -> Animation {
+        Animation(LeanSpring(spring: spring))
+    }
+}
+
+/// A spring animation that stops once it is visually settled.
+///
+/// SwiftUI's own spring keeps animating until it is within a tiny fraction of a point of its target:
+/// a 0.3 s close ran for 1.4 s (measured, 120 Hz: ~170 frames of SwiftUI layout and display-list
+/// work, most of the island's CPU per open and close). This one ends when it is within
+/// `settledFraction` of the distance it travels. (Holding the value between 60 Hz steps was tried:
+/// SwiftUI still runs its update on every display frame, so it saved nothing.)
+nonisolated struct LeanSpring: CustomAnimation {
+    let spring: Spring
+    /// Remaining distance, as a share of the whole move, at which the spring counts as settled.
+    static let settledFraction = 0.003
+
+    func animate<V: VectorArithmetic>(value: V, time: TimeInterval, context: inout AnimationContext<V>) -> V? {
+        let end: TimeInterval
+        if let cached = context.state[EndTime.self] {
+            end = cached
+        } else {
+            end = endTime(for: value)
+            context.state[EndTime.self] = end
+        }
+        if time >= end { return nil }
+        return spring.value(target: value, time: time)
+    }
+
+    func velocity<V: VectorArithmetic>(value: V, time: TimeInterval, context: AnimationContext<V>) -> V? {
+        spring.velocity(target: value, time: time)
+    }
+
+    /// Settling depends only on the spring and on the move's size, so it is worked out once per
+    /// animation (kept in the context's state).
+    private struct EndTime: AnimationStateKey {
+        static var defaultValue: TimeInterval? { nil }
+    }
+
+    private func endTime<V: VectorArithmetic>(for value: V) -> TimeInterval {
+        let distance = value.magnitudeSquared.squareRoot()
+        guard distance > 0 else { return 0 }
+        return min(spring.settlingDuration(target: value, epsilon: distance * Self.settledFraction),
+                   spring.duration * 4)
     }
 }

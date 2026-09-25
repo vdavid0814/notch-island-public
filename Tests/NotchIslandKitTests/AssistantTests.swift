@@ -33,8 +33,8 @@ import Testing
     @Test func roomChangesAreShortSprings() {
         let grow = Motion.animation(from: .assistant(.field), to: .assistant(.suggestions), reduceMotion: false)
         let shrink = Motion.animation(from: .assistant(.list), to: .assistant(.field), reduceMotion: false)
-        #expect(grow == .spring(Motion.openSpring(duration: Motion.defaultDuration * 0.7)))
-        #expect(shrink == .spring(Motion.closeSpring(duration: Motion.defaultDuration * 0.7)))
+        #expect(grow == .lean(Motion.openSpring(duration: Motion.defaultDuration * 0.7)))
+        #expect(shrink == .lean(Motion.closeSpring(duration: Motion.defaultDuration * 0.7)))
         #expect(Motion.animation(from: .assistant(.field), to: .assistant(.list), reduceMotion: true) == Motion.reduced)
     }
 

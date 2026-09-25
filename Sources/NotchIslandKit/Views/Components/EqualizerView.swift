@@ -12,18 +12,24 @@ struct EqualizerView: NSViewRepresentable {
     var isAnimating: Bool
     /// On battery the bars breathe at a lower frame rate (`EqualizerBarsView.batteryFrameRate`).
     var onBattery = false
+    /// The compact pill's bars by default; Settings' illustrations draw a miniature.
+    var size = Metrics.Compact.equalizerSize
+    var barWidth = EqualizerBarsView.barWidth
 
     func makeNSView(context: Context) -> EqualizerBarsView {
-        EqualizerBarsView(frame: CGRect(origin: .zero, size: Metrics.Compact.equalizerSize))
+        let view = EqualizerBarsView(frame: CGRect(origin: .zero, size: size))
+        view.barWidth = barWidth
+        return view
     }
 
     func updateNSView(_ view: EqualizerBarsView, context: Context) {
         view.frameRate = onBattery ? EqualizerBarsView.batteryFrameRate : EqualizerBarsView.frameRate
+        view.barWidth = barWidth
         view.isAnimating = isAnimating
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: EqualizerBarsView, context: Context) -> CGSize? {
-        Metrics.Compact.equalizerSize
+        size
     }
 }
 
@@ -59,6 +65,9 @@ final class EqualizerBarsView: NSView {
         }
     }
     static let barWidth: CGFloat = 2.5
+    var barWidth = EqualizerBarsView.barWidth {
+        didSet { if barWidth != oldValue { needsLayout = true } }
+    }
 
     private let barLayers: [CALayer]
 
@@ -93,18 +102,18 @@ final class EqualizerBarsView: NSView {
     override func layout() {
         super.layout()
         let count = CGFloat(barLayers.count)
-        let spacing = max(0, (bounds.width - count * Self.barWidth) / max(count - 1, 1))
+        let spacing = max(0, (bounds.width - count * barWidth) / max(count - 1, 1))
         // Without disabling actions the bars would implicitly animate ("swim") whenever the island
         // resizes around them.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, bar) in barLayers.enumerated() {
-            bar.bounds = CGRect(x: 0, y: 0, width: Self.barWidth, height: bounds.height)
+            bar.bounds = CGRect(x: 0, y: 0, width: barWidth, height: bounds.height)
             bar.position = CGPoint(
-                x: CGFloat(index) * (Self.barWidth + spacing) + Self.barWidth / 2,
+                x: CGFloat(index) * (barWidth + spacing) + barWidth / 2,
                 y: bounds.midY
             )
-            bar.cornerRadius = Self.barWidth / 2
+            bar.cornerRadius = barWidth / 2
         }
         CATransaction.commit()
     }

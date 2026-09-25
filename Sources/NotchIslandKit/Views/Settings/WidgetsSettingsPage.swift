@@ -125,7 +125,13 @@ private struct StudioStage: View {
                 }
             PreviewMenuBar(height: layout.notch.height, notchWidth: island.width)
                 .allowsHitTesting(false)
-            StageIsland(selection: $selection, group: $group, thumbnails: thumbnails)
+            // In a graph of its own: the live widgets on it (clocks, readings) keep ticking, and
+            // each tick would otherwise update all of Settings (`IsolatedHosting`).
+            IsolatedHosting(size: island) {
+                StageIsland(selection: $selection, group: $group, thumbnails: thumbnails)
+                    .environment(model)
+                    .environment(\.appearsActive, true)
+            }
         }
         .frame(height: layout.notch.height + island.height + 70)
         .frame(maxWidth: .infinity)

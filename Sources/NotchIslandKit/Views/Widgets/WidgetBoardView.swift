@@ -269,7 +269,7 @@ struct NowPlayingWidget: View {
             }
         }
         .frame(width: size.width, height: size.height, alignment: .leading)
-        .onAppear { media.refreshPosition() }
+        .onAppear { withoutAnimation { media.refreshPosition() } }
     }
 
     // The cover beside a column of title, artist, progress and controls. The cover is as tall as

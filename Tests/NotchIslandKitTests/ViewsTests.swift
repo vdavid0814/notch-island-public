@@ -368,3 +368,35 @@ struct RenderingTests {
         #expect(artwork.forKeyword(FourCharCode(fourCC: "from"))?.descriptorType == FourCharCode(fourCC: "obj "))
     }
 }
+
+@Suite struct IslandOutlineTests {
+    let outline = IslandOutline(size: CGSize(width: 300, height: 120), bottomRadius: 30, shoulderRadius: 10, topInset: 24)
+
+    /// On a wider canvas the outline is the island's own shape, top-centred.
+    @Test func drawsTheIslandShapeTopCentredOnACanvas() {
+        let canvas = CGRect(x: 0, y: 0, width: 800, height: 400)
+        let shape = IslandShape(bottomRadius: 30, shoulderRadius: 10, topInset: 24)
+            .path(in: CGRect(x: 250, y: 0, width: 300, height: 144))
+        #expect(outline.path(in: canvas).boundingRect == shape.boundingRect)
+        #expect(outline.path(in: canvas).description == shape.description)
+    }
+
+    /// The glass covers the body below the shoulders, full height; the shoulders cover the rest.
+    @Test func glassBodyLeavesOnlyTheShoulders() {
+        let canvas = CGRect(x: 0, y: 0, width: 800, height: 400)
+        let body = IslandGlassBody(outline: outline).path(in: canvas).boundingRect
+        #expect(body == CGRect(x: 260, y: 0, width: 280, height: 144))
+        #expect(IslandShoulders(outline: outline).path(in: canvas).boundingRect == outline.path(in: canvas).boundingRect)
+    }
+
+    @Test func mixesTowardsAnotherOutline() {
+        let notch = IslandOutline(size: CGSize(width: 180, height: 32), bottomRadius: 8, shoulderRadius: 6)
+        #expect(notch.mixed(with: outline, by: 0).size == notch.size)
+        #expect(notch.mixed(with: outline, by: 1).size == outline.size)
+        #expect(notch.mixed(with: outline, by: 0.5).size == CGSize(width: 240, height: 76))
+        // Past the end (an open's overshoot) the size keeps going; radii never go negative.
+        #expect(notch.mixed(with: outline, by: 1.1).size.width > outline.size.width)
+        #expect(outline.mixed(with: notch, by: 20).bottomRadius == 0)
+    }
+}
+

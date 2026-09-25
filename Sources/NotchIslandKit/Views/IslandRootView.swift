@@ -14,13 +14,22 @@ import SwiftUI
 ///   springs out to its presentation's size; on the way back to idle it shrinks into the notch the
 ///   same way before it is removed (`NotchEmergence`).
 /// * **Sizes come from `IslandLayout`, animation from the transaction.** `IslandModel.apply` sets
-///   `presentation` inside `withAnimation(Motion…)`; frame, radii and the content swap all ride that
-///   one transaction. No second animation is attached to the size here.
+///   `presentation` inside `withAnimation(Motion…)`; outline, radii and the content swap all ride
+///   that one transaction. No second animation is attached to the size here.
+/// * **Shapes move, frames do not.** The island is drawn on a canvas the size of its window, which
+///   changes only when the window is re-staged (twice per transition). A morph animates the drawn
+///   outline (`IslandSurface`), never a frame: a frame changing every frame re-laid the content out
+///   and had the window server allocate new offscreen textures for the glass and the outline
+///   mask at every size — ~100 MB per open, ~400 MB for Settings, freed a second later (measured).
 struct IslandRootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Lives as long as the island, so shelf thumbnails survive page switches.
     @State private var thumbnails = ThumbnailCache()
+    /// Fade style only: the glass is switched off while the island is a black pill at the notch's
+    /// height (it would be sampling a backdrop nobody can see); see `glassRetirement`. nil for an
+    /// island that has just emerged.
+    @State private var isGlassRetired: Bool?
 
     init() {}
 
@@ -45,109 +54,44 @@ struct IslandRootView: View {
             .fill(Color.primary.opacity(Metrics.hitTargetOpacity))
             .frame(width: layout.notch.width, height: layout.notch.height)
             .accessibilityHidden(true)
+            .onAppear { isGlassRetired = nil }
         } else {
-            // One glass container for the island and every glass control on it. Both the emergence
-            // and the outline clip sit outside it: a container animates the insertion of its own
-            // shapes itself (it would swallow the emergence), and renders its glass past any clip
-            // inside it (the rim would show).
-            GlassEffectContainer {
-                GlassIsland(
-                    presentation: presentation,
-                    layout: layout,
-                    reduceMotion: reduceMotion,
-                    // On battery the content swaps with a plain cross-fade: the blur-replace costs
-                    // about a seventh of an open's main-thread time (measured).
-                    lightContentSwap: model.activity.prefersReducedWork
-                        || (model.power.state.hasBattery && !model.power.state.isPluggedIn),
-                    reducesWork: model.activity.prefersReducedWork,
-                    thumbnails: thumbnails
-                )
-            }
-            .transition(NotchEmergence(layout: layout, presentation: presentation))
+            let contentSize = layout.size(for: presentation)
+            // Settings is a large page: it grows in without the blur (an offscreen pass over the
+            // whole page each frame) and on plain black. Live glass the size of the screen under it
+            // cost ~40 MB while open and ~300 MB more at its peak (measured) for a surface its own
+            // window colour hides; its faint see-through look comes from the system's window
+            // vibrancy instead (`SettingsBackdrop`), which the window server draws.
+            let isOpaquePage = presentation.isSettings
+            // The AirPods card lies over macOS's own card to hide it: glass would let it show through.
+            let coversSystemCard: Bool = if case .banner(.airPods) = presentation { AirPodsSystemCard.current == .cover } else { false }
+            let glassStyle = isOpaquePage || coversSystemCard ? IslandGlassStyle.black : model.effectiveGlassStyle
+            let wantsGlass = glassStyle != .fade || contentSize.height > layout.notch.height + 0.5
+            let reducesWork = model.activity.prefersReducedWork
+            // On battery the content swaps with a plain cross-fade: the blur-replace costs about a
+            // seventh of an open's main-thread time (measured).
+            let lightContentSwap = reducesWork || (model.power.state.hasBattery && !model.power.state.isPluggedIn)
+            IslandContentStack(
+                presentation: presentation,
+                layout: layout,
+                crossFades: reduceMotion || lightContentSwap || isOpaquePage,
+                thumbnails: thumbnails
+            )
+            .transition(IslandSurfaceTransition(surface: IslandSurface(
+                size: contentSize,
+                bottomRadius: layout.bottomRadius(for: presentation),
+                shoulderRadius: layout.shoulderRadius(for: presentation),
+                notch: IslandOutline(size: layout.notch, bottomRadius: layout.bottomRadius(for: .idle),
+                                     shoulderRadius: layout.shoulderRadius(for: .idle)),
+                glassStyle: glassStyle,
+                showsGlass: wantsGlass || isGlassRetired == false,
+                // Low Power Mode or thermal pressure: the growth is drawn without its animated blur,
+                // the most expensive part of it (an offscreen pass over the whole island every frame).
+                blursGrowth: !(reduceMotion || reducesWork || isOpaquePage),
+                solidDepth: IslandLayout.overdraw + layout.notch.height
+            )))
+            .task(id: wantsGlass) { await glassRetirement(wantsGlass: wantsGlass) }
         }
-    }
-}
-
-/// The visible island: content clipped to the silhouette, on one glass surface.
-private struct GlassIsland: View {
-    let presentation: IslandPresentation
-    let layout: IslandLayout
-    let reduceMotion: Bool
-    /// Cross-fade the content instead of the blur-replace.
-    let lightContentSwap: Bool
-    /// Low Power Mode or thermal pressure: the growth is drawn without its animated blur, which is
-    /// the most expensive part of it (an offscreen pass over the whole island every frame).
-    let reducesWork: Bool
-    let thumbnails: ThumbnailCache
-    @Environment(\.islandEmergence) private var emergence
-    @Environment(\.islandGlassStyle) private var chosenStyle
-    /// Fade style only: the glass is switched off while the island is a black pill at the notch's
-    /// height (it would be sampling a backdrop nobody can see); see `glassRetirement`.
-    @State private var isGlassRetired: Bool?
-
-    var body: some View {
-        // Between the notch (0) and the presentation (1). The spring may carry it past 1, which is
-        // the open's overshoot. The content keeps its own size and is revealed by the silhouette as
-        // the glass grows, so it never reflows.
-        let contentSize = layout.size(for: presentation)
-        let notch = layout.size(for: .idle)
-        let geometry = EmergingSilhouette(layout: layout, presentation: presentation, emergence: emergence)
-        let retraction = geometry.retraction
-        let bottomRadius = geometry.bottomRadius
-        let shoulderRadius = geometry.shoulderRadius
-        let reveal = min(max(emergence, 0), 1)
-        // Settings is a large page: it grows in without the blur (an offscreen pass over the whole
-        // page each frame) and on plain black. Live glass the size of the screen under it cost
-        // ~40 MB while open and ~300 MB more at its peak (measured) for a surface its own window
-        // colour hides; its faint see-through look comes from the system's window vibrancy
-        // instead (`SettingsBackdrop`), which the window server draws.
-        let isOpaquePage = presentation.isSettings
-        // The AirPods card lies over macOS's own card to hide it: glass would let it show through.
-        let coversSystemCard: Bool = if case .banner(.airPods) = presentation { AirPodsSystemCard.current == .cover } else { false }
-        let glassStyle = isOpaquePage || coversSystemCard ? IslandGlassStyle.black : chosenStyle
-        let blursGrowth = !(reduceMotion || reducesWork || isOpaquePage)
-        let wantsGlass = glassStyle != .fade || contentSize.height > notch.height + 0.5
-        let showsGlass = wantsGlass || isGlassRetired == false
-        let silhouette = IslandShape(bottomRadius: bottomRadius, shoulderRadius: shoulderRadius, retraction: retraction)
-        // The glass's outline, `overdraw` taller at the top (above the screen edge), and the surface
-        // it is drawn on: larger by the style's rim inset, so the rim light on its edge lies outside
-        // the outline and is clipped (see `IslandGlassStyle.rimInset`).
-        let outline = IslandShape(bottomRadius: bottomRadius, shoulderRadius: shoulderRadius,
-                                  topInset: IslandLayout.overdraw, retraction: retraction)
-        let surface = outline.inset(by: -glassStyle.rimInset)
-
-        ZStack(alignment: .top) {
-            // Each content view is laid out at its own presentation's size, so while the frame
-            // springs between two sizes neither the outgoing nor the incoming content reflows.
-            IslandContent(presentation: presentation, thumbnails: thumbnails)
-                .frame(width: contentSize.width, height: contentSize.height, alignment: .top)
-                .id(presentation.surfaceKey)
-                .transition(.islandContent(reduceMotion: reduceMotion || lightContentSwap || isOpaquePage))
-        }
-        .opacity(reveal)
-        .blur(radius: blursGrowth ? 6 * (1 - reveal) : 0)
-        // The island's panel never becomes key (it must not steal focus), so by default every
-        // control in it would draw in the inactive, desaturated style of a background window.
-        // Like Control Center, it is a surface the user operates directly: draw controls active.
-        .environment(\.appearsActive, true)
-        .frame(width: contentSize.width, height: contentSize.height, alignment: .top)
-        .clipShape(silhouette)
-        .containerShape(silhouette)
-        // The glass extends `overdraw` above the window, where the window edge clips it, so its top
-        // edge (and the rim light that comes with an edge) is never on screen.
-        .padding(.top, IslandLayout.overdraw)
-        .islandSurfaceShade(
-            glassStyle,
-            solidDepth: IslandLayout.overdraw + layout.notch.height,
-            in: surface
-        )
-        // `rimInset` larger than the outline, so its rim falls outside the outline clip that
-        // `EmergenceProgress` applies around the container.
-        .islandGlass(in: surface, isEnabled: showsGlass)
-        .environment(\.islandGlassStyle, glassStyle)
-        .padding(.top, -IslandLayout.overdraw)
-        .task(id: wantsGlass) { await glassRetirement(wantsGlass: wantsGlass) }
-
     }
 
     /// Glass comes back at once when the island grows past the notch (under the black band, so the
@@ -166,33 +110,39 @@ private struct GlassIsland: View {
     }
 }
 
-/// The island's outline part-way out of the notch: `emergence` 0 is the notch, 1 the presentation
-/// (past 1 during the open's overshoot). The frame keeps the content's size throughout; the
-/// outline is drawn pulled in from it, top-centred on the notch (see `IslandShape.retraction`).
-nonisolated struct EmergingSilhouette {
-    let retraction: CGSize
-    let bottomRadius: CGFloat
-    let shoulderRadius: CGFloat
+/// What the island shows, at the presentation's own size, top-centred on the island's canvas (its
+/// window). Nothing here changes while the island moves: the outline, glass and shade around it are
+/// `IslandSurface`'s, so a morph never re-evaluates or re-lays out the content.
+private struct IslandContentStack: View {
+    let presentation: IslandPresentation
+    let layout: IslandLayout
+    /// Cross-fade the content instead of the blur-replace.
+    let crossFades: Bool
+    let thumbnails: ThumbnailCache
 
-    init(layout: IslandLayout, presentation: IslandPresentation, emergence: Double) {
-        let t = CGFloat(emergence)
-        let content = layout.size(for: presentation)
-        let notch = layout.size(for: .idle)
-        retraction = CGSize(
-            width: (content.width - notch.width) * (1 - t) / 2,
-            height: (content.height - notch.height) * (1 - t)
-        )
-        bottomRadius = max(0, Self.mix(layout.bottomRadius(for: .idle), layout.bottomRadius(for: presentation), t))
-        shoulderRadius = max(0, Self.mix(layout.shoulderRadius(for: .idle), layout.shoulderRadius(for: presentation), t))
-    }
-
-    /// The visible outline, in the island's frame.
-    var shape: IslandShape {
-        IslandShape(bottomRadius: bottomRadius, shoulderRadius: shoulderRadius, retraction: retraction)
-    }
-
-    static func mix(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat {
-        a + (b - a) * t
+    var body: some View {
+        let contentSize = layout.size(for: presentation)
+        ZStack(alignment: .top) {
+            // Each content view is laid out at its own presentation's size, so while the outline
+            // springs between two sizes neither the outgoing nor the incoming content reflows.
+            IslandContent(presentation: presentation, thumbnails: thumbnails)
+                .frame(width: contentSize.width, height: contentSize.height, alignment: .top)
+                // Concentric corners inside (the artwork) follow the island they belong to.
+                .containerShape(IslandShape(bottomRadius: layout.bottomRadius(for: presentation),
+                                            shoulderRadius: layout.shoulderRadius(for: presentation)))
+                // Every child fills the canvas, so the stack's size never changes: sized by its
+                // children, it grew from the old content's size to the new one's with the spring,
+                // and every frame re-laid out and re-placed the whole content inside it (measured:
+                // most of an open's CPU) although nothing on screen moved.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .id(presentation.surfaceKey)
+                .transition(.islandContent(reduceMotion: crossFades))
+        }
+        // The island's panel never becomes key (it must not steal focus), so by default every
+        // control in it would draw in the inactive, desaturated style of a background window.
+        // Like Control Center, it is a surface the user operates directly: draw controls active.
+        .environment(\.appearsActive, true)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -227,48 +177,92 @@ extension IslandPresentation {
     }
 }
 
-/// Insertion and removal of the glass island: it starts as the notch and grows to its size, and
-/// shrinks back into the notch when it goes.
+/// The island's surface around its content: outline, shade, glass — and its motion.
 ///
-/// A plain `.frame` change cannot do this: an inserted view has no previous layout to animate
-/// from, so it would simply appear at full size. Instead the transition animates a progress value
-/// (`islandEmergence`) with the transaction's spring, and `GlassIsland` sizes its glass from it.
-nonisolated private struct NotchEmergence: Transition {
-    let layout: IslandLayout
-    let presentation: IslandPresentation
+/// Size and radii ride the transaction's spring (they are animatable data), and so does the
+/// emergence: as a transition, the island is inserted at the notch (0) and grows to its
+/// presentation (1), and shrinks back into the notch when it is removed. The spring may carry
+/// either past its end, which is the open's overshoot. Everything that changes per frame is drawn
+/// here, around the content, so the content itself never re-renders while the island moves.
+///
+/// One glass container holds the island and every glass control on it. The outline clip sits
+/// outside it, and cuts the content with it: a container renders its glass past any clip inside
+/// it (the rim would show), and a second clip on the content alone only cost per-frame work.
+nonisolated private struct IslandSurfaceTransition: Transition {
+    let surface: IslandSurface
 
     func body(content: Content, phase: TransitionPhase) -> some View {
-        content.modifier(EmergenceProgress(progress: phase.isIdentity ? 1 : 0, layout: layout, presentation: presentation))
+        var surface = surface
+        surface.emergence = phase.isIdentity ? 1 : 0
+        return content.modifier(surface)
     }
 }
 
-/// Animates the emergence, and clips the island (glass container included) to its outline at that
-/// progress — outside the container, where a clip reaches the glass and cuts its rim.
-nonisolated private struct EmergenceProgress: ViewModifier, Animatable {
-    var progress: Double
-    let layout: IslandLayout
-    let presentation: IslandPresentation
+nonisolated private struct IslandSurface: ViewModifier, Animatable {
+    var size: CGSize
+    var bottomRadius: CGFloat
+    var shoulderRadius: CGFloat
+    /// The idle outline, where an emerging island starts.
+    let notch: IslandOutline
+    let glassStyle: IslandGlassStyle
+    let showsGlass: Bool
+    let blursGrowth: Bool
+    /// The shade's solid black from the top (fade style).
+    let solidDepth: CGFloat
+    /// 0 in the notch, 1 at the presentation.
+    var emergence: Double = 1
 
-    var animatableData: Double {
-        get { progress }
-        set { progress = newValue }
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<AnimatablePair<CGFloat, CGFloat>, Double>> {
+        get {
+            AnimatablePair(AnimatablePair(size.width, size.height),
+                           AnimatablePair(AnimatablePair(bottomRadius, shoulderRadius), emergence))
+        }
+        set {
+            size = CGSize(width: newValue.first.first, height: newValue.first.second)
+            bottomRadius = newValue.second.first.first
+            shoulderRadius = newValue.second.first.second
+            emergence = newValue.second.second
+        }
     }
 
     func body(content: Content) -> some View {
-        content
-            .environment(\.islandEmergence, progress)
-            .clipShape(EmergingSilhouette(layout: layout, presentation: presentation, emergence: progress).shape)
+        // The outline the presentations morph between, and the one drawn: pulled into the notch
+        // while the island emerges.
+        let frame = IslandOutline(size: size, bottomRadius: bottomRadius, shoulderRadius: shoulderRadius)
+        let drawn = notch.mixed(with: frame, by: emergence)
+        let reveal = min(max(emergence, 0), 1)
+        // The glass's outline, `overdraw` taller at the top (above the screen edge), and the surface
+        // it is drawn on: larger by the style's rim inset, so the rim light on its edge lies outside
+        // the outline and is clipped (see `IslandGlassStyle.rimInset`).
+        let surface = drawn.withTopInset(IslandLayout.overdraw).inset(by: -glassStyle.rimInset)
+        GlassEffectContainer {
+            content
+                .opacity(reveal)
+                .blur(radius: blursGrowth ? 6 * (1 - reveal) : 0)
+                // The glass extends `overdraw` above the window, where the window edge clips it, so
+                // its top edge (and the rim light that comes with an edge) is never on screen.
+                .padding(.top, IslandLayout.overdraw)
+                .islandSurfaceShade(glassStyle, solidDepth: solidDepth,
+                                    height: size.height + IslandLayout.overdraw, in: surface)
+                .islandGlass(in: IslandGlassBody(outline: surface), isEnabled: showsGlass)
+                .background {
+                    // The shoulders beside the glass body, in the glass's smoke (`IslandGlassBody`).
+                    IslandShoulders(outline: surface)
+                        .fill(Color.black.opacity(showsGlass && glassStyle.hasGlassSurface ? IslandGlassStyle.smokeOpacity : 0),
+                              style: FillStyle(eoFill: true))
+                }
+                .environment(\.islandGlassStyle, glassStyle)
+                .padding(.top, -IslandLayout.overdraw)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .clipShape(drawn)
     }
 }
 
-extension EnvironmentValues {
-    /// 0 while the glass island sits in the notch, 1 once it has grown to its presentation.
-    @Entry var islandEmergence: Double = 1
-}
 
 extension AnyTransition {
     /// Content swaps inside the island: a blur-replace, or a plain cross-fade under Reduce Motion (and
-    /// on battery, see `GlassIsland.lightContentSwap`).
+    /// on battery, see `IslandRootView`).
     static func islandContent(reduceMotion: Bool) -> AnyTransition {
         reduceMotion ? .opacity : AnyTransition(.blurReplace)
     }

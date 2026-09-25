@@ -414,10 +414,26 @@ import Testing
 
     @Test func animationLengthFollowsThePreference() {
         #expect(Motion.animation(from: .idle, to: .expanded(.home), reduceMotion: false, duration: 1.0)
-            == .spring(Motion.openSpring(duration: 1.0)))
+            == .lean(Motion.openSpring(duration: 1.0)))
         #expect(Motion.animation(from: .expanded(.home), to: .idle, reduceMotion: false, duration: 1.0)
-            == .spring(Motion.closeSpring(duration: 1.0)))
+            == .lean(Motion.closeSpring(duration: 1.0)))
         #expect(Motion.animation(from: .idle, to: .expanded(.home), reduceMotion: true, duration: 1.0) == Motion.reduced)
+    }
+
+    /// The lean spring ends long before SwiftUI's own (which ran a 0.3 s close for 1.4 s), yet only
+    /// once what is left of the move is below a point on every edge — and about when
+    /// the window shrinks to its resting frame (the resting margin absorbs the last fraction).
+    @Test func leanSpringsEndOnceSettled() {
+        let travel = max(Self.largestTravel.perSide * 2, Self.largestTravel.height)
+        for duration in Self.durations {
+            for spring in Self.springs(duration) {
+                let end = spring.settlingDuration(target: travel, epsilon: travel * LeanSpring.settledFraction)
+                #expect(end < Motion.settleDuration(for: duration) + 0.05, "\(spring) ends at \(end)")
+                // The spring moves every component alike, so each edge is left with its own share:
+                // half the width change per side, the whole height change at the bottom.
+                #expect(max(Self.largestTravel.perSide, Self.largestTravel.height) * LeanSpring.settledFraction < 1)
+            }
+        }
     }
 
     @Test func settleLeavesLessThanAPointOfMotion() {

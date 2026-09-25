@@ -85,7 +85,7 @@ struct ControlWidget: View {
         .accessibilityLabel(control.title)
         .accessibilityValue(control.isAction ? "" : control.status(on: on))
         .accessibilityAddTraits(control.isAction ? .isButton : [.isButton, .isToggle])
-        .onAppear { if !isPreview { controls.startObserving(control) } }
+        .onAppear { if !isPreview { withoutAnimation { controls.startObserving(control) } } }
         .onDisappear { if !isPreview { controls.stopObserving(control) } }
     }
 
@@ -284,7 +284,7 @@ struct KeyboardWidget: View {
                     .frame(width: size.width, height: size.height)
             }
         }
-        .onAppear { model.controls.refresh() }
+        .onAppear { withoutAnimation { model.controls.refresh() } }
     }
 
     private func slider(_ level: Double, _ controls: SystemControls) -> some View {

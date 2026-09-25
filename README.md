@@ -4,13 +4,41 @@ Turns the MacBook notch into a Dynamic-Island-style surface made of Liquid Glass
 Rest the pointer on the notch and it grows into a panel; music, timers, battery
 events, volume/brightness and dropped files live there the rest of the time.
 
-**Current version: v0.3** (the previous release was v0.2).
+**Current version: v0.3.1** (the energy and memory update of v0.3).
 Swift 6, SwiftUI, macOS 27.
 
-> ⚠️ **v0.3 is an early, feature-heavy build.** It may use **more battery** than
-> v0.2, and there may still be **memory leaks** or stutters in places that were
-> not tested for long. If you rely on NotchIsland every day and want the calmer
-> build, v0.2 is still on the [Releases](https://github.com/vdavid0814/notch-island-public/releases) page.
+> v0.3.1 fixes the extra battery use and the memory peaks of v0.3 — nothing looks or
+> behaves differently. Older builds are on the [Releases](https://github.com/vdavid0814/notch-island-public/releases) page.
+
+---
+
+## What's new in v0.3.1
+
+An energy and memory update. Nothing looks or behaves differently; it just costs far
+less. Measured on a MacBook Air (M5) with music playing, CPU as a share of one core
+over 30-second windows.
+
+**Memory — peaks stay below ~130 MB everywhere**
+- Opening the panel peaks at ~40 MB instead of ~145 MB; Settings at ~100 MB instead of
+  ~420 MB; the Siri app gallery at ~50 MB instead of ~285 MB; banners at ~40–80 MB.
+- The cause: Liquid Glass drawn in the island's own outline was rasterised again for
+  every frame of an animation. The glass is now drawn in a shape the system renders
+  directly, and the exact outline comes from a clip.
+- A 4.7-hour test (music playing, screen locked) stayed flat at 23 MB: no leaks.
+
+**CPU**
+- Opening and closing the panel costs less than half as much as before (about 0.35 s of
+  CPU for open + close instead of ~0.9 s): springs stop once they are visually settled
+  instead of running on for another second, and a morph animates only the island's
+  outline, so the content inside is no longer laid out again on every frame.
+- Settings ▸ General at rest: ~0.03 % instead of ~15 % (the animation-length preview
+  now runs on Core Animation).
+- Settings ▸ Widgets at rest: ~1.8 % instead of ~2.5 % (the live preview updates on its
+  own).
+- The open panel: the Now Playing progress line moves on Core Animation, and the
+  System widget no longer animates every reading (it kept the panel redrawing).
+- Idle with music: ~0.00 %; with the screen locked: ~0.002 %.
+- The hover diagnostic (`demo/hover`) no longer opens and closes the island in a loop.
 
 ---
 
@@ -185,7 +213,9 @@ Demo / diagnostics routes (inject state without touching the system):
 Nothing polls: IOKit run-loop source for power, CoreAudio property listeners,
 DisplayServices notifications, distributed notifications from the players,
 NSWorkspace notifications, and NSEvent monitors only while they are needed. No
-SwiftUI `repeatForever`; the equaliser is Core Animation on the render server.
+SwiftUI `repeatForever`; the equaliser and the Now Playing progress line are Core
+Animation on the render server. Animations move shapes, never frames, and Liquid Glass
+is only drawn in shapes the system renders directly.
 The panel is ordered out while the screens sleep or the session is locked.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it fits together.

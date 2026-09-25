@@ -79,6 +79,112 @@ nonisolated struct IslandShape: RoundedRectangularShape {
     }
 }
 
+/// The island's silhouette at a given size, top-centred in whatever rect it is drawn in.
+///
+/// The island is drawn on a canvas (its window) whose size stays put while the island morphs, so
+/// only this outline changes from frame to frame, never a frame (see `IslandRootView`). The same
+/// outline as `IslandShape` in a rect of `size`.
+nonisolated struct IslandOutline: InsettableShape, Equatable {
+    /// The visible island, below the overdraw strip.
+    var size: CGSize
+    var bottomRadius: CGFloat
+    var shoulderRadius: CGFloat
+    /// Height of the full-width strip above the visible top edge (see `IslandLayout.overdraw`).
+    var topInset: CGFloat = 0
+    private var insetAmount: CGFloat = 0
+
+    init(size: CGSize, bottomRadius: CGFloat, shoulderRadius: CGFloat, topInset: CGFloat = 0) {
+        self.size = size
+        self.bottomRadius = bottomRadius
+        self.shoulderRadius = shoulderRadius
+        self.topInset = topInset
+    }
+
+    func withTopInset(_ inset: CGFloat) -> IslandOutline {
+        var copy = self
+        copy.topInset = inset
+        return copy
+    }
+
+    /// `t` of the way from this outline to `other` (past 1 during an open's overshoot); radii never
+    /// below zero.
+    func mixed(with other: IslandOutline, by t: Double) -> IslandOutline {
+        let t = CGFloat(t)
+        func mix(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a + (b - a) * t }
+        return IslandOutline(
+            size: CGSize(width: mix(size.width, other.size.width), height: mix(size.height, other.size.height)),
+            bottomRadius: max(0, mix(bottomRadius, other.bottomRadius)),
+            shoulderRadius: max(0, mix(shoulderRadius, other.shoulderRadius)),
+            topInset: other.topInset
+        )
+    }
+
+    /// Where the island lies in `rect`: top-centred, `topInset` taller than `size`.
+    func body(in rect: CGRect) -> CGRect {
+        CGRect(
+            x: rect.midX - max(0, size.width) / 2,
+            y: rect.minY,
+            width: max(0, size.width),
+            height: max(0, size.height + topInset)
+        )
+    }
+
+    func geometry(in rect: CGRect) -> IslandShapeGeometry {
+        IslandShapeGeometry(
+            rect: body(in: rect).insetBy(dx: insetAmount, dy: insetAmount),
+            bottomRadius: bottomRadius - insetAmount,
+            shoulderRadius: shoulderRadius,
+            topInset: topInset
+        )
+    }
+
+    func path(in rect: CGRect) -> Path {
+        geometry(in: rect).path()
+    }
+
+    func inset(by amount: CGFloat) -> IslandOutline {
+        var copy = self
+        copy.insetAmount += amount
+        return copy
+    }
+}
+
+/// What the island's Liquid Glass is drawn in: the outline's body — below the shoulders, with its
+/// continuous bottom corners — as the system's own rounded rectangle.
+///
+/// Liquid Glass draws a system rounded rectangle analytically, but rasterises any other path, anew
+/// for every size: in the island's own outline, each frame of a morph cost the window server fresh
+/// textures, ~100 MB per open (measured; 0 MB in this shape). The outline clips the island anyway
+/// (`IslandSurface`), so the body is all the glass has to cover; the two small concave shoulders at
+/// the top are filled with the glass's smoke instead (`IslandShoulders`).
+nonisolated struct IslandGlassBody: Shape {
+    let outline: IslandOutline
+
+    func path(in rect: CGRect) -> Path {
+        let geometry = outline.geometry(in: rect)
+        let body = CGRect(x: geometry.bodyMinX, y: geometry.rect.minY,
+                          width: max(0, geometry.bodyMaxX - geometry.bodyMinX), height: geometry.rect.height)
+        return Path(
+            roundedRect: body,
+            cornerRadii: RectangleCornerRadii(topLeading: 0, bottomLeading: geometry.radius,
+                                              bottomTrailing: geometry.radius, topTrailing: 0),
+            style: .continuous
+        )
+    }
+}
+
+/// The parts of the outline the glass body leaves out: the concave shoulders (and the full-width
+/// strip above the screen edge).
+nonisolated struct IslandShoulders: Shape {
+    let outline: IslandOutline
+
+    func path(in rect: CGRect) -> Path {
+        var path = outline.path(in: rect)
+        path.addPath(IslandGlassBody(outline: outline).path(in: rect))
+        return path
+    }
+}
+
 /// The resolved (clamped) numbers behind an `IslandShape`, separate so tests can check them.
 nonisolated struct IslandShapeGeometry: Sendable, Equatable {
     /// How far a continuous corner's curve reaches along each edge, as a multiple of its radius.

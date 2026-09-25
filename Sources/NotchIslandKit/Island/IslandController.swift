@@ -622,7 +622,9 @@ nonisolated extension BannerKind {
     }
 
     private func pointerMonitorChanged(_ inside: Bool) {
-        guard pointerMonitor.isRunning else { return }
+        // A simulated pointer (`demo/hover`) is not where the real one is: the monitor would close
+        // the panel the simulation opened, and the dwell reopen it, over and over.
+        guard pointerMonitor.isRunning, !isPointerSimulated else { return }
         monitorInside = inside
         pointerChanged()
     }

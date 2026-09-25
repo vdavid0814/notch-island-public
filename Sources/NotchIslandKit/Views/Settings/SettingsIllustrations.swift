@@ -143,7 +143,7 @@ struct PictureChoice<Value: Hashable, Picture: View>: View {
 }
 
 /// Tiny widgets inside a pictured island.
-private struct MiniWidgets: View {
+struct MiniWidgets: View {
     let width: CGFloat
     let height: CGFloat
 
@@ -183,31 +183,140 @@ struct IslandSizePicture: View {
 }
 
 /// The island growing out of the notch and back, over and over, at the chosen speed (General ▸
-/// Animation length). Runs only while on screen.
+/// Animation length).
+///
+/// The desktop is SwiftUI; the island and its widgets are Core Animation layers (`GrowthLoopView`),
+/// looped by the window server. Driven by SwiftUI, every frame of the loop ran an update over all of
+/// Settings (measured: ~11 % CPU for as long as General was open), even in a graph of its own.
 struct GrowthPicture: View {
     let duration: Double
 
-    @State private var isOpen = false
-
     var body: some View {
-        let open = CGSize(width: 102, height: 40)
-        let closed = CGSize(width: MiniMetrics.notchWidth, height: MiniMetrics.menuBar)
-        MiniDesktop(width: 150, height: 70) {
-            MiniIsland(width: isOpen ? open.width : closed.width, height: isOpen ? open.height : closed.height) {
-                MiniWidgets(width: open.width - 10, height: open.height - MiniMetrics.menuBar - 5)
-                    .padding(.top, MiniMetrics.menuBar + 1)
-                    .opacity(isOpen ? 1 : 0)
-            }
+        MiniDesktop(width: Self.size.width, height: Self.size.height) {
+            GrowthLoop(duration: duration)
+                .frame(width: Self.size.width, height: Self.size.height)
         }
-        .task(id: duration) {
-            while !Task.isCancelled {
-                withAnimation(.spring(duration: duration, bounce: 0.2)) { isOpen = true }
-                try? await Task.sleep(for: .seconds(duration + 0.9))
-                guard !Task.isCancelled else { return }
-                withAnimation(.spring(duration: duration * 0.8, bounce: 0)) { isOpen = false }
-                try? await Task.sleep(for: .seconds(duration + 0.6))
-            }
+    }
+
+    static let size = CGSize(width: 150, height: 70)
+    static let open = CGSize(width: 102, height: 40)
+    static let closed = CGSize(width: MiniMetrics.notchWidth, height: MiniMetrics.menuBar)
+    /// Where the widgets sit in the open island.
+    static let widgets = CGSize(width: open.width - 10, height: open.height - MiniMetrics.menuBar - 5)
+
+    /// The island's outline at a size, top-centred in the picture (`MiniIsland`'s shape).
+    static func islandPath(_ size: CGSize) -> CGPath {
+        let rect = CGRect(x: (Self.size.width - size.width) / 2, y: 0, width: size.width, height: size.height)
+        return IslandShape(bottomRadius: min(10, size.height / 2), shoulderRadius: 3).path(in: rect).cgPath
+    }
+}
+
+private struct GrowthLoop: NSViewRepresentable {
+    let duration: Double
+
+    func makeNSView(context: Context) -> GrowthLoopView {
+        GrowthLoopView(frame: CGRect(origin: .zero, size: GrowthPicture.size))
+    }
+
+    func updateNSView(_ view: GrowthLoopView, context: Context) {
+        view.duration = duration
+    }
+}
+
+/// The looping island of `GrowthPicture`: a black island shape whose outline springs between the
+/// notch and the open size, and the widgets fading in and out with it — the same springs and pauses
+/// the SwiftUI picture used (open: `duration`, bounce 0.2, then 0.9 s; close: 0.8 × `duration`,
+/// no bounce, then 0.6 s).
+final class GrowthLoopView: NSView {
+    private let island = CAShapeLayer()
+    private let widgets = CALayer()
+    static let animationKey = "growth"
+
+    var duration: Double = 0 {
+        didSet { if duration != oldValue { restart() } }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        island.fillColor = NSColor.black.cgColor
+        island.path = GrowthPicture.islandPath(GrowthPicture.closed)
+        widgets.opacity = 0
+        widgets.contentsGravity = .resize
+        layer?.addSublayer(island)
+        layer?.addSublayer(widgets)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        restart()
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        island.frame = bounds
+        let size = GrowthPicture.widgets
+        widgets.frame = CGRect(x: (bounds.width - size.width) / 2, y: MiniMetrics.menuBar + 1,
+                               width: size.width, height: size.height)
+        CATransaction.commit()
+    }
+
+    private func restart() {
+        island.removeAnimation(forKey: Self.animationKey)
+        widgets.removeAnimation(forKey: Self.animationKey)
+        guard let window, duration > 0 else { return }
+        if widgets.contents == nil { renderWidgets(scale: window.backingScaleFactor) }
+
+        let closed = GrowthPicture.islandPath(GrowthPicture.closed)
+        let open = GrowthPicture.islandPath(GrowthPicture.open)
+        let closeAt = duration + 0.9
+        let cycle = closeAt + duration + 0.6
+
+        func spring(_ key: String, from: Any, to: Any, begin: Double, duration: Double, bounce: Double) -> CASpringAnimation {
+            let animation = CASpringAnimation(perceptualDuration: duration, bounce: bounce)
+            animation.keyPath = key
+            animation.fromValue = from
+            animation.toValue = to
+            animation.beginTime = begin
+            animation.duration = min(animation.settlingDuration, cycle - begin)
+            animation.fillMode = .forwards
+            return animation
         }
+        func loop(_ animations: [CAAnimation]) -> CAAnimationGroup {
+            let group = CAAnimationGroup()
+            group.animations = animations
+            group.duration = cycle
+            group.repeatCount = .infinity
+            group.beginTime = CACurrentMediaTime()
+            return group
+        }
+        island.add(loop([
+            spring("path", from: closed, to: open, begin: 0, duration: duration, bounce: 0.2),
+            spring("path", from: open, to: closed, begin: closeAt, duration: duration * 0.8, bounce: 0),
+        ]), forKey: Self.animationKey)
+        widgets.add(loop([
+            spring("opacity", from: 0, to: 1, begin: 0, duration: duration, bounce: 0.2),
+            spring("opacity", from: 1, to: 0, begin: closeAt, duration: duration * 0.8, bounce: 0),
+        ]), forKey: Self.animationKey)
+    }
+
+    /// The widgets never change: drawn once into the layer.
+    private func renderWidgets(scale: CGFloat) {
+        let size = GrowthPicture.widgets
+        let renderer = ImageRenderer(content: MiniWidgets(width: size.width, height: size.height)
+            .frame(width: size.width, height: size.height))
+        renderer.scale = scale
+        widgets.contents = renderer.cgImage
+        widgets.contentsScale = scale
     }
 }
 
@@ -277,19 +386,11 @@ struct NowPlayingPicture: View {
     }
 }
 
+/// The pill's own bars in miniature: Core Animation, so an open Settings page costs no frames.
+/// (A SwiftUI `TimelineView` here re-rendered the page 8 times a second for as long as it was open.)
 private struct MiniEqualizer: View {
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 8)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .bottom, spacing: 1) {
-                ForEach(0..<3, id: \.self) { bar in
-                    Capsule()
-                        .fill(.white)
-                        .frame(height: 2 + 5 * abs(sin(t * 3 + Double(bar) * 1.3)))
-                }
-            }
-            .frame(maxHeight: .infinity, alignment: .bottom)
-        }
+        EqualizerView(isAnimating: true, onBattery: true, size: CGSize(width: 8, height: 7), barWidth: 1.4)
     }
 }
 

@@ -83,11 +83,9 @@ extension ButtonLook {
 /// The playback line over the track, with elapsed and remaining time under it.
 ///
 /// Progress is derived from `PlaybackClock` (an anchor, no ticker). While playing, the times are
-/// `TickingClock`s (once a second, while on screen), and a
-/// `TimelineView` in the background moves the slider about once per point of travel — every few
-/// seconds for a long track — only while this card is on screen, playing, and not being dragged. The slider itself lives outside the timeline, so the timeline
-/// coming and going never tears down a slider mid-drag. While dragging, the slider follows a local
-/// value and the seek is sent once, on release.
+/// `TickingClock`s (once a second, while on screen) and the line is moved by Core Animation
+/// (`PlayedLine`), so nothing in SwiftUI changes between two seconds. While dragging, the slider
+/// follows a local value and the seek is sent once, on release.
 struct PlaybackScrubber: View {
     let clock: PlaybackClock?
     let duration: TimeInterval?
@@ -107,7 +105,8 @@ struct PlaybackScrubber: View {
             // The line across the whole width (thick, thicker under the pointer, like Music's),
             // the times under its two ends.
             VStack(spacing: Metrics.Spacing.xSmall) {
-                ScrubTrack(position: shown, duration: duration) { target in
+                ScrubTrack(position: shown, duration: duration,
+                           rate: running == nil ? 0 : (clock?.rate ?? 0)) { target in
                     if dragPosition == nil { model.island.isInteracting = true }
                     dragPosition = target
                 } commit: {
@@ -140,31 +139,12 @@ struct PlaybackScrubber: View {
             // Follows the control size so the times keep their proportion to the line.
             .font((controlSize >= .large ? Font.callout : .footnote).weight(.medium).monospacedDigit())
             .foregroundStyle(.secondary)
-            .background {
-                if isPlaying && dragPosition == nil && !isPreview {
-                    // A fixed anchor: `.now` made a new schedule on every render, whose first entry
-                    // (now) moved the slider, which rendered again — every frame while the card was
-                    // open (measured: 100 renders per open and close, most of the panel's CPU).
-                    TimelineView(.periodic(from: Self.tickAnchor, by: Self.sliderTick(duration: duration))) { context in
-                        Color.clear.onChange(of: context.date, initial: true) { _, date in
-                            livePosition = position(at: date)
-                        }
-                    }
-                }
-            }
             .onChange(of: clock, initial: true) { livePosition = position(at: .now) }
         } else {
             Label("Live", systemImage: "dot.radiowaves.left.and.right")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-    }
-
-    nonisolated static let tickAnchor = Date(timeIntervalSinceReferenceDate: 0)
-
-    /// About one step per point of a ~200-pt slider, never faster than 1 Hz nor slower than 0.2 Hz.
-    nonisolated static func sliderTick(duration: TimeInterval) -> TimeInterval {
-        min(max(duration / 200, 1), 5)
     }
 
     /// Start and end of the track on the wall clock while it plays at normal speed and is not being
@@ -187,6 +167,8 @@ struct PlaybackScrubber: View {
 struct ScrubTrack: View {
     let position: TimeInterval
     let duration: TimeInterval
+    /// Seconds of track per second while it plays on its own (0: the line stands still).
+    var rate: Double = 0
     let scrub: (TimeInterval) -> Void
     let commit: () -> Void
 
@@ -201,8 +183,8 @@ struct ScrubTrack: View {
             let fraction = duration > 0 ? min(max(position / duration, 0), 1) : 0
             ZStack(alignment: .leading) {
                 Capsule().fill(.white.opacity(0.22))
-                Capsule().fill(.white.opacity(isDragging ? 1 : 0.9))
-                    .frame(width: max(height, proxy.size.width * fraction))
+                PlayedLine(fraction: fraction, rate: duration > 0 ? rate / duration : 0,
+                           opacity: isDragging ? 1 : 0.9)
             }
             .frame(height: height)
             .frame(maxHeight: .infinity)
@@ -234,5 +216,94 @@ struct ScrubTrack: View {
             @unknown default: break
             }
         }
+    }
+}
+
+/// The played part of the line, as a Core Animation layer: while the track plays, one linear
+/// animation carries it to the end at 2 fps, drawn by the window server. A SwiftUI position ticking
+/// once a second re-rendered the card, and every re-render set the island's interactive glass
+/// springing for a third of a second (measured: ~40 frames a second while the panel was open).
+struct PlayedLine: NSViewRepresentable {
+    /// 0…1 now.
+    let fraction: Double
+    /// Fraction per second (0: still).
+    let rate: Double
+    let opacity: Double
+
+    func makeNSView(context: Context) -> PlayedLineView { PlayedLineView() }
+
+    func updateNSView(_ view: PlayedLineView, context: Context) {
+        view.update(fraction: fraction, rate: rate, opacity: opacity)
+    }
+}
+
+final class PlayedLineView: NSView {
+    private let fill = CALayer()
+    private var fraction = 0.0
+    private var rate = 0.0
+    /// When `fraction` was true.
+    private var since = CACurrentMediaTime()
+    /// About one point of travel per frame on a ~200-pt line for a three-minute track.
+    nonisolated static let frameRate = CAFrameRateRange(minimum: 1, maximum: 4, preferred: 2)
+    nonisolated static let animationKey = "played"
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        fill.anchorPoint = CGPoint(x: 0, y: 0.5)
+        fill.backgroundColor = NSColor.white.cgColor
+        layer?.addSublayer(fill)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var isFlipped: Bool { true }
+
+    /// Clicks and drags belong to the SwiftUI track around it.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func update(fraction: Double, rate: Double, opacity: Double) {
+        fill.opacity = Float(opacity)
+        guard fraction != self.fraction || rate != self.rate else { return }
+        self.fraction = fraction
+        self.rate = rate
+        since = CACurrentMediaTime()
+        restart()
+    }
+
+    override func layout() {
+        super.layout()
+        restart()
+    }
+
+    /// Where the line is now, and — while playing — one animation from there to the end.
+    private func restart() {
+        let width = bounds.width
+        let height = bounds.height
+        let now = min(max(fraction + rate * (CACurrentMediaTime() - since), 0), 1)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fill.removeAnimation(forKey: Self.animationKey)
+        fill.cornerRadius = height / 2
+        fill.position = CGPoint(x: 0, y: height / 2)
+        fill.bounds = CGRect(x: 0, y: 0, width: Self.width(now, in: width, height: height), height: height)
+        if rate > 0, now < 1, width > 0 {
+            let animation = CABasicAnimation(keyPath: "bounds.size.width")
+            animation.fromValue = Self.width(now, in: width, height: height)
+            animation.toValue = Self.width(1, in: width, height: height)
+            animation.duration = (1 - now) / rate
+            animation.timingFunction = CAMediaTimingFunction(name: .linear)
+            animation.fillMode = .forwards
+            animation.isRemovedOnCompletion = false
+            animation.preferredFrameRateRange = Self.frameRate
+            fill.add(animation, forKey: Self.animationKey)
+        }
+        CATransaction.commit()
+    }
+
+    /// A capsule never narrower than it is tall.
+    nonisolated static func width(_ fraction: Double, in width: CGFloat, height: CGFloat) -> CGFloat {
+        max(height, width * CGFloat(fraction))
     }
 }
