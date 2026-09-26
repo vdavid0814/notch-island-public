@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4.1 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -18,6 +18,46 @@ events, volume/brightness and dropped files live there the rest of the time.
 For older versions, see the **[Releases page](https://github.com/vdavid0814/notch-island-public/releases)**.
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.4.1
+
+The island opens and closes on the render server, an equalizer that breathes to the beat, covers
+that cross-fade without a gap, a warmer Fade — and far less energy while music plays.
+
+**Opening and closing**
+- **The island's outline is animated by the system's render server.** SwiftUI draws the panel once, still, and a mask plays the spring: the app no longer redraws every frame while the island moves. The content is revealed by the growing outline.
+- The glass no longer clicks into place when the island lands.
+
+**Now Playing**
+- **The equalizer breathes to the music:** the bars move on the render server between short listening windows, with a soft lift on prominent kicks (bass) and cymbals (treble); neighbouring bars pull each other 15 %. Steadier after a track or volume change, no clicks.
+- **Covers cross-fade** with a small spring when the track changes, and the old cover stays until the new one arrives (no empty cover in between).
+
+**Siri**
+- **⌘C in Clipboard** copies the selected item — no click on it needed.
+- The app gallery keeps its app list and icons between openings.
+
+**Look**
+- **Fade:** the black clears 5 % earlier down the middle and 2 % earlier along the sides, over a longer ramp; its clear glass has a 10 % touch of the warm brown from the macOS 27 light wallpaper.
+
+**Energy** (MacBook Air M5, release build, Activity Monitor's Energy Impact)
+
+| | v0.4 | v0.4.1 |
+|---|---|---|
+| At rest with music playing | 1.3–1.4 | mostly 0.0–0.3 |
+| Opening the panel once | ~19–28 | ~13 |
+| Opening and closing it fast, over and over | ~115 | ~83 |
+| Hovering in and out fast, over and over | ~124 | ~71 |
+| App CPU per open + close | ~304 ms | ~180 ms |
+
+- The timer's ruler is drawn as a plain picture until the pointer is on it.
+- Pictures (covers, wallpapers, icons) are decoded on one low-priority thread.
+
+**Known issues**
+- The corner's edge light can look slightly jagged in some openings.
+- At rest the Energy Impact can rise to ~1 while other windows change a lot (the full-screen check reacts to them).
+- The open's small overshoot bounce is gone for now.
 
 ---
 
