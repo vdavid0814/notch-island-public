@@ -72,6 +72,8 @@ import AppKit
     /// Tears down every source (child process, observers, Apple Events) and clears what is shown.
     /// Idempotent.
     func stop() {
+        trackGapTask?.cancel()
+        trackGapTask = nil
         isStarted = false
         adapterHealthy = false
         adapter?.stop()
@@ -277,6 +279,24 @@ import AppKit
     private func publish(treatPauseAsFresh: Bool = false) {
         let next = demo ?? (isStarted ? shownKind.flatMap { snapshots[$0] } : nil)
         let previous = published
+        // Between two tracks a player reports nothing for a moment: while that lasts less than
+        // `trackGapGrace`, the last track stays. Published at once, the pill left the notch and came
+        // back a quarter of a second later (two transitions, Energy Impact ~3 at rest, measured).
+        if next == nil, demo == nil, isStarted, previous?.isPlaying == true, !trackGapElapsed {
+            if trackGapTask == nil {
+                trackGapTask = Task { [weak self] in
+                    try? await Task.sleep(for: Self.trackGapGrace)
+                    guard !Task.isCancelled, let self else { return }
+                    self.trackGapTask = nil
+                    self.trackGapElapsed = true
+                    self.publish()
+                    self.trackGapElapsed = false
+                }
+            }
+            return
+        }
+        trackGapTask?.cancel()
+        trackGapTask = nil
         if let previous, let next, previous.isEquivalent(to: next), !treatPauseAsFresh { return }
         published = next
 
@@ -284,7 +304,7 @@ import AppKit
         let playing = next?.isPlaying ?? false
         if isPlaying != playing { isPlaying = playing }
         if clock != next?.clock { clock = next?.clock }
-        updateArtwork(next?.item.artworkData)
+        updateArtwork(for: next?.item)
         updateActivity(playing: playing, hasItem: next != nil,
                        justPaused: treatPauseAsFresh || (previous?.isPlaying == true && !playing))
     }
@@ -311,8 +331,44 @@ import AppKit
         }
     }
 
+    /// How long a player may report no track at all before the pill goes (see `publish`).
+    static let trackGapGrace: Duration = .milliseconds(1500)
+    @ObservationIgnored private var trackGapTask: Task<Void, Never>?
+    @ObservationIgnored private var trackGapElapsed = false
+
     /// How long the previous cover waits for the next track's before giving way to none.
     static let artworkGrace: Duration = .seconds(2)
+
+    /// A track and the cover last seen with it.
+    private struct Cover {
+        let title: String
+        let artist: String
+        let album: String
+        let bytes: Data
+
+        func belongs(to item: NowPlayingItem) -> Bool {
+            item.title == title && item.artist == artist && item.album == album
+        }
+    }
+
+    @ObservationIgnored private var lastCover: Cover?
+
+    /// A report of the same track without its cover keeps the cover it had. After a while that is
+    /// what the sources send: the adapter, restarted after sleep, starts over with a full report
+    /// that may come without the image, and when the island moves between the adapter and Music's
+    /// own reports (which fetch no cover while the adapter runs) the cover was gone for good after
+    /// `artworkGrace`, until the next track.
+    private func updateArtwork(for item: NowPlayingItem?) {
+        guard let item else { return updateArtwork(nil) }
+        if let bytes = item.artworkData {
+            if lastCover?.bytes != bytes {
+                lastCover = Cover(title: item.title, artist: item.artist, album: item.album, bytes: bytes)
+            }
+            updateArtwork(bytes)
+        } else {
+            updateArtwork(lastCover.flatMap { $0.belongs(to: item) ? $0.bytes : nil })
+        }
+    }
 
     private func updateArtwork(_ bytes: Data?) {
         guard bytes != artworkBytes else { return }

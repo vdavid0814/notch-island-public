@@ -102,8 +102,8 @@ nonisolated enum IslandGlassStyle: String, Sendable, CaseIterable, Identifiable,
     var material: Glass { self == .fade ? .clear.tint(Self.fadeTint) : .clear.tint(Color.black.opacity(Self.smokeOpacity)) }
 
     /// A trace of colour in the fade style's otherwise clear glass: the dark warm brown in the
-    /// folds of the macOS 27 light wallpaper (its darkest browns averaged), at 10 %.
-    static let fadeTint = Color(red: 106 / 255, green: 89 / 255, blue: 75 / 255).opacity(0.1)
+    /// folds of the macOS 27 light wallpaper (its darkest browns averaged), at 25 %.
+    static let fadeTint = Color(red: 106 / 255, green: 89 / 255, blue: 75 / 255).opacity(0.25)
 
     /// The black of the surface glass's tint.
     static let smokeOpacity = 0.62

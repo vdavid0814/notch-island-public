@@ -441,6 +441,15 @@ nonisolated struct FileScope: Sendable, Equatable {
         selectionFollowsPointer = false
     }
 
+    /// The pointer on the row at `index` (the lists' own order): no need to work the rows out again,
+    /// which for the gallery sorts every app.
+    func select(at index: Int) {
+        guard selection != index || !selectionFollowsPointer else { return }
+        selection = index
+        selectionIsUsers = true
+        selectionFollowsPointer = true
+    }
+
     func select(_ row: AssistantRow) {
         guard let index = rows.firstIndex(where: { $0.id == row.id }) else { return }
         selection = index

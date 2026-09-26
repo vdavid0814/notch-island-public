@@ -81,6 +81,18 @@ nonisolated enum Motion {
         }
     }
 
+    /// Whether the island's surface follows its outline frame by frame (SwiftUI animates it) instead
+    /// of being drawn once under the render server's moving mask (`IslandOutlineMotion`).
+    ///
+    /// Between two open presentations on glass (Siri's field, list and gallery, the panel and Siri)
+    /// both ends show glass below the notch band. Held at the larger outline, the fade's black was
+    /// drawn for that outline — the smaller island stayed all black while it moved, and the glass
+    /// and its edge light only appeared, at once, when the outline landed. Settings is drawn on
+    /// black (`IslandRootView`) and solid black looks the same held, so both keep the render server.
+    static func surfaceFollowsOutline(from: IslandPresentation, to: IslandPresentation, style: IslandGlassStyle) -> Bool {
+        from.isOpen && to.isOpen && !from.isSettings && !to.isSettings && style.hasGlassSurface
+    }
+
     /// The content's own swap while the render server moves the outline (`IslandOutlineMotion`):
     /// short, so it costs a few frames rather than the whole spring. Nothing is animated when the
     /// island grows out of the notch (the growing outline reveals the content); on the way back

@@ -105,10 +105,10 @@ private struct GeneralSettings: View {
                     HStack {
                         Slider(value: hoverDelay, in: Preferences.hoverDelayRange)
                             .labelsHidden()
-                        Text(SettingsFormat.hoverDelay(preferences.hoverDelay))
-                            .monospacedDigit()
+                        ReservedWidthText(SettingsFormat.hoverDelay(preferences.hoverDelay),
+                                          fitting: [SettingsFormat.hoverDelay(Preferences.hoverDelayRange.lowerBound),
+                                                    SettingsFormat.hoverDelay(Preferences.hoverDelayRange.upperBound)])
                             .foregroundStyle(.secondary)
-                            .frame(minWidth: 56, alignment: .trailing)
                     }
                 }
                 .disabled(!preferences.openOnHover)
@@ -116,10 +116,10 @@ private struct GeneralSettings: View {
                     HStack {
                         Slider(value: animationDuration, in: Motion.durationRange)
                             .labelsHidden()
-                        Text(SettingsFormat.hoverDelay(preferences.animationDuration))
-                            .monospacedDigit()
+                        ReservedWidthText(SettingsFormat.hoverDelay(preferences.animationDuration),
+                                          fitting: [SettingsFormat.hoverDelay(Motion.durationRange.lowerBound),
+                                                    SettingsFormat.hoverDelay(Motion.durationRange.upperBound)])
                             .foregroundStyle(.secondary)
-                            .frame(minWidth: 56, alignment: .trailing)
                     }
                 } label: {
                     Text("Animation length")

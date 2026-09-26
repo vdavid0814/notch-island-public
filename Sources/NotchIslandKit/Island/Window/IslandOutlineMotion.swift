@@ -40,6 +40,8 @@ import SwiftUI
         let velocity: OutlineVector
         let spring: Spring
         let duration: TimeInterval
+        /// SwiftUI moves this one, with the surface (`handOff`): no mask to take down.
+        var isDrawnBySwiftUI = false
 
         func state(at time: CFTimeInterval) -> (value: OutlineVector, velocity: OutlineVector)? {
             let t = time - start
@@ -142,6 +144,39 @@ import SwiftUI
             }
         }
         return hold
+    }
+
+    func handOff(from: IslandPresentation, to: IslandPresentation, spring: Spring) -> SurfaceHold? {
+        let layout = model.layout
+        let now = CACurrentMediaTime()
+        let previous = flight
+        let live = previous.flatMap { $0.state(at: now) }
+        landing.cancel()
+        unmasking.cancel()
+        if let stage, stage.layer?.mask != nil {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            shape.removeAnimation(forKey: "outline")
+            stage.layer?.mask = nil
+            CATransaction.commit()
+        }
+        // SwiftUI starts a spring from rest, at the outline the render server had reached; one of
+        // its own springs under way it carries on from where it is, at its speed.
+        let fromRenderServer = live != nil && previous?.isDrawnBySwiftUI == false
+        let origin = live?.value ?? OutlineVector(layout.outline(for: from))
+        let velocity = fromRenderServer ? .zero : live?.velocity ?? .zero
+        let delta = OutlineVector(layout.outline(for: to)) - origin
+        let distance = delta.magnitudeSquared.squareRoot()
+        let duration = min(
+            spring.settlingDuration(target: delta, initialVelocity: velocity,
+                                    epsilon: max(distance * LeanSpring.settledFraction, 0.05)),
+            spring.duration * 4
+        )
+        nextID += 1
+        flight = Flight(id: nextID, start: now, origin: origin, delta: delta, velocity: velocity,
+                        spring: spring, duration: duration, isDrawnBySwiftUI: true)
+        guard fromRenderServer else { return nil }
+        return SurfaceHold(id: nextID, outline: origin.outline, presentation: from)
     }
 
     /// Keeps the mask over the window's content and the outline top-centred on it (the island is

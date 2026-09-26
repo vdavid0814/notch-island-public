@@ -29,7 +29,8 @@ import SwiftUI
     /// While true, a transition's hooks are running; see `apply`.
     @ObservationIgnored private var isApplying = false
     /// The latest request made from inside a transition's hooks.
-    @ObservationIgnored private var deferred: (presentation: IslandPresentation, animation: Animation?, spring: Spring?)?
+    @ObservationIgnored private var deferred: (presentation: IslandPresentation, animation: Animation?, spring: Spring?,
+                                               surfaceFollows: Bool)?
 
     /// No-op if equal. A request made from inside a transition (a hook that ends up here again) is
     /// not nested into it: it runs on the next main-actor turn, latest request winning, so every
@@ -40,10 +41,13 @@ import SwiftUI
     /// SwiftUI draws the surface once, still (`surfaceHold`), instead of every frame: the per-frame
     /// SwiftUI work was about half of an open's CPU (measured). Only the content's own short swap
     /// is animated here then (`Motion.contentSwap`).
-    func apply(_ next: IslandPresentation, animation: Animation?, spring: Spring? = nil) {
+    ///
+    /// `surfaceFollows` (`Motion.surfaceFollowsOutline`): the surface rides `animation` instead,
+    /// starting where a move on the render server has got to.
+    func apply(_ next: IslandPresentation, animation: Animation?, spring: Spring? = nil, surfaceFollows: Bool = false) {
         guard !isApplying else {
             let isFirst = deferred == nil
-            deferred = (next, animation, spring)
+            deferred = (next, animation, spring, surfaceFollows)
             Log.island.notice("deferred re-entrant transition to \(String(describing: next), privacy: .public)")
             if isFirst { Task { [weak self] in self?.applyDeferred() } }
             return
@@ -56,7 +60,17 @@ import SwiftUI
         isApplying = true
         defer { isApplying = false }
         willTransition?(from, next)
-        if let spring, let hold = outlineMover?.move(from: from, to: next, spring: spring) {
+        if let spring, surfaceFollows {
+            // A move on the render server stops where it is; the surface is drawn there, then
+            // springs on from it with SwiftUI.
+            if let live = outlineMover?.handOff(from: from, to: next, spring: spring) {
+                withoutAnimation { surfaceHold = live }
+            }
+            withAnimation(animation) {
+                surfaceHold = nil
+                presentation = next
+            }
+        } else if let spring, let hold = outlineMover?.move(from: from, to: next, spring: spring) {
             withoutAnimation { surfaceHold = hold }
             withAnimation(Motion.contentSwap(from: from, to: next)) {
                 presentation = next
@@ -71,7 +85,8 @@ import SwiftUI
 
     private func applyDeferred() {
         guard let deferred else { return }
-        apply(deferred.presentation, animation: deferred.animation, spring: deferred.spring)
+        apply(deferred.presentation, animation: deferred.animation, spring: deferred.spring,
+              surfaceFollows: deferred.surfaceFollows)
     }
 
     /// The outline has landed: the surface is drawn as `presentation`'s again.
@@ -102,4 +117,10 @@ nonisolated struct SurfaceHold: Equatable, Sendable {
     /// Starts the move and says how to draw the surface meanwhile; nil when the move is left to
     /// SwiftUI. Releases the hold (`IslandModel.releaseSurface`) once the outline has landed.
     func move(from: IslandPresentation, to: IslandPresentation, spring: Spring) -> SurfaceHold?
+
+    /// The outline moves with SwiftUI this time (`Motion.surfaceFollowsOutline`): a move under way
+    /// on the render server stops, and the hold returned is its outline at this moment, for SwiftUI
+    /// to start from (nil when none was under way). The move is remembered, so one that follows it
+    /// on the render server starts where it is.
+    func handOff(from: IslandPresentation, to: IslandPresentation, spring: Spring) -> SurfaceHold?
 }

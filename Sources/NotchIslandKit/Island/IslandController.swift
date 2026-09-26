@@ -407,7 +407,8 @@ nonisolated extension BannerKind {
                 from: from, to: next, reduceMotion: reduceMotion, duration: model.preferences.animationDuration
             )
             let spring = reduceMotion ? nil : Motion.spring(from: from, to: next, duration: model.preferences.animationDuration)
-            model.island.apply(next, animation: animation, spring: spring)
+            let follows = Motion.surfaceFollowsOutline(from: from, to: next, style: model.effectiveGlassStyle)
+            model.island.apply(next, animation: animation, spring: spring, surfaceFollows: follows)
             // What actually happened: a request from inside another transition is deferred.
             let applied = model.island.presentation
             if applied != from { presentationChanged(from: from, to: applied) }

@@ -10,9 +10,12 @@ import AppKit
 /// pointer costs nothing. They are installed only while the island is expanded.
 /// Mouse-move monitors need no permission (only key-event monitors do).
 final class PointerMonitor {
-    /// Slack around the island, so a fast pointer grazing the edge for one
-    /// frame does not slam the panel shut.
-    nonisolated static let slack: CGFloat = 8
+    /// Slack around the island, so a pointer resting on the very edge does not
+    /// flicker in and out. Small: the island closes as the pointer visibly
+    /// leaves it (8 pt kept it open under a pointer clearly below it, and with
+    /// a close delay of 0 there is nothing else to wait for). A pointer that
+    /// grazes out and back within the close delay keeps it open anyway.
+    nonisolated static let slack: CGFloat = 2
 
     var onChange: ((_ isInside: Bool) -> Void)?
 

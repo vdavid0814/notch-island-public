@@ -21,6 +21,10 @@ struct ExpandedView: View {
             clearance: Metrics.notchClearance
         )
         let scale = layout.scale.factor
+        // As the island's own content swaps (`IslandRootView`): on battery, or when the system asks
+        // for less work, a plain cross-fade — the blur-replace blurs both pages every frame.
+        let lightSwap = model.activity.prefersReducedWork
+            || (model.power.state.hasBattery && !model.power.state.isPluggedIn)
 
         VStack(spacing: 0) {
             ExpandedHeader(split: split, height: layout.notch.height)
@@ -28,7 +32,7 @@ struct ExpandedView: View {
                 pageView(scale: scale)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .id(page)
-                    .transition(.islandContent(reduceMotion: reduceMotion))
+                    .transition(.islandContent(reduceMotion: reduceMotion || lightSwap))
             }
             .padding(.top, Metrics.Expanded.pageTopInset)
             .padding(.bottom, Metrics.Expanded.pageBottomInset)

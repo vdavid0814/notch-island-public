@@ -570,12 +570,13 @@ import Testing
         #expect(!BannerKind.dropTarget.isInteractive)
     }
 
-    @Test func pointerSlackIsEightPoints() {
+    @Test func pointerSlackIsTwoPoints() {
         let region = CGRect(x: 100, y: 100, width: 200, height: 50)
         #expect(PointerMonitor.contains(CGPoint(x: 150, y: 120), in: region))
-        #expect(PointerMonitor.contains(CGPoint(x: 93, y: 157), in: region))
-        #expect(!PointerMonitor.contains(CGPoint(x: 91, y: 120), in: region))
-        #expect(!PointerMonitor.contains(CGPoint(x: 150, y: 159), in: region))
+        #expect(PointerMonitor.contains(CGPoint(x: 99, y: 151), in: region))
+        #expect(!PointerMonitor.contains(CGPoint(x: 97, y: 120), in: region))
+        #expect(!PointerMonitor.contains(CGPoint(x: 150, y: 153), in: region))
+        #expect(!PointerMonitor.contains(CGPoint(x: 150, y: 97), in: region))
         #expect(!PointerMonitor.contains(CGPoint(x: 150, y: 120), in: .null))
     }
 }

@@ -9,6 +9,11 @@ import os
 /// never sees half a press). Every other key passes straight through, in microseconds. It runs on
 /// its own thread (a tap callback must never wait for the main thread) and needs Accessibility,
 /// which the app already asks for. Off → the system shortcut works as before.
+///
+/// The key tap is only switched on while the chosen modifier is held (or a swallowed press is still
+/// down): a second tap on modifier changes alone switches it. On for good, every key typed anywhere
+/// woke the app twice (Energy Impact ~0.2 while typing, measured); modifiers change rarely. The
+/// modifier tap is not listen-only, so the key tap is on before the event after it is delivered.
 @MainActor final class CommandSpaceTap {
     /// Called on the main actor for each ⌘Space press.
     var onPress: (() -> Void)?
@@ -126,22 +131,56 @@ nonisolated private final class CommandSpaceTapShared: Sendable {
 nonisolated private final class CommandSpaceTapSession {
     let deliver: @Sendable () -> Void
     let shared: CommandSpaceTapShared
+    /// Key presses: on only while `armed`.
     var port: CFMachPort?
+    /// Modifier changes: always on.
+    var flagsPort: CFMachPort?
     var pressed = false
+    /// The chosen modifier is held: the key tap is on.
+    private var heldModifier = false
+    private var armed = false
 
     init(deliver: @escaping @Sendable () -> Void, shared: CommandSpaceTapShared) {
         self.deliver = deliver
         self.shared = shared
     }
 
+    /// The key tap follows the modifier, and stays on until a swallowed press has come back up.
+    func updateArming(flags: CGEventFlags) {
+        heldModifier = flags.intersection([.maskCommand, .maskShift, .maskAlternate, .maskControl]) == shared.modifiers
+        rearm()
+    }
+
+    private func rearm() {
+        let wanted = heldModifier || pressed
+        guard wanted != armed, let port else { return }
+        armed = wanted
+        CGEvent.tapEnable(tap: port, enable: wanted)
+    }
+
+    func handleFlags(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
+        switch type {
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            if let flagsPort { CGEvent.tapEnable(tap: flagsPort, enable: true) }
+        case .flagsChanged:
+            updateArming(flags: event.flags)
+        default:
+            break
+        }
+        return Unmanaged.passUnretained(event)
+    }
+
     func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            if let port { CGEvent.tapEnable(tap: port, enable: true) }
+            if let port, armed { CGEvent.tapEnable(tap: port, enable: true) }
             return Unmanaged.passUnretained(event)
         case .keyDown, .keyUp:
             let isDown = type == .keyDown
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            // A key's own flags are the truth (a modifier change the other tap missed).
+            heldModifier = event.flags.intersection([.maskCommand, .maskShift, .maskAlternate, .maskControl]) == shared.modifiers
+            defer { rearm() }
             guard CommandSpaceTap.swallows(keyCode: keyCode, isDown: isDown, flags: event.flags,
                                            modifiers: shared.modifiers, pressed: &pressed) else {
                 return Unmanaged.passUnretained(event)
@@ -162,6 +201,10 @@ nonisolated private enum CommandSpaceTapThread {
             guard let refcon else { return Unmanaged.passUnretained(event) }
             return Unmanaged<CommandSpaceTapSession>.fromOpaque(refcon).takeUnretainedValue().handle(type, event)
         }
+        let flagsCallback: CGEventTapCallBack = { _, type, event, refcon in
+            guard let refcon else { return Unmanaged.passUnretained(event) }
+            return Unmanaged<CommandSpaceTapSession>.fromOpaque(refcon).takeUnretainedValue().handleFlags(type, event)
+        }
         withExtendedLifetime(session) {
             let mask = (CGEventMask(1) << CGEventMask(CGEventType.keyDown.rawValue))
                 | (CGEventMask(1) << CGEventMask(CGEventType.keyUp.rawValue))
@@ -176,23 +219,45 @@ nonisolated private enum CommandSpaceTapThread {
                 Log.app.error("⌘Space tap could not be created")
                 return
             }
+            guard let flagsPort = CGEvent.tapCreate(
+                tap: .cgSessionEventTap,
+                place: .headInsertEventTap,
+                options: .defaultTap,
+                eventsOfInterest: CGEventMask(1) << CGEventMask(CGEventType.flagsChanged.rawValue),
+                callback: flagsCallback,
+                userInfo: Unmanaged.passUnretained(session).toOpaque()
+            ) else {
+                CFMachPortInvalidate(port)
+                Log.app.error("⌘Space modifier tap could not be created")
+                return
+            }
             guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0),
+                  let flagsSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, flagsPort, 0),
                   let runLoop = CFRunLoopGetCurrent(),
                   shared.attach(runLoop, generation: generation) else {
                 CFMachPortInvalidate(port)
+                CFMachPortInvalidate(flagsPort)
                 return
             }
             session.port = port
+            session.flagsPort = flagsPort
             CFRunLoopAddSource(runLoop, source, .commonModes)
-            CGEvent.tapEnable(tap: port, enable: true)
+            CFRunLoopAddSource(runLoop, flagsSource, .commonModes)
+            // Off until the modifier goes down (it may be held already).
+            CGEvent.tapEnable(tap: port, enable: false)
+            CGEvent.tapEnable(tap: flagsPort, enable: true)
+            session.updateArming(flags: CGEventSource.flagsState(.combinedSessionState))
             // No timeout: a finite one would wake this thread periodically forever.
             while shared.isActive(generation) {
                 let result = CFRunLoopRunInMode(.defaultMode, .greatestFiniteMagnitude, false)
                 if result == .finished || result == .stopped, !shared.isActive(generation) { break }
             }
             CGEvent.tapEnable(tap: port, enable: false)
+            CGEvent.tapEnable(tap: flagsPort, enable: false)
             CFRunLoopRemoveSource(runLoop, source, .commonModes)
+            CFRunLoopRemoveSource(runLoop, flagsSource, .commonModes)
             CFMachPortInvalidate(port)
+            CFMachPortInvalidate(flagsPort)
         }
     }
 }

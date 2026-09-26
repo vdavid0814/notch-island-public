@@ -521,10 +521,10 @@ private struct BackgroundOpacitySlider: View {
             }
             .labelsHidden()
             .frame(maxWidth: 260)
-            Text(value, format: .percent.precision(.fractionLength(0)))
-                .monospacedDigit()
+            ReservedWidthText(value.formatted(.percent.precision(.fractionLength(0))),
+                              fitting: [Double(0).formatted(.percent.precision(.fractionLength(0))),
+                                        Double(1).formatted(.percent.precision(.fractionLength(0)))])
                 .foregroundStyle(SettingsPalette.secondary)
-                .frame(minWidth: 40, alignment: .trailing)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Opacity")

@@ -93,8 +93,9 @@ struct IslandRootView: View {
                 // the most expensive part of it (an offscreen pass over the whole island every frame).
                 blursGrowth: !(reduceMotion || reducesWork || isOpaquePage),
                 solidDepth: IslandLayout.overdraw + layout.notch.height,
-                // Under Reduce Motion the island cross-fades as SwiftUI animates it; otherwise its
-                // outline moves on the render server and the surface never animates here.
+                // Under Reduce Motion the island cross-fades as SwiftUI animates it; otherwise it
+                // grows out of the notch on the render server. Between two open presentations the
+                // surface follows its outline here (`Motion.surfaceFollowsOutline`).
                 isStill: !reduceMotion
             )))
             .task(id: wantsGlass) { await glassRetirement(wantsGlass: wantsGlass) }
@@ -145,6 +146,10 @@ private struct IslandContentStack: View {
                 // and every frame re-laid out and re-placed the whole content inside it (measured:
                 // most of an open's CPU) although nothing on screen moved.
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                // The content takes its new size at once: grown or shrunk along the spring, it was
+                // laid out again at every size (Siri's gallery reflowed its grid every frame). The
+                // outline around it reveals or hides it; what swaps inside animates on its own.
+                .transaction(value: contentSize) { $0.animation = nil }
                 .id(presentation.surfaceKey)
                 // The panel's content leaves in a tenth of a second and the glass shrinks alone:
                 // riding the whole close spring, every frame re-rendered the content too.
@@ -239,20 +244,21 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
     let blursGrowth: Bool
     /// The shade's solid black from the top (fade style).
     let solidDepth: CGFloat
-    /// Drawn as given, never animated: the render server moves the outline (`IslandOutlineMotion`).
+    /// The island is inserted and removed at its presentation: the render server grows it out of the
+    /// notch and back (`IslandOutlineMotion`).
     let isStill: Bool
     /// 0 in the notch, 1 at the presentation.
     var emergence: Double = 1
 
     var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<AnimatablePair<CGFloat, CGFloat>, Double>> {
+        // Always the real values: a move on the render server changes them only in transactions
+        // that animate nothing (`IslandModel.apply`), while one SwiftUI animates
+        // (`Motion.surfaceFollowsOutline`) springs them frame by frame.
         get {
-            // Still: nothing for a transaction to interpolate, so no frame is ever redrawn for it.
-            guard !isStill else { return .zero }
-            return AnimatablePair(AnimatablePair(size.width, size.height),
-                                  AnimatablePair(AnimatablePair(bottomRadius, shoulderRadius), emergence))
+            AnimatablePair(AnimatablePair(size.width, size.height),
+                           AnimatablePair(AnimatablePair(bottomRadius, shoulderRadius), emergence))
         }
         set {
-            guard !isStill else { return }
             size = CGSize(width: newValue.first.first, height: newValue.first.second)
             bottomRadius = newValue.second.first.first
             shoulderRadius = newValue.second.first.second

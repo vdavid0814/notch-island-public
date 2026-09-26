@@ -718,6 +718,20 @@ private func line(_ json: String) -> Data { Data(json.utf8) }
         #expect(controller.artwork != nil)
     }
 
+    @Test func sameTrackReportedWithoutItsCoverKeepsIt() async throws {
+        let controller = MediaController()
+        let png = try #require(Self.tinyPNG())
+        controller.injectDemo(item(artwork: png), playing: true)
+        for _ in 0..<100 where controller.artwork == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(controller.artwork != nil)
+        // A restarted source reports the same track without its cover: past the grace it stays.
+        controller.injectDemo(item(), playing: true)
+        try await Task.sleep(for: MediaController.artworkGrace + .milliseconds(300))
+        #expect(controller.artwork != nil)
+    }
+
     static func tinyPNG() -> Data? {
         let image = NSImage(size: NSSize(width: 4, height: 4), flipped: false) { rect in
             NSColor.systemRed.setFill()

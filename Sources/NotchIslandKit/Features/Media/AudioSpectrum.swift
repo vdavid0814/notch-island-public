@@ -291,6 +291,18 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
                 var peak: Float = 0
                 vDSP_maxmgv(out, 1, &peak, vDSP_Length(count))
                 if peak > 1e-4 { loud = true }
+                // Into the ring the analyses read, oldest overwritten. (Left out when the folding
+                // moved to vDSP: every analysis read silence, and the bars followed only the beats.)
+                ring.withUnsafeMutableBufferPointer { ring in
+                    let size = ring.count
+                    var copied = 0
+                    while copied < count {
+                        let run = min(count - copied, size - ringIndex)
+                        (ring.baseAddress! + ringIndex).update(from: out + copied, count: run)
+                        ringIndex = (ringIndex + run) % size
+                        copied += run
+                    }
+                }
                 // The attack bands: filtered by vDSP, then their energy summed slice by slice.
                 bassBand.withUnsafeMutableBufferPointer { bass in
                     trebleBand.withUnsafeMutableBufferPointer { treble in

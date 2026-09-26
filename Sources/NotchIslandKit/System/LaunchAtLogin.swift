@@ -22,9 +22,22 @@ import ServiceManagement
 
     init() {}
 
+    /// Re-read in the background: the status is a synchronous request to the system's service
+    /// manager (~20 ms on the main thread, measured in every Settings opening).
     func refresh() {
-        let current = SMAppService.mainApp.status
-        if current != status { status = current }
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
+            let current = await Self.readStatus()
+            guard !Task.isCancelled, let self else { return }
+            self.refreshTask = nil
+            if current != self.status { self.status = current }
+        }
+    }
+
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+
+    @concurrent private static func readStatus() async -> SMAppService.Status {
+        SMAppService.mainApp.status
     }
 
     func openLoginItemsSettings() {
@@ -44,6 +57,10 @@ import ServiceManagement
             lastError = error.localizedDescription
             Log.system.error("launch at login \(enabled ? "register" : "unregister", privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
         }
-        refresh()
+        // At once: the switch the user just moved shows the outcome, not the old state for a moment.
+        refreshTask?.cancel()
+        refreshTask = nil
+        let current = SMAppService.mainApp.status
+        if current != status { status = current }
     }
 }

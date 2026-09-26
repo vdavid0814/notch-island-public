@@ -17,9 +17,11 @@ final class ScriptablePlayersSource: MediaSource {
 
     /// A launching player gets a moment to finish opening before it is asked anything.
     static let launchGrace: Duration = .milliseconds(1500)
-    /// Music often has no artwork at the instant a track starts; one delayed retry catches it.
+    /// Music often has no artwork at the instant a track starts, and a streamed track's cover can
+    /// take several seconds to arrive: retries after 2, 4 and 8 s (a handful of Apple Events per
+    /// coverless track, none once it has one).
     static let artworkRetryDelay: Duration = .seconds(2)
-    static let maxArtworkAttempts = 2
+    static let maxArtworkAttempts = 4
 
     private enum Job: Hashable {
         case seed(String), position(String), artwork(String), launch(String)
@@ -275,7 +277,7 @@ final class ScriptablePlayersSource: MediaSource {
                 self.fetchArtworkIfNeeded(player)
             } else if data == nil, attempt < Self.maxArtworkAttempts {
                 self.jobs[job] = Task { [weak self] in
-                    try? await Task.sleep(for: Self.artworkRetryDelay)
+                    try? await Task.sleep(for: Self.artworkRetryDelay * (1 << (attempt - 1)), tolerance: .milliseconds(500))
                     guard !Task.isCancelled, let self else { return }
                     self.jobs[job] = nil
                     self.fetchArtworkIfNeeded(player)

@@ -208,14 +208,17 @@ private struct NoticeDuration: View {
                 }), in: Preferences.noticeDurationRange)
                 .labelsHidden()
                 .frame(minWidth: 160, maxWidth: 240)
-                Text(value.formatted(.number.precision(.fractionLength(1))) + " s")
-                    .monospacedDigit()
+                ReservedWidthText(Self.format(value), fitting: [Self.format(Preferences.noticeDurationRange.lowerBound),
+                                                                Self.format(Preferences.noticeDurationRange.upperBound)])
                     .foregroundStyle(SettingsPalette.secondary)
-                    .frame(minWidth: 44, alignment: .trailing)
             }
         } label: {
             InfoLabel(title, "How long the notice stays in the island before it goes (it stays while the pointer is on it).")
         }
+    }
+
+    static func format(_ seconds: Double) -> String {
+        seconds.formatted(.number.precision(.fractionLength(1))) + " s"
     }
 }
 
@@ -230,14 +233,18 @@ private struct RowsStepper: View {
     var body: some View {
         LabeledContent {
             HStack(spacing: 10) {
-                Text(unit.isEmpty ? "\(value)" : "\(value) \(unit)")
-                    .monospacedDigit()
+                // The stepper stays put while the number beside it changes length.
+                ReservedWidthText(label(value), fitting: [label(range.lowerBound), label(range.upperBound)])
                     .foregroundStyle(SettingsPalette.secondary)
                 Stepper(title, value: $value, in: range).labelsHidden()
             }
         } label: {
             InfoLabel(title, detail)
         }
+    }
+
+    private func label(_ count: Int) -> String {
+        unit.isEmpty ? "\(count)" : "\(count) \(unit)"
     }
 }
 
@@ -275,11 +282,35 @@ struct DurationSlider: View {
             }), in: range)
             .labelsHidden()
             .frame(minWidth: 160, maxWidth: 240)
-            Text(SettingsFormat.hoverDelay(value))
-                .monospacedDigit()
+            ReservedWidthText(SettingsFormat.hoverDelay(value),
+                              fitting: [SettingsFormat.hoverDelay(range.lowerBound), SettingsFormat.hoverDelay(range.upperBound)])
                 .foregroundStyle(SettingsPalette.secondary)
-                .frame(minWidth: 52, alignment: .trailing)
         }
+    }
+}
+
+/// A value beside a slider or a stepper, as wide as the widest it can read: sized by the text on
+/// show, "1,500 ms" pushed the slider shorter than "120 ms" did, so the slider changed length
+/// under the pointer while it was being dragged.
+struct ReservedWidthText: View {
+    let text: String
+    let fitting: [String]
+
+    init(_ text: String, fitting: [String]) {
+        self.text = text
+        self.fitting = fitting
+    }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            ForEach(Array(fitting.enumerated()), id: \.offset) { _, sample in
+                Text(sample).hidden()
+            }
+            Text(text)
+        }
+        .monospacedDigit()
+        .lineLimit(1)
+        .fixedSize()
     }
 }
 
