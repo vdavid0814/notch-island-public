@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4.1 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4.2 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -18,6 +18,36 @@ events, volume/brightness and dropped files live there the rest of the time.
 For older versions, see the **[Releases page](https://github.com/vdavid0814/notch-island-public/releases)**.
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.4.2
+
+More precise pointer tracking in Siri and on the island's edge, covers that no longer vanish, and
+smoother moves between Siri's views.
+
+**Pointer**
+- **The island closes where you visibly leave it:** the slack around its edge is 2 pt instead of 8, so it no longer stays open under a pointer just below it.
+- **Siri follows the pointer precisely:** the row or app under the pointer is worked out from where the pointer is at every move, so the gaps between rows, a list scrolled under a resting pointer and a move inside the row the arrow keys just left all select correctly.
+- The selection plate is a faint light plate as in the system's Search window; it follows the pointer closely, and next to the island's bottom corners its own corners round with them.
+
+**Now Playing**
+- **Covers no longer disappear after a while:** the same track reported again without its cover (after sleep, or when Now Playing moves between sources) keeps the cover it had, and a cover Music delivers late is asked for again after 2, 4 and 8 s.
+- A player's short silence between two tracks no longer makes the pill leave the notch and come back.
+- The equalizer reads the music again between beats (its analyses read silence, so the bars followed only the beats).
+
+**Siri**
+- Between the field, the list and the app gallery the glass follows the outline as it moves; the gallery no longer reflows its grid while the island resizes, and what shows under the field cross-fades.
+
+**Look & Settings**
+- **Fade:** its clear glass has a 25 % touch of the warm brown (was 10 %).
+- Sliders and steppers in Settings keep their length while the value beside them changes.
+
+**Energy**
+- **⌘Space** only watches the keyboard while its modifier is held: typing anywhere no longer wakes the app (Energy Impact ~0.2 while typing before).
+- On battery, pages in the panel swap with a plain cross-fade.
+- Settings reads the Login Items state off the main thread.
+- At rest 0.0; after a stress run of fast opening, hovering, page switching and Settings, memory stays flat at ~38 MB (no leaks) and the rest is 0.0 again.
 
 ---
 
