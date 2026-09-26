@@ -7,7 +7,7 @@ struct DateTimeWidget: View {
     let size: CGSize
 
     var body: some View {
-        TimelineView(.everyMinute) { context in
+        PanelTimelineView(.everyMinute) { context in
             let showsTime = widget.shows(.readout), showsDate = widget.shows(.dateLine)
             let tall = size.height >= 56
             // Never wider than the widget, nor taller than its share of it; below that cap S, M
@@ -107,8 +107,7 @@ struct SystemStatsWidget: View {
         // No animation on the readings: an ease to every two-second sample kept the open panel
         // redrawing ~50 frames out of every 100 (measured, ~5% CPU). A step is one frame.
         .frame(width: size.width, height: size.height)
-        .onAppear { if !isPreview { withoutAnimation { stats.startObserving() } } }
-        .onDisappear { if !isPreview { stats.stopObserving() } }
+        .whileShown { if !isPreview { withoutAnimation { stats.startObserving() } } } stop: { if !isPreview { stats.stopObserving() } }
     }
 }
 

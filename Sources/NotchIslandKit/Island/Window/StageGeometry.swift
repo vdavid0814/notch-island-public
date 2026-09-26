@@ -31,9 +31,18 @@ nonisolated enum StageGeometry {
         if p.isIdle { return metrics.notchRect }
         return frame(
             around: islandFrame(for: p, layout: layout, metrics: metrics),
-            margin: IslandLayout.restingMargin,
+            margin: restingMargin(for: p),
             top: metrics.screenFrame.maxY
         )
+    }
+
+    /// The panel rests on its transition frame: the largest island, so every move to and from it
+    /// happens inside that frame, and neither the close's grow nor the open's settle resizes the
+    /// window (each cost a window-server round trip and a layout of the whole island, ~5–13 ms,
+    /// measured). The extra margin is transparent and lies below the menu bar's centre, which the
+    /// panel covers anyway. Everything smaller keeps the small margin (menu-bar items beside it).
+    static func restingMargin(for p: IslandPresentation) -> CGFloat {
+        p.isExpanded ? IslandLayout.stageMargin : IslandLayout.restingMargin
     }
 
     /// Converts a global rect into the window-local coordinates of `frame`.

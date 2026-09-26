@@ -128,34 +128,43 @@ private struct IslandContentStack: View {
     let crossFades: Bool
     let thumbnails: ThumbnailCache
 
+    /// The panel's last page, kept alive (hidden) while the island shows something else: opening
+    /// the panel again only shows it, instead of building every view of the page (~25–40 ms in
+    /// one burst, the largest part of an open's energy, measured).
+    @State private var keptPage: ExpandedPage?
+    /// How long a closed panel is kept for the next open.
+    static let keepDuration: Duration = .seconds(10)
+
     var body: some View {
-        let contentSize = layout.size(for: presentation)
+        let shownPage: ExpandedPage? = if case .expanded(let page) = presentation { page } else { nil }
         ZStack(alignment: .top) {
-            // Each content view is laid out at its own presentation's size, so while the outline
-            // springs between two sizes neither the outgoing nor the incoming content reflows.
-            IslandContent(presentation: presentation, thumbnails: thumbnails)
-                .frame(width: contentSize.width, height: contentSize.height, alignment: .top)
-                // Where the glass shows through, text and symbols keep a soft dark halo, so they
-                // stay readable over a bright desktop without darkening the glass itself.
-                .modifier(GlassLegibility())
-                // Concentric corners inside (the artwork) follow the island they belong to.
-                .containerShape(IslandShape(bottomRadius: layout.bottomRadius(for: presentation),
-                                            shoulderRadius: layout.shoulderRadius(for: presentation)))
-                // Every child fills the canvas, so the stack's size never changes: sized by its
-                // children, it grew from the old content's size to the new one's with the spring,
-                // and every frame re-laid out and re-placed the whole content inside it (measured:
-                // most of an open's CPU) although nothing on screen moved.
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                // The content takes its new size at once: grown or shrunk along the spring, it was
-                // laid out again at every size (Siri's gallery reflowed its grid every frame). The
-                // outline around it reveals or hides it; what swaps inside animates on its own.
-                .transaction(value: contentSize) { $0.animation = nil }
-                .id(presentation.surfaceKey)
-                // The panel's content leaves in a tenth of a second and the glass shrinks alone:
-                // riding the whole close spring, every frame re-rendered the content too.
-                .transition(presentation.isExpanded
-                            ? .asymmetric(insertion: .identity, removal: .opacity.animation(.easeOut(duration: 0.1)))
-                            : .islandContent(reduceMotion: crossFades))
+            if let page = shownPage ?? keptPage {
+                let isShown = shownPage != nil
+                // Hidden, it is only transparent: views at opacity 0 take no clicks or hover, and it
+                // lies under whatever the island shows instead. (Moved out of the way, the timer's
+                // lazy ruler was rebuilt at every open; switching hit testing or accessibility off
+                // and on re-derived the whole page: ~15 ms per open each, measured.)
+                content(for: .expanded(page))
+                    // The panel's content leaves in a tenth of a second and the glass shrinks alone:
+                    // riding the whole close spring, every frame re-rendered the content too.
+                    .opacity(isShown ? 1 : 0)
+                    .animation(isShown ? nil : .easeOut(duration: 0.1), value: isShown)
+                    .environment(\.isIslandPanelHidden, !isShown)
+            }
+            if shownPage == nil {
+                content(for: presentation)
+                    .id(presentation.surfaceKey)
+                    .transition(.islandContent(reduceMotion: crossFades))
+            }
+        }
+        .onChange(of: shownPage, initial: true) { _, page in if let page { keptPage = page } }
+        // Kept only for a while: hidden, it is part of every other update the island makes (a
+        // volume banner cost twice as much with it, measured). Quick re-opens are where it pays.
+        .task(id: shownPage == nil ? keptPage : nil) {
+            guard shownPage == nil, keptPage != nil else { return }
+            try? await Task.sleep(for: Self.keepDuration, tolerance: .seconds(1))
+            guard !Task.isCancelled else { return }
+            withoutAnimation { keptPage = nil }
         }
         // The island's panel never becomes key (it must not steal focus), so by default every
         // control in it would draw in the inactive, desaturated style of a background window.
@@ -163,6 +172,38 @@ private struct IslandContentStack: View {
         .environment(\.appearsActive, true)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
+}
+
+extension IslandContentStack {
+    /// One presentation's content at its own size, top-centred on the canvas.
+    @ViewBuilder func content(for presentation: IslandPresentation) -> some View {
+        let contentSize = layout.size(for: presentation)
+        // Each content view is laid out at its own presentation's size, so while the outline
+        // springs between two sizes neither the outgoing nor the incoming content reflows.
+        IslandContent(presentation: presentation, thumbnails: thumbnails)
+            .frame(width: contentSize.width, height: contentSize.height, alignment: .top)
+            // Where the glass shows through, text and symbols keep a soft dark halo, so they
+            // stay readable over a bright desktop without darkening the glass itself.
+            .modifier(GlassLegibility())
+            // Concentric corners inside (the artwork) follow the island they belong to.
+            .containerShape(IslandShape(bottomRadius: layout.bottomRadius(for: presentation),
+                                        shoulderRadius: layout.shoulderRadius(for: presentation)))
+            // Every child fills the canvas, so the stack's size never changes: sized by its
+            // children, it grew from the old content's size to the new one's with the spring,
+            // and every frame re-laid out and re-placed the whole content inside it (measured:
+            // most of an open's CPU) although nothing on screen moved.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            // The content takes its new size at once: grown or shrunk along the spring, it was
+            // laid out again at every size (Siri's gallery reflowed its grid every frame). The
+            // outline around it reveals or hides it; what swaps inside animates on its own.
+            .transaction(value: contentSize) { $0.animation = nil }
+    }
+}
+
+extension EnvironmentValues {
+    /// The panel is kept alive but hidden (`IslandContentStack.keptPage`): whatever it would keep
+    /// running on its own (clocks, monitors) waits until it is shown again.
+    @Entry var isIslandPanelHidden = false
 }
 
 /// A faint dark halo around the island's content on see-through styles (none on solid black).
@@ -283,6 +324,7 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
         // pill's edge all that time. Per frame, it goes the moment the outline reaches the band
         // on the way down and returns the moment it leaves it on the way up.
         let glassOn = showsGlass && (glassStyle != .fade || drawn.size.height > notch.size.height + 1)
+        let parksGlass = isStill
         GlassEffectContainer {
             content
                 .opacity(reveal)
@@ -293,7 +335,11 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
                 .islandSurfaceShade(glassStyle, solidDepth: solidDepth,
                                     size: CGSize(width: size.width, height: size.height + IslandLayout.overdraw),
                                     in: surface.inset(by: -IslandGlassStyle.shadeBleed))
-                .islandGlass(in: IslandGlassBody(outline: surface), isEnabled: glassOn)
+                // Off, the glass is parked out of sight rather than taken down (`IslandGlassBody`);
+                // while SwiftUI animates the surface (Reduce Motion) it goes, as a parked glass
+                // would slide along the transaction.
+                .islandGlass(in: IslandGlassBody(outline: surface, isParked: !glassOn && parksGlass),
+                             isEnabled: glassOn || parksGlass)
                 .background {
                     // The shoulders beside the glass body, in the glass's smoke (`IslandGlassBody`).
                     IslandShoulders(outline: surface)

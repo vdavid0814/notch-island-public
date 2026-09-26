@@ -85,8 +85,7 @@ struct ControlWidget: View {
         .accessibilityLabel(control.title)
         .accessibilityValue(control.isAction ? "" : control.status(on: on))
         .accessibilityAddTraits(control.isAction ? .isButton : [.isButton, .isToggle])
-        .onAppear { if !isPreview { withoutAnimation { controls.startObserving(control) } } }
-        .onDisappear { if !isPreview { controls.stopObserving(control) } }
+        .whileShown { if !isPreview { withoutAnimation { controls.startObserving(control) } } } stop: { if !isPreview { controls.stopObserving(control) } }
     }
 
     /// The lone glyph's colour: on a coloured background white (the colour already says "on"),
@@ -354,7 +353,7 @@ struct KeyboardWidget: View {
                     .frame(width: size.width, height: size.height)
             }
         }
-        .onAppear { withoutAnimation { model.controls.refresh() } }
+        .whileShown { withoutAnimation { model.controls.refresh() } }
     }
 
     private func slider(_ level: Double, _ controls: SystemControls) -> some View {

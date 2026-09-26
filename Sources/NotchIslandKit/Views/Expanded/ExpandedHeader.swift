@@ -8,13 +8,15 @@ struct ExpandedHeader: View {
     let height: CGFloat
 
     @Environment(AppModel.self) private var model
+    /// Hidden (kept for the next open): a level banner is the island's own then, not the header's.
+    @Environment(\.isIslandPanelHidden) private var isHidden
 
     var body: some View {
         NotchSplitBand(split: split, height: height) {
             PagePicker()
         } trailing: {
             ZStack(alignment: .trailing) {
-                if let kind = model.banners.current?.levelKind {
+                if !isHidden, let kind = model.banners.current?.levelKind {
                     LevelCapsule(kind: kind)
                         .transition(.blurReplace)
                 } else {
@@ -22,7 +24,7 @@ struct ExpandedHeader: View {
                         .transition(.blurReplace)
                 }
             }
-            .animation(Motion.content, value: model.banners.current)
+            .animation(Motion.content, value: isHidden ? nil : model.banners.current)
         }
         // Header controls are sized by the notch-height band, whatever the island scale.
         .controlSize(Metrics.Control.size(fittingBand: height))

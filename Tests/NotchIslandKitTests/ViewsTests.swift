@@ -494,3 +494,13 @@ struct SpectrumTests {
         #expect(EqualizerBarsView.barColors(count: 4, palette: []).allSatisfy { $0 == nil })
     }
 }
+
+@Suite struct PanelTimelineTests {
+    @Test func aHiddenPanelsTimelineStandsStill() {
+        let start = Date(timeIntervalSinceReferenceDate: 1000)
+        let paused = PanelTimeline(base: .periodic(from: start, by: 1), isPaused: true)
+        #expect(Array(paused.entries(from: start, mode: .normal)) == [start])
+        let running = PanelTimeline(base: .periodic(from: start, by: 1), isPaused: false)
+        #expect(Array(running.entries(from: start, mode: .normal).prefix(3)) == [start, start + 1, start + 2])
+    }
+}

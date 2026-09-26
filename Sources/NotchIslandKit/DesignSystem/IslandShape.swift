@@ -159,9 +159,18 @@ nonisolated struct IslandOutline: InsettableShape, Equatable {
 /// the top are filled with the glass's smoke instead (`IslandShoulders`).
 nonisolated struct IslandGlassBody: Shape {
     let outline: IslandOutline
+    /// Out of sight: a one-point sliver at the top of the overdraw, above the screen edge, where the
+    /// island's clip cuts it away. The glass stays alive instead of being taken down and set up
+    /// again each time the fade style's pill hides it (~20 ms of the main thread per close,
+    /// measured).
+    var isParked = false
 
     func path(in rect: CGRect) -> Path {
         let geometry = outline.geometry(in: rect)
+        if isParked {
+            return Path(CGRect(x: geometry.bodyMinX, y: geometry.rect.minY,
+                               width: max(0, geometry.bodyMaxX - geometry.bodyMinX), height: 1))
+        }
         let body = CGRect(x: geometry.bodyMinX, y: geometry.rect.minY,
                           width: max(0, geometry.bodyMaxX - geometry.bodyMinX), height: geometry.rect.height)
         return Path(

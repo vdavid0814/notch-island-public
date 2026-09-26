@@ -22,7 +22,7 @@ struct TickingClock: View {
         if isPreview {
             Text(prefix + IslandFormat.clock(Self.value(at: .now, anchor: anchor, countsDown: countsDown)))
         } else {
-            TimelineView(.periodic(from: phase, by: 1)) { context in
+            PanelTimelineView(.periodic(from: phase, by: 1)) { context in
                 Text(prefix + IslandFormat.clock(Self.value(at: context.date, anchor: anchor, countsDown: countsDown)))
             }
         }

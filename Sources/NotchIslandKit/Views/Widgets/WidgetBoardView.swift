@@ -333,7 +333,7 @@ struct NowPlayingWidget: View {
             }
         }
         .frame(width: size.width, height: size.height, alignment: .leading)
-        .onAppear { withoutAnimation { media.refreshPosition() } }
+        .whileShown { withoutAnimation { media.refreshPosition() } }
     }
 
     // The cover beside a column of title, artist, progress and controls. The cover is as tall as
@@ -603,7 +603,7 @@ struct TimerWidget: View {
             // Re-read once per remaining minute, on the countdown's own minute boundaries.
             let remaining = max(0, endDate.timeIntervalSinceNow)
             let boundary = endDate.addingTimeInterval(-60 * (remaining / 60).rounded(.up))
-            TimelineView(.periodic(from: boundary, by: 60)) { context in
+            PanelTimelineView(.periodic(from: boundary, by: 60)) { context in
                 TimerRuler(
                     minutes: .constant(Self.minutesLeft(timers.countdown, at: context.date)),
                     isEditable: false,
