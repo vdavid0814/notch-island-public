@@ -169,7 +169,7 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
     let levels = Mutex(SpectrumLevels())
 
     private let sampleRate: Double
-    private let hop: Int
+    let hop: Int
     private let bins: [Range<Int>]
     private let setup: FFTSetup
     private var ring: [Float]
@@ -432,6 +432,19 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
                 try HAL.check("create aggregate", AudioHardwareCreateAggregateDevice(settings as CFDictionary, &aggregate))
                 try HAL.check("create io proc",
                               AudioDeviceCreateIOProcIDWithBlock(&proc, aggregate, queue, Self.ioBlock(analyzer)))
+                // One I/O cycle per analysis: the analyser runs once `hop` samples have come in,
+                // and at the default 512 frames the I/O thread woke four times for each at 48 kHz
+                // (~94 times a second). The buffer becomes the whole number of default buffers
+                // that makes up an analysis (2048 at 48 kHz, 1536 at 44.1), so the analyses see the
+                // same samples at the same moments with a quarter (a third) of the wake-ups. The
+                // size applies to this app only.
+                var bufferAddress = HAL.address(kAudioDevicePropertyBufferFrameSize)
+                var current: UInt32 = 0
+                var bufferSize = UInt32(MemoryLayout<UInt32>.size)
+                if AudioObjectGetPropertyData(aggregate, &bufferAddress, 0, nil, &bufferSize, &current) == noErr, current > 0 {
+                    var frames = UInt32((analyzer.hop + Int(current) - 1) / Int(current)) * current
+                    AudioObjectSetPropertyData(aggregate, &bufferAddress, 0, nil, bufferSize, &frames)
+                }
                 try HAL.check("start", AudioDeviceStart(aggregate, proc))
             } catch {
                 Self.destroy(tap: tap, aggregate: aggregate, proc: proc)
