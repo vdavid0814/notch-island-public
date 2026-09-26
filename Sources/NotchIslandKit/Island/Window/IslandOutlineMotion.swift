@@ -152,11 +152,6 @@ import SwiftUI
         CATransaction.setDisableActions(true)
         let bounds = stage.bounds
         mask.frame = bounds
-        // A layer made in code draws at 1× unless told otherwise: on a Retina screen the outline's
-        // edge came out in half-resolution steps, the glass's edge light jagged along the corners.
-        let scale = stage.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-        mask.contentsScale = scale
-        shape.contentsScale = scale
         // The path runs down from the top edge: flip it onto an unflipped view.
         shape.position = CGPoint(x: bounds.midX, y: stage.isFlipped ? bounds.minY : bounds.maxY)
         shape.setAffineTransform(stage.isFlipped ? .identity : CGAffineTransform(scaleX: 1, y: -1))
