@@ -215,7 +215,8 @@ struct AssistantTile: View {
     }
 }
 
-/// The suggestions, hits and actions; the selected row is tinted, ↑/↓ scroll it into view.
+/// The suggestions, hits and actions; the selected row is tinted, ↑/↓ scroll it into view (the
+/// pointer's never does, see `AssistantModel.selectionFollowsPointer`).
 private struct RowsList: View {
     let assistant: AssistantModel
 
@@ -237,7 +238,8 @@ private struct RowsList: View {
             // Fewer rows than fit: nothing to scroll, so no rubber-band either.
             .scrollBounceBehavior(.basedOnSize)
             .onChange(of: assistant.selection) { _, selection in
-                guard rows.indices.contains(selection) else { return }
+                // Only a selection the keys moved: one the pointer hovered is already in view.
+                guard !assistant.selectionFollowsPointer, rows.indices.contains(selection) else { return }
                 proxy.scrollTo(rows[selection].id)
             }
         }
@@ -272,7 +274,8 @@ private struct AppGallery: View {
             // Fewer rows than fit: nothing to scroll, so no rubber-band either.
             .scrollBounceBehavior(.basedOnSize)
             .onChange(of: assistant.selection) { _, selection in
-                guard rows.indices.contains(selection) else { return }
+                // Only a selection the keys moved: one the pointer hovered is already in view.
+                guard !assistant.selectionFollowsPointer, rows.indices.contains(selection) else { return }
                 proxy.scrollTo(rows[selection].id)
             }
         }

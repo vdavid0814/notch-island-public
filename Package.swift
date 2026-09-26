@@ -25,6 +25,7 @@ let package = Package(
                 .linkedFramework("IOKit"),
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AudioToolbox"),
+                .linkedFramework("Accelerate"),
                 .linkedFramework("UniformTypeIdentifiers"),
                 .linkedFramework("ServiceManagement"),
                 .linkedFramework("QuartzCore"),

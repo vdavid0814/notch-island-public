@@ -43,6 +43,8 @@
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>NotchIsland reads what Music and Spotify are playing so it can show it in the island, and sends them play, pause and skip commands.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>The equalizer beside the notch follows the music that is playing: bass on the left, treble on the right. The sound is only measured, never recorded or kept.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>The Controls widget shows whether Bluetooth is on and switches it, like Control Center.</string>
 	<key>NSHighResolutionCapable</key>

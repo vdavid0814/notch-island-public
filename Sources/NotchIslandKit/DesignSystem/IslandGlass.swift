@@ -103,6 +103,11 @@ nonisolated enum IslandGlassStyle: String, Sendable, CaseIterable, Identifiable,
 
     /// The black of the surface glass's tint.
     static let smokeOpacity = 0.62
+    /// How far the fade style's black reaches past the island's outline (clipped by it). The glass's
+    /// edge light sits right on the outline (`rimInset` 0); a black ending on the same edge left its
+    /// anti-aliased edge pixels half-covered, and the light showed through as a line around the
+    /// compact pill.
+    static let shadeBleed: CGFloat = 2
 
     /// Glass under controls: the CAD app's smoke, so buttons read a shade lighter than the surface.
     var controlMaterial: Glass { .clear.tint(Color.black.opacity(0.5)) }
@@ -210,21 +215,42 @@ private struct FadeShadeMask: View {
     let solidDepth: CGFloat
     let size: CGSize
 
-    /// Share of the island below the notch band that stays solid black down its middle.
-    static let hold: CGFloat = 0.68
+    /// Share of the island below the notch band that stays solid black down its middle. The fade
+    /// starts there and runs the remaining 35.552% (a tenth and a hundredth longer than the earlier
+    /// 32%), times `reach`.
+    static let hold: CGFloat = 0.64448
+
+    /// How far the fade runs past the island's bottom, as a share of its length: 1.02 starts it
+    /// where it did but ends it 2% lower, so the bottom edge keeps a little more black and the
+    /// ramp is 2% longer (the stops are cut at the edge, `verticalStops`).
+    static let reach: CGFloat = 1.02
 
     /// How far in from the island's edge the black is whole.
     static let edge: CGFloat = 12
+
+    /// The sides' black (and with it their fade to clear) sits this share of the island's width
+    /// further in on each side than `edge` alone would put it.
+    static let sideShift: CGFloat = 0.01
 
     var body: some View {
         let width = max(size.width, 1), height = max(size.height, 1)
         LinearGradient(stops: Self.verticalStops(solidDepth: solidDepth, height: height),
                        startPoint: .top, endPoint: .bottom)
             .mask {
-                // One shape, blurred as one: no step anywhere along its sides.
-                FadeCore(depth: solidDepth, inset: Self.edge, bottomInset: Self.edge * 0.9,
-                         cornerRadius: Self.edge * 1.5)
-                .blur(radius: Self.edge * 1.3)
+                ZStack(alignment: .top) {
+                    // One shape, blurred as one: no step anywhere along its sides.
+                    FadeCore(depth: solidDepth, inset: Self.edge, bottomInset: Self.edge * 0.9 + width * Self.sideShift,
+                             cornerRadius: Self.edge * 1.5)
+                    .blur(radius: Self.edge * 1.3)
+                    // The notch band stays whole black, edge to edge and down to its bottom: the blur
+                    // alone softened the band's lower edge and ends, so the compact pill — which is
+                    // only the band — showed its glass and rim light while that glass was still
+                    // held after a close (`IslandRootView.glassRetirement`). Below the band the
+                    // core is black as well, so the open island looks the same.
+                    Rectangle()
+                        .frame(width: width + 2 * IslandGlassStyle.shadeBleed,
+                               height: min(solidDepth, height) + IslandGlassStyle.shadeBleed)
+                }
             }
         .frame(width: width, height: height, alignment: .top)
     }
@@ -234,17 +260,29 @@ private struct FadeShadeMask: View {
     static let floor: Double = 0.5
 
     static func verticalStops(solidDepth: CGFloat, height: CGFloat) -> [Gradient.Stop] {
-        let solid = min((solidDepth + max(height - solidDepth, 0) * hold) / height, 1)
-        return smoothFade(from: solid, to: 1, floor: floor)
+        let below = max(height - solidDepth, 0)
+        let solid = min((solidDepth + below * hold) / height, 1)
+        let end = solid + below * (1 - hold) * reach / height
+        return smoothFade(from: solid, to: end, floor: floor)
     }
 
     /// Opaque black up to `start`, easing out (smoothstep, in twelve steps so none shows) to
-    /// `floor` (clear by default) at `end`.
+    /// `floor` (clear by default) at `end`. An `end` past 1 is cut at the bottom edge: the last
+    /// stop is the ramp's value there (a gradient's stops must lie within 0…1).
     private static func smoothFade(from start: CGFloat, to end: CGFloat, floor: Double = 0) -> [Gradient.Stop] {
-        [Gradient.Stop(color: .black, location: 0)] + (0...12).map { index in
-            let t = CGFloat(index) / 12
-            let eased = Double(t * t * (3 - 2 * t))
-            return Gradient.Stop(color: .black.opacity(1 - eased * (1 - floor)), location: start + (end - start) * t)
+        func opacity(_ t: CGFloat) -> Double {
+            let t = min(max(t, 0), 1)
+            return 1 - Double(t * t * (3 - 2 * t)) * (1 - floor)
         }
+        let span = max(end - start, 0.0001)
+        var stops = [Gradient.Stop(color: .black, location: 0)]
+        for index in 0...12 {
+            let t = CGFloat(index) / 12
+            let location = start + span * t
+            guard location < 1 else { break }
+            stops.append(Gradient.Stop(color: .black.opacity(opacity(t)), location: location))
+        }
+        stops.append(Gradient.Stop(color: .black.opacity(opacity((1 - start) / span)), location: 1))
+        return stops
     }
 }

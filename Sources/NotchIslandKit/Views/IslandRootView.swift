@@ -149,12 +149,19 @@ private struct IslandContentStack: View {
     }
 }
 
-/// A soft dark halo around the island's content on see-through styles (none on solid black).
+/// A faint dark halo around the island's content on see-through styles (none on solid black).
+///
+/// Just enough to lift white text off a bright spot behind the glass: at 0.55 / 2.5 pt it read as
+/// a glow around every word and tile, so it is a whisper now — tight and light. The fade style's
+/// black under the content does most of the work.
 private struct GlassLegibility: ViewModifier {
     @Environment(\.islandGlassStyle) private var style
 
+    static let opacity: Double = 0.18
+    static let radius: CGFloat = 1.2
+
     func body(content: Content) -> some View {
-        content.shadow(color: .black.opacity(style.hasGlassSurface ? 0.55 : 0), radius: 2.5)
+        content.shadow(color: .black.opacity(style.hasGlassSurface ? Self.opacity : 0), radius: Self.radius)
     }
 }
 
@@ -247,6 +254,13 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
         // it is drawn on: larger by the style's rim inset, so the rim light on its edge lies outside
         // the outline and is clipped (see `IslandGlassStyle.rimInset`).
         let surface = drawn.withTopInset(IslandLayout.overdraw).inset(by: -glassStyle.rimInset)
+        // Fade: the glass is off whenever the outline, as drawn this frame, is no taller than the
+        // notch band — the pill is all black there, and the glass would only add its edge light
+        // around it. `showsGlass` alone held the glass for up to ~2.8 s after a shrink had landed
+        // (`IslandRootView.glassRetirement` waits for the slowest spring), and the rim lit the
+        // pill's edge all that time. Per frame, it goes the moment the outline reaches the band
+        // on the way down and returns the moment it leaves it on the way up.
+        let glassOn = showsGlass && (glassStyle != .fade || drawn.size.height > notch.size.height + 1)
         GlassEffectContainer {
             content
                 .opacity(reveal)
@@ -256,12 +270,12 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
                 .padding(.top, IslandLayout.overdraw)
                 .islandSurfaceShade(glassStyle, solidDepth: solidDepth,
                                     size: CGSize(width: size.width, height: size.height + IslandLayout.overdraw),
-                                    in: surface)
-                .islandGlass(in: IslandGlassBody(outline: surface), isEnabled: showsGlass)
+                                    in: surface.inset(by: -IslandGlassStyle.shadeBleed))
+                .islandGlass(in: IslandGlassBody(outline: surface), isEnabled: glassOn)
                 .background {
                     // The shoulders beside the glass body, in the glass's smoke (`IslandGlassBody`).
                     IslandShoulders(outline: surface)
-                        .fill(Color.black.opacity(showsGlass && glassStyle.hasGlassSurface ? IslandGlassStyle.smokeOpacity : 0),
+                        .fill(Color.black.opacity(glassOn && glassStyle.hasGlassSurface ? IslandGlassStyle.smokeOpacity : 0),
                               style: FillStyle(eoFill: true))
                 }
                 .environment(\.islandGlassStyle, glassStyle)

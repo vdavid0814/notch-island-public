@@ -402,7 +402,7 @@ struct NowPlayingPicture: View {
 /// (A SwiftUI `TimelineView` here re-rendered the page 8 times a second for as long as it was open.)
 private struct MiniEqualizer: View {
     var body: some View {
-        EqualizerView(isAnimating: true, onBattery: true, size: CGSize(width: 8, height: 7), barWidth: 1.4)
+        EqualizerView(isAnimating: true, onBattery: true, size: CGSize(width: 9.5, height: 7), barWidth: 1.2)
     }
 }
 

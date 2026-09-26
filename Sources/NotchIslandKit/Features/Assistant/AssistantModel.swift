@@ -238,6 +238,10 @@ nonisolated struct FileScope: Sendable, Equatable {
     @ObservationIgnored private var generation = 0
     /// The user moved the selection (keys or pointer): results landing keep that row selected.
     @ObservationIgnored private var selectionIsUsers = false
+    /// The pointer put the selection where it is (hovering a row). The lists scroll only a
+    /// selection the keys moved: scrolling slides a new row under a still pointer, and scrolling
+    /// that one into view would slide the next one under it, down to the end.
+    @ObservationIgnored private(set) var selectionFollowsPointer = false
     /// Files reads running that may be waiting on the system's folder-access prompt.
     @ObservationIgnored private var fileAccessReads = 0
 
@@ -395,6 +399,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         shortcuts = nil
         selection = 0
         selectionIsUsers = false
+        selectionFollowsPointer = false
         answer = nil
         languageUnsupported = false
         revealsSuggestions = false
@@ -417,12 +422,14 @@ nonisolated struct FileScope: Sendable, Equatable {
         guard count > 0 else { return }
         selection = min(max(selection + delta, 0), count - 1)
         selectionIsUsers = true
+        selectionFollowsPointer = false
     }
 
     func select(_ row: AssistantRow) {
         guard let index = rows.firstIndex(where: { $0.id == row.id }) else { return }
         selection = index
         selectionIsUsers = true
+        selectionFollowsPointer = true
     }
 
     /// Return: runs the selected row. On an answer it asks again if the question was edited; on the
@@ -479,6 +486,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         revealsSuggestions = true
         selection = 0
         selectionIsUsers = false
+        selectionFollowsPointer = false
         files = []
         apps = []
         search(now: true)
@@ -557,6 +565,7 @@ nonisolated struct FileScope: Sendable, Equatable {
     private func queryChanged() {
         selection = 0
         selectionIsUsers = false
+        selectionFollowsPointer = false
         if answer != nil, answer?.isResponding == false { answer = nil }
         // Until the new search lands only the hits that still match stay, so Return never runs a
         // hit from an earlier, shorter query.

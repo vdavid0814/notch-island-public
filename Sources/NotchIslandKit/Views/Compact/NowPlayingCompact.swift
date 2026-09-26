@@ -25,9 +25,13 @@ struct NowPlayingCompact: View {
             EqualizerView(
                 isAnimating: media.isPlaying && !reduceMotion && !model.activity.prefersReducedWork,
                 onBattery: model.power.state.hasBattery && !model.power.state.isPluggedIn,
-                tint: media.artworkColor
+                // The cover's square: at full level a bar is as tall as the artwork opposite.
+                size: CGSize(width: glyphSide, height: glyphSide),
+                barWidth: glyphSide * Metrics.Compact.equalizerBarShare,
+                tint: media.artworkColor,
+                palette: media.artworkPalette,
+                listensToAudio: true
             )
-                .frame(width: Metrics.Compact.equalizerSize.width, height: Metrics.Compact.equalizerSize.height)
                 .frame(width: glyphSide, height: glyphSide)
                 .accessibilityHidden(true)
         }

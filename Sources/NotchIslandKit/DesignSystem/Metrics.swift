@@ -40,6 +40,9 @@ nonisolated enum Metrics {
         /// Tighter than the global clearance: the pill is short, and the ears are narrow.
         static let notchClearance: CGFloat = 4
         static let equalizerSize = CGSize(width: 16, height: 12)
+        /// The pill's equalizer fills the cover's square (`NowPlayingCompact`); each of its five
+        /// bars is this share of the square's side wide, the gaps between them a little narrower.
+        static let equalizerBarShare: CGFloat = 0.12
         /// How far the trailing time may shrink before it truncates. The ear is one glyph wide, so
         /// "4:59" already shrinks a little; "1:02:03" needs ~0.5 at the standard notch.
         static let timeMinimumScale: CGFloat = 0.5

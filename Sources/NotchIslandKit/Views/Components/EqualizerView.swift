@@ -2,12 +2,15 @@ import AppKit
 import QuartzCore
 import SwiftUI
 
-/// Four breathing bars beside the notch while music plays.
+/// Five bars beside the notch while music plays, as tall and as wide as the cover opposite: bass on the left, treble on the right, the mids
+/// between — driven by what is actually playing (`AudioSpectrumTap`), in the cover's colours.
 ///
-/// Core Animation rather than SwiftUI: a SwiftUI `repeatForever` animation re-evaluates the view
-/// graph on the main thread every frame (measured at ~5% of a core in the legacy app), while a
-/// `CABasicAnimation` on a plain layer is interpolated by the render server — a playing track costs
-/// the app no CPU at all.
+/// Without sound to follow (the system-audio permission not granted, a quiet intro) the bars
+/// breathe as before. Core Animation rather than SwiftUI: a SwiftUI `repeatForever` animation
+/// re-evaluates the view graph on the main thread every frame (measured at ~5% of a core in the
+/// legacy app), while a `CABasicAnimation` on a plain layer is interpolated by the render server.
+/// Following the music costs one display-link tick at 20 fps (12 on battery): five floats read and
+/// five transforms set, each eased to the next by the render server.
 struct EqualizerView: NSViewRepresentable {
     var isAnimating: Bool
     /// On battery the bars breathe at a lower frame rate (`EqualizerBarsView.batteryFrameRate`).
@@ -15,8 +18,12 @@ struct EqualizerView: NSViewRepresentable {
     /// The compact pill's bars by default; Settings' illustrations draw a miniature.
     var size = Metrics.Compact.equalizerSize
     var barWidth = EqualizerBarsView.barWidth
-    /// The cover's colour: the bars take a faint wash of it (nil: plain white).
+    /// The cover's colour: the bars take it (nil: plain white).
     var tint: ArtworkColor?
+    /// The cover's leading colours, run across the bars left to right (wins over `tint`).
+    var palette: [ArtworkColor] = []
+    /// Follow the system's audio output (the compact pill); off, the bars only breathe.
+    var listensToAudio = false
 
     func makeNSView(context: Context) -> EqualizerBarsView {
         let view = EqualizerBarsView(frame: CGRect(origin: .zero, size: size))
@@ -28,6 +35,8 @@ struct EqualizerView: NSViewRepresentable {
         view.frameRate = onBattery ? EqualizerBarsView.batteryFrameRate : EqualizerBarsView.frameRate
         view.barWidth = barWidth
         view.tint = tint
+        view.palette = palette
+        view.listensToAudio = listensToAudio
         view.isAnimating = isAnimating
     }
 
@@ -53,6 +62,7 @@ final class EqualizerBarsView: NSView {
         Bar(low: 0.30, high: 0.95, period: 0.52, phase: 0.0),
         Bar(low: 0.55, high: 0.70, period: 0.68, phase: 0.5),
         Bar(low: 0.22, high: 1.00, period: 0.44, phase: 0.25),
+        Bar(low: 0.36, high: 0.88, period: 0.56, phase: 0.6),
         Bar(low: 0.44, high: 0.80, period: 0.60, phase: 0.75),
     ]
     nonisolated static let animationKey = "breathe"
@@ -65,6 +75,7 @@ final class EqualizerBarsView: NSView {
         didSet {
             guard frameRate != oldValue, isAnimating else { return }
             applyAnimationState()
+            displayLink?.preferredFrameRateRange = frameRate
         }
     }
     static let barWidth: CGFloat = 2.5
@@ -74,11 +85,21 @@ final class EqualizerBarsView: NSView {
 
     private let barLayers: [CALayer]
 
-    /// How much of the cover's colour the playing bars take: a hint, the bars still read as white.
-    nonisolated static let tintFraction: CGFloat = 0.4
+    /// How much of the cover's colour the playing bars take: nearly all of it — the colour is
+    /// already lifted to read on the dark island (`ArtworkColor.accent`), a touch of white keeps
+    /// the bars luminous.
+    nonisolated static let tintFraction: CGFloat = 0.9
 
     var tint: ArtworkColor? {
         didSet { if tint != oldValue { applyColors(animated: true) } }
+    }
+
+    var palette: [ArtworkColor] = [] {
+        didSet { if palette != oldValue { applyColors(animated: true) } }
+    }
+
+    var listensToAudio = false {
+        didSet { if listensToAudio != oldValue { updateListening() } }
     }
 
     /// Installs the animations when playback starts and removes them when it stops. Nothing else
@@ -86,10 +107,23 @@ final class EqualizerBarsView: NSView {
     var isAnimating = false {
         didSet {
             guard isAnimating != oldValue else { return }
+            isFollowing = false
             applyAnimationState()
             applyColors()
+            updateListening()
         }
     }
+
+    /// The lowest a bar sinks while following the music (a fraction of the height): silence in a
+    /// band still leaves a dot, as the breathing bars' lows do.
+    nonisolated static let restingScale: CGFloat = 0.1
+    /// How many ticks a new height takes to arrive.
+    nonisolated static let glide: CFTimeInterval = 1
+
+    /// Holding the tap and ticking: animating, listening and on screen.
+    private var displayLink: CADisplayLink?
+    /// The bars show the music (breathing removed) rather than breathing.
+    private var isFollowing = false
 
     override init(frame: CGRect) {
         barLayers = Self.bars.map { _ in CALayer() }
@@ -128,6 +162,11 @@ final class EqualizerBarsView: NSView {
         CATransaction.commit()
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateListening()
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         applyColors()
@@ -137,10 +176,12 @@ final class EqualizerBarsView: NSView {
     /// dark/light, so it is re-resolved whenever the effective appearance changes.
     private func applyColors(animated: Bool = false) {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            var color = isAnimating ? NSColor.labelColor : NSColor.secondaryLabelColor
-            if isAnimating, let tint {
-                let cover = NSColor(srgbRed: tint.red, green: tint.green, blue: tint.blue, alpha: 1)
-                color = color.usingColorSpace(.sRGB)?.blended(withFraction: Self.tintFraction, of: cover) ?? color
+            let base = isAnimating ? NSColor.labelColor : NSColor.secondaryLabelColor
+            let covers = isAnimating ? (palette.isEmpty ? tint.map { [$0] } ?? [] : palette) : []
+            let colors = Self.barColors(count: barLayers.count, palette: covers).map { cover -> NSColor in
+                guard let cover else { return base }
+                let color = NSColor(srgbRed: cover.red, green: cover.green, blue: cover.blue, alpha: 1)
+                return base.usingColorSpace(.sRGB)?.blended(withFraction: Self.tintFraction, of: color) ?? base
             }
             CATransaction.begin()
             // A new cover eases its colour in (one short render-server animation, no app work).
@@ -149,9 +190,74 @@ final class EqualizerBarsView: NSView {
             } else {
                 CATransaction.setDisableActions(true)
             }
-            for bar in barLayers { bar.backgroundColor = color.cgColor }
+            for (bar, color) in zip(barLayers, colors) { bar.backgroundColor = color.cgColor }
             CATransaction.commit()
         }
+    }
+
+    /// Each bar's cover colour: the palette spread evenly across the bars, blended between its
+    /// neighbours (one colour: every bar; none: nil, plain white).
+    nonisolated static func barColors(count: Int, palette: [ArtworkColor]) -> [ArtworkColor?] {
+        guard !palette.isEmpty else { return Array(repeating: nil, count: count) }
+        return (0..<count).map { index in
+            guard palette.count > 1, count > 1 else { return palette[0] }
+            let position = Double(index) / Double(count - 1) * Double(palette.count - 1)
+            let low = Int(position.rounded(.down)), high = min(low + 1, palette.count - 1)
+            let t = position - Double(low)
+            let a = palette[low], b = palette[high]
+            return ArtworkColor(red: a.red + (b.red - a.red) * t,
+                                green: a.green + (b.green - a.green) * t,
+                                blue: a.blue + (b.blue - a.blue) * t)
+        }
+    }
+
+    // MARK: Following the music
+
+    private func updateListening() {
+        let wanted = isAnimating && listensToAudio && window != nil
+        if wanted, displayLink == nil {
+            AudioSpectrumTap.shared.acquire()
+            let link = displayLink(target: self, selector: #selector(tick))
+            link.preferredFrameRateRange = frameRate
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        } else if !wanted, let link = displayLink {
+            link.invalidate()
+            displayLink = nil
+            AudioSpectrumTap.shared.release()
+            if isFollowing {
+                isFollowing = false
+                applyAnimationState()
+            }
+        }
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        let levels = AudioSpectrumTap.shared.levels
+        guard levels.hasSignal() else {
+            // Silence, or no permission: back to breathing until sound comes through.
+            if isFollowing {
+                isFollowing = false
+                applyAnimationState()
+            }
+            return
+        }
+        CATransaction.begin()
+        if !isFollowing {
+            isFollowing = true
+            for bar in barLayers { bar.removeAnimation(forKey: Self.animationKey) }
+        }
+        // Each new height eases in over one tick, from wherever the bar is on screen, so the bars
+        // glide at the render server's rate while the app sets them only 20 times a second. The
+        // levels already move on a spring (`SpectrumLeveler`): a linear step between two of its
+        // samples keeps its curve, where an ease-out would add a small stop at every tick.
+        CATransaction.setAnimationDuration(max(link.targetTimestamp - link.timestamp, 1.0 / 60) * Self.glide)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .linear))
+        for (bar, level) in zip(barLayers, levels.bands) {
+            let scale = Self.restingScale + (1 - Self.restingScale) * CGFloat(level)
+            bar.transform = CATransform3DMakeScale(1, scale, 1)
+        }
+        CATransaction.commit()
     }
 
     private func applyAnimationState() {

@@ -41,6 +41,59 @@ nonisolated enum ArtworkDecoder {
         guard drawn else { return nil }
         return ArtworkColor(red: Double(pixel[0]) / 255, green: Double(pixel[1]) / 255, blue: Double(pixel[2]) / 255)
     }
+    /// The cover's leading colours, most present first (up to `limit`), each made an accent: an
+    /// 8 × 8 downsample, its pixels grouped by hue (twelve sectors), a sector weighted by how much of
+    /// the cover it covers and how vivid it is. Near-grey pixels count only when nothing is vivid,
+    /// so a black-and-white cover stays grey instead of picking up noise.
+    @concurrent static func palette(_ image: CGImage, limit: Int = 3) async -> [ArtworkColor] {
+        let side = 8
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.interpolationQuality = .medium
+            context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+            return true
+        }
+        guard drawn else { return [] }
+        let colors = stride(from: 0, to: pixels.count, by: 4).map {
+            ArtworkColor(red: Double(pixels[$0]) / 255, green: Double(pixels[$0 + 1]) / 255, blue: Double(pixels[$0 + 2]) / 255)
+        }
+        return dominantColors(colors, limit: limit)
+    }
+
+    /// `palette`'s grouping, on plain colours (testable).
+    static func dominantColors(_ colors: [ArtworkColor], limit: Int) -> [ArtworkColor] {
+        struct Sector { var weight = 0.0, red = 0.0, green = 0.0, blue = 0.0 }
+        var sectors = Array(repeating: Sector(), count: 12)
+        for color in colors {
+            let (hue, saturation, value) = color.hsv
+            guard saturation > 0.18, value > 0.15 else { continue }
+            let index = min(Int(hue * 12), 11)
+            let weight = saturation * value
+            sectors[index].weight += weight
+            sectors[index].red += color.red * weight
+            sectors[index].green += color.green * weight
+            sectors[index].blue += color.blue * weight
+        }
+        let ranked = sectors.filter { $0.weight > 0 }.sorted { $0.weight > $1.weight }
+        guard let top = ranked.first else {
+            // Nothing vivid: the cover's overall tone (grey stays grey through `accent`).
+            guard !colors.isEmpty else { return [] }
+            let n = Double(colors.count)
+            let mean = ArtworkColor(red: colors.map(\.red).reduce(0, +) / n,
+                                    green: colors.map(\.green).reduce(0, +) / n,
+                                    blue: colors.map(\.blue).reduce(0, +) / n)
+            return [mean.accent]
+        }
+        // A sector far smaller than the leading one is a detail, not one of the cover's colours.
+        return ranked.prefix(limit).filter { $0.weight >= top.weight * 0.18 }.map {
+            ArtworkColor(red: $0.red / $0.weight, green: $0.green / $0.weight, blue: $0.blue / $0.weight).accent
+        }
+    }
 }
 
 /// A cover's colour, as plain components (Sendable, comparable).
@@ -48,6 +101,19 @@ nonisolated struct ArtworkColor: Sendable, Equatable {
     var red: Double
     var green: Double
     var blue: Double
+
+    /// Hue (0…1), saturation and value.
+    var hsv: (hue: Double, saturation: Double, value: Double) {
+        let high = max(red, green, blue), low = min(red, green, blue), delta = high - low
+        guard high > 0, delta > 0.0001 else { return (0, 0, high) }
+        var hue: Double
+        if high == red { hue = (green - blue) / delta }
+        else if high == green { hue = 2 + (blue - red) / delta }
+        else { hue = 4 + (red - green) / delta }
+        hue /= 6
+        if hue < 0 { hue += 1 }
+        return (hue, delta / high, high)
+    }
 
     /// Saturation and brightness lifted so it works as an accent on the dark island: a muddy or
     /// near-black cover still gives a visible colour, a grey one stays grey.

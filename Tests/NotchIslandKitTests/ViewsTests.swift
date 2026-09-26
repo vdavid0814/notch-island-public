@@ -226,7 +226,7 @@ struct PowerCopyTests {
 struct EqualizerTests {
     @Test func barsAreStaggered() {
         let bars = EqualizerBarsView.bars
-        #expect(bars.count == 4)
+        #expect(bars.count == 5)
         #expect(Set(bars.map(\.period)).count == bars.count)
         #expect(Set(bars.map(\.phase)).count == bars.count)
         #expect(bars.allSatisfy { $0.low > 0 && $0.low < $0.high && $0.high <= 1 })
@@ -238,7 +238,7 @@ struct EqualizerTests {
 
         view.isAnimating = true
         let installed = view.installedAnimations.compactMap { $0 }
-        #expect(installed.count == 4)
+        #expect(installed.count == 5)
         #expect(installed.allSatisfy { $0.repeatCount == .infinity && $0.autoreverses })
 
         // Layout (e.g. the island resizing) must not restart the animations.
@@ -400,3 +400,86 @@ struct RenderingTests {
     }
 }
 
+
+// MARK: - Spectrum
+
+@Suite("Spectrum")
+struct SpectrumTests {
+    @Test func bandsRunLowToHighWithoutGaps() {
+        let bins = SpectrumBands.bins(size: SpectrumAnalyzer.size, sampleRate: 48_000)
+        #expect(bins.count == 5)
+        #expect(bins.allSatisfy { !$0.isEmpty && $0.lowerBound >= 1 })
+        for (a, b) in zip(bins, bins.dropFirst()) { #expect(a.upperBound == b.lowerBound) }
+    }
+
+    @Test func quietBandsStayLow() {
+        var leveler = SpectrumLeveler()
+        // The measured pop-track balance: after the tilt, every band about as loud → all well up.
+        for _ in 0..<60 { leveler.update(decibels: [-24, -31, -37, -42, -50], elapsed: 1 / 30) }
+        #expect(leveler.levels.allSatisfy { $0 > 0.7 })
+        // Same bass, the treble 15 dB quieter than that: its bar sinks well below the bass's.
+        for _ in 0..<60 { leveler.update(decibels: [-24, -31, -37, -42, -65], elapsed: 1 / 30) }
+        #expect(leveler.levels[4] < 0.35)
+        #expect(leveler.levels[0] > 0.8)
+        // A whisper (everything 30 dB down) is not amplified to fill the bars.
+        for _ in 0..<60 { leveler.update(decibels: [-54, -61, -67, -72, -80], elapsed: 1 / 30) }
+        #expect(leveler.levels.allSatisfy { $0 < 0.3 })
+        // Silence drops every bar.
+        for _ in 0..<90 { leveler.update(decibels: [-120, -120, -120, -120, -120], elapsed: 1 / 30) }
+        #expect(leveler.levels.allSatisfy { $0 < 0.01 })
+    }
+
+    @Test func aQuietTrebleStillSwings() {
+        var leveler = SpectrumLeveler()
+        // The measured pop-track balance, the treble alternating between a lull and a hi-hat a few
+        // dB louder (−58 / −52, around its measured −54). Its bar swings low to high.
+        var low: Float = 1, high: Float = 0
+        for frame in 0..<240 {
+            let hat: Float = (frame / 12).isMultiple(of: 2) ? -58 : -52
+            leveler.update(decibels: [-24, -31, -37, -42, hat], elapsed: 1 / 30)
+            if frame > 120 { low = min(low, leveler.levels[4]); high = max(high, leveler.levels[4]) }
+        }
+        #expect(high - low > 0.5)
+        // The treble is the most sensitive bar (`SpectrumLeveler.sensitivity`): its lulls sit a
+        // little higher, but still well down.
+        #expect(low < 0.45)
+    }
+
+    @Test func theSpringSoftensASingleSpike() {
+        var leveler = SpectrumLeveler()
+        // One loud frame out of silence: the bar starts up, but eases instead of jumping.
+        leveler.update(decibels: [-20, -120, -120, -120, -120], elapsed: 1 / 30)
+        #expect(leveler.levels[0] > 0.05)
+        #expect(leveler.levels[0] < 0.25)
+        // A few frames on it is well up: smoothing, not damping the motion away.
+        for _ in 0..<8 { leveler.update(decibels: [-20, -120, -120, -120, -120], elapsed: 1 / 30) }
+        #expect(leveler.levels[0] > 0.6)
+    }
+
+    @Test func noSignalWithoutSound() {
+        #expect(!SpectrumLevels().hasSignal(now: 100))
+        #expect(SpectrumLevels(lastSignal: 99.5).hasSignal(now: 100))
+        #expect(!SpectrumLevels(lastSignal: 90).hasSignal(now: 100))
+    }
+
+    @Test func paletteFindsTheCoversColours() {
+        let red = ArtworkColor(red: 0.9, green: 0.1, blue: 0.1)
+        let blue = ArtworkColor(red: 0.1, green: 0.2, blue: 0.9)
+        let colors = Array(repeating: red, count: 40) + Array(repeating: blue, count: 20)
+            + Array(repeating: ArtworkColor(red: 0.05, green: 0.05, blue: 0.05), count: 4)
+        let palette = ArtworkDecoder.dominantColors(colors, limit: 3)
+        #expect(palette.count == 2)
+        #expect(palette[0].red > palette[0].blue)
+        #expect(palette[1].blue > palette[1].red)
+        // A grey cover gives one grey.
+        let grey = ArtworkDecoder.dominantColors(Array(repeating: ArtworkColor(red: 0.5, green: 0.5, blue: 0.5), count: 10), limit: 3)
+        #expect(grey.count == 1)
+    }
+
+    @Test func barsSpreadThePalette() {
+        let a = ArtworkColor(red: 1, green: 0, blue: 0), b = ArtworkColor(red: 0, green: 0, blue: 1)
+        let bars = EqualizerBarsView.barColors(count: 4, palette: [a, b])
+        #expect(bars.first! == a && bars.last! == b)
+        #expect(EqualizerBarsView.barColors(count: 4, palette: []).allSatisfy { $0 == nil })
+    }
+}
