@@ -14,6 +14,8 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case timerUnit
     /// Siri opened on its app gallery (as ⌘Space then ⌘1).
     case siriApps
+    /// Siri opened on the clipboard history (as ⌘Space then ⌘4).
+    case siriClipboard
     /// Switches the island's surface style, as the Settings cards do (animated).
     case surface(IslandGlassStyle)
     /// Holds every island spring this long after its start (nil: runs them again), so single frames
@@ -126,6 +128,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "demo/airpods": return .demo(.airPods)
         case "demo/timerunit": return .demo(.timerUnit)
         case "demo/siriapps": return .demo(.siriApps)
+        case "demo/siriclipboard": return .demo(.siriClipboard)
         case "demo/surface":
             return query["style"].flatMap { IslandGlassStyle(rawValue: $0.lowercased()) }.map { .demo(.surface($0)) }
         case "demo/freeze":

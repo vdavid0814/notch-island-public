@@ -26,6 +26,8 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
     var showsApplications = true
     var showsFiles = true
     var showsActions = true
+    /// Clipboard (⌘4): the history of copied text. Off, nothing is watched or kept.
+    var showsClipboard = true
 
     // MARK: App gallery
 
@@ -87,6 +89,7 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
         showsApplications = value(.showsApplications, d.showsApplications)
         showsFiles = value(.showsFiles, d.showsFiles)
         showsActions = value(.showsActions, d.showsActions)
+        showsClipboard = value(.showsClipboard, d.showsClipboard)
         galleryColumns = min(max(value(.galleryColumns, d.galleryColumns), Self.galleryColumnsRange.lowerBound), Self.galleryColumnsRange.upperBound)
         gallerySort = value(.gallerySort, d.gallerySort)
         folders = value(.folders, d.folders)
@@ -107,13 +110,14 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
         SiriLayout(widthFactor: panelSize.factor, listRows: listRows, galleryRows: galleryRows, galleryColumns: galleryColumns)
     }
 
-    /// The suggestions (⌘1–⌘3) that are switched on, in order.
+    /// The suggestions (⌘1–⌘4) that are switched on, in order.
     var categories: [AssistantCategory] {
         AssistantCategory.allCases.filter {
             switch $0 {
             case .applications: showsApplications
             case .files: showsFiles
             case .actions: showsActions
+            case .clipboard: showsClipboard
             }
         }
     }

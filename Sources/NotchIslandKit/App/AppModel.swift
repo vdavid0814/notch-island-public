@@ -27,6 +27,8 @@ import Observation
     let widgets = WidgetStore()
     let fullscreen = FullscreenMonitor()
     let assistant = AssistantModel()
+    /// What the user copied, for Siri's Clipboard (⌘4).
+    let clipboard = ClipboardHistory()
     /// Control Center switches for the Controls and Keyboard widgets.
     let controls = SystemControls()
     @ObservationIgnored private let commandSpaceTap = CommandSpaceTap()
@@ -93,6 +95,17 @@ import Observation
         }
         assistant.onFileAccessSettled = { [weak self] in self?.windowController?.assistantNeedsKeyboard() }
         assistant.settings = { [weak preferences] in preferences?.siri ?? SiriSettings() }
+        assistant.clipboard = { [weak self] in self?.clipboard.items ?? [] }
+        assistant.onPaste = { [weak self] item in
+            guard let self else { return }
+            // Siri gives the keyboard back to the app the user was typing in, then ⌘V lands there.
+            self.clipboard.place(item)
+            self.controller.closeAssistant()
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(180))
+                ClipboardHistory.pasteIntoFrontApp()
+            }
+        }
         commandSpaceTap.setModifiers(preferences.siri.shortcut.modifiers)
         // Like the system's ⌘Space: opens Siri, and closes it again.
         commandSpaceTap.onPress = { [weak self] in
@@ -150,6 +163,7 @@ import Observation
         demo.cancel()
         FeatureState.actions(from: appliedFeatures, to: .off).forEach(run)
         appliedFeatures = nil
+        clipboard.setWatching(false)
         power.stop()
         airPods.stop()
         activity.stop()
@@ -391,8 +405,8 @@ import Observation
     /// difference to the applied state is acted on.
     private func observeFeatures() {
         let generation = featureGeneration
-        let state = withObservationTracking {
-            currentFeatureState()
+        let (state, watchesClipboard) = withObservationTracking {
+            (currentFeatureState(), preferences.siri.showsClipboard)
         } onChange: { [weak self] in
             // Fires in willSet on the mutating thread; the hop lands after the new value is set.
             Task { @MainActor [weak self] in
@@ -400,6 +414,7 @@ import Observation
                 self.observeFeatures()
             }
         }
+        clipboard.setWatching(watchesClipboard)
         let actions = FeatureState.actions(from: appliedFeatures, to: state)
         appliedFeatures = state
         guard !actions.isEmpty else { return }

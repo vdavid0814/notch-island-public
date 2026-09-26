@@ -126,7 +126,9 @@ struct AssistantView: View {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
                 }
-                TextField(assistant.category?.title ?? String(localized: "Search or Ask"), text: $assistant.query)
+                // In Clipboard the field shows the copy the selection is on, as Spotlight does.
+                TextField(assistant.selectedClip?.preview ?? assistant.category?.title ?? String(localized: "Search or Ask"),
+                          text: $assistant.query)
                     .textFieldStyle(.plain)
                     .font(.title3)
                     .focused($isFieldFocused)
@@ -179,10 +181,11 @@ extension AssistantCategory {
         case .applications: String(localized: "Applications")
         case .files: String(localized: "Files")
         case .actions: String(localized: "Actions")
+        case .clipboard: String(localized: "Clipboard")
         }
     }
 
-    /// ⌘1, ⌘2, ⌘3.
+    /// ⌘1–⌘4.
     var key: KeyEquivalent { KeyEquivalent(Character(String(rawValue))) }
 
     var tile: some View {
@@ -190,6 +193,7 @@ extension AssistantCategory {
         case .applications: AssistantTile(symbol: "square.grid.2x2.fill", color: .blue)
         case .files: AssistantTile(symbol: "folder.fill", color: .cyan)
         case .actions: AssistantTile(symbol: "bolt.fill", color: .orange)
+        case .clipboard: AssistantTile(symbol: "list.clipboard.fill", color: .gray)
         }
     }
 }
@@ -230,6 +234,8 @@ private struct RowsList: View {
                 }
             }
             .scrollIndicators(.never)
+            // Fewer rows than fit: nothing to scroll, so no rubber-band either.
+            .scrollBounceBehavior(.basedOnSize)
             .onChange(of: assistant.selection) { _, selection in
                 guard rows.indices.contains(selection) else { return }
                 proxy.scrollTo(rows[selection].id)
@@ -263,6 +269,8 @@ private struct AppGallery: View {
                 }
             }
             .scrollIndicators(.never)
+            // Fewer rows than fit: nothing to scroll, so no rubber-band either.
+            .scrollBounceBehavior(.basedOnSize)
             .onChange(of: assistant.selection) { _, selection in
                 guard rows.indices.contains(selection) else { return }
                 proxy.scrollTo(rows[selection].id)
@@ -317,6 +325,11 @@ private struct RowView: View {
                 .frame(width: 22, height: 22)
             Text(title).lineLimit(1)
             Spacer(minLength: 0)
+            if case .clip(let item) = row {
+                Text("Copied \(item.copied.formatted(date: Calendar.current.isDateInToday(item.copied) ? .omitted : .abbreviated, time: .shortened))")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
             if case .category(let category) = row {
                 Text(verbatim: "⌘\(category.rawValue)")
                     .foregroundStyle(.secondary)
@@ -341,6 +354,8 @@ private struct RowView: View {
             Image(nsImage: AssistantIcons.shortcuts)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
+        case .clip:
+            Image(systemName: "doc.plaintext").foregroundStyle(.secondary).imageScale(.large)
         case .askIntelligence:
             Image(systemName: "apple.intelligence").foregroundStyle(AssistantGlow.gradient).imageScale(.large)
         case .searchWeb:
@@ -355,6 +370,7 @@ private struct RowView: View {
         case .category(let category): category.title
         case .hit(let hit): hit.name
         case .action(let action): action.title
+        case .clip(let item): item.preview
         case .askIntelligence: String(localized: "Ask Apple Intelligence")
         case .searchWeb: String(localized: "Search the Web")
         case .askChatGPT: String(localized: "Ask ChatGPT")
@@ -385,6 +401,8 @@ private struct AnswerPane: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollIndicators(.never)
+            // Fewer rows than fit: nothing to scroll, so no rubber-band either.
+            .scrollBounceBehavior(.basedOnSize)
             if !answer.isResponding {
                 HStack(spacing: Metrics.Spacing.small) {
                     Spacer(minLength: 0)

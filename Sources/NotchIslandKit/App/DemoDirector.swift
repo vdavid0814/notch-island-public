@@ -57,6 +57,9 @@ import SwiftUI
         case .siriApps:
             model.controller.openAssistant()
             model.assistant.open(.applications)
+        case .siriClipboard:
+            model.controller.openAssistant()
+            model.assistant.open(.clipboard)
         case .timerUnit:
             NotificationCenter.default.post(name: .demoNextTimerUnit, object: nil)
         case .surface(let style):

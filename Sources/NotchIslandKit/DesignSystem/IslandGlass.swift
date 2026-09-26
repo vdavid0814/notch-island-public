@@ -89,15 +89,17 @@ nonisolated enum IslandGlassStyle: String, Sendable, CaseIterable, Identifiable,
     var rimInset: CGFloat {
         switch self {
         case .liquidGlass: 1.5
-        // Fade is meant to read as a black island: no outline at all, also where it turns to glass.
-        case .fade: 3
+        // Fade shows its glass's own edge light where the black has cleared, like the iPhone's Siri
+        // (the black keeps it out of sight around the notch).
+        case .fade: 0
         case .black: 0
         }
     }
 
-    /// The island's smoked glass: a little darker than the CAD app's (0.5), so the surface stays
-    /// closer to the black of the notch it hangs from while still showing what is behind it.
-    var material: Glass { .clear.tint(Color.black.opacity(Self.smokeOpacity)) }
+    /// The island's glass. Liquid Glass is smoked, a little darker than the CAD app's (0.5), so the
+    /// surface stays closer to the black of the notch it hangs from while still showing what is
+    /// behind it; under the fade's black it is perfectly clear, colourless glass.
+    var material: Glass { self == .fade ? .clear : .clear.tint(Color.black.opacity(Self.smokeOpacity)) }
 
     /// The black of the surface glass's tint.
     static let smokeOpacity = 0.62
@@ -138,54 +140,111 @@ private struct IslandGlassModifier<S: Shape>: ViewModifier {
     }
 }
 
-private extension View {
-    /// Share of the island below the notch band that stays solid black in the fade style.
-    static var fadeHold: CGFloat { 0.18 }
-}
-
 extension View {
-    /// The black the island's surface wears over its glass in the `fade` style: opaque down to
-    /// `solidDepth` (the notch band, plus the overdraw above the screen), then easing out to clear
-    /// towards the bottom. Sized from the surface itself, so it follows the island while it grows.
+    /// The black the island's surface wears over its glass in the `fade` style: opaque down to about
+    /// two thirds of the island, then easing slowly out, and clearing towards the sides in a mild V
+    /// and along the bottom (`FadeShadeMask`). Sized from the
+    /// surface itself, so it follows the island while it grows.
     func islandSurfaceShade(_ style: IslandGlassStyle, solidDepth: CGFloat, in shape: some Shape) -> some View {
         background {
             if style == .fade {
                 GeometryReader { proxy in
                     shape.fill(Color.black).mask {
-                        LinearGradient(stops: Self.fadeStops(solidDepth: solidDepth, height: proxy.size.height),
-                                       startPoint: .top, endPoint: .bottom)
+                        FadeShadeMask(solidDepth: solidDepth, size: proxy.size)
                     }
                 }
             }
         }
     }
 
-    /// The same shade over the top `height` points of a larger canvas (the island's window): the
-    /// island's surface is `height` tall this frame, the canvas keeps its size (see `IslandRootView`).
-    func islandSurfaceShade(_ style: IslandGlassStyle, solidDepth: CGFloat, height: CGFloat, in shape: some Shape) -> some View {
+    /// The same shade over the top `size.height` points of a larger canvas (the island's window),
+    /// centred on it: the island's surface is `size` this frame, the canvas keeps its size (see
+    /// `IslandRootView`).
+    func islandSurfaceShade(_ style: IslandGlassStyle, solidDepth: CGFloat, size: CGSize, in shape: some Shape) -> some View {
         background {
             if style == .fade {
                 shape.fill(Color.black).mask(alignment: .top) {
-                    LinearGradient(stops: Self.fadeStops(solidDepth: solidDepth, height: height),
-                                   startPoint: .top, endPoint: .bottom)
-                        .frame(height: max(height, 1))
+                    FadeShadeMask(solidDepth: solidDepth, size: size)
                 }
             }
         }
     }
+}
 
-    private static func fadeStops(solidDepth: CGFloat, height: CGFloat) -> [Gradient.Stop] {
-        let height = max(height, 1)
-        // A little below the notch band before the fade starts, so the black reads as hanging from
-        // the notch rather than ending exactly at its edge.
-        let solid = min((solidDepth + (height - solidDepth) * Self.fadeHold) / height, 1)
-        let clear = solid + (1 - solid) * 0.85
-        return [
-            .init(color: .black, location: 0),
-            .init(color: .black, location: solid),
-            .init(color: .black.opacity(0.7), location: solid + (clear - solid) * 0.3),
-            .init(color: .black.opacity(0.25), location: solid + (clear - solid) * 0.7),
-            .init(color: .clear, location: clear),
-        ]
+/// The fade's black as one shape: out past the sides through the notch band, then narrowing in a
+/// mild V — straight sides leaning in from the band's corners to `bottomInset` from each side at
+/// `inset` above the bottom — with its lower corners rounded like the island's.
+nonisolated private struct FadeCore: Shape {
+    let depth: CGFloat
+    let inset: CGFloat
+    let bottomInset: CGFloat
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let out = 2 * inset, top = rect.minY - 200, bend = rect.minY + depth
+        let bottom = max(rect.maxY - inset, bend + 1)
+        let left = rect.minX + bottomInset, right = rect.maxX - bottomInset
+        let r = max(0, min(cornerRadius, (right - left) / 2, bottom - bend))
+        // Where the leaning sides meet the rounded corners: `r` up each side.
+        func side(_ fromX: CGFloat, _ toX: CGFloat) -> CGFloat { toX + (fromX - toX) * r / (bottom - bend) }
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX - out, y: top))
+        path.addLine(to: CGPoint(x: rect.maxX + out, y: top))
+        path.addLine(to: CGPoint(x: rect.maxX + out, y: bend))
+        path.addLine(to: CGPoint(x: side(rect.maxX + out, right), y: bottom - r))
+        path.addQuadCurve(to: CGPoint(x: right - r, y: bottom), control: CGPoint(x: right, y: bottom))
+        path.addLine(to: CGPoint(x: left + r, y: bottom))
+        path.addQuadCurve(to: CGPoint(x: side(rect.minX - out, left), y: bottom - r), control: CGPoint(x: left, y: bottom))
+        path.addLine(to: CGPoint(x: rect.minX - out, y: bend))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Where the fade style's black lies over an island of `size`: solid down to `solidDepth` (the
+/// notch band, plus the overdraw above the screen) across the whole width; below it solid down the
+/// middle through about two thirds of the rest, easing slowly out towards the bottom (never quite
+/// clear there, `floor`); and clearing along the island's sides, narrowing in a mild V, and along
+/// its bottom (`FadeCore`, softened) — like the iPhone's Siri.
+private struct FadeShadeMask: View {
+    let solidDepth: CGFloat
+    let size: CGSize
+
+    /// Share of the island below the notch band that stays solid black down its middle.
+    static let hold: CGFloat = 0.68
+
+    /// How far in from the island's edge the black is whole.
+    static let edge: CGFloat = 12
+
+    var body: some View {
+        let width = max(size.width, 1), height = max(size.height, 1)
+        LinearGradient(stops: Self.verticalStops(solidDepth: solidDepth, height: height),
+                       startPoint: .top, endPoint: .bottom)
+            .mask {
+                // One shape, blurred as one: no step anywhere along its sides.
+                FadeCore(depth: solidDepth, inset: Self.edge, bottomInset: Self.edge * 0.9,
+                         cornerRadius: Self.edge * 1.5)
+                .blur(radius: Self.edge * 1.3)
+            }
+        .frame(width: width, height: height, alignment: .top)
+    }
+
+    /// How much black stays at the bottom in the middle, under the content: enough for white text
+    /// over a white page. Only the edges clear completely, where the glass shows its edge light.
+    static let floor: Double = 0.5
+
+    static func verticalStops(solidDepth: CGFloat, height: CGFloat) -> [Gradient.Stop] {
+        let solid = min((solidDepth + max(height - solidDepth, 0) * hold) / height, 1)
+        return smoothFade(from: solid, to: 1, floor: floor)
+    }
+
+    /// Opaque black up to `start`, easing out (smoothstep, in twelve steps so none shows) to
+    /// `floor` (clear by default) at `end`.
+    private static func smoothFade(from start: CGFloat, to end: CGFloat, floor: Double = 0) -> [Gradient.Stop] {
+        [Gradient.Stop(color: .black, location: 0)] + (0...12).map { index in
+            let t = CGFloat(index) / 12
+            let eased = Double(t * t * (3 - 2 * t))
+            return Gradient.Stop(color: .black.opacity(1 - eased * (1 - floor)), location: start + (end - start) * t)
+        }
     }
 }

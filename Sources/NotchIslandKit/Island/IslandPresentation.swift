@@ -87,8 +87,8 @@ nonisolated enum AssistantRoom: Sendable, Hashable, Comparable {
     case list
     case gallery
 
-    /// The field and the three suggestions (Applications, Files, Actions).
-    static let suggestions = AssistantRoom.rows(3)
+    /// The field and every suggestion (Applications, Files, Actions, Clipboard).
+    static let suggestions = AssistantRoom.rows(AssistantCategory.allCases.count)
 
     static let allCases: [AssistantRoom] = [.field, .suggestions, .list, .gallery]
 

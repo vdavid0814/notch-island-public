@@ -249,7 +249,8 @@ private struct ThumbnailGlass<S: Shape>: View {
 
     var body: some View {
         if style.hasGlassSurface {
-            shape.fill(.black.opacity(0.42))
+            // Liquid Glass is smoked; the fade's glass is clear.
+            shape.fill(.black.opacity(style == .fade ? 0.1 : 0.42))
                 .overlay { shape.fill(LinearGradient(colors: [.white.opacity(0.16), .white.opacity(0.03)],
                                                      startPoint: .top, endPoint: .bottom)) }
                 .overlay { shape.stroke(.white.opacity(style == .liquidGlass ? 0.35 : 0.12), lineWidth: 0.75) }
@@ -463,6 +464,9 @@ struct SiriSettingsPage: View {
                 }
                 Toggle(isOn: $preferences.siri.showsActions) {
                     InfoLabel("Actions  ⌘3", "The island's actions and your shortcuts in search results.")
+                }
+                Toggle(isOn: $preferences.siri.showsClipboard) {
+                    InfoLabel("Clipboard  ⌘4", "The last 50 texts you copied, kept on this Mac; Return pastes one where you were typing. Copies that password managers mark as secret are never kept. Off, nothing is watched.")
                 }
             } header: {
                 InfoLabel("Suggestions", "What Siri lists and searches. A suggestion that is off does not open with its shortcut either.")

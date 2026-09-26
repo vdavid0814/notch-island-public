@@ -127,6 +127,9 @@ private struct IslandContentStack: View {
             // springs between two sizes neither the outgoing nor the incoming content reflows.
             IslandContent(presentation: presentation, thumbnails: thumbnails)
                 .frame(width: contentSize.width, height: contentSize.height, alignment: .top)
+                // Where the glass shows through, text and symbols keep a soft dark halo, so they
+                // stay readable over a bright desktop without darkening the glass itself.
+                .modifier(GlassLegibility())
                 // Concentric corners inside (the artwork) follow the island they belong to.
                 .containerShape(IslandShape(bottomRadius: layout.bottomRadius(for: presentation),
                                             shoulderRadius: layout.shoulderRadius(for: presentation)))
@@ -143,6 +146,15 @@ private struct IslandContentStack: View {
         // Like Control Center, it is a surface the user operates directly: draw controls active.
         .environment(\.appearsActive, true)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+/// A soft dark halo around the island's content on see-through styles (none on solid black).
+private struct GlassLegibility: ViewModifier {
+    @Environment(\.islandGlassStyle) private var style
+
+    func body(content: Content) -> some View {
+        content.shadow(color: .black.opacity(style.hasGlassSurface ? 0.55 : 0), radius: 2.5)
     }
 }
 
@@ -243,7 +255,8 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
                 // its top edge (and the rim light that comes with an edge) is never on screen.
                 .padding(.top, IslandLayout.overdraw)
                 .islandSurfaceShade(glassStyle, solidDepth: solidDepth,
-                                    height: size.height + IslandLayout.overdraw, in: surface)
+                                    size: CGSize(width: size.width, height: size.height + IslandLayout.overdraw),
+                                    in: surface)
                 .islandGlass(in: IslandGlassBody(outline: surface), isEnabled: showsGlass)
                 .background {
                     // The shoulders beside the glass body, in the glass's smoke (`IslandGlassBody`).

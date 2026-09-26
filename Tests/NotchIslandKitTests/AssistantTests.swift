@@ -15,8 +15,8 @@ import Testing
         #expect(field.width == expanded.width && suggestions.width == expanded.width && list.width == expanded.width)
         // Only the field: the top inset, the 40 pt field and the bottom inset.
         #expect(field.height == CGFloat(28 + 8 + 40 + 12))
-        // The three suggestions exactly: three rows and their spacing, one inset between.
-        #expect(suggestions.height == field.height + 8 + 3 * 32 + 2 * 2)
+        // The four suggestions exactly: four rows and their spacing, one inset between.
+        #expect(suggestions.height == field.height + 8 + 4 * 32 + 3 * 2)
         #expect(list.height == 28 + IslandLayout.assistantPageHeight)
         #expect(field.height < suggestions.height && suggestions.height < list.height)
         #expect(layout.bottomRadius(for: .assistant(.field)) == layout.bottomRadius(for: .expanded(.home)))
@@ -112,7 +112,7 @@ import Testing
 
     @Test func bareFieldListsTheSuggestionsButNeedsNoList() {
         let model = model()
-        #expect(model.rows == [.category(.applications), .category(.files), .category(.actions)])
+        #expect(model.rows == [.category(.applications), .category(.files), .category(.actions), .category(.clipboard)])
         #expect(!model.needsList && !model.revealsSuggestions)
         // Return on the bare field does nothing: nothing is shown to run.
         model.activateSelection()
@@ -518,5 +518,66 @@ import Testing
 
     @Test func webSearchEngines() {
         #expect(AssistantActions.webSearchURL(for: "a b", engine: .duckDuckGo)?.absoluteString == "https://duckduckgo.com/?q=a%20b")
+    }
+}
+
+@MainActor @Suite struct ClipboardTests {
+    func history() -> (ClipboardHistory, NSPasteboard) {
+        let board = NSPasteboard(name: NSPasteboard.Name("ClipboardTests.\(UUID().uuidString)"))
+        return (ClipboardHistory(pasteboard: board, storeURL: nil), board)
+    }
+
+    @Test func keepsCopiesNewestFirstWithoutDuplicatesUpToTheLimit() {
+        let (history, _) = history()
+        history.add("one")
+        history.add("two")
+        history.add("one")
+        #expect(history.items.map(\.text) == ["one", "two"])
+        for i in 0..<(ClipboardHistory.limit + 5) { history.add("item \(i)") }
+        #expect(history.items.count == ClipboardHistory.limit)
+        #expect(history.items.first?.text == "item \(ClipboardHistory.limit + 4)")
+        history.add("   \n")
+        #expect(history.items.first?.text == "item \(ClipboardHistory.limit + 4)")
+    }
+
+    @Test func readsNewCopiesButNeverConcealedOnes() {
+        let (history, board) = history()
+        board.clearContents()
+        board.setString("hello", forType: .string)
+        history.check()
+        #expect(history.items.map(\.text) == ["hello"])
+        board.clearContents()
+        board.declareTypes([.string, NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")], owner: nil)
+        board.setString("secret", forType: .string)
+        history.check()
+        #expect(history.items.map(\.text) == ["hello"])
+        // Placing an item puts it on top without it counting as a new copy.
+        history.add("other")
+        history.place(history.items[1])
+        history.check()
+        #expect(history.items.map(\.text) == ["hello", "other"])
+        #expect(board.string(forType: .string) == "hello")
+    }
+
+    @Test func clipboardSuggestionListsAndFiltersCopiesAndPastesTheSelection() {
+        let defaults = UserDefaults(suiteName: "ClipboardTests.\(UUID().uuidString)")!
+        let model = AssistantModel(defaults: defaults, sources: stubSources())
+        model.begin()
+        let items = [ClipboardItem(text: "DELIVERY/screenshots/P3-fitness/", copied: .now),
+                     ClipboardItem(text: "fitness,apple,watch\nrun", copied: .now)]
+        model.clipboard = { items }
+        var pasted: ClipboardItem?
+        model.onPaste = { pasted = $0 }
+        #expect(model.rows.contains(.category(.clipboard)))
+        model.open(.clipboard)
+        #expect(model.rows == items.map(AssistantRow.clip))
+        #expect(model.room == .rows(2))
+        #expect(model.selectedClip == items[0])
+        model.moveSelection(by: 1)
+        #expect(model.selectedClip?.preview == "fitness,apple,watch")
+        model.activateSelection()
+        #expect(pasted == items[1])
+        model.query = "screens"
+        #expect(model.rows == [.clip(items[0])])
     }
 }

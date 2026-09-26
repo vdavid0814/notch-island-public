@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// The suggestions shown before anything is typed, as in the system's Search window: each one
 /// lists everything of its kind (⌘1, ⌘2, ⌘3) and the field then filters that list.
 nonisolated enum AssistantCategory: Int, CaseIterable, Hashable, Sendable {
-    case applications = 1, files, actions
+    case applications = 1, files, actions, clipboard
 
     /// What the user may type to find the suggestion itself: its title, and its English names in
     /// any language (the title is localized).
@@ -15,11 +15,13 @@ nonisolated enum AssistantCategory: Int, CaseIterable, Hashable, Sendable {
         case .applications: ["Applications", "Apps"]
         case .files: ["Files", "Documents"]
         case .actions: ["Actions", "Shortcuts"]
+        case .clipboard: ["Clipboard", "Pasteboard", "Copied"]
         }
         let title = switch self {
         case .applications: String(localized: "Applications")
         case .files: String(localized: "Files")
         case .actions: String(localized: "Actions")
+        case .clipboard: String(localized: "Clipboard")
         }
         return [title] + english.filter { $0 != title }
     }
@@ -30,6 +32,8 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
     case category(AssistantCategory)
     case hit(AssistantHit)
     case action(AssistantAction)
+    /// Something the user copied (Clipboard, ⌘4).
+    case clip(ClipboardItem)
     case askIntelligence
     case searchWeb
     case askChatGPT
@@ -39,6 +43,7 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
         case .category(let category): "category:\(category.rawValue)"
         case .hit(let hit): "hit:\(hit.url.path)"
         case .action(let action): "action:\(action.id)"
+        case .clip(let item): "clip:\(item.id)"
         case .askIntelligence: "ask"
         case .searchWeb: "web"
         case .askChatGPT: "chatgpt"
@@ -171,7 +176,7 @@ nonisolated struct FileScope: Sendable, Equatable {
             queryChanged()
         }
     }
-    /// The suggestion the user opened (⌘1, ⌘2, ⌘3); nil is the root.
+    /// The suggestion the user opened (⌘1–⌘4); nil is the root.
     private(set) var category: AssistantCategory?
     /// Root search hits.
     private(set) var apps: [AssistantHit] = []
@@ -200,6 +205,10 @@ nonisolated struct FileScope: Sendable, Equatable {
     @ObservationIgnored var onCommand: ((AppCommand) -> Void)?
     /// The user's Siri settings, read as they are needed (so a change applies at once).
     @ObservationIgnored var settings: () -> SiriSettings = { SiriSettings() }
+    /// What the user copied, newest first (Clipboard, ⌘4).
+    @ObservationIgnored var clipboard: () -> [ClipboardItem] = { [] }
+    /// Pastes a copied item where the user was typing before Siri (the app closes Siri first).
+    @ObservationIgnored var onPaste: ((ClipboardItem) -> Void)?
     /// Whether something is playing: the Now Playing actions are listed only with a track.
     @ObservationIgnored var mediaState: () -> MediaState = { .none }
     nonisolated enum MediaState: Sendable { case none, paused, playing }
@@ -255,14 +264,13 @@ nonisolated struct FileScope: Sendable, Equatable {
         if answer != nil { return .list }
         if category == .applications { return .gallery }
         if needsList {
-            // An open suggestion lists everything of its kind: the full list. A query gets exactly
-            // the rows it has ("application": the suggestion and three hand-offs, not a list's
-            // worth of empty space), up to the full list, which then scrolls.
-            guard category == nil else { return .list }
+            // Exactly the rows there are (a query's hits, an open suggestion's items), not a list's
+            // worth of empty space, up to the list's height (Settings ▸ Siri), which then scrolls.
             let count = rows.count
             return count < settings().listRows ? .rows(max(count, 1)) : .list
         }
-        return revealsSuggestions || hoverReveals ? .suggestions : .field
+        // Exactly the suggestions the user has switched on.
+        return revealsSuggestions || hoverReveals ? .rows(max(settings().categories.count, 1)) : .field
     }
 
     /// The pointer over Siri brings the suggestions down (unless the user turned that off).
@@ -289,6 +297,10 @@ nonisolated struct FileScope: Sendable, Equatable {
             return files.map(AssistantRow.hit)
         case .actions:
             return actions(matching: text).map(AssistantRow.action)
+        case .clipboard:
+            let items = clipboard()
+            guard !text.isEmpty else { return items.map(AssistantRow.clip) }
+            return items.filter { AssistantMatch.matches($0.text, text, .anywhere) }.map(AssistantRow.clip)
         case nil:
             guard !text.isEmpty else { return settings.categories.map(AssistantRow.category) }
             let hits = (settings.showsApplications ? apps.map(AssistantRow.hit) : [])
@@ -341,6 +353,14 @@ nonisolated struct FileScope: Sendable, Equatable {
             + (settings.includesShortcuts ? (shortcuts ?? []) : []).map(AssistantAction.shortcut)
         guard !text.isEmpty else { return all }
         return all.filter { AssistantMatch.matches($0.title, text, settings.matching) }
+    }
+
+    /// The copied item the selection is on, in Clipboard (the field shows it, as Spotlight does).
+    var selectedClip: ClipboardItem? {
+        guard category == .clipboard, answer == nil else { return nil }
+        let rows = rows
+        guard rows.indices.contains(selection), case .clip(let item) = rows[selection] else { return nil }
+        return item
     }
 
     // MARK: Lifecycle
@@ -484,6 +504,8 @@ nonisolated struct FileScope: Sendable, Equatable {
         case .action(.shortcut(let name)):
             onClose?()
             AssistantActions.runShortcut(named: name)
+        case .clip(let item):
+            onPaste?(item)
         case .askIntelligence:
             ask()
         case .searchWeb:
@@ -557,7 +579,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         searchTask?.cancel()
         loadLists(for: category, query: text)
         switch category {
-        case .applications, .actions:
+        case .applications, .actions, .clipboard:
             // Filtered in memory as the user types.
             return
         case .files:
