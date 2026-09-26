@@ -445,6 +445,17 @@ struct SpectrumTests {
         #expect(low < 0.45)
     }
 
+    @Test func aTallBarLiftsItsNeighbours() {
+        // The bass alone sounds: its neighbour ends up a little above silence, pulled up by it;
+        // the far bars, with no taller neighbour, stay down.
+        var leveler = SpectrumLeveler()
+        for _ in 0..<60 { leveler.update(decibels: [-20, -120, -120, -120, -120], elapsed: 1 / 30) }
+        #expect(leveler.levels[0] > 0.9)
+        #expect(leveler.levels[1] > 0.04)
+        #expect(leveler.levels[1] < 0.16)
+        #expect(leveler.levels[3] < leveler.levels[1])
+    }
+
     @Test func theSpringSoftensASingleSpike() {
         var leveler = SpectrumLeveler()
         // One loud frame out of silence: the bar starts up, but eases instead of jumping.

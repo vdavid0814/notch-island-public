@@ -79,9 +79,9 @@ nonisolated struct SpectrumLeveler: Sendable {
     /// Below this (dB of mean bin power) a band counts as silent.
     static let silence: Float = -95
     static let exponent: Float = 1.7
-    /// A reading is stretched by this before it is capped at the top: 1.212 lets a bar reach its
-    /// full height about 21% more easily.
-    static let reach: Float = 1.212
+    /// A reading is stretched by this before it is capped at the top: 1.188 lets a bar reach its
+    /// full height about 19% more easily (1.212, then 2% less).
+    static let reach: Float = 1.188
     /// Each bar's own stretch on top of `reach`, bass → treble, tuned by ear: the right side
     /// answers more readily than the left (the treble ≈ 1.33 before the lean below), the three
     /// middle bars +5% then −3%, the bass bar a touch less (0.95, then −2%) — and the whole
@@ -100,6 +100,9 @@ nonisolated struct SpectrumLeveler: Sendable {
     static let floorRise: Float = 4
     /// A band's own span never narrows below this (dB): a waver does not fill the bar.
     static let minimumSpan: Float = 10
+
+    /// How strongly a taller neighbour lifts a bar: this share of the height between them.
+    static let neighbourPull: Float = 0.10
 
     private(set) var ceiling: Float = SpectrumLeveler.minimumCeiling
     private var floors: [Float] = Array(repeating: SpectrumLeveler.minimumCeiling - SpectrumLeveler.range,
@@ -130,10 +133,24 @@ nonisolated struct SpectrumLeveler: Sendable {
             }
             let rate = reading > targets[band] ? Self.attack : Self.decay
             targets[band] += (reading - targets[band]) * rate
+        }
 
-            // Semi-implicit Euler on x'' = ω²(target − x) − 2ω x' (critical damping).
+        // Neighbours pull each other up: a bar heads for its own target plus a share
+        // (`neighbourPull`) of how far each neighbour stands above it — the tallest lifts the ones
+        // beside it a little, like bars on a loose string. Only upward: a quiet neighbour never
+        // drags a loud bar down. Measured on last frame's heights, so the pull is as smooth as
+        // the bars themselves.
+        let previous = levels
+        for band in levels.indices {
+            var goal = targets[band]
+            for neighbour in [band - 1, band + 1] where previous.indices.contains(neighbour) {
+                goal += Self.neighbourPull * max(previous[neighbour] - previous[band], 0)
+            }
+            goal = min(goal, 1)
+
+            // Semi-implicit Euler on x'' = ω²(goal − x) − 2ω x' (critical damping).
             let omega = Self.stiffness
-            velocities[band] += (omega * omega * (targets[band] - levels[band]) - 2 * omega * velocities[band]) * dt
+            velocities[band] += (omega * omega * (goal - levels[band]) - 2 * omega * velocities[band]) * dt
             levels[band] = min(max(levels[band] + velocities[band] * dt, 0), 1)
         }
     }
