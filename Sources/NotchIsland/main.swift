@@ -1,4 +1,5 @@
 import Darwin
+import MachO
 import NotchIslandKit
 
 // Read by the system libraries only at launch, so they come from the environment: Info.plist's
@@ -17,7 +18,10 @@ import NotchIslandKit
 let environment = ["MallocSpaceEfficient": "1", "RB_DISABLE_GPU": "1"]
 if environment.keys.contains(where: { getenv($0) == nil }) {
     for (name, value) in environment { setenv(name, value, 1) }
-    if let path = CommandLine.unsafeArgv[0] { execv(path, CommandLine.unsafeArgv) }
+    // The executable's own path (argv[0] may be relative or a bare name).
+    var size = UInt32(PATH_MAX)
+    var path = [CChar](repeating: 0, count: Int(size))
+    if _NSGetExecutablePath(&path, &size) == 0 { execv(path, CommandLine.unsafeArgv) }
     // exec failed: carry on without them.
 }
 
