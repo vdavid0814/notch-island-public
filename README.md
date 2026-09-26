@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.3.2 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -18,6 +18,50 @@ events, volume/brightness and dropped files live there the rest of the time.
 For older versions, see the **[Releases page](https://github.com/vdavid0814/notch-island-public/releases)**.
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.4
+
+An equalizer that follows the music, Siri's clipboard history, a Fade style like the iPhone's
+Siri, the app's own icon — and about half the memory.
+
+**Now Playing**
+- **The equalizer follows the music.** The five bars beside the notch — bass on the left, treble on the right — move with what is actually playing, in the cover's colours, as tall as the cover opposite them; neighbouring bars lift each other a little. macOS asks once for **System Audio Recording**: the sound is only measured, never recorded or kept. Without the permission (or in a quiet intro) the bars breathe as before.
+- With the Fade style, the compact pill's edge no longer glows for ~3 s after the island closes into it.
+
+**Siri**
+- **Clipboard history (⌘4):** the last 50 copied texts, kept on this Mac only; texts that password managers mark as concealed are never kept. Return pastes the selection where you were typing. It can be switched off in Settings ▸ Siri.
+- Lists are exactly as tall as their rows (up to the list height) and do not rubber-band when everything fits.
+- The app gallery no longer jumps to the bottom while you scroll with the pointer over it.
+
+**Look**
+- **Fade** fades like the iPhone's Siri: black through about two thirds of the island, easing slowly out, clearing along the sides and the bottom in a mild V, with the glass's own edge light.
+- A much fainter text halo on the see-through styles.
+- NotchIsland has its own icon (Finder, the Dock, the disk image).
+
+**Energy and memory** (measured overnight on a MacBook Air M5, the release build)
+
+| | v0.3.2 | v0.4 |
+|---|---|---|
+| At rest | 26–28 MB | 19–21 MB |
+| At rest after using Settings, Siri and the rest for hours | 82–91 MB | 42–44 MB |
+| Volume / brightness key (peak) | 72–122 MB | 21–30 MB |
+| AirPods / timer-finished banner (peak) | 73–95 MB | 30–32 MB |
+| Opening Settings (peak) | 158–197 MB | 71–84 MB |
+| At rest with music playing | 1.0–1.25 % CPU, Energy Impact 1.7 | 0.9–1.0 % CPU, Energy Impact 1.3–1.4 |
+
+- The volume and brightness sliders, symbol animations (the volume symbol, the AirPods and timer bounces) and the native controls in Settings no longer set up ~40 MB of graphics memory each time they appear.
+- Freed memory goes back to the system: after Settings or Siri close, the app returns to about where it was.
+- The wallpaper pictures in Settings are decoded at the size they are shown, in the form the system displays directly: Settings ▸ General open 95 → 57 MB.
+- The equalizer's audio analysis wakes the Mac half as often.
+- Settings ▸ Widgets left open: ~3.5 % CPU (was ~10 %).
+- No leaks: hours of opening, closing and resting, a hundred opens in a row, memory flat to 0.1 MB. Energy Impact stays below 50 in every animation (opening the panel ~28, Siri's app gallery ~45).
+
+**Known issues**
+- Opening and closing the island costs about the same CPU as in v0.3.2.
+- Settings ▸ Widgets left open uses ~3.5 % CPU: its live widget previews redraw every second.
+- Switching between Settings pages can reach ~84 MB for a moment.
 
 ---
 
@@ -154,7 +198,8 @@ volume/brightness Minimal for 1.5 s, AirPods card 5 s.
    Security**, scroll down and click **Open Anyway** next to NotchIsland, and
    confirm. This is needed only once.
 5. Grant what it asks for: **Accessibility** (for the ⌘Space Siri and the
-   volume/brightness HUD) and **Automation** for Music or Spotify (Now Playing).
+   volume/brightness HUD), **Automation** for Music or Spotify (Now Playing) and
+   **System Audio Recording** (the equalizer that follows the music).
 
 Needs a MacBook with a notch (Apple silicon) and **macOS 27** or later.
 All releases: [Releases](https://github.com/vdavid0814/notch-island-public/releases).
@@ -252,6 +297,7 @@ Demo / diagnostics routes (inject state without touching the system):
 | Island, timers, shelf, battery, showing volume/brightness | nothing | — |
 | Replacing the system volume/brightness HUD | Accessibility | the system HUD stays |
 | Music / Spotify artwork and position | Automation (per app) | title/artist still appear; Settings shows the status |
+| The equalizer following the music | System Audio Recording (measured only, never recorded) | the bars breathe |
 
 ---
 
