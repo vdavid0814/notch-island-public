@@ -440,9 +440,9 @@ struct SpectrumTests {
             if frame > 120 { low = min(low, leveler.levels[4]); high = max(high, leveler.levels[4]) }
         }
         #expect(high - low > 0.5)
-        // The treble is the most sensitive bar (`SpectrumLeveler.sensitivity`): its lulls sit a
-        // little higher, but still well down.
-        #expect(low < 0.45)
+        // The treble is the most sensitive bar (`SpectrumLeveler.sensitivity`), and its louder
+        // neighbour pulls it up by 15 % of the gap: its lulls sit a little higher, but still down.
+        #expect(low < 0.5)
     }
 
     @Test func aTallBarLiftsItsNeighbours() {

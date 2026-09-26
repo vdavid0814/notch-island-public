@@ -101,8 +101,9 @@ nonisolated struct SpectrumLeveler: Sendable {
     /// A band's own span never narrows below this (dB): a waver does not fill the bar.
     static let minimumSpan: Float = 10
 
-    /// How strongly a taller neighbour lifts a bar: this share of the height between them.
-    static let neighbourPull: Float = 0.10
+    /// How strongly a taller neighbour lifts a bar: this share of the height between them (10 %,
+    /// then 15 %).
+    static let neighbourPull: Float = 0.15
 
     private(set) var ceiling: Float = SpectrumLeveler.minimumCeiling
     private var floors: [Float] = Array(repeating: SpectrumLeveler.minimumCeiling - SpectrumLeveler.range,
@@ -190,6 +191,17 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
     static let chunk = 4096
     private var leveler = SpectrumLeveler()
 
+    /// Samples per attack slice.
+    static let onsetFrames = 512
+    /// Seconds from the tap to the speaker (the output's latency), added to each slice's time.
+    var playbackDelay: CFTimeInterval = 0
+    private var onsets: [OnsetSample] = []
+    /// Two one-pole low-passes in a row (the kick band) and one for the cymbal band's high-pass.
+    private var bassStage1: Float = 0, bassStage2: Float = 0, trebleLow: Float = 0
+    private let bassCoefficient: Float
+    private let trebleCoefficient: Float
+    private var bassEnergy: Float = 0, trebleEnergy: Float = 0, sliceFrames = 0
+
     init?(sampleRate: Double) {
         guard sampleRate > 0, let setup = vDSP_create_fftsetup(Self.log2Size, FFTRadix(kFFTRadix2)) else { return nil }
         let size = Self.size
@@ -208,22 +220,34 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
         power = Array(repeating: 0, count: size / 2)
         decibels = Array(repeating: 0, count: SpectrumBands.count)
         mono = Array(repeating: 0, count: Self.chunk)
+        bassCoefficient = Float(1 - exp(-2 * Double.pi * 120 / sampleRate))
+        trebleCoefficient = Float(1 - exp(-2 * Double.pi * 6_000 / sampleRate))
+        onsets.reserveCapacity(64)
     }
 
     deinit { vDSP_destroy_fftsetup(setup) }
+
+    /// Nanoseconds per host-time tick.
+    static let hostTick: Double = {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        return Double(info.numer) / Double(info.denom)
+    }()
 
     /// One I/O cycle's worth of Float32 samples, interleaved or one buffer per channel.
     ///
     /// Vectorised (vDSP): the channels are summed per chunk rather than per sample. The per-sample
     /// loop walked the buffer list through its generic collection conformance for every frame
     /// (measured: most of this thread's own time).
-    func consume(_ list: UnsafePointer<AudioBufferList>) {
+    func consume(_ list: UnsafePointer<AudioBufferList>, hostTime: UInt64 = 0) {
+        let start = Double(hostTime) * Self.hostTick / 1e9
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
         guard let first = buffers.first, first.mNumberChannels > 0 else { return }
         let frames = Int(first.mDataByteSize) / MemoryLayout<Float>.size / Int(first.mNumberChannels)
         guard frames > 0 else { return }
         var done = 0
         batch.removeAll(keepingCapacity: true)
+        onsets.removeAll(keepingCapacity: true)
         // In pieces that end on analysis boundaries: one I/O cycle may hold several analyses.
         while done < frames {
             let count = min(frames - done, Self.chunk, block - sinceAnalysis)
@@ -247,6 +271,22 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
                 var peak: Float = 0
                 vDSP_maxmgv(out, 1, &peak, vDSP_Length(count))
                 if peak > 1e-4 { loud = true }
+                // The attack bands, slice by slice.
+                for index in 0..<count {
+                    let x = out[index]
+                    bassStage1 += bassCoefficient * (x - bassStage1)
+                    bassStage2 += bassCoefficient * (bassStage1 - bassStage2)
+                    trebleLow += trebleCoefficient * (x - trebleLow)
+                    let high = x - trebleLow
+                    bassEnergy += bassStage2 * bassStage2
+                    trebleEnergy += high * high
+                    sliceFrames += 1
+                    if sliceFrames == Self.onsetFrames {
+                        onsets.append(OnsetSample(time: start + Double(done + index + 1) / sampleRate + playbackDelay,
+                                                  bass: bassEnergy, treble: trebleEnergy))
+                        bassEnergy = 0; trebleEnergy = 0; sliceFrames = 0
+                    }
+                }
                 // Into the ring, wrapping at its end.
                 ring.withUnsafeMutableBufferPointer { ring in
                     var copied = 0
@@ -270,8 +310,8 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
                 batch.append(analyse(elapsed: elapsed))
             }
         }
-        if !batch.isEmpty {
-            AudioSpectrumTap.deliver(batch, interval: CFTimeInterval(block) / sampleRate)
+        if !batch.isEmpty || !onsets.isEmpty {
+            AudioSpectrumTap.deliver(batch, onsets: onsets, interval: CFTimeInterval(block) / sampleRate)
         }
     }
 
@@ -314,6 +354,16 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
     }
 }
 
+/// The music's attacks over one short slice (`SpectrumAnalyzer.onsetFrames` samples, ~11 ms):
+/// the energy of the kick-drum band (below ~120 Hz) and of the cymbal band (above ~6 kHz), and
+/// when the slice is heard (media time, the output's latency included). The equalizer finds the
+/// beat in these.
+nonisolated struct OnsetSample: Sendable {
+    var time: CFTimeInterval
+    var bass: Float
+    var treble: Float
+}
+
 /// Takes each analysis on the tap's I/O thread, as it is made (`AudioSpectrumTap.addSink`).
 ///
 /// The equalizer used to read the levels on a display link on the main thread, 20 times a second:
@@ -321,8 +371,8 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
 /// measured). The I/O thread is running anyway for the tap, so the bars are set from there.
 nonisolated protocol SpectrumSink: AnyObject, Sendable {
     /// The analyses of one I/O cycle, oldest first, `interval` seconds apart (the first one
-    /// `interval` after the last of the previous cycle).
-    func spectrumDidUpdate(_ batch: [SpectrumLevels], interval: CFTimeInterval)
+    /// `interval` after the last of the previous cycle), and the cycle's attack slices.
+    func spectrumDidUpdate(_ batch: [SpectrumLevels], onsets: [OnsetSample], interval: CFTimeInterval)
 }
 
 /// The system's audio output as five band levels, from a Core Audio process tap on every process
@@ -348,14 +398,15 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
         sinks.withLock { $0.removeAll { $0 === sink } }
     }
 
-    nonisolated static func deliver(_ batch: [SpectrumLevels], interval: CFTimeInterval) {
+    nonisolated static func deliver(_ batch: [SpectrumLevels], onsets: [OnsetSample], interval: CFTimeInterval) {
         sinks.withLock { list in
-            for sink in list { sink.spectrumDidUpdate(batch, interval: interval) }
+            for sink in list { sink.spectrumDidUpdate(batch, onsets: onsets, interval: interval) }
         }
     }
 
     @ObservationIgnored private var holders = 0
     @ObservationIgnored private var stopTask: Task<Void, Never>?
+    @ObservationIgnored private var restTask: Task<Void, Never>?
     @ObservationIgnored private var session: Session?
     @ObservationIgnored private var outputListener: AudioObjectPropertyListenerBlock?
 
@@ -398,7 +449,24 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
         }
     }
 
+    /// Stops listening for `duration` (the I/O thread sleeps; nothing is torn down), then
+    /// listens again. The equalizer needs a few seconds of music every so often, not all of it:
+    /// the tap's I/O cycles were most of the app's cost while music played.
+    func rest(for duration: Duration) {
+        guard let session, restTask == nil else { return }
+        session.pause()
+        restTask = Task { [weak self] in
+            try? await Task.sleep(for: duration, tolerance: .milliseconds(500))
+            guard let self else { return }
+            self.restTask = nil
+            guard !Task.isCancelled else { return }
+            self.session?.resume()
+        }
+    }
+
     private func stop() {
+        restTask?.cancel()
+        restTask = nil
         session = nil
         if let outputListener {
             var address = HAL.defaultOutputAddress
@@ -421,6 +489,8 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
 
     private func outputChanged() {
         guard session != nil else { return }
+        restTask?.cancel()
+        restTask = nil
         session = nil
         session = try? Session()
     }
@@ -490,6 +560,7 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
                 var current: UInt32 = 0
                 var bufferSize = UInt32(MemoryLayout<UInt32>.size)
                 if AudioObjectGetPropertyData(aggregate, &bufferAddress, 0, nil, &bufferSize, &current) == noErr, current > 0 {
+                    analyzer.playbackDelay = HAL.outputLatency(output, sampleRate: format.mSampleRate)
                     let block = (analyzer.hop + Int(current) - 1) / Int(current) * Int(current)
                     analyzer.block = block
                     // As many analyses per cycle as the device's largest buffer holds.
@@ -512,9 +583,17 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
 
         deinit { Self.destroy(tap: tap, aggregate: aggregate, proc: proc) }
 
+        func pause() {
+            if let proc { AudioDeviceStop(aggregate, proc) }
+        }
+
+        func resume() {
+            if let proc { AudioDeviceStart(aggregate, proc) }
+        }
+
         /// Built outside any actor: the block runs on the I/O queue.
         private static func ioBlock(_ analyzer: SpectrumAnalyzer) -> AudioDeviceIOBlock {
-            { _, input, _, _, _ in analyzer.consume(input) }
+            { _, input, inputTime, _, _ in analyzer.consume(input, hostTime: inputTime.pointee.mHostTime) }
         }
 
         private static func destroy(tap: AudioObjectID, aggregate: AudioObjectID, proc: AudioDeviceIOProcID?) {
@@ -548,6 +627,27 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
             var address = defaultOutputAddress
             let status = AudioObjectGetPropertyData(system, &address, 0, nil, &size, &device)
             return status == noErr && device != kAudioObjectUnknown ? device : nil
+        }
+
+        /// Seconds from the moment a sample is mixed to the moment the output plays it: the
+        /// device's latency and safety offset and its first stream's latency, on the output side.
+        static func outputLatency(_ device: AudioObjectID, sampleRate: Double) -> CFTimeInterval {
+            func frames(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) -> UInt32 {
+                var value: UInt32 = 0
+                var size = UInt32(MemoryLayout<UInt32>.size)
+                var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeOutput,
+                                                         mElement: kAudioObjectPropertyElementMain)
+                return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr ? value : 0
+            }
+            var total = frames(device, kAudioDevicePropertyLatency) + frames(device, kAudioDevicePropertySafetyOffset)
+            var streams = [AudioStreamID](repeating: 0, count: 8)
+            var size = UInt32(MemoryLayout<AudioStreamID>.size * streams.count)
+            var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams, mScope: kAudioObjectPropertyScopeOutput,
+                                                     mElement: kAudioObjectPropertyElementMain)
+            if AudioObjectGetPropertyData(device, &address, 0, nil, &size, &streams) == noErr, size > 0 {
+                total += frames(streams[0], kAudioStreamPropertyLatency)
+            }
+            return sampleRate > 0 ? Double(total) / sampleRate : 0
         }
 
         /// This app's own audio process object, so the tap leaves out its own sounds.

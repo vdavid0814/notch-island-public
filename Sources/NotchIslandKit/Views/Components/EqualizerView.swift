@@ -85,6 +85,9 @@ final class EqualizerBarsView: NSView {
     }
 
     private let barLayers: [CALayer]
+    /// Each bar's holder: a beat's pulse scales it (the bar inside breathes), so the two motions
+    /// multiply instead of fighting over one property.
+    private let pulseLayers: [CALayer]
 
     /// How much of the cover's colour the playing bars take: nearly all of it — the colour is
     /// already lifted to read on the dark island (`ArtworkColor.accent`), a touch of white keeps
@@ -129,13 +132,15 @@ final class EqualizerBarsView: NSView {
 
     override init(frame: CGRect) {
         barLayers = Self.bars.map { _ in CALayer() }
+        pulseLayers = Self.bars.map { _ in CALayer() }
         super.init(frame: frame)
         follower.view = self
         wantsLayer = true
         layer?.masksToBounds = false
-        for bar in barLayers {
+        for (bar, holder) in zip(barLayers, pulseLayers) {
             bar.cornerCurve = .continuous
-            layer?.addSublayer(bar)
+            holder.addSublayer(bar)
+            layer?.addSublayer(holder)
         }
         applyAnimationState()
         applyColors()
@@ -155,11 +160,14 @@ final class EqualizerBarsView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, bar) in barLayers.enumerated() {
-            bar.bounds = CGRect(x: 0, y: 0, width: barWidth, height: bounds.height)
-            bar.position = CGPoint(
+            let holder = pulseLayers[index]
+            holder.bounds = CGRect(x: 0, y: 0, width: barWidth, height: bounds.height)
+            holder.position = CGPoint(
                 x: CGFloat(index) * (barWidth + spacing) + barWidth / 2,
                 y: bounds.midY
             )
+            bar.bounds = holder.bounds
+            bar.position = CGPoint(x: holder.bounds.midX, y: holder.bounds.midY)
             bar.cornerRadius = barWidth / 2
         }
         CATransaction.commit()
@@ -234,12 +242,73 @@ final class EqualizerBarsView: NSView {
         }
     }
 
-    /// The follower lost the sound for a second: the default breathing comes back.
+    /// The follower lost the sound for a few seconds: the default breathing comes back.
     fileprivate func followingChanged(_ following: Bool) {
         guard isListening, !following else { return }
         specs = Self.bars
         applyAnimationState()
     }
+
+    /// What the follower found in the last window of music.
+    fileprivate struct Reading {
+        var specs: [Bar]?
+        var pulses: [Pulse?]
+    }
+
+    /// A beat for one bar: every `period` seconds from `beat` (media time), the bar's holder jumps
+    /// to `peak` times its height and falls back.
+    nonisolated struct Pulse: Sendable, Equatable {
+        var period: CFTimeInterval
+        var beat: CFTimeInterval
+        var peak: CGFloat
+    }
+
+    fileprivate func apply(_ reading: Reading) {
+        guard isListening, isAnimating else { return }
+        if let specs = reading.specs { adapt(to: specs) }
+        applyPulses(reading.pulses)
+    }
+
+    /// Schedules each bar's beat on the render server: a repeating pulse, started on the next
+    /// predicted beat. Nothing runs in the app between one window of music and the next.
+    private func applyPulses(_ pulses: [Pulse?]) {
+        let now = CACurrentMediaTime()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (index, holder) in pulseLayers.enumerated() {
+            guard index < pulses.count, let pulse = pulses[index], pulse.period > 0.15 else {
+                holder.removeAnimation(forKey: Self.pulseKey)
+                continue
+            }
+            // The next beat far enough ahead to start on it.
+            let ahead = max(0, ((now + 0.03 - pulse.beat) / pulse.period).rounded(.up))
+            let first = pulse.beat + ahead * pulse.period
+            let rise = min(Self.pulseRise, pulse.period * 0.25)
+            let fall = min(Self.pulseFall, pulse.period * 0.65)
+            let animation = CAKeyframeAnimation(keyPath: "transform.scale.y")
+            animation.values = [1, pulse.peak, 1, 1]
+            animation.keyTimes = [0, NSNumber(value: rise / pulse.period), NSNumber(value: (rise + fall) / pulse.period), 1]
+            // A soft swell: eased up, eased back down (no edge anywhere).
+            animation.timingFunctions = [CAMediaTimingFunction(name: .easeInEaseOut),
+                                         CAMediaTimingFunction(name: .easeInEaseOut),
+                                         CAMediaTimingFunction(name: .linear)]
+            animation.duration = pulse.period
+            animation.repeatCount = .infinity
+            // The swell tops out just after the beat.
+            animation.beginTime = holder.convertTime(first - rise + 0.02, from: nil)
+            animation.preferredFrameRateRange = frameRate == Self.batteryFrameRate ? Self.batteryPulseRate : Self.pulseRate
+            holder.add(animation, forKey: Self.pulseKey)
+        }
+        CATransaction.commit()
+    }
+
+    nonisolated static let pulseKey = "pulse"
+    /// A beat's swell up and back down.
+    nonisolated static let pulseRise: CFTimeInterval = 0.1
+    nonisolated static let pulseFall: CFTimeInterval = 0.32
+    /// The swell is quicker than the breathing: a few more frames keep it smooth.
+    nonisolated static let pulseRate = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+    nonisolated static let batteryPulseRate = CAFrameRateRange(minimum: 20, maximum: 30, preferred: 30)
 
     /// The music's character over the last seconds: each bar breathes through its band's range
     /// at a pace that follows how lively it is. Each bar carries on from where it is, in the
@@ -248,37 +317,40 @@ final class EqualizerBarsView: NSView {
     fileprivate func adapt(to new: [Bar]) {
         guard isListening, isAnimating, new.count == barLayers.count, starts.count == barLayers.count else { return }
         let now = CACurrentMediaTime()
+        var adapted = new
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, bar) in barLayers.enumerated() {
-            let old = specs[index], spec = new[index]
+            let old = specs[index]
             let current = (bar.presentation()?.value(forKeyPath: "transform.scale.y") as? CGFloat) ?? old.low
             // Rising or falling now, in the running breathing.
             let cycle = ((now - starts[index]) / old.period).truncatingRemainder(dividingBy: 2)
             let rising = cycle >= 0 && cycle < 1
-            // Where `current` lies in the new range, through the inverse of the ease-in-ease-out
-            // curve (a smoothstep: u = ½ − sin(asin(1 − 2f) / 3)).
-            let fraction = Double(min(max((current - spec.low) / max(spec.high - spec.low, 0.01), 0), 1))
-            let u = 0.5 - sin(asin(1 - 2 * fraction) / 3)
-            let offset = (rising ? u : 2 - u) * spec.period
+            // The new range always holds where the bar is, so nothing jumps: the range stretches
+            // to it until the next update.
+            var spec = new[index]
+            if current > spec.high { spec = Bar(low: spec.low, high: current, period: spec.period, phase: spec.phase) }
+            if current < spec.low { spec = Bar(low: current, high: spec.high, period: spec.period, phase: spec.phase) }
+            let fraction = Double((current - spec.low) / max(spec.high - spec.low, 0.001))
+            let offset = (rising ? Self.easeTime(at: fraction) : 2 - Self.easeTime(at: fraction)) * spec.period
+            adapted[index] = spec
             let breathing = Self.breathing(spec, frameRate: frameRate)
             breathing.timeOffset = offset
             bar.transform = CATransform3DMakeScale(1, spec.low, 1)
             bar.add(breathing, forKey: Self.animationKey)
             starts[index] = now - offset
         }
-        specs = new
+        specs = adapted
         CATransaction.commit()
     }
 
-
-    /// Listens to the tap's analyses on its I/O thread and turns them into a breathing for each
-    /// bar, handed to the main thread only when the music's character has changed.
+    /// Listens to the tap's analyses on its I/O thread, for three seconds at a time, and turns
+    /// them into a breathing for each bar and a beat for the bass and treble bars, handed to the
+    /// main thread once per window. The tap then sleeps (`rest`).
     ///
     /// Setting the bars from every analysis (23 a second, or one keyframe animation per I/O cycle)
-    /// kept the app at Energy Impact 0.6–1.0 while music played: most of it Core Animation's
-    /// commits, the analysis itself ~0.05 % CPU (measured). The breathing is interpolated by the
-    /// render server, so the app sends Core Animation something only every few seconds.
+    /// kept the app at Energy Impact 0.6–1.0 while music played, nearly all of it Core Animation's
+    /// commits (measured). Breathing and beats are interpolated by the render server.
     fileprivate final class Follower: SpectrumSink, @unchecked Sendable {
         /// Main thread only.
         weak var view: EqualizerBarsView?
@@ -291,11 +363,23 @@ final class EqualizerBarsView: NSView {
         private var squares: [Double] = []
         private var count = 0
         private var windowTime: CFTimeInterval = 0
-        /// The breathing last handed over.
+        private var onsets: [OnsetSample] = []
+        /// The breathing last handed over (smoothed).
         private var applied: [EqualizerBarsView.Bar] = EqualizerBarsView.bars
+        private var hasApplied = false
+        /// The beat periods found in earlier windows (bass, treble), to steady the tempo.
+        private var periods: [CFTimeInterval?] = [nil, nil]
+        /// The last beats handed over (bass, treble), and how many windows in a row missed them.
+        private var pulses: [Pulse?] = [nil, nil]
+        private var misses = [0, 0]
 
-        /// Seconds of music each breathing is taken from.
+        /// Seconds of music each reading is taken from.
         static let window: CFTimeInterval = 3
+        /// How long the tap sleeps after each window: the music is sampled 3 s in every 11.
+        static let rest: Duration = .seconds(8)
+        /// Silence this long (a track's end, a pause) brings the resting breathing back; a
+        /// shorter gap between two songs keeps the music's.
+        static let silence: CFTimeInterval = 3
 
         var isFollowing: Bool { lock.withLock { isActive && following } }
 
@@ -308,6 +392,10 @@ final class EqualizerBarsView: NSView {
             lock.withLock {
                 isActive = true
                 following = false
+                hasApplied = false
+                periods = [nil, nil]
+                pulses = [nil, nil]
+                misses = [0, 0]
                 reset()
                 applied = EqualizerBarsView.bars
             }
@@ -322,32 +410,45 @@ final class EqualizerBarsView: NSView {
             squares = sum
             count = 0
             windowTime = 0
+            onsets.removeAll(keepingCapacity: true)
         }
 
-        func spectrumDidUpdate(_ batch: [SpectrumLevels], interval: CFTimeInterval) {
-            guard let newest = batch.last else { return }
-            let signal = newest.hasSignal()
-            var handOver: (following: Bool, specs: [EqualizerBarsView.Bar]?)?
+        func spectrumDidUpdate(_ batch: [SpectrumLevels], onsets slices: [OnsetSample], interval: CFTimeInterval) {
+            guard let newest = batch.last ?? nil as SpectrumLevels? else {
+                lock.withLock { if isActive { onsets.append(contentsOf: slices) } }
+                return
+            }
+            let loud = newest.hasSignal()
+            let silent = newest.lastSignal > 0 ? CACurrentMediaTime() - newest.lastSignal > Self.silence : !loud
+            var handOver: Reading?
+            var backToRest = false
             lock.lock()
             defer {
                 lock.unlock()
-                if let handOver {
+                if backToRest {
+                    DispatchQueue.main.async { [weak self] in self?.view?.followingChanged(false) }
+                } else if let handOver {
                     DispatchQueue.main.async { [weak self] in
-                        guard let view = self?.view else { return }
-                        if let specs = handOver.specs { view.adapt(to: specs) } else { view.followingChanged(handOver.following) }
+                        self?.view?.apply(handOver)
+                        AudioSpectrumTap.shared.rest(for: Self.rest)
                     }
                 }
             }
             guard isActive else { return }
-            if signal != following {
-                following = signal
+            if loud { following = true }
+            if following, silent {
+                following = false
+                hasApplied = false
+                periods = [nil, nil]
+                pulses = [nil, nil]
+                misses = [0, 0]
+                applied = EqualizerBarsView.bars
                 reset()
-                if !signal {
-                    applied = EqualizerBarsView.bars
-                    handOver = (false, nil)
-                }
+                backToRest = true
+                return
             }
-            guard signal else { return }
+            guard loud else { return }
+            onsets.append(contentsOf: slices)
             for levels in batch {
                 for band in 0..<min(sum.count, levels.bands.count) {
                     let value = Double(levels.bands[band])
@@ -358,16 +459,65 @@ final class EqualizerBarsView: NSView {
             }
             windowTime += interval * Double(batch.count)
             guard windowTime >= Self.window, count > 0 else { return }
-            let specs = Self.breathing(sum: sum, squares: squares, count: count, battery: battery)
-            reset()
-            if Self.differs(specs, applied) {
-                applied = specs
-                handOver = (true, specs)
+
+            // The breathing, eased from the last one: a new song or a volume change moves it over
+            // a couple of windows instead of all at once.
+            let raw = Self.breathing(sum: sum, squares: squares, count: count, battery: battery)
+            let smoothed = hasApplied ? zip(applied, raw).map { Self.mix($0, $1, 0.5) } : raw
+            var reading = Reading(specs: nil, pulses: [nil, nil, nil, nil, nil])
+            if !hasApplied || Self.differs(smoothed, applied) {
+                applied = smoothed
+                hasApplied = true
+                reading.specs = smoothed
             }
+            // The beats: a strong kick drum lifts the bass bar a little higher on each beat, strong
+            // cymbals the treble bar; their neighbours get 15 % of it. Faint ones lift nothing.
+            // A window without a clear beat keeps the last one, fainter, for one more window, so
+            // the pulses do not come and go with every reading.
+            let bands: [(slices: [(CFTimeInterval, Float)], range: ClosedRange<Double>, bar: Int, neighbour: Int)] = [
+                (onsets.map { ($0.time, $0.bass) }, 0.33...0.9, 0, 1),
+                (onsets.map { ($0.time, $0.treble) }, 0.25...0.9, 4, 3),
+            ]
+            for (slot, band) in bands.enumerated() {
+                if let found = BeatFinder.beat(band.slices, range: band.range, previous: periods[slot]),
+                   let lift = Self.lift(strength: found.strength) {
+                    periods[slot] = found.period
+                    pulses[slot] = Pulse(period: found.period, beat: found.beat, peak: 1 + lift)
+                    misses[slot] = 0
+                } else if let last = pulses[slot], misses[slot] == 0 {
+                    misses[slot] = 1
+                    pulses[slot] = Pulse(period: last.period, beat: last.beat, peak: 1 + (last.peak - 1) * 0.6)
+                } else {
+                    periods[slot] = nil
+                    pulses[slot] = nil
+                }
+                if let pulse = pulses[slot] {
+                    let peak = min(pulse.peak, max(1.02, 1.04 / max(applied[band.bar].high, 0.1)))
+                    reading.pulses[band.bar] = Pulse(period: pulse.period, beat: pulse.beat, peak: peak)
+                    reading.pulses[band.neighbour] = Pulse(period: pulse.period, beat: pulse.beat,
+                                                           peak: 1 + (peak - 1) * Self.neighbourShare)
+                }
+            }
+            reset()
+            handOver = reading
+            let bass = reading.pulses[0].map { String(format: "%.0f bpm ×%.2f", 60 / $0.period, $0.peak) } ?? "-"
+            let treble = reading.pulses[4].map { String(format: "%.0f bpm ×%.2f", 60 / $0.period, $0.peak) } ?? "-"
+            Log.media.debug("beat: bass \(bass, privacy: .public) treble \(treble, privacy: .public) specs \(reading.specs != nil, privacy: .public)")
         }
 
+        /// How much higher a beat lifts its bar (a share of its height), from how much the beats
+        /// stand out: nothing below a clear beat, up to a third for a very prominent one.
+        static func lift(strength: Double) -> CGFloat? {
+            let lift = min(max((strength - 2.5) * 0.06, 0), 0.32)
+            return lift >= 0.06 ? CGFloat(lift) : nil
+        }
+
+        /// The neighbour of a beat's bar moves with it by this share.
+        static let neighbourShare: CGFloat = 0.15
+
         /// Each bar through its band's range over the window (its mean, give or take its spread),
-        /// faster the more the music moves. The default breathing's phases keep the bars apart.
+        /// faster the more the music moves. The faintest wavers barely move a bar: the spread
+        /// counts only past a small floor.
         static func breathing(sum: [Double], squares: [Double], count: Int, battery: Bool) -> [EqualizerBarsView.Bar] {
             let n = Double(count)
             let means = sum.map { $0 / n }
@@ -376,16 +526,16 @@ final class EqualizerBarsView: NSView {
             return EqualizerBarsView.bars.enumerated().map { index, base in
                 let rest = Double(EqualizerBarsView.restingScale)
                 let mean = index < means.count ? rest + (1 - rest) * means[index] : Double(base.low)
-                let spread = index < spreads.count ? (1 - rest) * spreads[index] : 0
-                var low = mean - 1.3 * spread - 0.06
-                var high = mean + 1.3 * spread + 0.12
-                if high - low < 0.25 {
+                let spread = index < spreads.count ? (1 - rest) * max(spreads[index] - 0.035, 0) : 0
+                var low = mean - 1.5 * spread - 0.03
+                var high = mean + 1.5 * spread + 0.06
+                if high - low < 0.14 {
                     let middle = (high + low) / 2
-                    low = middle - 0.125
-                    high = middle + 0.125
+                    low = middle - 0.07
+                    high = middle + 0.07
                 }
                 low = min(max(low, rest), 0.85)
-                high = min(max(high, low + 0.15), 1)
+                high = min(max(high, low + 0.1), 1)
                 // 0 (a held note) … ~0.3 (drums): a third slower … two fifths faster than resting.
                 let pace = min(max(1.3 - 2.3 * liveliness, 0.6), 1.3)
                 return EqualizerBarsView.Bar(low: CGFloat(low), high: CGFloat(high),
@@ -393,21 +543,50 @@ final class EqualizerBarsView: NSView {
             }
         }
 
+        static func mix(_ a: EqualizerBarsView.Bar, _ b: EqualizerBarsView.Bar, _ t: CGFloat) -> EqualizerBarsView.Bar {
+            EqualizerBarsView.Bar(low: a.low + (b.low - a.low) * t, high: a.high + (b.high - a.high) * t,
+                                  period: a.period + (b.period - a.period) * Double(t), phase: a.phase)
+        }
+
         /// Worth an update: a bar's range moved by more than a few percent of its height, or its
         /// pace by more than a fifth.
         static func differs(_ a: [EqualizerBarsView.Bar], _ b: [EqualizerBarsView.Bar]) -> Bool {
             guard a.count == b.count else { return true }
             return zip(a, b).contains { x, y in
-                abs(x.low - y.low) > 0.09 || abs(x.high - y.high) > 0.09 || abs(x.period - y.period) / y.period > 0.2
+                abs(x.low - y.low) > 0.06 || abs(x.high - y.high) > 0.06 || abs(x.period - y.period) / y.period > 0.15
             }
         }
     }
+
+    /// The time (0…1) at which the breathing's ease-in-ease-out curve — CAMediaTimingFunction's
+    /// Bézier (0.42, 0) (0.58, 1) — reaches `value` (0…1): the exact inverse, from a table.
+    nonisolated static func easeTime(at value: Double) -> Double {
+        let v = min(max(value, 0), 1)
+        let table = easeTable
+        var lo = 0, hi = table.count - 1
+        while hi - lo > 1 {
+            let mid = (lo + hi) / 2
+            if table[mid].y < v { lo = mid } else { hi = mid }
+        }
+        let a = table[lo], b = table[hi]
+        let t = b.y > a.y ? (v - a.y) / (b.y - a.y) : 0
+        return a.x + (b.x - a.x) * t
+    }
+
+    /// (time, value) along the curve, in steps of its parameter.
+    nonisolated private static let easeTable: [(x: Double, y: Double)] = (0...512).map { step in
+        let s = Double(step) / 512, r = 1 - s
+        return (x: 3 * r * r * s * 0.42 + 3 * r * s * s * 0.58 + s * s * s,
+                y: 3 * r * s * s + s * s * s)
+    }
+
 
     private func applyAnimationState() {
         let now = CACurrentMediaTime()
         starts = specs.map { now - $0.period * $0.phase }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        for holder in pulseLayers { holder.removeAnimation(forKey: Self.pulseKey) }
         for (bar, spec) in zip(barLayers, specs) {
             bar.transform = CATransform3DMakeScale(1, spec.low, 1)
             if isAnimating {
