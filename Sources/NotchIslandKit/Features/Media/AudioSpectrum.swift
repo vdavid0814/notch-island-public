@@ -170,6 +170,10 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
 
     private let sampleRate: Double
     let hop: Int
+    /// Samples per analysis: `hop` rounded up to whole device buffers (set when the tap starts).
+    var block: Int
+    /// This cycle's analyses (capacity kept).
+    private var batch: [SpectrumLevels] = []
     private let bins: [Range<Int>]
     private let setup: FFTSetup
     private var ring: [Float]
@@ -192,6 +196,8 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
         self.sampleRate = sampleRate
         self.setup = setup
         hop = max(Int(sampleRate / Self.rate), 256)
+        block = hop
+        batch.reserveCapacity(16)
         bins = SpectrumBands.bins(size: size, sampleRate: sampleRate)
         ring = Array(repeating: 0, count: size)
         window = Array(repeating: 0, count: size)
@@ -216,10 +222,12 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
         guard let first = buffers.first, first.mNumberChannels > 0 else { return }
         let frames = Int(first.mDataByteSize) / MemoryLayout<Float>.size / Int(first.mNumberChannels)
         guard frames > 0 else { return }
-        var loud = false
         var done = 0
+        batch.removeAll(keepingCapacity: true)
+        // In pieces that end on analysis boundaries: one I/O cycle may hold several analyses.
         while done < frames {
-            let count = min(frames - done, Self.chunk)
+            let count = min(frames - done, Self.chunk, block - sinceAnalysis)
+            var loud = false
             mono.withUnsafeMutableBufferPointer { mono in
                 let out = mono.baseAddress!
                 vDSP_vclr(out, 1, vDSP_Length(count))
@@ -250,20 +258,24 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
                     }
                 }
             }
+            if loud {
+                let now = CACurrentMediaTime()
+                levels.withLock { $0.lastSignal = now }
+            }
             done += count
+            sinceAnalysis += count
+            if sinceAnalysis >= block {
+                let elapsed = Float(sinceAnalysis) / Float(sampleRate)
+                sinceAnalysis = 0
+                batch.append(analyse(elapsed: elapsed))
+            }
         }
-        if loud {
-            let now = CACurrentMediaTime()
-            levels.withLock { $0.lastSignal = now }
+        if !batch.isEmpty {
+            AudioSpectrumTap.deliver(batch, interval: CFTimeInterval(block) / sampleRate)
         }
-        sinceAnalysis += frames
-        guard sinceAnalysis >= hop else { return }
-        let elapsed = Float(sinceAnalysis) / Float(sampleRate)
-        sinceAnalysis = 0
-        analyse(elapsed: elapsed)
     }
 
-    private func analyse(elapsed: Float) {
+    private func analyse(elapsed: Float) -> SpectrumLevels {
         let size = ring.count
         // The ring in time order, windowed.
         let tail = size - ringIndex
@@ -295,8 +307,22 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
         }
         leveler.update(decibels: decibels, elapsed: elapsed)
         let bands = leveler.levels
-        levels.withLock { $0.bands = bands }
+        return levels.withLock { levels -> SpectrumLevels in
+            levels.bands = bands
+            return levels
+        }
     }
+}
+
+/// Takes each analysis on the tap's I/O thread, as it is made (`AudioSpectrumTap.addSink`).
+///
+/// The equalizer used to read the levels on a display link on the main thread, 20 times a second:
+/// that alone woke the app ~50 times a second (Energy Impact ~0.9 of the ~2 while music played,
+/// measured). The I/O thread is running anyway for the tap, so the bars are set from there.
+nonisolated protocol SpectrumSink: AnyObject, Sendable {
+    /// The analyses of one I/O cycle, oldest first, `interval` seconds apart (the first one
+    /// `interval` after the last of the previous cycle).
+    func spectrumDidUpdate(_ batch: [SpectrumLevels], interval: CFTimeInterval)
 }
 
 /// The system's audio output as five band levels, from a Core Audio process tap on every process
@@ -308,6 +334,25 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
 /// folded into the five levels and dropped.
 @Observable final class AudioSpectrumTap {
     static let shared = AudioSpectrumTap()
+
+    /// Who hears each analysis, on the I/O thread.
+    nonisolated private static let sinks = Mutex<[any SpectrumSink]>([])
+
+    nonisolated static func addSink(_ sink: any SpectrumSink) {
+        sinks.withLock { list in
+            if !list.contains(where: { $0 === sink }) { list.append(sink) }
+        }
+    }
+
+    nonisolated static func removeSink(_ sink: any SpectrumSink) {
+        sinks.withLock { $0.removeAll { $0 === sink } }
+    }
+
+    nonisolated static func deliver(_ batch: [SpectrumLevels], interval: CFTimeInterval) {
+        sinks.withLock { list in
+            for sink in list { sink.spectrumDidUpdate(batch, interval: interval) }
+        }
+    }
 
     @ObservationIgnored private var holders = 0
     @ObservationIgnored private var stopTask: Task<Void, Never>?
@@ -395,6 +440,9 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
         private var aggregate = AudioObjectID(kAudioObjectUnknown)
         private var proc: AudioDeviceIOProcID?
         private let queue = DispatchQueue(label: "com.davidvarga.notchisland.spectrum", qos: .userInteractive)
+        /// Analyses per I/O cycle (the buffer holds this many analysis blocks): the equalizer needs
+        /// only each few seconds' character, so the I/O thread wakes ~6 times a second, not ~23.
+        static let analysesPerCycle = 4
 
         init() throws {
             let description = CATapDescription(stereoGlobalTapButExcludeProcesses: HAL.ownProcess.map { [$0] } ?? [])
@@ -442,7 +490,17 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
                 var current: UInt32 = 0
                 var bufferSize = UInt32(MemoryLayout<UInt32>.size)
                 if AudioObjectGetPropertyData(aggregate, &bufferAddress, 0, nil, &bufferSize, &current) == noErr, current > 0 {
-                    var frames = UInt32((analyzer.hop + Int(current) - 1) / Int(current)) * current
+                    let block = (analyzer.hop + Int(current) - 1) / Int(current) * Int(current)
+                    analyzer.block = block
+                    // As many analyses per cycle as the device's largest buffer holds.
+                    var range = AudioValueRange()
+                    var rangeSize = UInt32(MemoryLayout<AudioValueRange>.size)
+                    var rangeAddress = HAL.address(kAudioDevicePropertyBufferFrameSizeRange)
+                    var largest = block
+                    if AudioObjectGetPropertyData(aggregate, &rangeAddress, 0, nil, &rangeSize, &range) == noErr {
+                        largest = max(block, Int(range.mMaximum))
+                    }
+                    var frames = UInt32(block * max(1, min(Self.analysesPerCycle, largest / block)))
                     AudioObjectSetPropertyData(aggregate, &bufferAddress, 0, nil, bufferSize, &frames)
                 }
                 try HAL.check("start", AudioDeviceStart(aggregate, proc))

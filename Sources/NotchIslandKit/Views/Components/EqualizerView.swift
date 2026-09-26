@@ -9,8 +9,9 @@ import SwiftUI
 /// breathe as before. Core Animation rather than SwiftUI: a SwiftUI `repeatForever` animation
 /// re-evaluates the view graph on the main thread every frame (measured at ~5% of a core in the
 /// legacy app), while a `CABasicAnimation` on a plain layer is interpolated by the render server.
-/// Following the music costs one display-link tick at 20 fps (12 on battery): five floats read and
-/// five transforms set, each eased to the next by the render server.
+/// Following the music, each bar breathes through its own band's range at the music's pace, taken
+/// afresh from the last three seconds of the tap's analyses (`Follower`): Core Animation hears from
+/// the app only when that changes, every few seconds, and interpolates the rest itself.
 struct EqualizerView: NSViewRepresentable {
     var isAnimating: Bool
     /// On battery the bars breathe at a lower frame rate (`EqualizerBarsView.batteryFrameRate`).
@@ -73,9 +74,9 @@ final class EqualizerBarsView: NSView {
     /// Applied to the running animations when it changes (the power source switched).
     var frameRate = EqualizerBarsView.frameRate {
         didSet {
+            follower.onBattery = frameRate == Self.batteryFrameRate
             guard frameRate != oldValue, isAnimating else { return }
             applyAnimationState()
-            displayLink?.preferredFrameRateRange = frameRate
         }
     }
     static let barWidth: CGFloat = 2.5
@@ -107,7 +108,6 @@ final class EqualizerBarsView: NSView {
     var isAnimating = false {
         didSet {
             guard isAnimating != oldValue else { return }
-            isFollowing = false
             applyAnimationState()
             applyColors()
             updateListening()
@@ -117,17 +117,20 @@ final class EqualizerBarsView: NSView {
     /// The lowest a bar sinks while following the music (a fraction of the height): silence in a
     /// band still leaves a dot, as the breathing bars' lows do.
     nonisolated static let restingScale: CGFloat = 0.1
-    /// How many ticks a new height takes to arrive.
-    nonisolated static let glide: CFTimeInterval = 1
 
-    /// Holding the tap and ticking: animating, listening and on screen.
-    private var displayLink: CADisplayLink?
-    /// The bars show the music (breathing removed) rather than breathing.
-    private var isFollowing = false
+    /// Holding the tap and following: animating, listening and on screen.
+    private var isListening = false
+    /// Turns the tap's analyses into breathings.
+    private let follower = Follower()
+    /// The breathing each bar has now: the resting one, or one taken from the music.
+    private var specs: [Bar] = EqualizerBarsView.bars
+    /// When each bar's breathing had phase 0 (media time): where it is in its cycle now.
+    private var starts: [CFTimeInterval] = []
 
     override init(frame: CGRect) {
         barLayers = Self.bars.map { _ in CALayer() }
         super.init(frame: frame)
+        follower.view = self
         wantsLayer = true
         layer?.masksToBounds = false
         for bar in barLayers {
@@ -215,55 +218,197 @@ final class EqualizerBarsView: NSView {
 
     private func updateListening() {
         let wanted = isAnimating && listensToAudio && window != nil
-        if wanted, displayLink == nil {
+        if wanted, !isListening {
+            isListening = true
             AudioSpectrumTap.shared.acquire()
-            let link = displayLink(target: self, selector: #selector(tick))
-            link.preferredFrameRateRange = frameRate
-            link.add(to: .main, forMode: .common)
-            displayLink = link
-        } else if !wanted, let link = displayLink {
-            link.invalidate()
-            displayLink = nil
+            follower.start()
+            AudioSpectrumTap.addSink(follower)
+        } else if !wanted, isListening {
+            isListening = false
+            // Stopped before it is removed: an analysis already under way sets nothing more.
+            follower.stop()
+            AudioSpectrumTap.removeSink(follower)
             AudioSpectrumTap.shared.release()
-            if isFollowing {
-                isFollowing = false
-                applyAnimationState()
-            }
+            specs = Self.bars
+            applyAnimationState()
         }
     }
 
-    @objc private func tick(_ link: CADisplayLink) {
-        let levels = AudioSpectrumTap.shared.levels
-        guard levels.hasSignal() else {
-            // Silence, or no permission: back to breathing until sound comes through.
-            if isFollowing {
-                isFollowing = false
-                applyAnimationState()
-            }
-            return
-        }
+    /// The follower lost the sound for a second: the default breathing comes back.
+    fileprivate func followingChanged(_ following: Bool) {
+        guard isListening, !following else { return }
+        specs = Self.bars
+        applyAnimationState()
+    }
+
+    /// The music's character over the last seconds: each bar breathes through its band's range
+    /// at a pace that follows how lively it is. Each bar carries on from where it is, in the
+    /// direction it is going: the new breathing starts at the phase that has it there (restarting
+    /// every bar from its low each time read as a stutter every couple of seconds).
+    fileprivate func adapt(to new: [Bar]) {
+        guard isListening, isAnimating, new.count == barLayers.count, starts.count == barLayers.count else { return }
+        let now = CACurrentMediaTime()
         CATransaction.begin()
-        if !isFollowing {
-            isFollowing = true
-            for bar in barLayers { bar.removeAnimation(forKey: Self.animationKey) }
+        CATransaction.setDisableActions(true)
+        for (index, bar) in barLayers.enumerated() {
+            let old = specs[index], spec = new[index]
+            let current = (bar.presentation()?.value(forKeyPath: "transform.scale.y") as? CGFloat) ?? old.low
+            // Rising or falling now, in the running breathing.
+            let cycle = ((now - starts[index]) / old.period).truncatingRemainder(dividingBy: 2)
+            let rising = cycle >= 0 && cycle < 1
+            // Where `current` lies in the new range, through the inverse of the ease-in-ease-out
+            // curve (a smoothstep: u = ½ − sin(asin(1 − 2f) / 3)).
+            let fraction = Double(min(max((current - spec.low) / max(spec.high - spec.low, 0.01), 0), 1))
+            let u = 0.5 - sin(asin(1 - 2 * fraction) / 3)
+            let offset = (rising ? u : 2 - u) * spec.period
+            let breathing = Self.breathing(spec, frameRate: frameRate)
+            breathing.timeOffset = offset
+            bar.transform = CATransform3DMakeScale(1, spec.low, 1)
+            bar.add(breathing, forKey: Self.animationKey)
+            starts[index] = now - offset
         }
-        // Each new height eases in over one tick, from wherever the bar is on screen, so the bars
-        // glide at the render server's rate while the app sets them only 20 times a second. The
-        // levels already move on a spring (`SpectrumLeveler`): a linear step between two of its
-        // samples keeps its curve, where an ease-out would add a small stop at every tick.
-        CATransaction.setAnimationDuration(max(link.targetTimestamp - link.timestamp, 1.0 / 60) * Self.glide)
-        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .linear))
-        for (bar, level) in zip(barLayers, levels.bands) {
-            let scale = Self.restingScale + (1 - Self.restingScale) * CGFloat(level)
-            bar.transform = CATransform3DMakeScale(1, scale, 1)
-        }
+        specs = new
         CATransaction.commit()
     }
 
+
+    /// Listens to the tap's analyses on its I/O thread and turns them into a breathing for each
+    /// bar, handed to the main thread only when the music's character has changed.
+    ///
+    /// Setting the bars from every analysis (23 a second, or one keyframe animation per I/O cycle)
+    /// kept the app at Energy Impact 0.6–1.0 while music played: most of it Core Animation's
+    /// commits, the analysis itself ~0.05 % CPU (measured). The breathing is interpolated by the
+    /// render server, so the app sends Core Animation something only every few seconds.
+    fileprivate final class Follower: SpectrumSink, @unchecked Sendable {
+        /// Main thread only.
+        weak var view: EqualizerBarsView?
+        private let lock = NSLock()
+        private var isActive = false
+        private var following = false
+        private var battery = false
+        /// This window's sums per band: level and level squared, and how many.
+        private var sum: [Double] = []
+        private var squares: [Double] = []
+        private var count = 0
+        private var windowTime: CFTimeInterval = 0
+        /// The breathing last handed over.
+        private var applied: [EqualizerBarsView.Bar] = EqualizerBarsView.bars
+
+        /// Seconds of music each breathing is taken from.
+        static let window: CFTimeInterval = 3
+
+        var isFollowing: Bool { lock.withLock { isActive && following } }
+
+        var onBattery: Bool {
+            get { lock.withLock { battery } }
+            set { lock.withLock { battery = newValue } }
+        }
+
+        func start() {
+            lock.withLock {
+                isActive = true
+                following = false
+                reset()
+                applied = EqualizerBarsView.bars
+            }
+        }
+
+        func stop() {
+            lock.withLock { isActive = false }
+        }
+
+        private func reset() {
+            sum = Array(repeating: 0, count: EqualizerBarsView.bars.count)
+            squares = sum
+            count = 0
+            windowTime = 0
+        }
+
+        func spectrumDidUpdate(_ batch: [SpectrumLevels], interval: CFTimeInterval) {
+            guard let newest = batch.last else { return }
+            let signal = newest.hasSignal()
+            var handOver: (following: Bool, specs: [EqualizerBarsView.Bar]?)?
+            lock.lock()
+            defer {
+                lock.unlock()
+                if let handOver {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let view = self?.view else { return }
+                        if let specs = handOver.specs { view.adapt(to: specs) } else { view.followingChanged(handOver.following) }
+                    }
+                }
+            }
+            guard isActive else { return }
+            if signal != following {
+                following = signal
+                reset()
+                if !signal {
+                    applied = EqualizerBarsView.bars
+                    handOver = (false, nil)
+                }
+            }
+            guard signal else { return }
+            for levels in batch {
+                for band in 0..<min(sum.count, levels.bands.count) {
+                    let value = Double(levels.bands[band])
+                    sum[band] += value
+                    squares[band] += value * value
+                }
+                count += 1
+            }
+            windowTime += interval * Double(batch.count)
+            guard windowTime >= Self.window, count > 0 else { return }
+            let specs = Self.breathing(sum: sum, squares: squares, count: count, battery: battery)
+            reset()
+            if Self.differs(specs, applied) {
+                applied = specs
+                handOver = (true, specs)
+            }
+        }
+
+        /// Each bar through its band's range over the window (its mean, give or take its spread),
+        /// faster the more the music moves. The default breathing's phases keep the bars apart.
+        static func breathing(sum: [Double], squares: [Double], count: Int, battery: Bool) -> [EqualizerBarsView.Bar] {
+            let n = Double(count)
+            let means = sum.map { $0 / n }
+            let spreads = zip(squares, means).map { sqrt(max($0 / n - $1 * $1, 0)) }
+            let liveliness = spreads.reduce(0, +) / Double(max(spreads.count, 1))
+            return EqualizerBarsView.bars.enumerated().map { index, base in
+                let rest = Double(EqualizerBarsView.restingScale)
+                let mean = index < means.count ? rest + (1 - rest) * means[index] : Double(base.low)
+                let spread = index < spreads.count ? (1 - rest) * spreads[index] : 0
+                var low = mean - 1.3 * spread - 0.06
+                var high = mean + 1.3 * spread + 0.12
+                if high - low < 0.25 {
+                    let middle = (high + low) / 2
+                    low = middle - 0.125
+                    high = middle + 0.125
+                }
+                low = min(max(low, rest), 0.85)
+                high = min(max(high, low + 0.15), 1)
+                // 0 (a held note) … ~0.3 (drums): a third slower … two fifths faster than resting.
+                let pace = min(max(1.3 - 2.3 * liveliness, 0.6), 1.3)
+                return EqualizerBarsView.Bar(low: CGFloat(low), high: CGFloat(high),
+                                             period: base.period * pace * (battery ? 1.2 : 1), phase: base.phase)
+            }
+        }
+
+        /// Worth an update: a bar's range moved by more than a few percent of its height, or its
+        /// pace by more than a fifth.
+        static func differs(_ a: [EqualizerBarsView.Bar], _ b: [EqualizerBarsView.Bar]) -> Bool {
+            guard a.count == b.count else { return true }
+            return zip(a, b).contains { x, y in
+                abs(x.low - y.low) > 0.09 || abs(x.high - y.high) > 0.09 || abs(x.period - y.period) / y.period > 0.2
+            }
+        }
+    }
+
     private func applyAnimationState() {
+        let now = CACurrentMediaTime()
+        starts = specs.map { now - $0.period * $0.phase }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for (bar, spec) in zip(barLayers, Self.bars) {
+        for (bar, spec) in zip(barLayers, specs) {
             bar.transform = CATransform3DMakeScale(1, spec.low, 1)
             if isAnimating {
                 bar.add(Self.breathing(spec, frameRate: frameRate), forKey: Self.animationKey)
