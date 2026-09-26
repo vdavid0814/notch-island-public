@@ -139,7 +139,11 @@ private struct IslandContentStack: View {
                 // most of an open's CPU) although nothing on screen moved.
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .id(presentation.surfaceKey)
-                .transition(.islandContent(reduceMotion: crossFades))
+                // The panel's content leaves in a tenth of a second and the glass shrinks alone:
+                // riding the whole close spring, every frame re-rendered the content too.
+                .transition(presentation.isExpanded
+                            ? .asymmetric(insertion: .identity, removal: .opacity.animation(.easeOut(duration: 0.1)))
+                            : .islandContent(reduceMotion: crossFades))
         }
         // The island's panel never becomes key (it must not steal focus), so by default every
         // control in it would draw in the inactive, desaturated style of a background window.

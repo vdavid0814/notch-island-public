@@ -19,10 +19,7 @@ struct ArtworkView: View {
         Color.clear
             .overlay {
                 if let image {
-                    Image(nsImage: image)
-                        .resizable()
-                        .interpolation(.high)
-                        .aspectRatio(contentMode: .fill)
+                    CoverLayer(image: image)
                 } else if let appIcon {
                     Image(nsImage: appIcon)
                         .resizable()
@@ -48,5 +45,74 @@ struct ArtworkView: View {
               let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
         else { return nil }
         return NSWorkspace.shared.icon(forFile: url.path(percentEncoded: false))
+    }
+}
+
+/// The cover on a Core Animation layer: a new track's cover cross-fades in while it springs up from
+/// a little smaller — played by the render server from one commit, nothing redrawn by the app
+/// frame by frame. (An `Image` swapped its cover in one frame.)
+private struct CoverLayer: NSViewRepresentable {
+    let image: NSImage
+
+    func makeNSView(context: Context) -> CoverLayerView { CoverLayerView() }
+
+    func updateNSView(_ view: CoverLayerView, context: Context) {
+        view.show(image)
+    }
+}
+
+final class CoverLayerView: NSView {
+    private let cover = CALayer()
+    private weak var shown: NSImage?
+
+    /// The cross-fade and the spring that lifts the new cover to its size.
+    static let fade: CFTimeInterval = 0.45
+    static let startScale: CGFloat = 0.9
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        cover.contentsGravity = .resizeAspectFill
+        cover.masksToBounds = true
+        layer?.addSublayer(cover)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        cover.frame = bounds
+        cover.contentsScale = window?.backingScaleFactor ?? 2
+        CATransaction.commit()
+    }
+
+    func show(_ image: NSImage) {
+        guard image !== shown else { return }
+        let first = shown == nil
+        shown = image
+        let contents = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if !first, window != nil {
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = Self.fade
+            fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            cover.add(fade, forKey: "contents")
+            let spring = CASpringAnimation(perceptualDuration: Self.fade * 1.3, bounce: 0.25)
+            spring.keyPath = "transform.scale"
+            spring.fromValue = Self.startScale
+            spring.toValue = 1
+            spring.duration = spring.settlingDuration
+            cover.add(spring, forKey: "lift")
+        }
+        cover.contents = contents
+        CATransaction.commit()
     }
 }

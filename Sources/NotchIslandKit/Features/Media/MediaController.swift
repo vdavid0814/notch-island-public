@@ -311,15 +311,26 @@ import AppKit
         }
     }
 
+    /// How long the previous cover waits for the next track's before giving way to none.
+    static let artworkGrace: Duration = .seconds(2)
+
     private func updateArtwork(_ bytes: Data?) {
         guard bytes != artworkBytes else { return }
         artworkBytes = bytes
         artworkTask?.cancel()
         artworkTask = nil
         guard let bytes else {
-            if artwork != nil { artwork = nil }
-            if artworkColor != nil { artworkColor = nil }
-            if !artworkPalette.isEmpty { artworkPalette = [] }
+            // A new track often arrives before its cover: the old cover stays up for a moment in
+            // case the new one follows (it then cross-fades in, `ArtworkView`), rather than
+            // flashing the placeholder in between.
+            artworkTask = Task { [weak self] in
+                try? await Task.sleep(for: Self.artworkGrace)
+                guard !Task.isCancelled, let self, self.artworkBytes == nil else { return }
+                self.artworkTask = nil
+                if self.artwork != nil { self.artwork = nil }
+                if self.artworkColor != nil { self.artworkColor = nil }
+                if !self.artworkPalette.isEmpty { self.artworkPalette = [] }
+            }
             return
         }
         // The previous image stays up for the few milliseconds the decode takes instead of flashing

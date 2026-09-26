@@ -375,8 +375,8 @@ final class EqualizerBarsView: NSView {
 
         /// Seconds of music each reading is taken from.
         static let window: CFTimeInterval = 3
-        /// How long the tap sleeps after each window: the music is sampled 3 s in every 11.
-        static let rest: Duration = .seconds(8)
+        /// How long the tap sleeps after each window: the music is sampled 3 s in every 13.
+        static let rest: Duration = .seconds(10)
         /// Silence this long (a track's end, a pause) brings the resting breathing back; a
         /// shorter gap between two songs keeps the music's.
         static let silence: CFTimeInterval = 3

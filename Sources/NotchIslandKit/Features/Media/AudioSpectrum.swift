@@ -196,10 +196,14 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
     /// Seconds from the tap to the speaker (the output's latency), added to each slice's time.
     var playbackDelay: CFTimeInterval = 0
     private var onsets: [OnsetSample] = []
-    /// Two one-pole low-passes in a row (the kick band) and one for the cymbal band's high-pass.
-    private var bassStage1: Float = 0, bassStage2: Float = 0, trebleLow: Float = 0
-    private let bassCoefficient: Float
-    private let trebleCoefficient: Float
+    /// The kick band (a 120 Hz low-pass) and the cymbal band (a 6 kHz high-pass), biquads run by
+    /// vDSP over each chunk, their state carried from one to the next.
+    private let bassFilter: vDSP_biquad_Setup
+    private let trebleFilter: vDSP_biquad_Setup
+    private var bassDelay = [Float](repeating: 0, count: 4)
+    private var trebleDelay = [Float](repeating: 0, count: 4)
+    private var bassBand: [Float]
+    private var trebleBand: [Float]
     private var bassEnergy: Float = 0, trebleEnergy: Float = 0, sliceFrames = 0
 
     init?(sampleRate: Double) {
@@ -220,12 +224,28 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
         power = Array(repeating: 0, count: size / 2)
         decibels = Array(repeating: 0, count: SpectrumBands.count)
         mono = Array(repeating: 0, count: Self.chunk)
-        bassCoefficient = Float(1 - exp(-2 * Double.pi * 120 / sampleRate))
-        trebleCoefficient = Float(1 - exp(-2 * Double.pi * 6_000 / sampleRate))
+        bassFilter = vDSP_biquad_CreateSetup(Self.biquad(lowPass: true, frequency: 120, sampleRate: sampleRate), 1)!
+        trebleFilter = vDSP_biquad_CreateSetup(Self.biquad(lowPass: false, frequency: 6_000, sampleRate: sampleRate), 1)!
+        bassBand = Array(repeating: 0, count: Self.chunk)
+        trebleBand = Array(repeating: 0, count: Self.chunk)
         onsets.reserveCapacity(64)
     }
 
-    deinit { vDSP_destroy_fftsetup(setup) }
+    deinit {
+        vDSP_destroy_fftsetup(setup)
+        vDSP_biquad_DestroySetup(bassFilter)
+        vDSP_biquad_DestroySetup(trebleFilter)
+    }
+
+    /// A second-order Butterworth section (the Audio EQ Cookbook's), normalised for vDSP:
+    /// b0, b1, b2, a1, a2.
+    static func biquad(lowPass: Bool, frequency: Double, sampleRate: Double) -> [Double] {
+        let w = 2 * Double.pi * frequency / sampleRate, c = cos(w), alpha = sin(w) / (2 * 0.7071)
+        let a0 = 1 + alpha
+        let b0 = lowPass ? (1 - c) / 2 : (1 + c) / 2
+        let b1 = lowPass ? 1 - c : -(1 + c)
+        return [b0 / a0, b1 / a0, b0 / a0, -2 * c / a0, (1 - alpha) / a0]
+    }
 
     /// Nanoseconds per host-time tick.
     static let hostTick: Double = {
@@ -271,30 +291,27 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
                 var peak: Float = 0
                 vDSP_maxmgv(out, 1, &peak, vDSP_Length(count))
                 if peak > 1e-4 { loud = true }
-                // The attack bands, slice by slice.
-                for index in 0..<count {
-                    let x = out[index]
-                    bassStage1 += bassCoefficient * (x - bassStage1)
-                    bassStage2 += bassCoefficient * (bassStage1 - bassStage2)
-                    trebleLow += trebleCoefficient * (x - trebleLow)
-                    let high = x - trebleLow
-                    bassEnergy += bassStage2 * bassStage2
-                    trebleEnergy += high * high
-                    sliceFrames += 1
-                    if sliceFrames == Self.onsetFrames {
-                        onsets.append(OnsetSample(time: start + Double(done + index + 1) / sampleRate + playbackDelay,
-                                                  bass: bassEnergy, treble: trebleEnergy))
-                        bassEnergy = 0; trebleEnergy = 0; sliceFrames = 0
-                    }
-                }
-                // Into the ring, wrapping at its end.
-                ring.withUnsafeMutableBufferPointer { ring in
-                    var copied = 0
-                    while copied < count {
-                        let run = min(count - copied, ring.count - ringIndex)
-                        (ring.baseAddress! + ringIndex).update(from: out + copied, count: run)
-                        ringIndex = (ringIndex + run) % ring.count
-                        copied += run
+                // The attack bands: filtered by vDSP, then their energy summed slice by slice.
+                bassBand.withUnsafeMutableBufferPointer { bass in
+                    trebleBand.withUnsafeMutableBufferPointer { treble in
+                        vDSP_biquad(bassFilter, &bassDelay, out, 1, bass.baseAddress!, 1, vDSP_Length(count))
+                        vDSP_biquad(trebleFilter, &trebleDelay, out, 1, treble.baseAddress!, 1, vDSP_Length(count))
+                        var position = 0
+                        while position < count {
+                            let run = min(count - position, Self.onsetFrames - sliceFrames)
+                            var bassSum: Float = 0, trebleSum: Float = 0
+                            vDSP_svesq(bass.baseAddress! + position, 1, &bassSum, vDSP_Length(run))
+                            vDSP_svesq(treble.baseAddress! + position, 1, &trebleSum, vDSP_Length(run))
+                            bassEnergy += bassSum
+                            trebleEnergy += trebleSum
+                            sliceFrames += run
+                            position += run
+                            if sliceFrames == Self.onsetFrames {
+                                onsets.append(OnsetSample(time: start + Double(done + position) / sampleRate + playbackDelay,
+                                                          bass: bassEnergy, treble: trebleEnergy))
+                                bassEnergy = 0; trebleEnergy = 0; sliceFrames = 0
+                            }
+                        }
                     }
                 }
             }
