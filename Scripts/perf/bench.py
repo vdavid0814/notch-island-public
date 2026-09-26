@@ -8,7 +8,7 @@ Writes <label>.csv and prints a summary.
 """
 import ctypes, ctypes.util, os, re, subprocess, sys, threading, time, statistics, json
 
-APP = os.environ.get("NI_APP", os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../build/NotchIsland.app"))
+APP = os.environ.get("NI_APP", os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../build/NotchIsland.app")))
 OUT = os.path.dirname(os.path.abspath(__file__))
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
