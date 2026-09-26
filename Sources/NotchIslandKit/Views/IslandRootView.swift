@@ -137,7 +137,10 @@ private struct IslandContentStack: View {
 
     var body: some View {
         let shownPage: ExpandedPage? = if case .expanded(let page) = presentation { page } else { nil }
-        ZStack(alignment: .top) {
+        // On a canvas-sized base, as an overlay: the kept panel is larger than a small island's
+        // window, and as the stack's own size it grew the root past the window, which then sat
+        // the pill 67 pt above the screen for as long as the panel was kept (seen, measured).
+        Color.clear.overlay(alignment: .top) { ZStack(alignment: .top) {
             if let page = shownPage ?? keptPage {
                 let isShown = shownPage != nil
                 // Hidden, it is only transparent: views at opacity 0 take no clicks or hover, and it
@@ -156,7 +159,7 @@ private struct IslandContentStack: View {
                     .id(presentation.surfaceKey)
                     .transition(.islandContent(reduceMotion: crossFades))
             }
-        }
+        } }
         .onChange(of: shownPage, initial: true) { _, page in if let page { keptPage = page } }
         // Kept only for a while: hidden, it is part of every other update the island makes (a
         // volume banner cost twice as much with it, measured). Quick re-opens are where it pays.
