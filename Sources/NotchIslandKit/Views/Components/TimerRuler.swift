@@ -56,8 +56,8 @@ struct TimerRuler: View {
         VStack(spacing: markerSize < 9 ? 1 : 2) {
             // A new scale per unit: it cross-fades in on its own value while the marker below
             // stays put (the whole ruler used to swap, so two markers slid across each other).
-            RulerTrack(minutes: $minutes, range: range, minimum: minimum, isEditable: isEditable,
-                       showsLabels: showsLabels, tint: tint, onInteraction: onInteraction)
+            RestingRulerTrack(minutes: $minutes, range: range, minimum: minimum, isEditable: isEditable,
+                              showsLabels: showsLabels, tint: tint, onInteraction: onInteraction)
                 .id(unit)
                 // The old scale goes at once and the new one fades in: two scales cross-fading
                 // showed a double row of ticks.
@@ -305,5 +305,78 @@ private struct Tick: View {
                 .frame(maxHeight: .infinity)
                 .padding(.vertical, major ? 0 : 3)
         }
+    }
+}
+
+/// The scale as a picture until the pointer comes over it (or it moves): the real scroll view —
+/// a platform scroll view with dozens of ticks, aligned to its value as it appears — was over half
+/// of the timer widget's cost on every opening of the island (measured). At rest the two draw the
+/// same pixels; a running countdown, which glides every second, keeps the scroll view.
+private struct RestingRulerTrack: View {
+    @Binding var minutes: Int
+    let range: ClosedRange<Int>
+    let minimum: Int
+    let isEditable: Bool
+    let showsLabels: Bool
+    let tint: Color
+    let onInteraction: (Bool) -> Void
+
+    @State private var isHovered = false
+    @State private var isInteracting = false
+
+    var body: some View {
+        let live = !isEditable || isHovered || isInteracting
+        ZStack {
+            if live {
+                RulerTrack(minutes: $minutes, range: range, minimum: minimum, isEditable: isEditable,
+                           showsLabels: showsLabels, tint: tint) { interacting in
+                    isInteracting = interacting
+                    onInteraction(interacting)
+                }
+            } else {
+                RulerPicture(value: min(max(minutes, max(range.lowerBound, minimum)), range.upperBound),
+                             range: range, showsLabels: showsLabels, tint: tint)
+            }
+        }
+        .onHover { isHovered = $0 }
+    }
+}
+
+/// The resting scale: the same ticks where the scroll view puts them with the value centred, in a
+/// plain stack (no scroll view to build and align), with the same fade at both ends.
+private struct RulerPicture: View {
+    let value: Int
+    let range: ClosedRange<Int>
+    let showsLabels: Bool
+    let tint: Color
+
+    var body: some View {
+        GeometryReader { proxy in
+            let spacing = TimerRuler.tickSpacing
+            let centre = proxy.size.width / 2
+            let reach = Int(ceil(centre / spacing)) + 1
+            ZStack(alignment: .topLeading) {
+                ForEach(max(range.lowerBound, value - reach)...min(range.upperBound, value + reach), id: \.self) { minute in
+                    Tick(minute: minute, isPast: minute > value, showsLabel: showsLabels, tint: tint)
+                        .frame(width: spacing, height: proxy.size.height)
+                        .offset(x: centre + CGFloat(minute - value) * spacing - spacing / 2)
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+        }
+        .mask {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black, location: 0.18),
+                    .init(color: .black, location: 0.82),
+                    .init(color: .clear, location: 1),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        }
+        .allowsHitTesting(true)
+        .contentShape(.rect)
     }
 }
