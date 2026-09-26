@@ -372,6 +372,16 @@ nonisolated struct FileScope: Sendable, Equatable {
         return item
     }
 
+    /// ⌘C in Clipboard: the copy the selection is on goes back on the pasteboard, without a click
+    /// on it. False when the selection is on none (the key goes on to the field).
+    func copySelectedClip() -> Bool {
+        guard let item = selectedClip else { return false }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(item.text, forType: .string)
+        return true
+    }
+
     // MARK: Lifecycle
 
     /// The assistant opened.

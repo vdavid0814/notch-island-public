@@ -92,6 +92,10 @@ struct AssistantView: View {
             assistant.open(category)
             return .handled
         }
+        .onKeyPress(KeyEquivalent("c"), phases: .down) { press in
+            guard press.modifiers == .command else { return .ignored }
+            return assistant.copySelectedClip() ? .handled : .ignored
+        }
         .onKeyPress(.delete) {
             assistant.deleteBackwardInEmptyField() ? .handled : .ignored
         }

@@ -99,7 +99,11 @@ nonisolated enum IslandGlassStyle: String, Sendable, CaseIterable, Identifiable,
     /// The island's glass. Liquid Glass is smoked, a little darker than the CAD app's (0.5), so the
     /// surface stays closer to the black of the notch it hangs from while still showing what is
     /// behind it; under the fade's black it is perfectly clear, colourless glass.
-    var material: Glass { self == .fade ? .clear : .clear.tint(Color.black.opacity(Self.smokeOpacity)) }
+    var material: Glass { self == .fade ? .clear.tint(Self.fadeTint) : .clear.tint(Color.black.opacity(Self.smokeOpacity)) }
+
+    /// A trace of colour in the fade style's otherwise clear glass: the dark warm brown in the
+    /// folds of the macOS 27 light wallpaper (its darkest browns averaged), at 10 %.
+    static let fadeTint = Color(red: 106 / 255, green: 89 / 255, blue: 75 / 255).opacity(0.1)
 
     /// The black of the surface glass's tint.
     static let smokeOpacity = 0.62
@@ -228,6 +232,14 @@ private struct FadeShadeMask: View {
     /// How far in from the island's edge the black is whole.
     static let edge: CGFloat = 12
 
+    /// The fade to clear down the middle runs this much longer than `hold` and `reach` alone make
+    /// it, starting earlier and ending where it did.
+    static let rampStretch: CGFloat = 1.05
+
+    /// The same along the sides: the blur that softens them is this much wider, and their black
+    /// sits in by the difference, so the fade starts further in and ends where it did.
+    static let sideStretch: CGFloat = 1.02
+
     /// The sides' black (and with it their fade to clear) sits this share of the island's width
     /// further in on each side than `edge` alone would put it.
     static let sideShift: CGFloat = 0.01
@@ -239,9 +251,11 @@ private struct FadeShadeMask: View {
             .mask {
                 ZStack(alignment: .top) {
                     // One shape, blurred as one: no step anywhere along its sides.
-                    FadeCore(depth: solidDepth, inset: Self.edge, bottomInset: Self.edge * 0.9 + width * Self.sideShift,
+                    let blur = Self.edge * 1.3 * Self.sideStretch
+                    FadeCore(depth: solidDepth, inset: Self.edge,
+                             bottomInset: Self.edge * 0.9 + width * Self.sideShift + (blur - Self.edge * 1.3),
                              cornerRadius: Self.edge * 1.5)
-                    .blur(radius: Self.edge * 1.3)
+                    .blur(radius: blur)
                     // The notch band stays whole black, edge to edge and down to its bottom: the blur
                     // alone softened the band's lower edge and ends, so the compact pill — which is
                     // only the band — showed its glass and rim light while that glass was still
@@ -261,8 +275,9 @@ private struct FadeShadeMask: View {
 
     static func verticalStops(solidDepth: CGFloat, height: CGFloat) -> [Gradient.Stop] {
         let below = max(height - solidDepth, 0)
-        let solid = min((solidDepth + below * hold) / height, 1)
-        let end = solid + below * (1 - hold) * reach / height
+        let ramp = below * (1 - hold) * reach
+        let end = (solidDepth + below * hold + ramp) / height
+        let solid = min(max(end - ramp * rampStretch / height, solidDepth / height), 1)
         return smoothFade(from: solid, to: end, floor: floor)
     }
 
