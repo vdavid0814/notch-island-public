@@ -35,7 +35,7 @@ nonisolated struct ClipboardItem: Hashable, Identifiable, Sendable, Codable {
 
     @ObservationIgnored private let pasteboard: NSPasteboard
     @ObservationIgnored private let storeURL: URL?
-    @ObservationIgnored private var timer: DispatchSourceTimer?
+    @ObservationIgnored private var timer: (any DispatchSourceTimer)?
     @ObservationIgnored private var lastChangeCount: Int
 
     init(pasteboard: NSPasteboard = .general, storeURL: URL? = ClipboardHistory.defaultStoreURL) {

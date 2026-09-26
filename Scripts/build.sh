@@ -39,6 +39,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/NotchIsland" "$APP/Contents/MacOS/NotchIsland"
 cp "$ROOT/Support/Info.plist" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
+# The app's icon (Support/AppIcon.png, rendered to .icns): shown in Finder, the Dock and the DMG.
+cp "$ROOT/Support/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 if [[ -d "$VENDOR" ]]; then
   REVISION="$(head -n 1 "$VENDOR/REVISION" 2>/dev/null || echo 'unknown revision')"
