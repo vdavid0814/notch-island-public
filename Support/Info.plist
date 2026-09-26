@@ -41,6 +41,12 @@
 	<string>27.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<!-- The allocator's space-efficient mode (see Sources/NotchIsland/main.swift). -->
+	<key>LSEnvironment</key>
+	<dict>
+		<key>MallocSpaceEfficient</key>
+		<string>1</string>
+	</dict>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>NotchIsland reads what Music and Spotify are playing so it can show it in the island, and sends them play, pause and skip commands.</string>
 	<key>NSAudioCaptureUsageDescription</key>

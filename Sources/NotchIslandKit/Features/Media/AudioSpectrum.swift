@@ -181,6 +181,9 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
     private var imaginary: [Float]
     private var power: [Float]
     private var decibels: [Float]
+    /// One chunk of the I/O cycle's samples folded to mono.
+    private var mono: [Float]
+    static let chunk = 4096
     private var leveler = SpectrumLeveler()
 
     init?(sampleRate: Double) {
@@ -198,29 +201,56 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
         imaginary = Array(repeating: 0, count: size / 2)
         power = Array(repeating: 0, count: size / 2)
         decibels = Array(repeating: 0, count: SpectrumBands.count)
+        mono = Array(repeating: 0, count: Self.chunk)
     }
 
     deinit { vDSP_destroy_fftsetup(setup) }
 
     /// One I/O cycle's worth of Float32 samples, interleaved or one buffer per channel.
+    ///
+    /// Vectorised (vDSP): the channels are summed per chunk rather than per sample. The per-sample
+    /// loop walked the buffer list through its generic collection conformance for every frame
+    /// (measured: most of this thread's own time).
     func consume(_ list: UnsafePointer<AudioBufferList>) {
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
         guard let first = buffers.first, first.mNumberChannels > 0 else { return }
         let frames = Int(first.mDataByteSize) / MemoryLayout<Float>.size / Int(first.mNumberChannels)
         guard frames > 0 else { return }
         var loud = false
-        for index in 0..<frames {
-            var sum: Float = 0, channels = 0
-            for buffer in buffers {
-                guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
-                let count = Int(buffer.mNumberChannels)
-                for channel in 0..<count { sum += data[index * count + channel] }
-                channels += count
+        var done = 0
+        while done < frames {
+            let count = min(frames - done, Self.chunk)
+            mono.withUnsafeMutableBufferPointer { mono in
+                let out = mono.baseAddress!
+                vDSP_vclr(out, 1, vDSP_Length(count))
+                var channels = 0
+                for buffer in buffers {
+                    guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                    let stride = Int(buffer.mNumberChannels)
+                    for channel in 0..<stride {
+                        vDSP_vadd(data + done * stride + channel, vDSP_Stride(stride), out, 1, out, 1, vDSP_Length(count))
+                    }
+                    channels += stride
+                }
+                if channels > 1 {
+                    var scale = 1 / Float(channels)
+                    vDSP_vsmul(out, 1, &scale, out, 1, vDSP_Length(count))
+                }
+                var peak: Float = 0
+                vDSP_maxmgv(out, 1, &peak, vDSP_Length(count))
+                if peak > 1e-4 { loud = true }
+                // Into the ring, wrapping at its end.
+                ring.withUnsafeMutableBufferPointer { ring in
+                    var copied = 0
+                    while copied < count {
+                        let run = min(count - copied, ring.count - ringIndex)
+                        (ring.baseAddress! + ringIndex).update(from: out + copied, count: run)
+                        ringIndex = (ringIndex + run) % ring.count
+                        copied += run
+                    }
+                }
             }
-            let sample = channels > 0 ? sum / Float(channels) : 0
-            if abs(sample) > 1e-4 { loud = true }
-            ring[ringIndex] = sample
-            ringIndex = (ringIndex + 1) % ring.count
+            done += count
         }
         if loud {
             let now = CACurrentMediaTime()
