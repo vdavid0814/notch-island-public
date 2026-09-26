@@ -106,6 +106,8 @@ struct ChosenDesktopBackdrop: View {
     static let shared = WallpaperLibrary()
 
     private var images: [String: NSImage] = [:]
+    /// The pickers' swatch-sized pictures, by the same keys.
+    private var thumbnails: [String: NSImage] = [:]
     private var loading: [String: Task<NSImage?, Never>] = [:]
     /// What `.desktop` last resolved to: the picture is looked up again when the desktop changes.
     private var desktopKey: String?
@@ -122,6 +124,8 @@ struct ChosenDesktopBackdrop: View {
     /// Long side of the decoded pictures: sharp on the widget studio's stage at 2× (about 880 pt
     /// wide). 2400 kept ~16 MB per picture.
     nonisolated static let maximumPixels = 1800
+    /// Long side of a swatch's picture: a 36 × 21 pt swatch at 2×, filled, with room to spare.
+    nonisolated static let thumbnailPixels = 160
 
     /// Settings closed: nothing shows a wallpaper any more, so the decoded pictures go (they are
     /// the only large images the app keeps). The frames cached on disk make the next open quick.
@@ -129,6 +133,7 @@ struct ChosenDesktopBackdrop: View {
         for task in loading.values { task.cancel() }
         loading.removeAll()
         images.removeAll()
+        thumbnails.removeAll()
         desktopKey = nil
         WallpaperSwatch.purge()
     }
@@ -138,6 +143,14 @@ struct ChosenDesktopBackdrop: View {
         case .checkerboard: nil
         case .desktop: desktopKey.flatMap { images[$0] }
         case .system, .systemLight: images[systemDefault(light: style == .systemLight).key]
+        }
+    }
+
+    func cachedThumbnail(_ style: DesktopBackdropStyle) -> NSImage? {
+        switch style {
+        case .checkerboard: nil
+        case .desktop: desktopKey.flatMap { thumbnails[$0] }
+        case .system, .systemLight: thumbnails[systemDefault(light: style == .systemLight).key]
         }
     }
 
@@ -164,27 +177,47 @@ struct ChosenDesktopBackdrop: View {
         return image
     }
 
-    @concurrent private static func decode(_ source: WallpaperSource) async -> CGImage? {
+    /// A swatch-sized picture of the wallpaper, decoded at that size. The picker needs one for
+    /// every wallpaper while only the chosen one is shown large: decoding all of them at full size
+    /// for their swatches kept ~26 MB of pictures for three 36 pt squares (measured).
+    func thumbnail(for style: DesktopBackdropStyle) async -> NSImage? {
+        let source: WallpaperSource
+        switch style {
+        case .checkerboard: return nil
+        case .desktop:
+            source = await WallpaperSource.currentDesktop()
+            desktopKey = source.key
+        case .system, .systemLight: source = systemDefault(light: style == .systemLight)
+        }
+        if let image = thumbnails[source.key] { return image }
+        guard let cgImage = await Self.decode(source, maximumPixels: Self.thumbnailPixels) else { return nil }
+        let image = NSImage(cgImage: cgImage, size: .zero)
+        thumbnails[source.key] = image
+        return image
+    }
+
+    @concurrent private static func decode(_ source: WallpaperSource,
+                                           maximumPixels: Int = WallpaperLibrary.maximumPixels) async -> CGImage? {
         switch source {
         case .image(let url):
-            return downsample(url)
+            return downsample(url, maximumPixels: maximumPixels)
         case .aerial(let id):
             // A frame taken once is kept on disk: the next launch reads a small JPEG instead of
             // opening a 4K video.
             let cached = WallpaperSource.cacheDirectory.appendingPathComponent("\(id).jpg")
-            if let image = downsample(cached) { return image }
+            if let image = downsample(cached, maximumPixels: maximumPixels) { return image }
             if let frame = await firstFrame(of: WallpaperSource.aerialVideo(id)) {
                 save(frame, to: cached)
-                return frame
+                return maximumPixels < Self.maximumPixels ? downsample(cached, maximumPixels: maximumPixels) ?? frame : frame
             }
             // Not downloaded on this Mac: the system's small preview, better than nothing.
-            return downsample(WallpaperSource.aerialThumbnail(id))
+            return downsample(WallpaperSource.aerialThumbnail(id), maximumPixels: maximumPixels)
         case .none:
             return nil
         }
     }
 
-    nonisolated private static func downsample(_ url: URL?) -> CGImage? {
+    nonisolated private static func downsample(_ url: URL?, maximumPixels: Int) -> CGImage? {
         guard let url, let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
         else { return nil }
         return CGImageSourceCreateThumbnailAtIndex(source, 0, [
@@ -449,7 +482,7 @@ struct WallpaperBar: View {
         .accessibilityLabel("Preview Wallpaper")
         .task {
             for style in styles where style != .checkerboard {
-                guard let picture = await WallpaperLibrary.shared.image(for: style) else { continue }
+                guard let picture = await WallpaperLibrary.shared.thumbnail(for: style) else { continue }
                 swatches[style] = WallpaperSwatch.make(style, picture: picture)
             }
         }
@@ -576,7 +609,7 @@ struct SegmentBar: NSViewRepresentable {
     /// Drawn once per style for the first frame, before the picture is in.
     static func drawn(_ style: DesktopBackdropStyle) -> NSImage {
         if let image = placeholders[style] { return image }
-        let image = make(style, picture: WallpaperLibrary.shared.cached(style))
+        let image = make(style, picture: WallpaperLibrary.shared.cachedThumbnail(style))
         placeholders[style] = image
         return image
     }

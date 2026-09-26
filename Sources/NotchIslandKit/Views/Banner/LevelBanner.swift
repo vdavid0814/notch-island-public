@@ -125,20 +125,15 @@ struct LevelSlider: View {
 
     var body: some View {
         let reading = model.levels.reading(kind)
-        Slider(
-            value: Binding(
-                get: { model.levels.reading(kind).value },
-                set: { model.levels.set(kind, to: $0) }
-            ),
-            in: 0...1
-        ) {
-            Text(kind == .volume ? "Volume" : "Brightness")
-        } onEditingChanged: { editing in
+        RestingSlider(
+            value: reading.value,
+            isEnabled: reading.isAvailable,
+            label: Text(kind == .volume ? "Volume" : "Brightness"),
+            set: { model.levels.set(kind, to: $0) }
+        ) { editing in
             model.island.isInteracting = editing
             // Release the hold only if the pointer has also left; hovering keeps it held.
             model.banners.isHeld = editing || model.island.isHovering
         }
-        .labelsHidden()
-        .disabled(!reading.isAvailable)
     }
 }
