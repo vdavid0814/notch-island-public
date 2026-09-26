@@ -158,12 +158,12 @@ private struct SurfaceThumbnail: View {
     var body: some View {
         let shape = IslandShape(bottomRadius: 13, shoulderRadius: 4)
         ZStack(alignment: .top) {
-            DesktopBackdrop(style: backdrop)
+            DesktopBackdrop(style: backdrop, detail: .miniature)
             PreviewMenuBar(height: 12, notchWidth: 104, darkText: backdrop.prefersDarkMenuBar,
                            backing: backdrop.menuBarBacking)
             if style.hasGlassSurface {
                 // What the glass lets through: the same desktop, blurred, inside the island.
-                DesktopBackdrop(style: backdrop)
+                DesktopBackdrop(style: backdrop, detail: .miniature)
                     .blur(radius: 4)
                     .mask(alignment: .top) { shape.frame(width: 104, height: 40) }
             }

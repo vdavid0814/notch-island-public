@@ -75,7 +75,8 @@ struct MiniDesktop<Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            DesktopBackdrop(style: style)
+            // A picture this small needs no more than the miniature (up to 240 pt wide at 2×).
+            DesktopBackdrop(style: style, detail: width <= 240 && height <= 240 ? .miniature : .full)
             PreviewMenuBar(height: MiniMetrics.menuBar, notchWidth: MiniMetrics.notchWidth + 14,
                            darkText: style.prefersDarkMenuBar,
                            backing: style.menuBarBacking)
