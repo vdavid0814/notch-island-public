@@ -184,6 +184,11 @@ nonisolated struct FileScope: Sendable, Equatable {
     private(set) var files: [AssistantHit] = []
     /// Every app, most recently used first: the Applications gallery, filtered in memory.
     private(set) var allApps: [AssistantHit] = []
+    /// When `allApps` was read from Spotlight: it is kept across openings (asking Spotlight and
+    /// drawing the icons again on every opening of the gallery was most of its energy, measured)
+    /// and read again in the background once it is older than `appsLifetime`.
+    @ObservationIgnored private var allAppsRead: Date?
+    static let appsLifetime: TimeInterval = 10 * 60
     /// The user's shortcuts, read once per opening.
     private(set) var shortcuts: [String]?
     private(set) var selection = 0
@@ -395,7 +400,6 @@ nonisolated struct FileScope: Sendable, Equatable {
         query = ""
         apps = []
         files = []
-        allApps = []
         shortcuts = nil
         selection = 0
         selectionIsUsers = false
@@ -403,7 +407,9 @@ nonisolated struct FileScope: Sendable, Equatable {
         answer = nil
         languageUnsupported = false
         revealsSuggestions = false
-        AssistantIcons.purge()
+        // The app list and the gallery's icons stay for the next opening; the icons go after a
+        // while without Siri (`AssistantIcons.purgeLater`).
+        AssistantIcons.purgeLater()
     }
 
     // MARK: Keys
@@ -656,7 +662,8 @@ nonisolated struct FileScope: Sendable, Equatable {
 
     /// Every app for Applications; the shortcuts for Actions and for root queries.
     private func loadLists(for category: AssistantCategory?, query: String) {
-        let needsApps = category == .applications && allApps.isEmpty
+        let isStale = allAppsRead.map { Date().timeIntervalSince($0) > Self.appsLifetime } ?? true
+        let needsApps = category == .applications && (allApps.isEmpty || isStale)
         let needsShortcuts = shortcuts == nil && settings().includesShortcuts
             && (category == .actions || (category == nil && !query.isEmpty))
         guard needsApps || needsShortcuts, loadTask == nil else { return }
@@ -668,7 +675,10 @@ nonisolated struct FileScope: Sendable, Equatable {
             guard !Task.isCancelled, let self else { return }
             self.loadTask = nil
             self.replaceLists {
-                if needsApps { self.allApps = foundApps }
+                if needsApps {
+                    self.allApps = foundApps
+                    self.allAppsRead = Date()
+                }
                 if needsShortcuts { self.shortcuts = foundShortcuts ?? [] }
             }
             // Asked for something else while this ran (the task is single-flight).
@@ -828,7 +838,13 @@ nonisolated enum AssistantMatch {
         return image
     }
 
-    @concurrent private static func render(path: String, pixels: Int) async -> CGImage? {
+    /// On the `Thrifty` queue: a gallery of icons drawn in parallel from its cells ran every
+    /// performance core at full clock (measured 2.2 W for half a second).
+    private static func render(path: String, pixels: Int) async -> CGImage? {
+        await Thrifty.run { draw(path: path, pixels: pixels) }
+    }
+
+    nonisolated private static func draw(path: String, pixels: Int) -> CGImage? {
         let icon = NSWorkspace.shared.icon(forFile: path)
         var rect = CGRect(x: 0, y: 0, width: pixels, height: pixels)
         guard let source = icon.cgImage(forProposedRect: &rect, context: nil, hints: nil),
@@ -850,6 +866,21 @@ nonisolated enum AssistantMatch {
     static func purge() {
         cache = [:]
         thumbnails = [:]
+    }
+
+    private static var purgeTask: Task<Void, Never>?
+    /// How long the icons outlive the last opening of Siri.
+    static let keep: Duration = .seconds(10 * 60)
+
+    /// Frees the icons once Siri has not been opened for `keep`; an opening meanwhile keeps them.
+    static func purgeLater() {
+        purgeTask?.cancel()
+        purgeTask = Task {
+            try? await Task.sleep(for: keep, tolerance: .seconds(60))
+            guard !Task.isCancelled else { return }
+            purge()
+            purgeTask = nil
+        }
     }
 }
 

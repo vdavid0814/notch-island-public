@@ -186,7 +186,7 @@ struct ChosenDesktopBackdrop: View {
         if let task = loading[key] { return await task.value }
         let task = Task { () -> NSImage? in
             guard let decoded = await Self.decode(source, maximumPixels: detail.pixels) else { return nil }
-            let cgImage = Self.displayReady(decoded)
+            let cgImage = await Thrifty.run { Self.displayReady(decoded) }
             return NSImage(cgImage: cgImage, size: .zero)
         }
         loading[key] = task
@@ -219,18 +219,18 @@ struct ChosenDesktopBackdrop: View {
                                            maximumPixels: Int) async -> CGImage? {
         switch source {
         case .image(let url):
-            return downsample(url, maximumPixels: maximumPixels)
+            return await Thrifty.run { downsample(url, maximumPixels: maximumPixels) }
         case .aerial(let id):
             // A frame taken once is kept on disk: the next launch reads a small JPEG instead of
             // opening a 4K video.
             let cached = WallpaperSource.cacheDirectory.appendingPathComponent("\(id).jpg")
-            if let image = downsample(cached, maximumPixels: maximumPixels) { return image }
+            if let image = await Thrifty.run({ downsample(cached, maximumPixels: maximumPixels) }) { return image }
             if let frame = await firstFrame(of: WallpaperSource.aerialVideo(id)) {
                 save(frame, to: cached)
                 return maximumPixels < WallpaperDetail.full.pixels ? downsample(cached, maximumPixels: maximumPixels) ?? frame : frame
             }
             // Not downloaded on this Mac: the system's small preview, better than nothing.
-            return downsample(WallpaperSource.aerialThumbnail(id), maximumPixels: maximumPixels)
+            return await Thrifty.run { downsample(WallpaperSource.aerialThumbnail(id), maximumPixels: maximumPixels) }
         case .none:
             return nil
         }

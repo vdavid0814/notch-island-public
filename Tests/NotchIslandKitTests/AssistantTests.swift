@@ -305,14 +305,17 @@ import Testing
         #expect(model.deleteBackwardInEmptyField() && model.category == nil)
     }
 
-    @Test func endForgetsEverything() async {
+    @Test func endForgetsEverythingButTheAppList() async {
         let model = model(stubSources(allApps: ["Safari"]))
         model.open(.applications)
         await model.settle()
         model.query = "s"
         model.end()
-        #expect(model.query.isEmpty && model.category == nil && model.allApps.isEmpty && model.answer == nil)
+        #expect(model.query.isEmpty && model.category == nil && model.answer == nil)
         #expect(!model.needsList && !model.revealsSuggestions)
+        // The app list stays for the next opening of the gallery (asking Spotlight again each time
+        // was most of the gallery's energy).
+        #expect(model.allApps.map(\.name) == ["Safari"])
     }
 
     @Test func questionsAreAnsweredOnReturn() async {

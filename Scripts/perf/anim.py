@@ -1,7 +1,8 @@
 #!/usr/bin/python3
-"""Worst second of Energy Impact for each island animation, the way Activity Monitor's Energy tab
-counts it: NotchIsland's coalition, 100 × (CPU seconds + 0.0002 × wake-ups) per second (the
-default.plist energy constants on Apple silicon), sampled every 0.1 s, maximum over any 1 s window.
+"""Worst stretch of Energy Impact for each island animation, the way Activity Monitor's Energy tab
+counts it on Apple silicon: the energy NotchIsland's coalition used, in milliwatts (measured:
+Activity Monitor's number is this, averaged over its 5 s update; at rest 0.0–0.2, flicking the
+island open ~100). Sampled every 0.1 s; the worst 1 s and 5 s windows. CPU time alongside.
 
     anim.py [scenario ...]
 """
@@ -44,7 +45,7 @@ def main():
                 time.sleep(0.1)
                 cur = read(cid); t = time.time()
                 samples.append((t, (cur["cpu_time"] - prev["cpu_time"]) * TICK / 1e9,
-                                cur["platform_idle_wakeups"] - prev["platform_idle_wakeups"], t - pt))
+                                (cur["energy"] - prev["energy"]) / 1e9, t - pt))
                 prev, pt = cur, t
         th = threading.Thread(target=sampler, daemon=True); th.start()
         time.sleep(0.5)
@@ -58,7 +59,7 @@ def main():
                 window = [s for s in samples[i:] if s[0] - samples[i][0] < span]
                 dt = sum(s[3] for s in window)
                 if dt < span * 0.9: break
-                best = max(best, 100 * (sum(s[1] for s in window) + 0.0002 * sum(s[2] for s in window)) / dt)
+                best = max(best, 1000 * sum(s[2] for s in window) / dt)
             return best
         print(f"{name:16} worst 1 s {worst(1.0):6.1f}   worst 5 s (Activity Monitor) {worst(5.0):6.1f}   CPU {total_cpu * 1000:6.0f} ms", flush=True)
 

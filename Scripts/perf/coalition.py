@@ -51,9 +51,11 @@ def main():
         wake = d["platform_idle_wakeups"]; iw = d["interrupt_wakeups"]
         gpu = d["gpu_time"] * TICK / 1e9 * 100
         est = cpu + 100 * 0.0002 * wake
-        print(f"{t - t0:6.1f}s cpu {cpu:6.2f}% billed-to-me {billed:6.2f}% gpu {gpu:6.2f}% idle-wake/s {wake:6.1f} irq/s {iw:6.1f} "
-              f"energy nJ/s {d['energy']:12.0f} gpu nJ/s {d['gpu_energy_nj']:10.0f} billed nJ/s {d['energy_billed_to_me']:10.0f}"
-              f" | AM≈ {est:6.2f}", flush=True)
+        mw = d['energy'] / 1e6; gmw = d['gpu_energy_nj'] / 1e6; bmw = d['energy_billed_to_me'] / 1e6
+        gbmw = d['gpu_energy_nj_billed_to_me'] / 1e6
+        ane = d['ane_energy_nj'] / 1e6; gt = d['gpu_time'] * TICK / 1e6
+        print(f"{t - t0:6.1f}s cpu {cpu:6.2f}% billed-cpu {billed:5.2f}% wake/s {wake:5.1f} | mW energy {mw:7.2f} gpu {gmw:7.2f} "
+              f"billed {bmw:7.2f} gpu-billed {gbmw:7.2f} ane {ane:6.2f} gpu-ms {gt:6.2f} | AM≈ {est:6.2f}", flush=True)
         prev, pt = cur, t
 
 if __name__ == "__main__":

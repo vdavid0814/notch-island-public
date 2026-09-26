@@ -10,7 +10,12 @@ import ImageIO
 nonisolated enum ArtworkDecoder {
     static let maxPixelSize = 320
 
-    @concurrent static func decode(_ data: Data) async -> CGImage? {
+    /// On the `Thrifty` queue, as are the colours below: a track change is never in a hurry.
+    static func decode(_ data: Data) async -> CGImage? {
+        await Thrifty.run { decodeNow(data) }
+    }
+
+    static func decodeNow(_ data: Data) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else {
             return nil
         }
@@ -26,7 +31,11 @@ nonisolated enum ArtworkDecoder {
     /// The cover's overall colour, for widgets that tint themselves from it: the average of a
     /// 1 × 1 downsample, pushed toward a readable brightness (a black cover still gives a colour
     /// the controls can sit on).
-    @concurrent static func averageColor(_ image: CGImage) async -> ArtworkColor? {
+    static func averageColor(_ image: CGImage) async -> ArtworkColor? {
+        await Thrifty.run { averageColorNow(image) }
+    }
+
+    static func averageColorNow(_ image: CGImage) -> ArtworkColor? {
         var pixel = [UInt8](repeating: 0, count: 4)
         let drawn = pixel.withUnsafeMutableBytes { buffer -> Bool in
             guard let context = CGContext(
@@ -45,7 +54,11 @@ nonisolated enum ArtworkDecoder {
     /// 8 × 8 downsample, its pixels grouped by hue (twelve sectors), a sector weighted by how much of
     /// the cover it covers and how vivid it is. Near-grey pixels count only when nothing is vivid,
     /// so a black-and-white cover stays grey instead of picking up noise.
-    @concurrent static func palette(_ image: CGImage, limit: Int = 3) async -> [ArtworkColor] {
+    static func palette(_ image: CGImage, limit: Int = 3) async -> [ArtworkColor] {
+        await Thrifty.run { paletteNow(image, limit: limit) }
+    }
+
+    static func paletteNow(_ image: CGImage, limit: Int = 3) -> [ArtworkColor] {
         let side = 8
         var pixels = [UInt8](repeating: 0, count: side * side * 4)
         let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
