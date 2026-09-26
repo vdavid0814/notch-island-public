@@ -176,6 +176,11 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         }
     }
 
+    /// The island's outline in a presentation: its size and radii.
+    func outline(for p: IslandPresentation) -> IslandOutline {
+        IslandOutline(size: size(for: p), bottomRadius: bottomRadius(for: p), shoulderRadius: shoulderRadius(for: p))
+    }
+
     func bottomRadius(for p: IslandPresentation) -> CGFloat {
         switch p {
         case .idle: min(8, notch.height / 2)

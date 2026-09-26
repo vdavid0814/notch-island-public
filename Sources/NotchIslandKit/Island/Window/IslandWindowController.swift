@@ -28,6 +28,8 @@ import SwiftUI
     private var isSuspended = false
     /// Invalidates observation callbacks registered before the last start/stop.
     private var observationGeneration = 0
+    /// Plays the island's outline on the render server while it moves.
+    private lazy var outlineMotion = IslandOutlineMotion(model: model)
 
     init(model: AppModel) {
         self.model = model
@@ -218,11 +220,13 @@ import SwiftUI
         // view, NSHostingView resizes a non-resizable window to its SwiftUI content every frame of
         // a transition (even with `sizingOptions = []`), which shrank the stage around the
         // animating island, pinned at its top-left corner, and crashed AppKit's constraints pass.
-        let stage = NSView(frame: CGRect(origin: .zero, size: panel.frame.size))
+        let stage = IslandStageView(frame: CGRect(origin: .zero, size: panel.frame.size))
         hosting.frame = stage.bounds
         hosting.autoresizingMask = [.width, .height]
         stage.addSubview(hosting)
         panel.contentView = stage
+        outlineMotion.attach(to: stage)
+        model.island.outlineMover = outlineMotion
         self.panel = panel
         hostingView = hosting
         return panel

@@ -44,8 +44,11 @@ struct IslandRootView: View {
 
     @ViewBuilder private var island: some View {
         let presentation = model.island.presentation
+        // While the render server moves the outline, the surface is drawn still as the hold says,
+        // and stays until the outline has landed, also in the notch (`IslandOutlineMotion`).
+        let hold = model.island.surfaceHold
         let layout = model.layout
-        if presentation.isIdle {
+        if presentation.isIdle && hold == nil {
             // Alpha > 0 so the window server delivers hover to the notch; see `hitTargetOpacity`.
             IslandShape(
                 bottomRadius: layout.bottomRadius(for: .idle),
@@ -56,17 +59,18 @@ struct IslandRootView: View {
             .accessibilityHidden(true)
             .onAppear { isGlassRetired = nil }
         } else {
-            let contentSize = layout.size(for: presentation)
+            let surfaceOf = hold?.presentation ?? presentation
+            let outline = hold?.outline ?? layout.outline(for: presentation)
             // Settings is a large page: it grows in without the blur (an offscreen pass over the
             // whole page each frame) and on plain black. Live glass the size of the screen under it
             // cost ~40 MB while open and ~300 MB more at its peak (measured) for a surface its own
             // window colour hides; its faint see-through look comes from the system's window
             // vibrancy instead (`SettingsBackdrop`), which the window server draws.
-            let isOpaquePage = presentation.isSettings
+            let isOpaquePage = surfaceOf.isSettings
             // The AirPods card lies over macOS's own card to hide it: glass would let it show through.
-            let coversSystemCard: Bool = if case .banner(.airPods) = presentation { AirPodsSystemCard.current == .cover } else { false }
+            let coversSystemCard: Bool = if case .banner(.airPods) = surfaceOf { AirPodsSystemCard.current == .cover } else { false }
             let glassStyle = isOpaquePage || coversSystemCard ? IslandGlassStyle.black : model.effectiveGlassStyle
-            let wantsGlass = glassStyle != .fade || contentSize.height > layout.notch.height + 0.5
+            let wantsGlass = glassStyle != .fade || outline.size.height > layout.notch.height + 0.5
             let reducesWork = model.activity.prefersReducedWork
             // On battery the content swaps with a plain cross-fade: the blur-replace costs about a
             // seventh of an open's main-thread time (measured).
@@ -74,13 +78,13 @@ struct IslandRootView: View {
             IslandContentStack(
                 presentation: presentation,
                 layout: layout,
-                crossFades: reduceMotion || lightContentSwap || isOpaquePage,
+                crossFades: reduceMotion || lightContentSwap || presentation.isSettings,
                 thumbnails: thumbnails
             )
             .transition(IslandSurfaceTransition(surface: IslandSurface(
-                size: contentSize,
-                bottomRadius: layout.bottomRadius(for: presentation),
-                shoulderRadius: layout.shoulderRadius(for: presentation),
+                size: outline.size,
+                bottomRadius: outline.bottomRadius,
+                shoulderRadius: outline.shoulderRadius,
                 notch: IslandOutline(size: layout.notch, bottomRadius: layout.bottomRadius(for: .idle),
                                      shoulderRadius: layout.shoulderRadius(for: .idle)),
                 glassStyle: glassStyle,
@@ -88,7 +92,10 @@ struct IslandRootView: View {
                 // Low Power Mode or thermal pressure: the growth is drawn without its animated blur,
                 // the most expensive part of it (an offscreen pass over the whole island every frame).
                 blursGrowth: !(reduceMotion || reducesWork || isOpaquePage),
-                solidDepth: IslandLayout.overdraw + layout.notch.height
+                solidDepth: IslandLayout.overdraw + layout.notch.height,
+                // Under Reduce Motion the island cross-fades as SwiftUI animates it; otherwise its
+                // outline moves on the render server and the surface never animates here.
+                isStill: !reduceMotion
             )))
             .task(id: wantsGlass) { await glassRetirement(wantsGlass: wantsGlass) }
         }
@@ -216,7 +223,7 @@ nonisolated private struct IslandSurfaceTransition: Transition {
 
     func body(content: Content, phase: TransitionPhase) -> some View {
         var surface = surface
-        surface.emergence = phase.isIdentity ? 1 : 0
+        surface.emergence = phase.isIdentity || surface.isStill ? 1 : 0
         return content.modifier(surface)
     }
 }
@@ -232,15 +239,20 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
     let blursGrowth: Bool
     /// The shade's solid black from the top (fade style).
     let solidDepth: CGFloat
+    /// Drawn as given, never animated: the render server moves the outline (`IslandOutlineMotion`).
+    let isStill: Bool
     /// 0 in the notch, 1 at the presentation.
     var emergence: Double = 1
 
     var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<AnimatablePair<CGFloat, CGFloat>, Double>> {
         get {
-            AnimatablePair(AnimatablePair(size.width, size.height),
-                           AnimatablePair(AnimatablePair(bottomRadius, shoulderRadius), emergence))
+            // Still: nothing for a transaction to interpolate, so no frame is ever redrawn for it.
+            guard !isStill else { return .zero }
+            return AnimatablePair(AnimatablePair(size.width, size.height),
+                                  AnimatablePair(AnimatablePair(bottomRadius, shoulderRadius), emergence))
         }
         set {
+            guard !isStill else { return }
             size = CGSize(width: newValue.first.first, height: newValue.first.second)
             bottomRadius = newValue.second.first.first
             shoulderRadius = newValue.second.first.second

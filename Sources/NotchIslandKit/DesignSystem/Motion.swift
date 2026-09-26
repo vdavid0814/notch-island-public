@@ -55,25 +55,40 @@ nonisolated enum Motion {
         duration: Double = defaultDuration
     ) -> Animation {
         if reduceMotion { return reduced }
+        return spring(from: from, to: to, duration: duration).map { .lean($0) } ?? content
+    }
+
+    /// The spring the island's outline follows from one presentation to the other; nil when only
+    /// the content changes (switching expanded pages), which the `content` animation swaps.
+    static func spring(from: IslandPresentation, to: IslandPresentation, duration: Double = defaultDuration) -> Spring? {
         switch (from.isOpen, to.isOpen) {
-        case (false, true): return .lean(openSpring(duration: duration))
-        case (true, false): return .lean(closeSpring(duration: duration))
+        case (false, true): return openSpring(duration: duration)
+        case (true, false): return closeSpring(duration: duration)
         case (true, true):
             // The assistant grows out of the open panel, and shrinks back to it.
-            if to.isAssistant, !from.isAssistant { return .lean(openSpring(duration: duration)) }
-            if from.isAssistant, !to.isAssistant { return .lean(closeSpring(duration: duration)) }
+            if to.isAssistant, !from.isAssistant { return openSpring(duration: duration) }
+            if from.isAssistant, !to.isAssistant { return closeSpring(duration: duration) }
             // Settings grows out of the open panel too, and shrinks back to it.
-            if to.isSettings, !from.isSettings { return .lean(openSpring(duration: duration)) }
-            if from.isSettings, !to.isSettings { return .lean(closeSpring(duration: duration)) }
+            if to.isSettings, !from.isSettings { return openSpring(duration: duration) }
+            if from.isSettings, !to.isSettings { return closeSpring(duration: duration) }
             // The assistant's field growing into its list and back: the open and close springs,
             // shortened like a morph, since only the bottom edge moves.
             if case .assistant(let a) = from, case .assistant(let b) = to, a != b {
-                let spring = b > a ? openSpring(duration: duration * 0.7) : closeSpring(duration: duration * 0.7)
-                return .lean(spring)
+                return b > a ? openSpring(duration: duration * 0.7) : closeSpring(duration: duration * 0.7)
             }
-            return content
-        case (false, false): return .lean(morphSpring(duration: duration))
+            return nil
+        case (false, false): return morphSpring(duration: duration)
         }
+    }
+
+    /// The content's own swap while the render server moves the outline (`IslandOutlineMotion`):
+    /// short, so it costs a few frames rather than the whole spring. Nothing is animated when the
+    /// island grows out of the notch (the growing outline reveals the content); on the way back
+    /// the content leaves in a tenth of a second, as it did while the glass shrank.
+    static func contentSwap(from: IslandPresentation, to: IslandPresentation) -> Animation? {
+        if from.isIdle { return nil }
+        if to.isIdle { return .easeOut(duration: 0.1) }
+        return .easeOut(duration: 0.18)
     }
 }
 
