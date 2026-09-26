@@ -41,10 +41,13 @@
 	<string>27.0</string>
 	<key>LSUIElement</key>
 	<true/>
-	<!-- The allocator's space-efficient mode (see Sources/NotchIsland/main.swift). -->
+	<!-- The allocator's space-efficient mode, SwiftUI's renderer on the CPU (see
+	     Sources/NotchIsland/main.swift). -->
 	<key>LSEnvironment</key>
 	<dict>
 		<key>MallocSpaceEfficient</key>
+		<string>1</string>
+		<key>RB_DISABLE_GPU</key>
 		<string>1</string>
 	</dict>
 	<key>NSAppleEventsUsageDescription</key>
