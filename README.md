@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4.3.1 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4.4 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -18,6 +18,20 @@ events, volume/brightness and dropped files live there the rest of the time.
 For older versions, see the **[Releases page](https://github.com/vdavid0814/notch-island-public/releases)**.
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.4.4
+
+Music bars you can choose, a steady privacy dot, and smoother motion.
+
+**Music bars** (Settings ▸ General ▸ Music Bars)
+- **Follow the Music or Animation**, chosen separately **on battery** and **on the charger**: e.g. only a set animation on battery (nothing is listened to, no purple dot) and following the music on the charger.
+- **Listen more often while charging:** on the charger the bars take a new reading every 1.8 s (0.8 s of listening, 1 s of rest) and move at 60 fps; on battery 2 s of listening in every 8, at 12 fps.
+- **The purple dot no longer flashes:** while music plays the audio capture stays open and only the analysis rests, so macOS's indicator stays on steadily instead of blinking every few seconds.
+- **Smoother changes:** a new reading crossfades into the old motion over 0.6 s (place and speed), a beat cut off mid-swell eases down instead of snapping, and after silence the bars drift back to breathing from where they are.
+- The bars move 10% faster while following the music; silence returns them to breathing after 1 s.
+- The analysis window is 1920 samples (Accelerate's DFT, no padding).
 
 ---
 

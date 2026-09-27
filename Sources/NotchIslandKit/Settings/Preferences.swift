@@ -42,6 +42,9 @@ import Foundation
         static let airPodsDuration = prefix + "airPodsDuration"
         static let powerDuration = prefix + "powerDuration"
         static let airPodsSystemCard = prefix + "airPodsSystemCard"
+        static let musicBars = prefix + "musicBars"
+        static let musicBarsOnPower = prefix + "musicBarsOnPower"
+        static let musicBarsContinuousOnPower = prefix + "musicBarsContinuousOnPower"
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -95,6 +98,14 @@ import Foundation
             defaults.set(data, forKey: Key.siri)
         }
     }
+    /// How the bars beside the notch move while music plays, on battery.
+    var musicBars: MusicBarsStyle { didSet { defaults.set(musicBars.rawValue, forKey: Key.musicBars) } }
+    /// … and on the charger (or a Mac without a battery).
+    var musicBarsOnPower: MusicBarsStyle { didSet { defaults.set(musicBarsOnPower.rawValue, forKey: Key.musicBarsOnPower) } }
+    /// Following the music: on the charger, listen 0.8 s in every 1.8 instead of 2 s in every 8.
+    var musicBarsContinuousOnPower: Bool {
+        didSet { defaults.set(musicBarsContinuousOnPower, forKey: Key.musicBarsContinuousOnPower) }
+    }
     /// ⌘Space opens Siri in the notch instead of the system's Search window (needs Accessibility).
     var commandSpaceOpensSiri: Bool { didSet { defaults.set(commandSpaceOpensSiri, forKey: Key.commandSpaceOpensSiri) } }
 
@@ -132,12 +143,34 @@ import Foundation
         glassStyle = IslandGlassStyle(storedValue: defaults.string(forKey: Key.glassStyle))
         hideInFullscreen = defaults.object(forKey: Key.hideInFullscreen) as? Bool ?? true
         commandSpaceOpensSiri = defaults.object(forKey: Key.commandSpaceOpensSiri) as? Bool ?? true
+        let barsOnBattery = defaults.string(forKey: Key.musicBars).flatMap(MusicBarsStyle.init(rawValue:)) ?? .followMusic
+        musicBars = barsOnBattery
+        // Until chosen on its own, the charger follows the battery's choice.
+        musicBarsOnPower = defaults.string(forKey: Key.musicBarsOnPower).flatMap(MusicBarsStyle.init(rawValue:)) ?? barsOnBattery
+        musicBarsContinuousOnPower = defaults.object(forKey: Key.musicBarsContinuousOnPower) as? Bool ?? true
         siri = defaults.data(forKey: Key.siri).flatMap { try? JSONDecoder().decode(SiriSettings.self, from: $0) } ?? SiriSettings()
         let duration = defaults.object(forKey: Key.animationDuration) as? Double ?? Motion.defaultDuration
         animationDuration = min(
             max(duration.isFinite ? duration : Motion.defaultDuration, Motion.durationRange.lowerBound),
             Motion.durationRange.upperBound
         )
+    }
+}
+
+/// How the bars beside the notch move while music plays.
+nonisolated enum MusicBarsStyle: String, Sendable, CaseIterable, Identifiable {
+    /// They follow what is playing (the system-audio permission; macOS shows its purple dot).
+    case followMusic
+    /// A set animation, the same for every song: nothing is listened to.
+    case animation
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .followMusic: "Follow the Music"
+        case .animation: "Animation"
+        }
     }
 }
 

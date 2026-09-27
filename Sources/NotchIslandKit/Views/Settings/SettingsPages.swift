@@ -93,6 +93,25 @@ struct GeneralSettingsPage: View {
                 }
             }
 
+            Section("Music Bars") {
+                Picker(selection: $preferences.musicBars) {
+                    ForEach(MusicBarsStyle.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    InfoLabel("On battery", "Follow the Music: the bars move with what is playing — they listen to the Mac's sound (System Audio Recording; macOS shows a purple dot meanwhile). Nothing is recorded or kept. Animation: a set animation, nothing is listened to, the least energy.")
+                }
+                .choiceBar()
+                Picker(selection: $preferences.musicBarsOnPower) {
+                    ForEach(MusicBarsStyle.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    InfoLabel("On the charger", "The same choice while the Mac is charging (a Mac without a battery always uses this one).")
+                }
+                .choiceBar()
+                Toggle(isOn: $preferences.musicBarsContinuousOnPower) {
+                    InfoLabel("Listen more often while charging", "On battery the bars listen 2 seconds in every 8 to save energy. On the charger they listen 0.8 seconds in every 1.8, so they follow the music closely.")
+                }
+                .disabled(preferences.musicBarsOnPower != .followMusic)
+            }
+
             Section("Startup") {
                 Toggle(isOn: $launchAtLogin.isEnabled) {
                     InfoLabel("Open at login", "NotchIsland starts when you log in.")

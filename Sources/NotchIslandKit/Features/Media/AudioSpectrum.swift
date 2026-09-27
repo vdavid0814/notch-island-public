@@ -162,12 +162,15 @@ nonisolated struct SpectrumLeveler: Sendable {
 /// Everything is allocated up front: the I/O block must not allocate or wait. The only shared state
 /// is `levels`, behind a mutex held for a copy of five floats.
 nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
-    static let log2Size: vDSP_Length = 11
-    static let size = 1 << Int(log2Size)
+    /// Samples in each analysis: 1920 = 15 · 2⁷, a length Accelerate's DFT takes as it is (it
+    /// handles f · 2ⁿ for f = 1, 3, 5, 15), so no padding is needed; at 48 kHz, 40 ms of sound.
+    static let size = 1920
     /// Analyses per second: the bars redraw at 20–24 fps, more would be wasted work.
     static let rate: Double = 30
 
     let levels = Mutex(SpectrumLevels())
+    /// Set while the tap rests (`AudioSpectrumTap.rest`): the I/O cycles still arrive, nothing is analysed.
+    let isResting = Atomic(false)
 
     private let sampleRate: Double
     let hop: Int
@@ -176,7 +179,7 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
     /// This cycle's analyses (capacity kept).
     private var batch: [SpectrumLevels] = []
     private let bins: [Range<Int>]
-    private let setup: FFTSetup
+    private let setup: vDSP_DFT_Setup
     private var ring: [Float]
     private var ringIndex = 0
     private var sinceAnalysis = 0
@@ -207,7 +210,7 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
     private var bassEnergy: Float = 0, trebleEnergy: Float = 0, sliceFrames = 0
 
     init?(sampleRate: Double) {
-        guard sampleRate > 0, let setup = vDSP_create_fftsetup(Self.log2Size, FFTRadix(kFFTRadix2)) else { return nil }
+        guard sampleRate > 0, let setup = vDSP_DFT_zrop_CreateSetup(nil, vDSP_Length(Self.size), .FORWARD) else { return nil }
         let size = Self.size
         self.sampleRate = sampleRate
         self.setup = setup
@@ -232,7 +235,7 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
     }
 
     deinit {
-        vDSP_destroy_fftsetup(setup)
+        vDSP_DFT_DestroySetup(setup)
         vDSP_biquad_DestroySetup(bassFilter)
         vDSP_biquad_DestroySetup(trebleFilter)
     }
@@ -361,7 +364,8 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
                 frame.withUnsafeBytes { bytes in
                     vDSP_ctoz(bytes.bindMemory(to: DSPComplex.self).baseAddress!, 2, &split, 1, vDSP_Length(size / 2))
                 }
-                vDSP_fft_zrip(setup, &split, 1, Self.log2Size, FFTDirection(FFT_FORWARD))
+                // In place, packed as vDSP_fft_zrip packs it.
+                vDSP_DFT_Execute(setup, split.realp, split.imagp, split.realp, split.imagp)
                 // Bin 0 packs DC and Nyquist together; neither is in a band.
                 vDSP_zvmags(&split, 1, &power, 1, vDSP_Length(size / 2))
             }
@@ -441,7 +445,7 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
 
     /// A release waits this long before the tap is torn down: the island rebuilding the compact
     /// view (a resize, a banner passing) should not restart it.
-    static let stopDelay: Duration = .seconds(3)
+    static let stopDelay: Duration = .seconds(2)
 
     private init() {}
 
@@ -485,12 +489,21 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
         guard let session, restTask == nil else { return }
         session.pause()
         restTask = Task { [weak self] in
-            try? await Task.sleep(for: duration, tolerance: .milliseconds(500))
+            // The tolerance lets the system group wake-ups, but never more than half the rest.
+            try? await Task.sleep(for: duration, tolerance: min(.milliseconds(500), duration / 2))
             guard let self else { return }
             self.restTask = nil
             guard !Task.isCancelled else { return }
             self.session?.resume()
         }
+    }
+
+    /// Ends a rest under way: the analyses start again at once.
+    func wake() {
+        guard restTask != nil else { return }
+        restTask?.cancel()
+        restTask = nil
+        session?.resume()
     }
 
     private func stop() {
@@ -612,17 +625,22 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
 
         deinit { Self.destroy(tap: tap, aggregate: aggregate, proc: proc) }
 
+        /// The device keeps running while the tap rests, so the system's audio-recording
+        /// indicator stays on steadily instead of flashing at every rest: only the analyses stop.
         func pause() {
-            if let proc { AudioDeviceStop(aggregate, proc) }
+            analyzer.isResting.store(true, ordering: .relaxed)
         }
 
         func resume() {
-            if let proc { AudioDeviceStart(aggregate, proc) }
+            analyzer.isResting.store(false, ordering: .relaxed)
         }
 
         /// Built outside any actor: the block runs on the I/O queue.
         private static func ioBlock(_ analyzer: SpectrumAnalyzer) -> AudioDeviceIOBlock {
-            { _, input, inputTime, _, _ in analyzer.consume(input, hostTime: inputTime.pointee.mHostTime) }
+            { _, input, inputTime, _, _ in
+                guard !analyzer.isResting.load(ordering: .relaxed) else { return }
+                analyzer.consume(input, hostTime: inputTime.pointee.mHostTime)
+            }
         }
 
         private static func destroy(tap: AudioObjectID, aggregate: AudioObjectID, proc: AudioDeviceIOProcID?) {

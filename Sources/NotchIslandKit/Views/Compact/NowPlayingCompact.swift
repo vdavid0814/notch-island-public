@@ -10,6 +10,11 @@ struct NowPlayingCompact: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// On the charger, or a Mac without a battery.
+    private var onCharger: Bool {
+        !model.power.state.hasBattery || model.power.state.isPluggedIn
+    }
+
     var body: some View {
         let media = model.media
         NotchSplitBand(split: split, height: height) {
@@ -30,7 +35,9 @@ struct NowPlayingCompact: View {
                 barWidth: glyphSide * Metrics.Compact.equalizerBarShare,
                 tint: media.artworkColor,
                 palette: media.artworkPalette,
-                listensToAudio: true
+                // Settings ▸ General ▸ Music Bars: one choice on battery, one on the charger.
+                listensToAudio: (onCharger ? model.preferences.musicBarsOnPower : model.preferences.musicBars) == .followMusic,
+                continuous: model.preferences.musicBarsContinuousOnPower && onCharger
             )
                 .frame(width: glyphSide, height: glyphSide)
                 .accessibilityHidden(true)

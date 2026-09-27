@@ -25,6 +25,8 @@ struct EqualizerView: NSViewRepresentable {
     var palette: [ArtworkColor] = []
     /// Follow the system's audio output (the compact pill); off, the bars only breathe.
     var listensToAudio = false
+    /// Following the music, listen without rests (on the charger).
+    var continuous = false
 
     func makeNSView(context: Context) -> EqualizerBarsView {
         let view = EqualizerBarsView(frame: CGRect(origin: .zero, size: size))
@@ -38,6 +40,7 @@ struct EqualizerView: NSViewRepresentable {
         view.tint = tint
         view.palette = palette
         view.listensToAudio = listensToAudio
+        view.continuous = continuous
         view.isAnimating = isAnimating
     }
 
@@ -67,7 +70,10 @@ final class EqualizerBarsView: NSView {
         Bar(low: 0.44, high: 0.80, period: 0.60, phase: 0.75),
     ]
     nonisolated static let animationKey = "breathe"
-    nonisolated static let frameRate = CAFrameRateRange(minimum: 10, maximum: 24, preferred: 20)
+    /// The crossfade from one breathing into the next (`adapt`).
+    nonisolated static let blendKey = "blend"
+    /// On the charger (or a Mac without a battery): smooth, the display's 60 frames a second.
+    nonisolated static let frameRate = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
     /// Hours of playback on battery: the breathing still reads as motion at 12.
     nonisolated static let batteryFrameRate = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
 
@@ -104,6 +110,15 @@ final class EqualizerBarsView: NSView {
 
     var listensToAudio = false {
         didSet { if listensToAudio != oldValue { updateListening() } }
+    }
+
+    /// On the charger: shorter windows and rests (`Follower.chargingWindow`, `chargingRest`); a
+    /// longer rest under way ends at once.
+    var continuous = false {
+        didSet {
+            follower.charging = continuous
+            if continuous, !oldValue, isListening { AudioSpectrumTap.shared.wake() }
+        }
     }
 
     /// Installs the animations when playback starts and removes them when it stops. Nothing else
@@ -245,8 +260,14 @@ final class EqualizerBarsView: NSView {
     /// The follower lost the sound for a few seconds: the default breathing comes back.
     fileprivate func followingChanged(_ following: Bool) {
         guard isListening, !following else { return }
-        specs = Self.bars
-        applyAnimationState()
+        // Back to the resting breathing from where each bar is, and the beats eased out: no snap.
+        if isAnimating, starts.count == barLayers.count {
+            adapt(to: Self.bars)
+            applyPulses([])
+        } else {
+            specs = Self.bars
+            applyAnimationState()
+        }
     }
 
     /// What the follower found in the last window of music.
@@ -276,8 +297,16 @@ final class EqualizerBarsView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, holder) in pulseLayers.enumerated() {
+            // Mid-swell, the old beat is not cut off (a visible snap back to 1): it eases down first.
+            let swell = (holder.presentation()?.value(forKeyPath: "transform.scale.y") as? CGFloat) ?? 1
+            let settling = abs(swell - 1) > 0.01
             guard index < pulses.count, let pulse = pulses[index], pulse.period > 0.15 else {
-                holder.removeAnimation(forKey: Self.pulseKey)
+                if settling {
+                    holder.removeAnimation(forKey: Self.pulseKey)
+                    holder.add(Self.settle(from: swell, rate: pulseFrameRate), forKey: Self.settleKey)
+                } else {
+                    holder.removeAnimation(forKey: Self.pulseKey)
+                }
                 continue
             }
             // The next beat far enough ahead to start on it.
@@ -295,14 +324,40 @@ final class EqualizerBarsView: NSView {
             animation.duration = pulse.period
             animation.repeatCount = .infinity
             // The swell tops out just after the beat.
-            animation.beginTime = holder.convertTime(first - rise + 0.02, from: nil)
-            animation.preferredFrameRateRange = frameRate == Self.batteryFrameRate ? Self.batteryPulseRate : Self.pulseRate
-            holder.add(animation, forKey: Self.pulseKey)
+            animation.preferredFrameRateRange = pulseFrameRate
+            let start = first - rise + 0.02
+            if settling {
+                // The ease down first; the new beat starts once it is over.
+                let settle = Self.settle(from: swell, rate: pulseFrameRate)
+                settle.beginTime = holder.convertTime(now, from: nil)
+                animation.beginTime = holder.convertTime(max(start, now + settle.duration), from: nil)
+                holder.add(animation, forKey: Self.pulseKey)
+                holder.add(settle, forKey: Self.settleKey)
+            } else {
+                animation.beginTime = holder.convertTime(start, from: nil)
+                holder.add(animation, forKey: Self.pulseKey)
+            }
         }
         CATransaction.commit()
     }
 
+    private var pulseFrameRate: CAFrameRateRange {
+        frameRate == Self.batteryFrameRate ? Self.batteryPulseRate : Self.pulseRate
+    }
+
+    /// A cut-off swell easing back from `value` to rest.
+    private static func settle(from value: CGFloat, rate: CAFrameRateRange) -> CABasicAnimation {
+        let settle = CABasicAnimation(keyPath: "transform.scale.y")
+        settle.fromValue = value
+        settle.toValue = 1
+        settle.duration = pulseFall
+        settle.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        settle.preferredFrameRateRange = rate
+        return settle
+    }
+
     nonisolated static let pulseKey = "pulse"
+    nonisolated static let settleKey = "settle"
     /// A beat's swell up and back down.
     nonisolated static let pulseRise: CFTimeInterval = 0.1
     nonisolated static let pulseFall: CFTimeInterval = 0.32
@@ -335,10 +390,35 @@ final class EqualizerBarsView: NSView {
             let offset = (rising ? Self.easeTime(at: fraction) : 2 - Self.easeTime(at: fraction)) * spec.period
             adapted[index] = spec
             let breathing = Self.breathing(spec, frameRate: frameRate)
-            breathing.timeOffset = offset
+            let newStart = now - offset
             bar.transform = CATransform3DMakeScale(1, spec.low, 1)
+            // The old breathing crossfades into the new one over `blend`: sampled once here, both
+            // curves mixed with a smooth step, so the bar's speed changes gradually as well as
+            // its place (restarting on the new curve kept the place but the speed jumped).
+            let oldStart = starts[index]
+            let drift = Double(current) - Self.breathingValue(old, start: oldStart, at: now)
+            let steps = max(Int((Self.blend * Double(frameRate.preferred ?? 20)).rounded()), 2)
+            let values: [Double] = (0...steps).map { step in
+                let t = Double(step) / Double(steps)
+                let time = now + t * Self.blend
+                let weight = t * t * (3 - 2 * t)
+                let from = Self.breathingValue(old, start: oldStart, at: time) + drift * (1 - weight)
+                let to = Self.breathingValue(spec, start: newStart, at: time)
+                return from + (to - from) * weight
+            }
+            let transition = CAKeyframeAnimation(keyPath: "transform.scale.y")
+            transition.values = values
+            transition.duration = Self.blend
+            transition.calculationMode = .linear
+            transition.beginTime = bar.convertTime(now, from: nil)
+            transition.preferredFrameRateRange = frameRate
+            // Two animations, not a group (a group of infinite duration stood still): the new
+            // breathing starts as the crossfade ends, and the crossfade, added last, wins until then.
+            breathing.beginTime = bar.convertTime(now + Self.blend, from: nil)
+            breathing.timeOffset = offset + Self.blend
             bar.add(breathing, forKey: Self.animationKey)
-            starts[index] = now - offset
+            bar.add(transition, forKey: Self.blendKey)
+            starts[index] = newStart
         }
         specs = adapted
         CATransaction.commit()
@@ -374,14 +454,23 @@ final class EqualizerBarsView: NSView {
         private var misses = [0, 0]
 
         /// Seconds of music each reading is taken from.
-        static let window: CFTimeInterval = 3
-        /// How long the tap sleeps after each window: the music is sampled 3 s in every 13.
-        static let rest: Duration = .seconds(10)
+        static let window: CFTimeInterval = 2
+        /// On the charger: a reading from every 0.8 s of music, then 1 s of rest.
+        static let chargingWindow: CFTimeInterval = 0.8
+        static let chargingRest: Duration = .seconds(1)
+        /// How long the tap rests after each window: the music is analysed 2 s in every 8.
+        static let rest: Duration = .seconds(6)
         /// Silence this long (a track's end, a pause) brings the resting breathing back; a
         /// shorter gap between two songs keeps the music's.
-        static let silence: CFTimeInterval = 3
+        static let silence: CFTimeInterval = 1
 
         var isFollowing: Bool { lock.withLock { isActive && following } }
+
+        private var onCharger = false
+        var charging: Bool {
+            get { lock.withLock { onCharger } }
+            set { lock.withLock { onCharger = newValue } }
+        }
 
         var onBattery: Bool {
             get { lock.withLock { battery } }
@@ -429,8 +518,9 @@ final class EqualizerBarsView: NSView {
                     DispatchQueue.main.async { [weak self] in self?.view?.followingChanged(false) }
                 } else if let handOver {
                     DispatchQueue.main.async { [weak self] in
-                        self?.view?.apply(handOver)
-                        AudioSpectrumTap.shared.rest(for: Self.rest)
+                        guard let view = self?.view else { return }
+                        view.apply(handOver)
+                        AudioSpectrumTap.shared.rest(for: view.continuous ? Self.chargingRest : Self.rest)
                     }
                 }
             }
@@ -458,7 +548,7 @@ final class EqualizerBarsView: NSView {
                 count += 1
             }
             windowTime += interval * Double(batch.count)
-            guard windowTime >= Self.window, count > 0 else { return }
+            guard windowTime >= (onCharger ? Self.chargingWindow : Self.window), count > 0 else { return }
 
             // The breathing, eased from the last one: a new song or a volume change moves it over
             // a couple of windows instead of all at once.
@@ -515,6 +605,9 @@ final class EqualizerBarsView: NSView {
         /// The neighbour of a beat's bar moves with it by this share.
         static let neighbourShare: CGFloat = 0.15
 
+        /// How much faster the bars move while following the music than the pace alone gives (10 %).
+        static let speed = 1.1
+
         /// Each bar through its band's range over the window (its mean, give or take its spread),
         /// faster the more the music moves. The faintest wavers barely move a bar: the spread
         /// counts only past a small floor.
@@ -539,7 +632,7 @@ final class EqualizerBarsView: NSView {
                 // 0 (a held note) … ~0.3 (drums): a third slower … two fifths faster than resting.
                 let pace = min(max(1.3 - 2.3 * liveliness, 0.6), 1.3)
                 return EqualizerBarsView.Bar(low: CGFloat(low), high: CGFloat(high),
-                                             period: base.period * pace * (battery ? 1.2 : 1), phase: base.phase)
+                                             period: base.period * pace * (battery ? 1.2 : 1) / speed, phase: base.phase)
             }
         }
 
@@ -556,6 +649,32 @@ final class EqualizerBarsView: NSView {
                 abs(x.low - y.low) > 0.06 || abs(x.high - y.high) > 0.06 || abs(x.period - y.period) / y.period > 0.15
             }
         }
+    }
+
+    /// How long the old breathing takes to turn into the new one.
+    nonisolated static let blend: CFTimeInterval = 0.6
+
+    /// A breathing's value at `time`, for a breathing whose phase 0 fell at `start`: up from its
+    /// low on the ease-in-ease-out curve, then back down (autoreversed).
+    nonisolated static func breathingValue(_ bar: Bar, start: CFTimeInterval, at time: CFTimeInterval) -> Double {
+        var cycle = ((time - start) / bar.period).truncatingRemainder(dividingBy: 2)
+        if cycle < 0 { cycle += 2 }
+        let progress = cycle < 1 ? cycle : 2 - cycle
+        return Double(bar.low) + Double(bar.high - bar.low) * easeValue(at: progress)
+    }
+
+    /// The breathing's ease-in-ease-out curve's value (0…1) at `time` (0…1), from the same table.
+    nonisolated static func easeValue(at time: Double) -> Double {
+        let x = min(max(time, 0), 1)
+        let table = easeTable
+        var lo = 0, hi = table.count - 1
+        while hi - lo > 1 {
+            let mid = (lo + hi) / 2
+            if table[mid].x < x { lo = mid } else { hi = mid }
+        }
+        let a = table[lo], b = table[hi]
+        let t = b.x > a.x ? (x - a.x) / (b.x - a.x) : 0
+        return a.y + (b.y - a.y) * t
     }
 
     /// The time (0…1) at which the breathing's ease-in-ease-out curve — CAMediaTimingFunction's
@@ -586,8 +705,12 @@ final class EqualizerBarsView: NSView {
         starts = specs.map { now - $0.period * $0.phase }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for holder in pulseLayers { holder.removeAnimation(forKey: Self.pulseKey) }
+        for holder in pulseLayers {
+            holder.removeAnimation(forKey: Self.pulseKey)
+            holder.removeAnimation(forKey: Self.settleKey)
+        }
         for (bar, spec) in zip(barLayers, specs) {
+            bar.removeAnimation(forKey: Self.blendKey)
             bar.transform = CATransform3DMakeScale(1, spec.low, 1)
             if isAnimating {
                 bar.add(Self.breathing(spec, frameRate: frameRate), forKey: Self.animationKey)

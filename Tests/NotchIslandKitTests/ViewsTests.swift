@@ -224,6 +224,18 @@ struct PowerCopyTests {
 
 @Suite("Equalizer")
 struct EqualizerTests {
+    @Test func theCrossfadeCurvesMatchTheBreathing() {
+        // The ease curve and its inverse agree, so a crossfade starts where the bar is.
+        for value in stride(from: 0.0, through: 1.0, by: 0.1) {
+            #expect(abs(EqualizerBarsView.easeValue(at: EqualizerBarsView.easeTime(at: value)) - value) < 0.01)
+        }
+        // A breathing rises from its low to its high over one period, then falls back.
+        let bar = EqualizerBarsView.Bar(low: 0.2, high: 0.8, period: 0.5, phase: 0)
+        #expect(abs(EqualizerBarsView.breathingValue(bar, start: 10, at: 10) - 0.2) < 0.001)
+        #expect(abs(EqualizerBarsView.breathingValue(bar, start: 10, at: 10.5) - 0.8) < 0.001)
+        #expect(abs(EqualizerBarsView.breathingValue(bar, start: 10, at: 11) - 0.2) < 0.001)
+    }
+
     @Test func barsAreStaggered() {
         let bars = EqualizerBarsView.bars
         #expect(bars.count == 5)
