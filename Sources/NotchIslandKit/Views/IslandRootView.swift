@@ -44,6 +44,8 @@ struct IslandRootView: View {
 
     @ViewBuilder private var island: some View {
         let presentation = model.island.presentation
+        // Read so that `IslandModel.apply`'s catch-up reaches this view.
+        let _ = model.island.revision
         // While the render server moves the outline, the surface is drawn still as the hold says,
         // and stays until the outline has landed, also in the notch (`IslandOutlineMotion`).
         let hold = model.island.surfaceHold
@@ -151,13 +153,15 @@ private struct IslandContentStack: View {
                     // The panel's content leaves in a tenth of a second and the glass shrinks alone:
                     // riding the whole close spring, every frame re-rendered the content too.
                     .opacity(isShown ? 1 : 0)
-                    .animation(isShown ? nil : .easeOut(duration: 0.1), value: isShown)
+                    // Into Settings the render server cross-fades the whole content instead
+                    // (`IslandWindowController.crossFadeToSettings`).
+                    .animation(isShown || presentation.isSettings ? nil : .easeOut(duration: 0.1), value: isShown)
                     .environment(\.isIslandPanelHidden, !isShown)
             }
             if shownPage == nil {
                 content(for: presentation)
                     .id(presentation.surfaceKey)
-                    .transition(.islandContent(reduceMotion: crossFades))
+                    .transition(presentation.isSettings ? .identity : .islandContent(reduceMotion: crossFades))
             }
         } }
         .onChange(of: shownPage, initial: true) { _, page in if let page { keptPage = page } }

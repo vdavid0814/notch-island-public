@@ -26,6 +26,9 @@ import SwiftUI
     /// Called right after `presentation` changed (the window controller arms the settle here).
     @ObservationIgnored var didTransition: ((_ from: IslandPresentation, _ to: IslandPresentation) -> Void)?
 
+    /// Bumped a turn after each move on the render server; the island's root reads it, so a missed
+    /// update of `presentation` is caught up then (see `apply`).
+    private(set) var revision = 0
     /// While true, a transition's hooks are running; see `apply`.
     @ObservationIgnored private var isApplying = false
     /// The latest request made from inside a transition's hooks.
@@ -71,9 +74,16 @@ import SwiftUI
                 presentation = next
             }
         } else if let spring, let hold = outlineMover?.move(from: from, to: next, spring: spring) {
-            withoutAnimation { surfaceHold = hold }
+                withoutAnimation { surfaceHold = hold }
             withAnimation(Motion.contentSwap(from: from, to: next)) {
                 presentation = next
+            }
+            // The new presentation once more, a turn later: SwiftUI now and then drew the island
+            // between the hold and the presentation above (with the old content) and then missed
+            // the presentation's change, and the old content stayed until the outline landed half a
+            // second later (the panel's widgets on Settings' growing island; traced, v0.4.2 too).
+            Task { @MainActor [weak self] in
+                withAnimation(Motion.contentSwap(from: from, to: next)) { self?.revision &+= 1 }
             }
         } else {
             withAnimation(animation) {

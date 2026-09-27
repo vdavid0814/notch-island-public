@@ -29,9 +29,6 @@ nonisolated enum IslandSettingsPane: String, CaseIterable, Identifiable, Sendabl
         }
     }
 
-    /// How long a page's views keep arriving after it is built (the widget gallery's previews).
-    var settlingTime: TimeInterval { self == .widgets ? 1.6 : 0.5 }
-
     /// Under the page's title.
     var subtitle: String {
         switch self {
@@ -95,9 +92,6 @@ struct IslandSettingsView: View {
     /// every frame (their AppKit controls included: ~0.45 s of main thread per open, measured) and
     /// the growth stuttered; the empty window colour grows in smoothly instead.
     @State private var showsPages = false
-    /// The pages are in but still transparent: built while the island grows (the growth runs on
-    /// the render server, so the main thread's work cannot hold it up).
-    @State private var buildsPages = false
 
     var body: some View {
         let layout = model.layout
@@ -127,7 +121,7 @@ struct IslandSettingsView: View {
             // Gone from sight as soon as Settings starts to close (the same fade the removal had);
             // torn down with the rest of Settings once it has closed, on the efficiency cores
             // (`IslandController`), not in the turn the shrink starts in.
-            if buildsPages {
+            if showsPages {
                 // The sidebar floats as far from the island's side as from its bottom, its lower
                 // outer corner concentric with the island's (radius = the island's minus the gap).
                 let gap = Self.sidebarGap
@@ -148,7 +142,8 @@ struct IslandSettingsView: View {
                         .environment(\.colorScheme, .dark)
                         .environment(\.appearsActive, true)
                 }
-                .opacity(showsPages && model.island.presentation.isSettings ? 1 : 0)
+                .opacity(model.island.presentation.isSettings ? 1 : 0)
+                .transition(.opacity)
             } else {
                 Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -160,19 +155,10 @@ struct IslandSettingsView: View {
             MemoryRelief.afterLargeSurfaceClosed()
         }
         .task {
-            // A frame into the growth the pages are built, unseen, on the efficiency cores: one
-            // burst of ~100–200 ms on a performance core at full clock was most of an opening's
-            // energy (Energy Impact ~100–150, measured), and at background quality of service it
-            // takes about twice as long, which the growth hides.
-            try? await Task.sleep(for: .milliseconds(16))
-            guard !Task.isCancelled else { return }
-            let started = ContinuousClock.now
-            MainThrift.run(in: NSApp.windows.first { $0 is IslandPanel }) { withoutAnimation { buildsPages = true } }
-            // Their nested views (the widget studio, the pictures' loads) settle in the turns after.
-            MainThrift.lowPower(for: model.settingsPane.settlingTime)
-            // Shown as before: after most of the growth (its tail is too small to see a frame drop in).
-            let reveal = Duration.seconds(model.preferences.animationDuration * 0.9)
-            try? await Task.sleep(for: max(.zero, reveal - (ContinuousClock.now - started) - .milliseconds(16)))
+            // Most of the growth first (its tail is too small to see a frame drop in). At full
+            // speed: built unseen on the efficiency cores it took up to a second longer to appear,
+            // and held the panel's fading widgets still while it ran (tried, seen on video).
+            try? await Task.sleep(for: .seconds(model.preferences.animationDuration * 0.9))
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.16)) { showsPages = true }
             // Synchronous system queries (Login Items alone took ~20 ms): after the pages are in.

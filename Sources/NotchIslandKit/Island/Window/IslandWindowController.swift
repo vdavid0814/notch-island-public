@@ -242,7 +242,27 @@ import SwiftUI
         let fromRect = StageGeometry.islandFrame(for: from, layout: stagedLayout ?? layout, metrics: metrics)
         let toRect = StageGeometry.islandFrame(for: to, layout: layout, metrics: metrics)
         grow(toCover: fromRect.union(toRect))
+        if to.isSettings, !from.isSettings, !from.isIdle { crossFadeToSettings() }
     }
+
+    /// Into Settings the island's content cross-fades on the render server, as one picture: the
+    /// panel's widgets (or Siri, or the pill) into Settings' ground. Faded by SwiftUI frame by
+    /// frame, a busy main thread (Settings being set up, most of all the first time) held the fade
+    /// still, and the widgets stood on the growing island for up to half a second (seen on video,
+    /// v0.4.2 too). The island's own content swap is not animated then (`IslandContentStack`).
+    private func crossFadeToSettings() {
+        guard let layer = hostingView?.layer else { return }
+        // What is on screen now (the grown stage, still the old content) is where the fade starts.
+        CATransaction.flush()
+        let fade = CATransition()
+        fade.type = .fade
+        fade.duration = Self.settingsCrossFade
+        fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(fade, forKey: "settingsCrossFade")
+    }
+
+    /// As long as the content swap it replaces (`Motion.contentSwap`).
+    static let settingsCrossFade: CFTimeInterval = 0.18
 
     private func grow(toCover islands: CGRect) {
         guard let metrics else { return }
