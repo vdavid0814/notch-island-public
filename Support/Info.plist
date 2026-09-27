@@ -19,7 +19,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.4.4</string>
+	<string>0.4.5</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -34,15 +34,9 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>14</string>
+	<string>15</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>27.0</string>
-	<key>LSUIElement</key>
-	<true/>
-	<!-- The allocator's space-efficient mode, SwiftUI's renderer on the CPU (see
-	     Sources/NotchIsland/main.swift). -->
 	<key>LSEnvironment</key>
 	<dict>
 		<key>MallocSpaceEfficient</key>
@@ -50,6 +44,10 @@
 		<key>RB_DISABLE_GPU</key>
 		<string>1</string>
 	</dict>
+	<key>LSMinimumSystemVersion</key>
+	<string>27.0</string>
+	<key>LSUIElement</key>
+	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>NotchIsland reads what Music and Spotify are playing so it can show it in the island, and sends them play, pause and skip commands.</string>
 	<key>NSAudioCaptureUsageDescription</key>

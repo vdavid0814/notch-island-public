@@ -650,6 +650,8 @@ struct AboutSettingsPage: View {
                 .padding(.vertical, 6)
             }
 
+            FeedbackSection()
+
             Section {
                 PermissionRow(title: "Accessibility", detail: "⌘Space for Siri, and replacing the volume and brightness HUD.",
                               systemImage: "accessibility", tint: .blue,
@@ -673,6 +675,8 @@ struct AboutSettingsPage: View {
             } footer: {
                 Text("NotchIsland works without any of these; each one turns on the feature it names.")
             }
+
+            DiagnosticsSection()
 
             Section("Shelf") {
                 LabeledContent("Items on the Shelf", value: count.formatted())

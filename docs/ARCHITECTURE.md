@@ -123,3 +123,28 @@ the start of the video.
 island's measured position (offset from the notch centre). Transitions, stage
 frames, banner changes, feature start/stop and permission changes log at
 `.notice`, so `log show` finds them.
+
+### Reports to the developer
+
+`Features/Diagnostics/`. Off until the user turns it on in About; bug reports and feature requests
+(About's two buttons) work either way.
+
+* **What is read.** `DiagnosticsProbes` (the Mac, the bundle, permissions, Spotlight against the disk,
+  the log, crash/hang reports, System Information), `BatteryProbe` (the gauge, the top energy users,
+  power assertions), `DiagnosticsAppState` (the island, screens, features, preferences, copies,
+  running apps), `DiagnosticsHistory` (launches, versions, runs that did not end with a quit,
+  presentations since launch).
+* **Energy.** `EnergyMeter` reads `proc_pid_rusage` (energy in nJ, CPU, wakeups, footprint) for the
+  app and its helper processes every 10 minutes while diagnostics are on; the report has averages
+  since launch, the last hour, on battery and on the charger, the worst 10 minutes and a timeline.
+* **The reference.** `docs/diagnostics-baseline.json` holds the developer's Mac's numbers for the
+  published version (`Scripts/publish-baseline.sh`, only on a Mac with `ni2.diagnostics.reference`).
+  Every copy fetches it from GitHub, with the latest release, and flags a metric past both the
+  rule's minimum and its factor times the reference (`DiagnosticsMetric.Rule`; the file's `rules`
+  override the defaults without a release). Two 10-minute samples in a row past it send a report at
+  once, at most every 6 hours.
+* **Discord.** `Scripts/discord-setup.py` builds the channels (alerts; users, bugs and features
+  forums; baseline; how-to) and writes `Support/diagnostics-webhooks.json`, which `Scripts/build.sh`
+  puts in Info.plist (`NIDiagnosticsConfig`). Each Mac gets its own post in the users forum (its id is
+  kept in `ni2.diagnostics.userThread`); bugs and requests get a post in their forum; anything that
+  needs a look gets a line in alerts linking to the details. A failed delivery waits in the outbox.

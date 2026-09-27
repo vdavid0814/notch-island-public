@@ -39,6 +39,10 @@ nonisolated enum AppCommand: Sendable, Equatable {
     case customize
     /// ⌘Space (Siri or Spotlight), from the notch.
     case assistant
+    /// A diagnostics report now (`diagnostics/send`); only while the user has diagnostics on.
+    case sendDiagnostics
+    /// The developer's Mac writes its numbers as the reference (`diagnostics/baseline`).
+    case publishBaseline
     case demo(DemoCommand)
 
     static let scheme = "notchisland"
@@ -56,7 +60,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
     /// caller can log them) instead of guessing.
     ///
     ///     open[?page=home|shelf|timer]   close   pin   settings[/general|widgets|activities|permissions|about]
-    ///     customize   widget/<kind>   siri
+    ///     customize   widget/<kind>   siri   diagnostics/send   diagnostics/baseline
     ///     media/play|pause|toggle|next|previous
     ///     timer[?minutes=N]   timer/cancel   stopwatch
     ///     demo/media|charging|unplug|low|timerdone|drop|shelf|reset
@@ -92,6 +96,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
             return IslandSettingsPane.named(String(route.dropFirst("settings/".count))).map { .showSettingsPane($0) }
         case "customize": return .customize
         case "assistant", "siri": return .assistant
+        case "diagnostics/send": return .sendDiagnostics
+        case "diagnostics/baseline": return .publishBaseline
 
         case "media/play": return .media(.play)
         case "media/pause": return .media(.pause)

@@ -36,6 +36,8 @@ import Observation
     let activity = SystemActivity()
     let haptics: Haptics
     let launchAtLogin = LaunchAtLogin()
+    /// Reports to the developer and the user's bug reports (About ▸ Diagnostics).
+    let diagnostics = DiagnosticsCenter()
 
     /// Geometry of the screen the island lives on; nil while no screen exists (clamshell with no
     /// display, or the moment between two display configurations).
@@ -148,6 +150,7 @@ import Observation
         }
         installTransitionHaptics()
         observeFeatures()
+        diagnostics.start(model: self)
 
         let queued = pendingCommands
         pendingCommands.removeAll()
@@ -174,6 +177,7 @@ import Observation
         Log.app.notice("stop")
 
         demo.cancel()
+        diagnostics.stop()
         FeatureState.actions(from: appliedFeatures, to: .off).forEach(run)
         appliedFeatures = nil
         clipboard.setWatching(false)
@@ -225,6 +229,14 @@ import Observation
             showCustomize()
         case .assistant:
             controller.openAssistant()
+        case .sendDiagnostics:
+            guard diagnostics.isEnabled else {
+                Log.app.notice("diagnostics/send ignored: diagnostics are off")
+                return
+            }
+            Task { await diagnostics.sendReport(.manual) }
+        case .publishBaseline:
+            Task { await diagnostics.publishBaseline() }
         case .demo(let demoCommand):
             demo.run(demoCommand, model: self)
         }
@@ -301,6 +313,10 @@ import Observation
         }
         windowController.logState()
     }
+
+    /// For diagnostics reports: the feature state last applied, and whether ⌘Space is listened for.
+    var diagnosticsFeatureState: String { appliedFeatures.map { String(describing: $0) } ?? "stopped" }
+    var diagnosticsCommandSpaceTapRunning: Bool { commandSpaceTap.isRunning }
 
     /// Settings ▸ Siri changed the shortcut: the key tap listens for the new modifier at once.
     func siriShortcutChanged(_ shortcut: SiriShortcut) {

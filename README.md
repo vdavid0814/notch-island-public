@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4.4 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4.5 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -18,6 +18,31 @@ events, volume/brightness and dropped files live there the rest of the time.
 For older versions, see the **[Releases page](https://github.com/vdavid0814/notch-island-public/releases)**.
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.4.5
+
+Report bugs and ideas straight from the app, and optional diagnostics that help find problems on
+your Mac.
+
+**Report a Problem or Suggest a Feature** (Settings ▸ About)
+- **Report a Bug:** what happened, what you expected, how to make it happen and how often.
+- **Request a Feature:** your idea and why it would help.
+- Both go straight to the developer, with the app's state attached if you allow it. Without a
+  connection they are kept and sent later.
+
+**Diagnostics** (Settings ▸ About ▸ Diagnostics, off by default)
+- At launch, every 6 hours, after a crash and when NotchIsland uses unusually much energy, a report
+  goes to the developer: the Mac, macOS, displays and sound devices, permissions, every setting and
+  feature's state, whether Spotlight finds your apps, NotchIsland's log and crash reports.
+- **Energy:** NotchIsland's own use in milliwatts, CPU, wakeups and memory, a reading every 10
+  minutes, on battery and on the charger, plus the battery's health and the apps using the most
+  energy.
+- Every number is compared with the developer's Mac on the same version; anything unusual is
+  flagged at once.
+- **Preview Report…** shows exactly what would be sent. Never sent: your clipboard, the files on the
+  Shelf, what you search for, or what is playing.
 
 ---
 

@@ -39,6 +39,24 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/NotchIsland" "$APP/Contents/MacOS/NotchIsland"
 cp "$ROOT/Support/Info.plist" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
+# Where diagnostics and bug reports go (About). Support/diagnostics-webhooks.json, written by
+# Scripts/discord-setup.py, routes each kind to its channel; otherwise DIAGNOSTICS_WEBHOOK or the
+# first line of Support/diagnostics-webhook.txt sends everything to one channel. Both files are
+# git-ignored because the repository is public.
+CONFIG_JSON="$ROOT/Support/diagnostics-webhooks.json"
+WEBHOOK="${DIAGNOSTICS_WEBHOOK:-}"
+if [[ -z "$WEBHOOK" && -f "$ROOT/Support/diagnostics-webhook.txt" ]]; then
+  WEBHOOK="$(head -n 1 "$ROOT/Support/diagnostics-webhook.txt" | tr -d '[:space:]')"
+fi
+if [[ -f "$CONFIG_JSON" ]]; then
+  plutil -insert NIDiagnosticsConfig -string "$(tr -d '\n' < "$CONFIG_JSON")" "$APP/Contents/Info.plist"
+  echo "==> diagnostics: Discord channels from ${CONFIG_JSON#"$ROOT"/}"
+elif [[ -n "$WEBHOOK" ]]; then
+  /usr/libexec/PlistBuddy -c "Add :NIDiagnosticsWebhookURL string $WEBHOOK" "$APP/Contents/Info.plist"
+  echo "==> diagnostics: one webhook (run Scripts/discord-setup.py for separate channels)"
+else
+  echo "    no diagnostics webhook: sending reports is disabled in this build"
+fi
 # The app's icon (Support/AppIcon.png, rendered to .icns): shown in Finder, the Dock and the DMG.
 cp "$ROOT/Support/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 

@@ -366,6 +366,9 @@ private struct AboutSettings: View {
                     .foregroundStyle(.secondary)
             }
 
+            FeedbackSection()
+            DiagnosticsSection()
+
             Section("Shelf") {
                 LabeledContent("Items on the Shelf", value: count.formatted())
                 Button("Clear Shelf…", role: .destructive) {

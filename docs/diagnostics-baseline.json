@@ -1,0 +1,44 @@
+{
+  "build": "15",
+  "created": "2026-09-27T21:00:27Z",
+  "machine": "Mac17,3 \u00b7 Apple M5",
+  "metrics": {
+    "appSearchSeconds": 0,
+    "cpuPercent": 5.71,
+    "gallerySeconds": 0.06,
+    "helpersPowerMW": 0.04,
+    "logErrorsPerHour": 7.33,
+    "memoryMB": 83.25,
+    "peakMemoryMB": 122.19,
+    "powerMW": 48.09,
+    "powerOnBatteryMW": 47.94,
+    "recentPowerMW": 47.94,
+    "spotlightMissingPercent": 2.17,
+    "wakeupsPerSecond": 35.75,
+    "worstPowerMW": 103.17
+  },
+  "rules": {
+    "memoryMB": {
+      "factor": 2,
+      "minimum": 150
+    },
+    "powerMW": {
+      "factor": 2,
+      "minimum": 25
+    },
+    "powerOnBatteryMW": {
+      "factor": 2,
+      "minimum": 25
+    },
+    "recentPowerMW": {
+      "factor": 2,
+      "minimum": 25
+    },
+    "wakeupsPerSecond": {
+      "factor": 2,
+      "minimum": 20
+    }
+  },
+  "uptimeHours": 0.3,
+  "version": "0.4.5"
+}
