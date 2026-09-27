@@ -387,14 +387,49 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// The assistant opened.
     func begin() {
         end()
-        if case .available = SystemLanguageModel.default.availability {
-            intelligenceAvailable = true
+        // Read ahead in the background (`prewarm`): the first query loads the framework's model
+        // catalogue on the calling thread (~0.1 s on the main thread at the first opening, measured).
+        if let known = knownIntelligence {
+            intelligenceAvailable = known
+            Task { [weak self] in
+                let now = await Self.readIntelligence()
+                self?.knownIntelligence = now
+                if self?.intelligenceAvailable != now { self?.intelligenceAvailable = now }
+            }
         } else {
-            intelligenceAvailable = false
+            intelligenceAvailable = Self.readIntelligenceNow()
+            knownIntelligence = intelligenceAvailable
         }
         // The app list is read ahead (one Spotlight query, off the main thread), so the gallery
         // opens full.
         loadLists(for: .applications, query: "")
+    }
+
+    @ObservationIgnored private var knownIntelligence: Bool?
+    @ObservationIgnored private var hasOpenedGallery = false
+
+    nonisolated static func readIntelligenceNow() -> Bool {
+        if case .available = SystemLanguageModel.default.availability { true } else { false }
+    }
+
+    @concurrent nonisolated static func readIntelligence() async -> Bool { readIntelligenceNow() }
+
+    /// What the first opening of Siri would otherwise do at once — Apple Intelligence's
+    /// availability, the app list and the gallery's first icons — done a while after launch on
+    /// the background queue (efficiency cores), a little at a time. The first opening then only
+    /// builds its views (it cost Energy Impact 130, the app gallery 300, measured cold).
+    func prewarm(icons: Int = 42) async {
+        knownIntelligence = await Self.readIntelligence()
+        if allApps.isEmpty {
+            allApps = await sources.allApps()
+            allAppsRead = Date()
+        }
+        let gallery = settings().gallerySort == .name
+            ? allApps.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            : allApps
+        for hit in gallery.prefix(icons) {
+            _ = await AssistantIcons.thumbnail(for: hit, points: AssistantIcons.galleryIconSize, prewarming: true)
+        }
     }
 
     /// The assistant closed: cancel everything and forget the query and the lists.
@@ -499,6 +534,12 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// ⌘1, ⌘2, ⌘3, or a suggestion row; nil goes back to the root. The query stays, so a search
     /// can be narrowed to one kind.
     func open(_ category: AssistantCategory?) {
+        // The app gallery's first build (its grid and every cell's types): on the efficiency
+        // cores, once (Energy Impact ~95 at full clock, measured).
+        if category == .applications, !hasOpenedGallery {
+            hasOpenedGallery = true
+            MainThrift.lowPower(for: 0.9)
+        }
         // A suggestion the user switched off does not open by its shortcut either.
         if let category, !settings().categories.contains(category) { return }
         if answer != nil {
@@ -847,11 +888,17 @@ nonisolated enum AssistantMatch {
     /// it slow to open. Only cells on screen ask (the grid is lazy).
     static func cachedThumbnail(for hit: AssistantHit) -> NSImage? { thumbnails[hit.url.path] }
 
-    static func thumbnail(for hit: AssistantHit, points: CGFloat) async -> NSImage? {
+    /// The gallery cells' icon side.
+    static let galleryIconSize: CGFloat = 48
+
+    static func thumbnail(for hit: AssistantHit, points: CGFloat, prewarming: Bool = false) async -> NSImage? {
         let key = hit.url.path
         if let image = thumbnails[key] { return image }
         let path = hit.url.resolvingSymlinksInPath().path
-        guard let cgImage = await render(path: path, pixels: Int(points * 2)), !Task.isCancelled else { return nil }
+        let pixels = Int(points * 2)
+        let rendered = prewarming ? await Thrifty.runInBackground { draw(path: path, pixels: pixels) }
+                                  : await render(path: path, pixels: pixels)
+        guard let cgImage = rendered, !Task.isCancelled else { return nil }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: points, height: points))
         thumbnails[key] = image
         return image
@@ -882,9 +929,10 @@ nonisolated enum AssistantMatch {
         return icon
     }
 
+    /// The full icons go; the gallery's thumbnails (small, drawn off the main thread) stay, so
+    /// the gallery never draws a hundred icons again at an opening.
     static func purge() {
         cache = [:]
-        thumbnails = [:]
     }
 
     private static var purgeTask: Task<Void, Never>?

@@ -383,7 +383,7 @@ private struct GalleryCell: View {
     let hit: AssistantHit
     let isSelected: Bool
 
-    static let iconSize: CGFloat = 48
+    static let iconSize: CGFloat = AssistantIcons.galleryIconSize
     @State private var icon: NSImage?
 
     var body: some View {

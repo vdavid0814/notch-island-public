@@ -19,22 +19,39 @@ struct PreviewMenuBar: View {
         GeometryReader { proxy in
             let inset = height * 0.5
             let side = max(0, (proxy.size.width - notchWidth) / 2 - inset - height * 0.4)
+            let now = Date.now
+            let menusKey = PreviewMenuBarFit.Key(height: height, side: side, text: "")
+            let statusKey = PreviewMenuBarFit.Key(height: height, side: side, text: Self.dateText(now, showsDate: true)
+                                                  + "|" + Self.dateText(now, showsDate: false))
             HStack(spacing: 0) {
-                ViewThatFits(in: .horizontal) {
-                    menus(["Finder", "File", "Edit", "View", "Go", "Window", "Help"])
-                    menus(["Finder", "File", "Edit", "View", "Go"])
-                    menus(["Finder", "File", "Edit"])
-                    menus(["Finder"])
-                    menus([])
+                Group {
+                    // The variant that fits, once found for this width, is built alone: a ViewThatFits
+                    // lays out every variant it tries, text and all, and ~10 pictures each tried up
+                    // to five per side at every opening of Settings (measured: ~15–20 % of it).
+                    if let fit = PreviewMenuBarFit.menus[menusKey] {
+                        menus(Self.menuVariants[fit], now: now)
+                    } else {
+                        ViewThatFits(in: .horizontal) {
+                            ForEach(Self.menuVariants.indices, id: \.self) { index in
+                                menus(Self.menuVariants[index], now: now)
+                                    .onAppear { PreviewMenuBarFit.menus[menusKey] = index }
+                            }
+                        }
+                    }
                 }
                 .frame(width: side, alignment: .leading)
                 Spacer(minLength: 0)
-                ViewThatFits(in: .horizontal) {
-                    status(icons: Self.statusIcons, showsDate: true)
-                    status(icons: Self.statusIcons, showsDate: false)
-                    status(icons: Array(Self.statusIcons.suffix(2)), showsDate: false)
-                    status(icons: [], showsDate: false)
-                    EmptyView()
+                Group {
+                    if let fit = PreviewMenuBarFit.status[statusKey] {
+                        statusVariant(fit, now: now)
+                    } else {
+                        ViewThatFits(in: .horizontal) {
+                            ForEach(0..<Self.statusVariantCount, id: \.self) { index in
+                                statusVariant(index, now: now)
+                                    .onAppear { PreviewMenuBarFit.status[statusKey] = index }
+                            }
+                        }
+                    }
                 }
                 .frame(width: side, alignment: .trailing)
             }
@@ -55,7 +72,32 @@ struct PreviewMenuBar: View {
     /// Control Center, Wi-Fi and the battery, as on a MacBook's menu bar.
     static let statusIcons = ["battery.75percent", "wifi", "switch.2"]
 
-    private func menus(_ titles: [String]) -> some View {
+    static let menuVariants: [[String]] = [
+        ["Finder", "File", "Edit", "View", "Go", "Window", "Help"],
+        ["Finder", "File", "Edit", "View", "Go"],
+        ["Finder", "File", "Edit"],
+        ["Finder"],
+        [],
+    ]
+
+    static let statusVariantCount = 5
+
+    @ViewBuilder private func statusVariant(_ index: Int, now: Date) -> some View {
+        switch index {
+        case 0: status(icons: Self.statusIcons, showsDate: true, now: now)
+        case 1: status(icons: Self.statusIcons, showsDate: false, now: now)
+        case 2: status(icons: Array(Self.statusIcons.suffix(2)), showsDate: false, now: now)
+        case 3: status(icons: [], showsDate: false, now: now)
+        default: EmptyView()
+        }
+    }
+
+    static func dateText(_ date: Date, showsDate: Bool) -> String {
+        date.formatted(showsDate ? .dateTime.month(.abbreviated).day().weekday(.abbreviated).hour().minute()
+                                 : .dateTime.hour().minute())
+    }
+
+    private func menus(_ titles: [String], now: Date) -> some View {
         HStack(spacing: height * 0.62) {
             Image(systemName: "apple.logo").font(.system(size: height * 0.5, weight: .semibold))
             ForEach(Array(titles.enumerated()), id: \.offset) { index, title in
@@ -65,14 +107,27 @@ struct PreviewMenuBar: View {
         .fixedSize()
     }
 
-    private func status(icons: [String], showsDate: Bool) -> some View {
+    private func status(icons: [String], showsDate: Bool, now: Date) -> some View {
         HStack(spacing: height * 0.55) {
             ForEach(icons, id: \.self) { Image(systemName: $0) }
-            Text(Date.now, format: showsDate ? .dateTime.month(.abbreviated).day().weekday(.abbreviated).hour().minute()
-                                             : .dateTime.hour().minute())
+            Text(now, format: showsDate ? .dateTime.month(.abbreviated).day().weekday(.abbreviated).hour().minute()
+                                        : .dateTime.hour().minute())
         }
         .fixedSize()
     }
+}
+
+/// Which variant of the preview menu bar fits a side of a given width (`PreviewMenuBar`).
+@MainActor enum PreviewMenuBarFit {
+    struct Key: Hashable {
+        let height: CGFloat
+        let side: CGFloat
+        /// What the variants' width depends on besides the fixed titles (the clock's text).
+        let text: String
+    }
+
+    static var menus: [Key: Int] = [:]
+    static var status: [Key: Int] = [:]
 }
 
 /// NotchIsland's mark: the island hanging from a black squircle's top edge, in Liquid Glass

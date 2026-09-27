@@ -128,6 +128,7 @@ import Observation
         guard !isRunning else { return }
         isRunning = true
         Log.app.notice("start")
+        PerfTrace.install()
 
         permissions.start()
         activity.start()
@@ -151,7 +152,19 @@ import Observation
         let queued = pendingCommands
         pendingCommands.removeAll()
         queued.forEach(perform)
+
+        // What the first opening of Siri needs, read ahead while nothing else is going on.
+        if !hasPrewarmed {
+            hasPrewarmed = true
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(12), tolerance: .seconds(3))
+                guard let self, self.isRunning, !self.island.presentation.isAssistant else { return }
+                await self.assistant.prewarm()
+            }
+        }
     }
+
+    @ObservationIgnored private var hasPrewarmed = false
 
     /// Stops every service and removes every observer. Idempotent.
     func stop() {
@@ -204,8 +217,12 @@ import Observation
         case .showSettings:
             showSettings()
         case .showSettingsPane(let pane):
-            settingsPane = pane
-            showSettings()
+            if island.presentation.isSettings {
+                switchSettingsPane(to: pane)
+            } else {
+                settingsPane = pane
+                showSettings()
+            }
         case .editWidget(let kind):
             editWidget(kind)
         case .customize:
@@ -228,6 +245,16 @@ import Observation
         UserDefaults.standard.string(forKey: IslandSettingsPane.key) ?? ""
     ) ?? .general {
         didSet { UserDefaults.standard.set(settingsPane.rawValue, forKey: IslandSettingsPane.key) }
+    }
+
+    /// Another page while Settings is open: built on the efficiency cores (`MainThrift`), a turn
+    /// later (not from inside the sidebar's own selection handling). A page is one burst of
+    /// ~100 ms; at full clock on a performance core it cost Energy Impact ~100 per switch.
+    func switchSettingsPane(to pane: IslandSettingsPane) {
+        guard pane != settingsPane else { return }
+        Task { @MainActor in
+            MainThrift.run(in: NSApp.windows.first { $0 is IslandPanel }) { self.settingsPane = pane }
+        }
     }
 
     /// A widget whose editor Settings ▸ Widgets should open (from the island's context menu).

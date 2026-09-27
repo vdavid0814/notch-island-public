@@ -241,8 +241,17 @@ nonisolated extension BannerKind {
         guard !wantsAssistant else { return }
         wantsAssistant = true
         openWasUserInitiated = true
+        // The first opening sets Siri's views, the text field and the text input system up
+        // (~110 ms over a few turns, Energy Impact ~110; later openings ~30 ms): on the
+        // efficiency cores, a little slower, once.
+        if !hasOpenedAssistant {
+            hasOpenedAssistant = true
+            MainThrift.lowPower(for: 0.65)
+        }
         inputsChanged()
     }
+
+    private var hasOpenedAssistant = false
 
     /// Settings in the island, on `pane`. It takes the open panel's or the assistant's place.
     func openSettings(pane: IslandSettingsPane? = nil) {

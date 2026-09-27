@@ -155,7 +155,8 @@ struct IslandSettingsView: View {
             // Most of the growth first (its tail is too small to see a frame drop in).
             try? await Task.sleep(for: .seconds(model.preferences.animationDuration * 0.9))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.16)) { showsPages = true }
+            // Built on the efficiency cores: the pages only come in (and fade) once built.
+            MainThrift.run(in: NSApp.windows.first { $0 is IslandPanel }) { withAnimation(.easeOut(duration: 0.16)) { showsPages = true } }
             // Synchronous system queries (Login Items alone took ~20 ms): after the pages are in.
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
@@ -175,7 +176,7 @@ private struct SettingsPages: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SettingsSidebar(selection: Binding(get: { model.settingsPane }, set: { model.settingsPane = $0 }))
+            SettingsSidebar(selection: Binding(get: { model.settingsPane }, set: { model.switchSettingsPane(to: $0) }))
                 .frame(width: 236)
                 // Liquid Glass, smoked towards the black of the island.
                 .glassEffect(Glass.regular.tint(Color.black.opacity(0.45)), in: sidebarShape)

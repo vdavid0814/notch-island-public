@@ -152,12 +152,13 @@ struct ChosenDesktopBackdrop: View {
 
     /// Settings closed: nothing shows a wallpaper any more, so the decoded pictures go (they are
     /// the only large images the app keeps). The frames cached on disk make the next open quick.
+    /// The miniatures (960 px, ~2 MB each) and swatches stay: decoded again at every opening,
+    /// they were part of each visit's cost. Only the large pictures go.
     func purge() {
         for task in loading.values { task.cancel() }
         loading.removeAll()
-        images.removeAll()
-        desktopKey = nil
-        WallpaperSwatch.purge()
+        let full = "@\(WallpaperDetail.full.pixels)"
+        images = images.filter { !$0.key.hasSuffix(full) }
     }
 
     func cached(_ style: DesktopBackdropStyle, detail: WallpaperDetail = .full) -> NSImage? {

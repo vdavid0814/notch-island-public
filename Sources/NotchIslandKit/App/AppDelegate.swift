@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `AppModel` queues them until it has started.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
+            PerfTrace.mark(url.absoluteString)
             guard let command = AppCommand.parse(url) else {
                 Log.app.error("unrecognised URL: \(url.absoluteString, privacy: .public)")
                 continue

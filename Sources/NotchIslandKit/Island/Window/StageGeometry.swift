@@ -36,13 +36,14 @@ nonisolated enum StageGeometry {
         )
     }
 
-    /// The panel rests on its transition frame: the largest island, so every move to and from it
-    /// happens inside that frame, and neither the close's grow nor the open's settle resizes the
-    /// window (each cost a window-server round trip and a layout of the whole island, ~5–13 ms,
-    /// measured). The extra margin is transparent and lies below the menu bar's centre, which the
-    /// panel covers anyway. Everything smaller keeps the small margin (menu-bar items beside it).
+    /// The panel and Settings rest on their transition frame: each is the largest island of its
+    /// moves, so every move to and from it happens inside that frame, and neither the close's grow
+    /// nor the open's settle resizes the window (each cost a window-server round trip and a layout
+    /// of the whole island: ~5–13 ms for the panel, far more for Settings' AppKit form, measured).
+    /// The extra margin is transparent and lies below the menu bar's centre, which they cover
+    /// anyway. Everything smaller keeps the small margin (menu-bar items beside it).
     static func restingMargin(for p: IslandPresentation) -> CGFloat {
-        p.isExpanded ? IslandLayout.stageMargin : IslandLayout.restingMargin
+        p.isExpanded || p.isSettings ? IslandLayout.stageMargin : IslandLayout.restingMargin
     }
 
     /// Converts a global rect into the window-local coordinates of `frame`.

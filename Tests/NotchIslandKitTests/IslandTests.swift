@@ -205,7 +205,7 @@ import Testing
         let island = StageGeometry.islandFrame(for: presentation, layout: Self.layout, metrics: Self.metrics)
         let frame = StageGeometry.restingFrame(for: presentation, layout: Self.layout, metrics: Self.metrics)
         let m = StageGeometry.restingMargin(for: presentation)
-        #expect(m == (presentation.isExpanded ? IslandLayout.stageMargin : IslandLayout.restingMargin))
+        #expect(m == (presentation.isExpanded || presentation.isSettings ? IslandLayout.stageMargin : IslandLayout.restingMargin))
         #expect(frame == CGRect(x: island.minX - m, y: island.minY - m, width: island.width + 2 * m, height: island.height + m))
         #expect(frame.maxY == Self.metrics.screenFrame.maxY)
         #expect(island.midX == Self.metrics.notchRect.midX)
