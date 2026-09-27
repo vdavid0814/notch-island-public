@@ -421,8 +421,14 @@ nonisolated struct FileScope: Sendable, Equatable {
     func prewarm(icons: Int = 42) async {
         knownIntelligence = await Self.readIntelligence()
         if allApps.isEmpty {
-            allApps = await sources.allApps()
-            allAppsRead = Date()
+            let found = await sources.allApps()
+            // Siri may have opened (and read the list itself) meanwhile.
+            if allApps.isEmpty {
+                replaceLists {
+                    allApps = found
+                    allAppsRead = Date()
+                }
+            }
         }
         let gallery = settings().gallerySort == .name
             ? allApps.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
