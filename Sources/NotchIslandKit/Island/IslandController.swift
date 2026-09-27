@@ -479,6 +479,8 @@ nonisolated extension BannerKind {
     }
 
     private func presentationChanged(from: IslandPresentation, to: IslandPresentation) {
+        // Settings' teardown (its pages, forms and pictures, ~80 ms) once it has closed.
+        if from.isSettings, !to.isSettings { MainThrift.lowPower(for: 0.7) }
         if to.isOpen, !from.isOpen {
             if openWasUserInitiated { model.haptics.play(.open) }
         } else if from.isOpen, !to.isOpen {

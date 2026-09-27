@@ -29,6 +29,9 @@ nonisolated enum IslandSettingsPane: String, CaseIterable, Identifiable, Sendabl
         }
     }
 
+    /// How long a page's views keep arriving after it is built (the widget gallery's previews).
+    var settlingTime: TimeInterval { self == .widgets ? 1.6 : 0.5 }
+
     /// Under the page's title.
     var subtitle: String {
         switch self {
@@ -118,8 +121,10 @@ struct IslandSettingsView: View {
                 .help("Close (esc)")
             }
             .background(.black)
-            // Dropped as soon as Settings starts to close, so the shrink is as light as the growth.
-            if showsPages && model.island.presentation.isSettings {
+            // Gone from sight as soon as Settings starts to close (the same fade the removal had);
+            // torn down with the rest of Settings once it has closed, on the efficiency cores
+            // (`IslandController`), not in the turn the shrink starts in.
+            if showsPages {
                 // The sidebar floats as far from the island's side as from its bottom, its lower
                 // outer corner concentric with the island's (radius = the island's minus the gap).
                 let gap = Self.sidebarGap
@@ -140,6 +145,7 @@ struct IslandSettingsView: View {
                         .environment(\.colorScheme, .dark)
                         .environment(\.appearsActive, true)
                 }
+                .opacity(model.island.presentation.isSettings ? 1 : 0)
                 .transition(.opacity)
             } else {
                 Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -157,6 +163,9 @@ struct IslandSettingsView: View {
             guard !Task.isCancelled else { return }
             // Built on the efficiency cores: the pages only come in (and fade) once built.
             MainThrift.run(in: NSApp.windows.first { $0 is IslandPanel }) { withAnimation(.easeOut(duration: 0.16)) { showsPages = true } }
+            // Their nested views (the widget studio, the pictures' loads) settle in the turns after;
+            // on Widgets the gallery's previews then come in one after another (`GalleryCard`).
+            MainThrift.lowPower(for: model.settingsPane.settlingTime)
             // Synchronous system queries (Login Items alone took ~20 ms): after the pages are in.
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }

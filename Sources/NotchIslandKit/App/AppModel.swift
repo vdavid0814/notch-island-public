@@ -254,6 +254,7 @@ import Observation
         guard pane != settingsPane else { return }
         Task { @MainActor in
             MainThrift.run(in: NSApp.windows.first { $0 is IslandPanel }) { self.settingsPane = pane }
+            MainThrift.lowPower(for: pane.settlingTime)
         }
     }
 
