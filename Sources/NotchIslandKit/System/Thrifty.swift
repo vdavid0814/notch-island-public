@@ -38,7 +38,20 @@ nonisolated enum Thrifty {
 /// measured) and no performance core. Only for updates nobody is waiting on within the frame: the
 /// work takes about twice as long.
 @MainActor enum MainThrift {
-    static let isOn = ProcessInfo.processInfo.environment["NI_NO_THRIFT"] != "1"
+    static let isEnabled = ProcessInfo.processInfo.environment["NI_NO_THRIFT"] != "1"
+
+    /// Off for a while after a build at background quality of service turned out slow: then the
+    /// system is keeping everything on the efficiency cores anyway (seen on battery below ~30 %),
+    /// where the lower quality of service saves nothing and only runs at their lowest clock
+    /// (a safety net: well past what any page takes at background quality of service, ~0.6 s).
+    private static var slowUntil: ContinuousClock.Instant?
+    static let slowBuild: Duration = .milliseconds(1500)
+
+    static var isOn: Bool {
+        guard isEnabled else { return false }
+        if let slowUntil, ContinuousClock.now < slowUntil { return false }
+        return true
+    }
 
     /// Runs `body` and, still at background quality of service, the view and layer update it
     /// causes in `window` (done here and now rather than at the end of the turn: the dispatch queue
@@ -46,12 +59,17 @@ nonisolated enum Thrifty {
     /// loop's own update).
     static func run(in window: NSWindow?, _ body: () -> Void) {
         guard isOn, let window else { return body() }
+        let started = ContinuousClock.now
         pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
         body()
         window.contentView?.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
         CATransaction.flush()
         pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)
+        if ContinuousClock.now - started > slowBuild {
+            slowUntil = .now + .seconds(600)
+            Log.app.notice("efficiency cores slow: large updates at full speed for 10 minutes")
+        }
     }
 
     private static var restore: Timer?

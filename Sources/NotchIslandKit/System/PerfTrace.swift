@@ -20,6 +20,15 @@ import QuartzCore
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
     }
 
+    /// Times `body` into the same log ("TIME name ms").
+    @discardableResult static func measure<T>(_ name: String, _ body: () -> T) -> T {
+        guard isOn else { return body() }
+        let start = CACurrentMediaTime()
+        let result = body()
+        Log.window.notice("TIME \(name, privacy: .public) \(String(format: "%.1f", (CACurrentMediaTime() - start) * 1000), privacy: .public) at \(String(format: "%.3f", start), privacy: .public)")
+        return result
+    }
+
     /// A marker in the same log, to line turns up with events.
     static func mark(_ what: String) {
         guard isOn else { return }

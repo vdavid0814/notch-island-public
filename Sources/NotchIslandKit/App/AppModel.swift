@@ -247,15 +247,11 @@ import Observation
         didSet { UserDefaults.standard.set(settingsPane.rawValue, forKey: IslandSettingsPane.key) }
     }
 
-    /// Another page while Settings is open: built on the efficiency cores (`MainThrift`), a turn
-    /// later (not from inside the sidebar's own selection handling). A page is one burst of
-    /// ~100 ms; at full clock on a performance core it cost Energy Impact ~100 per switch.
+    /// Another page while Settings is open, a turn later (not from inside the sidebar's own
+    /// selection handling). At full speed: a click waits for it.
     func switchSettingsPane(to pane: IslandSettingsPane) {
         guard pane != settingsPane else { return }
-        Task { @MainActor in
-            MainThrift.run(in: NSApp.windows.first { $0 is IslandPanel }) { self.settingsPane = pane }
-            MainThrift.lowPower(for: pane.settlingTime)
-        }
+        Task { @MainActor in self.settingsPane = pane }
     }
 
     /// A widget whose editor Settings ▸ Widgets should open (from the island's context menu).

@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Log.app.error("unrecognised URL: \(url.absoluteString, privacy: .public)")
                 continue
             }
-            AppModel.shared.perform(command)
+            PerfTrace.measure("perform") { AppModel.shared.perform(command) }
         }
     }
 

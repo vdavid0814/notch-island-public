@@ -480,7 +480,13 @@ nonisolated extension BannerKind {
 
     private func presentationChanged(from: IslandPresentation, to: IslandPresentation) {
         // Settings' teardown (its pages, forms and pictures, ~80 ms) once it has closed.
-        if from.isSettings, !to.isSettings { MainThrift.lowPower(for: 0.7) }
+        // After the shrink has started (its first turn at full speed), before the teardown.
+        if from.isSettings, !to.isSettings {
+            Task {
+                try? await Task.sleep(for: .milliseconds(120))
+                MainThrift.lowPower(for: 0.6)
+            }
+        }
         if to.isOpen, !from.isOpen {
             if openWasUserInitiated { model.haptics.play(.open) }
         } else if from.isOpen, !to.isOpen {
