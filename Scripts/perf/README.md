@@ -78,3 +78,30 @@ Where the memory went, and what took it back (footprint = Activity Monitor's Mem
   adds ~2 MB once).
 - Energy Impact peaks over the whole soak: opening the panel 27–30, Siri's app gallery 40–47
   (the icons' colour conversion), Settings 30–35; nothing near 60.
+
+## Where the energy goes (September 27, 2026, battery, coalition energy)
+
+- **Performance cores.** Energy is ~0.9 mJ per ms of main-thread work on a performance core and
+  ~0.15–0.2 on an efficiency core. A main-thread burst of up to ~20 ms stays on the efficiency
+  cores; 80 ms in one turn costs 42 mJ, 160 ms 253 mJ. The same 80 ms in sixteen 5 ms pieces
+  16 ms apart cost 8 mJ. At background quality of service a 100 ms burst cost 12 mJ instead of 72
+  (utility changed nothing). `MainThrift` (System/Thrifty.swift) uses that for updates nobody waits
+  on within the frame; a dispatch job's end restores the thread's quality of service, so it
+  lays out and flushes inside (`run`) or sets it from a run-loop block (`lowPower`).
+- **Below ~30 % battery** the system kept NotchIsland (and v0.4.2 alike) entirely on the
+  efficiency cores: no performance-core time at all, everything 3–5× slower (a Settings page
+  ~1 s). Compare builds only back to back, in the same state.
+- **While the session is locked** the app is suspended (island ordered out) and, with the
+  display asleep, nothing is rendered: measurements then mean little, screenshots are black.
+- **Wins:** the closed panel kept 10 s (fast re-opens, spam-open 74 → 19), the fade glass parked
+  instead of switched off (~20 ms per close), the panel and Settings resting on their transition
+  frame, Siri's first opening read ahead (130 → 57), Settings' pages built unseen during the growth
+  at background quality of service (General 156 → 65).
+- **Tried and dropped:** keeping Settings' pages alive between visits (+77 MB, no gain: the cost is
+  laying them out and drawing them in the window, not building their graph); building a form one
+  section per frame (more work in total); GPU rendering (`RB_DISABLE_GPU=0`, ~15 % less on
+  Settings for +40–60 MB); moving the hidden panel off screen (lazy stacks rebuilt at each open);
+  switching its hit testing or accessibility (~15 ms per open each); the whole process at
+  background policy (`taskpolicy -b`, 7× the CPU).
+- `NI_TRACE=1` logs main run-loop turns over 2 ms (`TURN`) and URL commands (`MARK`) in the window
+  category.
