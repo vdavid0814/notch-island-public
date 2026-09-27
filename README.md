@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4.2 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4.3 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -18,6 +18,34 @@ events, volume/brightness and dropped files live there the rest of the time.
 For older versions, see the **[Releases page](https://github.com/vdavid0814/notch-island-public/releases)**.
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.4.3
+
+Far less energy for the island's everyday moves, a Settings opening without leftovers, and a pill
+that stays put.
+
+**Energy** (MacBook Air M5, battery, Activity Monitor's Energy Impact, worst 5 s, against v0.4.2)
+| | v0.4.2 | v0.4.3 |
+|---|---|---|
+| Opening and closing the panel fast, over and over | 85 | 27–34 |
+| Hovering in and out fast, over and over | 67 | 20 |
+| Siri's app gallery, first opening | 285 | 86 |
+| Settings ▸ Widgets | 222 | 157 |
+
+- The closed panel is kept for 10 s, so opening it again only shows it; its clocks and monitors stand still meanwhile.
+- The Fade style's glass is parked out of sight at the pill instead of being taken down and set up again.
+- The panel and Settings no longer resize their window on close or after opening.
+- Siri reads Apple Intelligence's availability, the app list and the gallery's first icons ahead, in the background.
+- Pictures, icons and covers are decoded on the efficiency cores; Settings' teardown after closing runs there too.
+
+**Fixes**
+- **Opening Settings from the panel:** the panel's widgets no longer stay on the growing island for half a second; Settings and its pages come in on time, cross-faded by the system.
+- **The pill no longer disappears** for a few seconds after closing the panel while music plays.
+
+**Known issues**
+- Settings' first opening still costs about as much as in v0.4.2 (Energy Impact ~140).
 
 ---
 
