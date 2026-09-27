@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4.3 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4.3.1 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -18,6 +18,12 @@ events, volume/brightness and dropped files live there the rest of the time.
 For older versions, see the **[Releases page](https://github.com/vdavid0814/notch-island-public/releases)**.
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.4.3.1
+
+- Settings ▸ General starts with a note: NotchIsland is still in beta; if some gestures don't work, check in About that its permissions are allowed, then quit it and open it again from Applications with Spotlight.
 
 ---
 

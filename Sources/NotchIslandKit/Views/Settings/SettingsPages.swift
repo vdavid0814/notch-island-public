@@ -21,6 +21,15 @@ struct GeneralSettingsPage: View {
         @Bindable var launchAtLogin = model.launchAtLogin
         Form {
             Section {
+                Label("NotchIsland is still in beta. If some gestures don't work, check in About that its permissions are allowed.",
+                      systemImage: "exclamationmark.triangle.fill")
+                Label("Once they are, quit NotchIsland and open it again from Applications with Spotlight.",
+                      systemImage: "arrow.clockwise")
+            }
+            .font(.callout)
+            .foregroundStyle(SettingsPalette.secondary)
+
+            Section {
                 SurfacePicker(selection: $preferences.glassStyle)
                     .padding(.vertical, 4)
                 if model.activity.isLowPowerMode {
