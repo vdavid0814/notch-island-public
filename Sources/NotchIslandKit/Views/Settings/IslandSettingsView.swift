@@ -194,7 +194,7 @@ private struct SettingsPages: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SettingsSidebar(selection: Binding(get: { model.settingsPane }, set: { model.switchSettingsPane(to: $0) }))
+            SettingsSidebar(selection: Binding(get: { model.settingsPane }, set: { model.settingsPane = $0 }))
                 .frame(width: 236)
                 // Liquid Glass, smoked towards the black of the island.
                 .glassEffect(Glass.regular.tint(Color.black.opacity(0.45)), in: sidebarShape)

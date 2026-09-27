@@ -217,12 +217,8 @@ import Observation
         case .showSettings:
             showSettings()
         case .showSettingsPane(let pane):
-            if island.presentation.isSettings {
-                switchSettingsPane(to: pane)
-            } else {
-                settingsPane = pane
-                showSettings()
-            }
+            settingsPane = pane
+            showSettings()
         case .editWidget(let kind):
             editWidget(kind)
         case .customize:
@@ -245,13 +241,6 @@ import Observation
         UserDefaults.standard.string(forKey: IslandSettingsPane.key) ?? ""
     ) ?? .general {
         didSet { UserDefaults.standard.set(settingsPane.rawValue, forKey: IslandSettingsPane.key) }
-    }
-
-    /// Another page while Settings is open, a turn later (not from inside the sidebar's own
-    /// selection handling). At full speed: a click waits for it.
-    func switchSettingsPane(to pane: IslandSettingsPane) {
-        guard pane != settingsPane else { return }
-        Task { @MainActor in self.settingsPane = pane }
     }
 
     /// A widget whose editor Settings ▸ Widgets should open (from the island's context menu).
