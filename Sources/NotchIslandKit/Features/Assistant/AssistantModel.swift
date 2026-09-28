@@ -34,6 +34,8 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
     case action(AssistantAction)
     /// Something the user copied (Clipboard, ⌘4).
     case clip(ClipboardItem)
+    /// A sum or a unit conversion worked out from the query (Return copies the result).
+    case calculation(AssistantCalculation)
     case askIntelligence
     case searchWeb
     case askChatGPT
@@ -44,6 +46,7 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
         case .hit(let hit): "hit:\(hit.url.path)"
         case .action(let action): "action:\(action.id)"
         case .clip(let item): "clip:\(item.id)"
+        case .calculation: "calculation"
         case .askIntelligence: "ask"
         case .searchWeb: "web"
         case .askChatGPT: "chatgpt"
@@ -271,7 +274,13 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// for the gallery and answers, which scroll).
     var room: AssistantRoom {
         if answer != nil { return .list }
-        if category == .applications { return .gallery }
+        if category == .applications {
+            // A search in the gallery: as many rows as its apps fill, up to the gallery's own.
+            guard !trimmedQuery.isEmpty else { return .gallery }
+            let columns = max(1, settings().galleryColumns)
+            let needed = max(1, (rows.count + columns - 1) / columns)
+            return needed < settings().galleryRows ? .galleryRows(needed) : .gallery
+        }
         if needsList {
             // Exactly the rows there are (a query's hits, an open suggestion's items), not a list's
             // worth of empty space, up to the list's height (Settings ▸ Siri), which then scrolls.
@@ -312,6 +321,9 @@ nonisolated struct FileScope: Sendable, Equatable {
             return items.filter { AssistantMatch.matches($0.text, text, .anywhere) }.map(AssistantRow.clip)
         case nil:
             guard !text.isEmpty else { return settings.categories.map(AssistantRow.category) }
+            // A sum or a conversion is worked out at once and comes first, above everything, as in
+            // Spotlight: "12 + 30 * 2" had five words and went to Apple Intelligence (seen, v0.4.5).
+            let calculation = calculation(for: text).map { [AssistantRow.calculation($0)] } ?? []
             let hits = (settings.showsApplications ? apps.map(AssistantRow.hit) : [])
                 + (settings.showsFiles ? files.map(AssistantRow.hit) : [])
                 + (settings.showsActions ? actions(matching: text).prefix(Self.rootActionLimit).map(AssistantRow.action) : [])
@@ -320,7 +332,7 @@ nonisolated struct FileScope: Sendable, Equatable {
             // Intelligence here, ChatGPT without it).
             if Self.looksLikeQuestion(text), intelligence || settings.offersChatGPT {
                 let answer: AssistantRow = intelligence ? .askIntelligence : .askChatGPT
-                return [answer] + hits + [.searchWeb, .askChatGPT, .askIntelligence].filter {
+                return calculation + [answer] + hits + [.searchWeb, .askChatGPT, .askIntelligence].filter {
                     $0 != answer && ($0 != .askIntelligence || intelligence) && ($0 != .askChatGPT || settings.offersChatGPT)
                 }
             }
@@ -328,7 +340,7 @@ nonisolated struct FileScope: Sendable, Equatable {
             // unless a hit's name starts with the query too ("app" is more likely App Store).
             let named = Self.categories(named: text, in: settings.categories).map(AssistantRow.category)
             let hitStarts = (apps + files).contains { AssistantMatch.startsName($0.name, text) }
-            var rows = hitStarts ? hits + named : named + hits
+            var rows = calculation + (hitStarts ? hits + named : named + hits)
             let ask: [AssistantRow] = intelligence ? [.askIntelligence] : []
             if !languageUnsupported { rows += ask }
             rows += [.searchWeb]
@@ -336,6 +348,17 @@ nonisolated struct FileScope: Sendable, Equatable {
             if languageUnsupported { rows += ask }
             return rows
         }
+    }
+
+    /// The query's sum or conversion, worked out once per query: `rows` is read again at every
+    /// move of the pointer over the list.
+    @ObservationIgnored private var calculated: (query: String, result: AssistantCalculation?)?
+
+    private func calculation(for text: String) -> AssistantCalculation? {
+        if let calculated, calculated.query == text { return calculated.result }
+        let result = AssistantCalculator.calculate(text)
+        calculated = (text, result)
+        return result
     }
 
     /// The suggestions whose name the query spells out (three letters or more, so "a" does not
@@ -482,15 +505,6 @@ nonisolated struct FileScope: Sendable, Equatable {
         selectionFollowsPointer = false
     }
 
-    /// The pointer on the row at `index` (the lists' own order): no need to work the rows out again,
-    /// which for the gallery sorts every app.
-    func select(at index: Int) {
-        guard selection != index || !selectionFollowsPointer else { return }
-        selection = index
-        selectionIsUsers = true
-        selectionFollowsPointer = true
-    }
-
     func select(_ row: AssistantRow) {
         guard let index = rows.firstIndex(where: { $0.id == row.id }) else { return }
         selection = index
@@ -586,6 +600,10 @@ nonisolated struct FileScope: Sendable, Equatable {
             AssistantActions.runShortcut(named: name)
         case .clip(let item):
             onPaste?(item)
+        case .calculation(let calculation):
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(calculation.result, forType: .string)
+            onClose?()
         case .askIntelligence:
             ask()
         case .searchWeb:

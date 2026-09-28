@@ -88,9 +88,12 @@ nonisolated enum Motion {
     /// both ends show glass below the notch band. Held at the larger outline, the fade's black was
     /// drawn for that outline — the smaller island stayed all black while it moved, and the glass
     /// and its edge light only appeared, at once, when the outline landed. Settings is drawn on
-    /// black (`IslandRootView`) and solid black looks the same held, so both keep the render server.
+    /// black (`IslandRootView`) and solid black looks the same held, so growing into it keeps the
+    /// render server. Out of Settings into a glass island (⌘Space from Settings into Siri) the
+    /// destination is glass: held at Settings' outline, it lensed the whole screen under a black
+    /// page until the outline landed (seen on video, v0.4.5), so that way it follows the outline too.
     static func surfaceFollowsOutline(from: IslandPresentation, to: IslandPresentation, style: IslandGlassStyle) -> Bool {
-        from.isOpen && to.isOpen && !from.isSettings && !to.isSettings && style.hasGlassSurface
+        from.isOpen && to.isOpen && !to.isSettings && style.hasGlassSurface
     }
 
     /// The content's own swap while the render server moves the outline (`IslandOutlineMotion`):

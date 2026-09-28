@@ -10,10 +10,11 @@ import QuartzCore
 /// (measured). One at a time at utility QoS, the icons arrive a little later for a fraction of the
 /// energy.
 nonisolated enum Thrifty {
-    /// Background, not utility: at utility the scheduler still put a burst of decoding on a
-    /// performance core; on the efficiency cores the same work costs about a quarter of the energy,
-    /// and nothing here is waited on more than a frame or two.
-    private static let queue = DispatchQueue(label: "com.davidvarga.notchisland.thrifty", qos: .background)
+    /// Utility, not background: at background, with the Mac busy (Xcode building), the queue was
+    /// starved and Siri's gallery showed empty tiles for seconds, filling in one by one (seen on
+    /// video, v0.4.5). Still one piece at a time, so a gallery never runs several cores at once;
+    /// work nobody is looking at goes to `runInBackground`.
+    private static let queue = DispatchQueue(label: "com.davidvarga.notchisland.thrifty", qos: .utility)
 
     /// Background quality of service: efficiency cores only, for work nobody is waiting for.
     private static let backgroundQueue = DispatchQueue(label: "com.davidvarga.notchisland.thrifty.background", qos: .background)

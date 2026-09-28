@@ -86,6 +86,17 @@ nonisolated enum AssistantRoom: Sendable, Hashable, Comparable {
     case rows(Int)
     case list
     case gallery
+    /// The gallery with only this many rows of apps (a search in it that found a few): not a
+    /// full gallery of black space under two apps (seen on video, v0.4.5).
+    case galleryRows(Int)
+
+    /// The Applications gallery, full or cut to its rows.
+    var isGallery: Bool {
+        switch self {
+        case .gallery, .galleryRows: true
+        default: false
+        }
+    }
 
     /// The field and every suggestion (Applications, Files, Actions, Clipboard).
     static let suggestions = AssistantRoom.rows(AssistantCategory.allCases.count)
@@ -97,6 +108,7 @@ nonisolated enum AssistantRoom: Sendable, Hashable, Comparable {
         case .field: 0
         case .rows(let count): 1 + Double(min(max(count, 0), 999)) / 1000
         case .list: 2
+        case .galleryRows(let count): 2.5 + Double(min(max(count, 0), 99)) / 1000
         case .gallery: 3
         }
     }

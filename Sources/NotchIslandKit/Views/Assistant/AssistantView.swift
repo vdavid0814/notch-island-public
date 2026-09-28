@@ -21,7 +21,7 @@ struct AssistantView: View {
         let layout = model.layout
         let assistant = model.assistant
         // Laid out at the largest size of the current kind: the list, or the gallery's window.
-        let fullRoom: AssistantRoom = assistant.room == .gallery ? .gallery : .list
+        let fullRoom: AssistantRoom = assistant.room.isGallery ? .gallery : .list
         let split = NotchSplit(
             layout: layout,
             presentation: .assistant(fullRoom),
@@ -238,10 +238,9 @@ struct AssistantTile: View {
 }
 
 /// The suggestions, hits and actions; the selected row is tinted, ↑/↓ scroll it into view (the
-/// pointer's never does, see `AssistantModel.selectionFollowsPointer`).
+/// pointer does not move the selection: it only clicks (reported: following it felt slow, v0.4.5).
 private struct RowsList: View {
     let assistant: AssistantModel
-    @State private var pointer = PointerTracker()
 
     var body: some View {
         let rows = assistant.rows
@@ -250,25 +249,17 @@ private struct RowsList: View {
             ScrollView {
                 LazyVStack(spacing: IslandLayout.assistantRowSpacing) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        RowView(row: row, isSelected: index == assistant.selection)
+                        RowView(row: row)
                             .id(row.id)
                             .contentShape(.rect)
                             .onTapGesture { assistant.perform(row) }
                     }
                 }
+                .background { SelectionScroller(assistant: assistant, count: count) { proxy.scrollTo(rows[$0].id) } }
             }
             .scrollIndicators(.never)
             // Fewer rows than fit: nothing to scroll, so no rubber-band either.
             .scrollBounceBehavior(.basedOnSize)
-            .pointerPicks(pointer, assistant: assistant) { point in
-                AssistantHitTest.row(atY: point.y, height: IslandLayout.assistantRowHeight,
-                                     spacing: IslandLayout.assistantRowSpacing, count: count)
-            }
-            .onChange(of: assistant.selection) { _, selection in
-                // Only a selection the keys moved: one the pointer hovered is already in view.
-                guard !assistant.selectionFollowsPointer, rows.indices.contains(selection) else { return }
-                proxy.scrollTo(rows[selection].id)
-            }
         }
     }
 }
@@ -277,7 +268,6 @@ private struct RowsList: View {
 /// view; the field filters it.
 private struct AppGallery: View {
     let assistant: AssistantModel
-    @State private var pointer = PointerTracker()
 
     var body: some View {
         // The user's column count (Settings ▸ Siri ▸ App Gallery); the window widens with it.
@@ -291,97 +281,24 @@ private struct AppGallery: View {
                 LazyVGrid(columns: columns, spacing: IslandLayout.galleryRowSpacing) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         if case .hit(let hit) = row {
-                            GalleryCell(hit: hit, isSelected: index == assistant.selection)
+                            GalleryCell(hit: hit)
                                 .id(row.id)
                                 .contentShape(.rect)
                                 .onTapGesture { assistant.perform(row) }
                         }
                     }
                 }
+                .background { SelectionScroller(assistant: assistant, count: count) { proxy.scrollTo(rows[$0].id) } }
             }
             .scrollIndicators(.never)
             // Fewer rows than fit: nothing to scroll, so no rubber-band either.
             .scrollBounceBehavior(.basedOnSize)
-            .pointerPicks(pointer, assistant: assistant) { [pointer] point in
-                AssistantHitTest.cell(at: point, width: pointer.contentWidth, columns: columnCount,
-                                      height: IslandLayout.galleryCellHeight,
-                                      spacing: IslandLayout.galleryRowSpacing, count: count)
-            }
-            .onChange(of: assistant.selection) { _, selection in
-                // Only a selection the keys moved: one the pointer hovered is already in view.
-                guard !assistant.selectionFollowsPointer, rows.indices.contains(selection) else { return }
-                proxy.scrollTo(rows[selection].id)
-            }
         }
-    }
-}
-
-/// Where the pointer is over a list or the gallery, kept outside SwiftUI's state: it changes with
-/// every move, and nothing is drawn from it (only the selection it picks is).
-private final class PointerTracker {
-    /// In the scroll view's own coordinates; nil while the pointer is elsewhere.
-    var location: CGPoint?
-    var contentOffset: CGPoint = .zero
-    var contentWidth: CGFloat = 0
-}
-
-private extension View {
-    /// The row or app under the pointer is selected at every move, worked out from the pointer's
-    /// place in the content rather than from each row's own hover (which fired only on entering a
-    /// row: none in the gaps between rows, none for a row scrolled under a resting pointer, none
-    /// when the pointer moved inside the row the keys had just left). A scroll re-picks too, but
-    /// only while the pointer leads the selection, so ↑/↓ scrolling the list never takes it back.
-    func pointerPicks(_ tracker: PointerTracker, assistant: AssistantModel,
-                      index: @escaping (CGPoint) -> Int?) -> some View {
-        let pick = {
-            guard let location = tracker.location,
-                  let picked = index(CGPoint(x: location.x + tracker.contentOffset.x,
-                                             y: location.y + tracker.contentOffset.y)) else { return }
-            assistant.select(at: picked)
-        }
-        return onContinuousHover(coordinateSpace: .local) { phase in
-            switch phase {
-            case .active(let location):
-                tracker.location = location
-                pick()
-            case .ended:
-                tracker.location = nil
-            }
-        }
-        .onScrollGeometryChange(for: ScrollGeometry.self, of: { $0 }) { _, geometry in
-            tracker.contentOffset = geometry.contentOffset
-            tracker.contentWidth = geometry.contentSize.width
-            if assistant.selectionFollowsPointer { pick() }
-        }
-    }
-}
-
-/// Which row or app is at a point of the content: rows and cells are laid out at a fixed pitch, and
-/// the gap between two belongs half to each, so the pointer is over one wherever it is.
-nonisolated enum AssistantHitTest {
-    /// A row of a list `height` tall and `spacing` apart, or nil past the last one.
-    static func row(atY y: CGFloat, height: CGFloat, spacing: CGFloat, count: Int) -> Int? {
-        guard y >= 0 else { return nil }
-        let index = Int(((y + spacing / 2) / (height + spacing)).rounded(.down))
-        return index < count ? index : nil
-    }
-
-    /// A cell of a grid `columns` wide filling `width`, cells `height` tall and `spacing` apart both
-    /// ways; nil past the last cell (the last row's empty places included).
-    static func cell(at point: CGPoint, width: CGFloat, columns: Int, height: CGFloat, spacing: CGFloat,
-                     count: Int) -> Int? {
-        guard columns > 0, width > 0, point.x >= 0, point.x < width,
-              let row = row(atY: point.y, height: height, spacing: spacing, count: Int.max) else { return nil }
-        let cellWidth = (width - CGFloat(columns - 1) * spacing) / CGFloat(columns)
-        let column = min(Int(((point.x + spacing / 2) / (cellWidth + spacing)).rounded(.down)), columns - 1)
-        let index = row * columns + column
-        return index < count ? index : nil
     }
 }
 
 private struct GalleryCell: View {
     let hit: AssistantHit
-    let isSelected: Bool
 
     static let iconSize: CGFloat = AssistantIcons.galleryIconSize
     @State private var icon: NSImage?
@@ -410,36 +327,29 @@ private struct GalleryCell: View {
         .padding(.horizontal, Metrics.Spacing.xxSmall)
         // Exactly the height `IslandLayout` sizes the gallery by, so N rows fill it.
         .frame(maxWidth: .infinity, minHeight: IslandLayout.galleryCellHeight, maxHeight: IslandLayout.galleryCellHeight)
-        .background { SelectionPlate(isSelected: isSelected, cornerRadius: 12) }
     }
 }
 
-/// The selected row or app, as the system's Search window marks it: a faint light plate, no
-/// colour. It follows the pointer closely: it comes in at once and the one it leaves fades in a
-/// tenth of a second (a quarter of a second left a trail of two or three plates behind a moving
-/// pointer, and the plate seemed to lag it); only the plate animates, never the row.
-///
-/// Its corners are concentric with the island's: a row or app next to the island's bottom corners
-/// rounds its own bottom corners with them, everywhere else `cornerRadius`.
-private struct SelectionPlate: View {
-    let isSelected: Bool
-    let cornerRadius: CGFloat
-
-    static let opacity: Double = 0.1
-    static let appear: Animation = .easeOut(duration: 0.05)
-    static let disappear: Animation = .easeOut(duration: 0.1)
+/// Brings a selection the keys moved into view. Nothing marks the selection: no plate, as asked
+/// (the grey plate under the first row read as a stuck hover, v0.4.5).
+private struct SelectionScroller: View {
+    let assistant: AssistantModel
+    let count: Int
+    let scroll: (Int) -> Void
 
     var body: some View {
-        ConcentricRectangle(corners: .concentric(minimum: .fixed(cornerRadius)), isUniform: false)
-            .fill(Color.white.opacity(isSelected ? Self.opacity : 0))
-            .animation(isSelected ? Self.appear : Self.disappear, value: isSelected)
+        Color.clear
+            .allowsHitTesting(false)
+            .onChange(of: assistant.selection) { _, selection in
+                guard !assistant.selectionFollowsPointer, selection >= 0, selection < count else { return }
+                scroll(selection)
+            }
     }
 }
 
 /// An icon and a name, nothing else (a suggestion also shows its shortcut, as the system does).
 private struct RowView: View {
     let row: AssistantRow
-    let isSelected: Bool
 
     var body: some View {
         HStack(spacing: Metrics.Spacing.large) {
@@ -459,7 +369,6 @@ private struct RowView: View {
         }
         .padding(.horizontal, Metrics.Spacing.large)
         .frame(height: IslandLayout.assistantRowHeight)
-        .background { SelectionPlate(isSelected: isSelected, cornerRadius: 10) }
     }
 
     @ViewBuilder private var icon: some View {
@@ -478,6 +387,8 @@ private struct RowView: View {
                 .aspectRatio(contentMode: .fit)
         case .clip:
             Image(systemName: "doc.plaintext").foregroundStyle(.secondary).imageScale(.large)
+        case .calculation:
+            AssistantTile(symbol: "equal", color: .orange)
         case .askIntelligence:
             Image(systemName: "apple.intelligence").foregroundStyle(AssistantGlow.gradient).imageScale(.large)
         case .searchWeb:
@@ -493,6 +404,7 @@ private struct RowView: View {
         case .hit(let hit): hit.name
         case .action(let action): action.title
         case .clip(let item): item.preview
+        case .calculation(let calculation): "\(calculation.expression) = \(calculation.result)"
         case .askIntelligence: String(localized: "Ask Apple Intelligence")
         case .searchWeb: String(localized: "Search the Web")
         case .askChatGPT: String(localized: "Ask ChatGPT")

@@ -166,11 +166,12 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             case .rows(let count): min(Self.assistantRowsPageHeight(count), max(list, Self.assistantSuggestionsPageHeight))
             case .list: max(list, Self.assistantSuggestionsPageHeight)
             case .gallery: Self.galleryPageHeight(rows: siri.galleryRows)
+            case .galleryRows(let count): Self.galleryPageHeight(rows: min(count, siri.galleryRows))
             }
             let panel = (max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f * siri.widthFactor).rounded()
             let gallery = (Self.assistantGalleryWidth * f * CGFloat(siri.galleryColumns) / 9).rounded()
             return CGSize(
-                width: room == .gallery ? max(panel, gallery) : panel,
+                width: room.isGallery ? max(panel, gallery) : panel,
                 height: notch.height + page
             )
         }

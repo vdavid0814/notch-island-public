@@ -37,8 +37,45 @@ nonisolated enum AssistantSearch {
             kMDItemContentTypeTree == "com.apple.application-bundle" && \
             (kMDItemDisplayName == "\(term)*"cdw || kMDItemAlternateNames == "\(term)*"cdw)
             """
-        let hits = run(predicate, scopes: appScopes, fetch: 20, kind: .app)
-        return Array(rank(hits, for: query).prefix(limit))
+        let indexed = run(predicate, scopes: appScopes, fetch: 20, kind: .app)
+        let onDisk = diskApps().filter { AssistantMatch.matches($0.name, query) }
+        return Array(rank(merged(indexed, onDisk), for: query).prefix(limit))
+    }
+
+    /// Spotlight's hits, then the apps on disk it did not return (by resolved path).
+    static func merged(_ indexed: [AssistantHit], _ onDisk: [AssistantHit]) -> [AssistantHit] {
+        var seen = Set(indexed.map { $0.url.resolvingSymlinksInPath().path })
+        return indexed + onDisk.filter { seen.insert($0.url.resolvingSymlinksInPath().path).inserted }
+    }
+
+    /// Every app in the app folders (and one folder down, like /Applications/Utilities), read
+    /// from disk. Spotlight's index misses apps: on a tester's Mac 19 of 28 apps in /Applications
+    /// (ChatGPT, Word, Keynote, …) were not in it, and Siri could not find them (report, v0.4.5).
+    /// A directory listing of a few folders, about a millisecond.
+    static func diskApps() -> [AssistantHit] {
+        let manager = FileManager.default
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey, .contentAccessDateKey]
+        var hits: [AssistantHit] = []
+        func scan(_ folder: URL, depth: Int) {
+            guard let entries = try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys,
+                                                                 options: [.skipsHiddenFiles]) else { return }
+            for url in entries {
+                if url.pathExtension == "app" {
+                    let name = manager.displayName(atPath: url.path)
+                    hits.append(AssistantHit(
+                        kind: .app,
+                        url: url,
+                        name: name.hasSuffix(".app") ? String(name.dropLast(4)) : name,
+                        contentType: "com.apple.application-bundle",
+                        lastUsed: nil
+                    ))
+                } else if depth > 0, (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                    scan(url, depth: depth - 1)
+                }
+            }
+        }
+        for scope in appScopes { scan(URL(fileURLWithPath: scope), depth: 1) }
+        return hits
     }
 
     /// Every app, most recently used first (the Applications suggestion). Apps inside other apps'
@@ -46,7 +83,8 @@ nonisolated enum AssistantSearch {
     @concurrent static func allApps() async -> [AssistantHit] {
         // NotchIsland itself would always come first (it is active while the assistant is open).
         let own = Bundle.main.bundleURL.resolvingSymlinksInPath().path
-        let hits = run(#"kMDItemContentTypeTree == "com.apple.application-bundle""#, scopes: appScopes, fetch: 2000, kind: .app)
+        let hits = merged(run(#"kMDItemContentTypeTree == "com.apple.application-bundle""#, scopes: appScopes, fetch: 2000, kind: .app),
+                          diskApps())
             .filter { !$0.url.deletingLastPathComponent().path.contains(".app") && $0.url.resolvingSymlinksInPath().path != own }
         return hits.sorted { a, b in
             let da = a.lastUsed ?? .distantPast, db = b.lastUsed ?? .distantPast

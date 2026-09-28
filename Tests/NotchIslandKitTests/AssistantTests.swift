@@ -585,31 +585,3 @@ import Testing
     }
 }
 
-@Suite struct AssistantHitTestTests {
-    @Test func rowsShareTheGapBetweenThem() {
-        // 32 pt rows, 2 pt apart: row 1 spans 34–66, the gaps 32–34 and 66–68 split down the middle.
-        #expect(AssistantHitTest.row(atY: 0, height: 32, spacing: 2, count: 5) == 0)
-        #expect(AssistantHitTest.row(atY: 32.9, height: 32, spacing: 2, count: 5) == 0)
-        #expect(AssistantHitTest.row(atY: 33, height: 32, spacing: 2, count: 5) == 1)
-        #expect(AssistantHitTest.row(atY: 66.9, height: 32, spacing: 2, count: 5) == 1)
-        #expect(AssistantHitTest.row(atY: 67, height: 32, spacing: 2, count: 5) == 2)
-        #expect(AssistantHitTest.row(atY: 5 * 34, height: 32, spacing: 2, count: 5) == nil)
-        #expect(AssistantHitTest.row(atY: -1, height: 32, spacing: 2, count: 5) == nil)
-    }
-
-    @Test func galleryCellsByColumnAndRow() {
-        // 4 columns in 316 pt with 4 pt gaps: 76 pt cells at 0, 80, 160, 240.
-        let hit = { (x: CGFloat, y: CGFloat, count: Int) in
-            AssistantHitTest.cell(at: CGPoint(x: x, y: y), width: 316, columns: 4, height: 77, spacing: 4, count: count)
-        }
-        #expect(hit(10, 10, 20) == 0)
-        #expect(hit(77.9, 10, 20) == 0)
-        #expect(hit(78, 10, 20) == 1)
-        #expect(hit(315, 10, 20) == 3)
-        #expect(hit(10, 80, 20) == 4)
-        #expect(hit(170, 170, 20) == 10)
-        // The last row's empty places select nothing.
-        #expect(hit(250, 90, 6) == nil)
-        #expect(hit(316, 10, 20) == nil)
-    }
-}

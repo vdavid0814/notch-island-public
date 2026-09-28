@@ -406,6 +406,9 @@ import Observation
         return report
     }
 
+    /// How long a stretch must be before its energy is set against the reference.
+    static let energyJudgedAfter: TimeInterval = 5 * 60
+
     /// NotchIsland's energy: since launch, the last hour, on battery and on the charger, the worst
     /// 10 minutes, and a timeline of the samples.
     private func energyReport() -> (DiagnosticsReport.Section, [DiagnosticsMetric: Double]) {
@@ -414,10 +417,14 @@ import Observation
         let now = energy.isRunning ? energy.take() : EnergySample.now(onBattery: false, batteryLevel: nil)
         if let total = EnergyInterval(from: energy.launch, to: now), let summary = EnergySummary([total]) {
             section.add("Since launch", summary.line)
-            metrics[.powerMW] = total.ownMW
-            metrics[.helpersPowerMW] = total.helpersMW
-            metrics[.cpuPercent] = total.cpuPercent
-            metrics[.wakeupsPerSecond] = total.wakeupsPerSecond
+            // A few seconds after launch is the launch itself (and Settings, opened to send the report):
+            // 21 s at 290 mW was flagged 6× the reference (seen, v0.4.5). Judged only once it has run.
+            if summary.seconds >= Self.energyJudgedAfter {
+                metrics[.powerMW] = total.ownMW
+                metrics[.helpersPowerMW] = total.helpersMW
+                metrics[.cpuPercent] = total.cpuPercent
+                metrics[.wakeupsPerSecond] = total.wakeupsPerSecond
+            }
         }
         metrics[.memoryMB] = Double(now.own.footprint) / 1_048_576
         metrics[.peakMemoryMB] = Double(now.own.peakFootprint) / 1_048_576
@@ -426,7 +433,7 @@ import Observation
         let intervals = energy.intervals
         if let hour = EnergySummary(intervals.filter { $0.end > now.date.addingTimeInterval(-3600) }) {
             section.add("Last hour", hour.line)
-            metrics[.recentPowerMW] = hour.ownMW
+            if hour.seconds >= Self.energyJudgedAfter { metrics[.recentPowerMW] = hour.ownMW }
         }
         if let battery = EnergySummary(intervals.filter(\.onBattery)) {
             section.add("On battery", battery.line)
@@ -438,7 +445,7 @@ import Observation
         if let worst = intervals.max(by: { $0.ownMW < $1.ownMW }) {
             section.add("Worst 10 minutes", String(format: "%.1f mW, CPU %.2f%%, %.1f wakeups/s, ending %@",
                                                    worst.ownMW, worst.cpuPercent, worst.wakeupsPerSecond, DiagnosticsFormat.date(worst.end)))
-            metrics[.worstPowerMW] = worst.ownMW
+            if worst.seconds >= Self.energyJudgedAfter { metrics[.worstPowerMW] = worst.ownMW }
         }
         let timeline = intervals.suffix(24).map { interval in
             String(format: "%@  %6.1f mW  helpers %5.1f  CPU %5.2f%%  %6.1f wk/s  %4.0f MB  %@%@",
