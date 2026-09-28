@@ -353,6 +353,7 @@ import Observation
     }
 
     func airPodsConnected(_ info: AirPodsInfo) {
+        DiagnosticsFlow.record("airpods connected: \(info)")
         // Passive, like a power notice: nothing appears by itself over a full-screen video.
         guard preferences.showAirPods, appliedFeatures?.hidden != true else { return }
         // Covering macOS's card away from the notch: the liquid runs to it.
@@ -370,6 +371,7 @@ import Observation
 
     private func levelChanged(_ kind: LevelKind, source: LevelChangeSource) {
         // `.island`: the user is dragging the island's own slider and already sees the value.
+        if source == .external { DiagnosticsFlow.record("\(kind) changed elsewhere") }
         guard preferences.showLevelHUD, source != .island else { return }
         // Over a full-screen video only a key press is answered; a Control Center, AirPods or
         // auto-brightness change stays invisible there.

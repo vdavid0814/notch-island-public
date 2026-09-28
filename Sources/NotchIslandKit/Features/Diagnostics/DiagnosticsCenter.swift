@@ -178,6 +178,7 @@ import Observation
             previous?(from, to)
             let kind = DiagnosticsHistory.kind(of: to)
             if kind != DiagnosticsHistory.kind(of: from) { self?.history?.count(kind) }
+            DiagnosticsFlow.record("island \(from) → \(to)")
         }
     }
 
@@ -556,6 +557,16 @@ import Observation
         if !basicOnly {
             report.sections.insert(referenceSection(metrics), at: min(3, report.sections.count))
             report.sections.insert(differencesSection(report.settings), at: min(4, report.sections.count))
+            var causes = DiagnosticsReport.Section("Likely causes")
+            let found = DiagnosticsInsights.causes(report, metrics: metrics)
+            causes.add("Causes", found.isEmpty ? "nothing stands out" : found.map { "• \($0)" }.joined(separator: "\n"))
+            report.sections.insert(causes, at: min(3, report.sections.count))
+            var extra: [DiagnosticsReport.Section] = [DiagnosticsFlow.section()]
+            if let crash = DiagnosticsInsights.crashSection(report.attachments) { extra.insert(crash, at: 0) }
+            if let log = report.attachments.first(where: { $0.name == "log.txt" }) {
+                extra.append(DiagnosticsInsights.errorSection(log.text))
+            }
+            report.sections.insert(contentsOf: extra, at: min(6, report.sections.count))
         }
         report.metrics = metrics
         return report

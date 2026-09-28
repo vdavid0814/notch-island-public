@@ -325,6 +325,22 @@ def show(query, n):
         for k, v in report["fields"].items():
             if k.startswith("📈"):
                 print("  " + v.replace("\n", "\n  "))
+    causes = value(report, "Likely causes", "Causes")
+    if causes and causes != "nothing stands out":
+        print("\nLikely causes:")
+        print("  " + causes.replace("\n", "\n  "))
+    crash = next((sec for sec in report["sections"] if sec["title"] == "Crash analysis"), None)
+    if crash:
+        print("\nCrash analysis:")
+        for entry in crash["entries"]:
+            print(f"  {entry['key']}:\n    " + entry["value"].replace("\n", "\n    "))
+    own = value(report, "Errors by source", "NotchIsland's own")
+    if own:
+        print(f"\nNotchIsland's own errors: {own}")
+    flow = value(report, "User flow", "Flow")
+    if flow:
+        print("\nUser flow (last 15 steps):")
+        print("  " + "\n  ".join(flow.splitlines()[-15:]))
     differences = value(report, "Differs from the reference Mac", "Settings")
     if differences:
         print(f"\nSet up differently from the reference Mac ({value(report, 'Differs from the reference Mac', 'Differences')}):")

@@ -111,6 +111,7 @@ nonisolated struct BannerSchedule: Sendable, Equatable {
     private func sync(reason: String) {
         // Writing an equal value would still notify observers and re-run the island policy.
         if current != schedule.current {
+            DiagnosticsFlow.record("banner \(schedule.current.map { String(describing: $0) } ?? "none") (\(reason))")
             Log.island.info("banner \(String(describing: self.current), privacy: .public) → \(String(describing: self.schedule.current), privacy: .public) (\(reason, privacy: .public))")
             current = schedule.current
         }

@@ -130,6 +130,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         state.start(.out(start: Date(), from: LiquidFlow.start(notch: metrics.notchRect, towards: cover.rect), to: cover))
         land(after: LiquidFlow.out.total)
         Log.levels.notice("liquid card out to \(window.logDescription, privacy: .public)")
+        DiagnosticsFlow.record("liquid card out (\(String(describing: kind.card))) to \(window.logDescription)")
     }
 
     /// macOS's card came up elsewhere than expected: there instead, as liquid again.
@@ -182,6 +183,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
             self.panel?.orderOut(nil)
         }
         Log.levels.notice("liquid card back")
+        DiagnosticsFlow.record("liquid card back")
     }
 
     // MARK: macOS's card

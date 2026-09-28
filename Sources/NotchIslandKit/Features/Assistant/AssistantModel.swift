@@ -586,6 +586,7 @@ nonisolated struct FileScope: Sendable, Equatable {
     // MARK: Actions
 
     func perform(_ row: AssistantRow) {
+        DiagnosticsFlow.record("siri: picked \(row.id) for \"\(trimmedQuery)\"")
         // From the answer pane the hand-offs take the question that was answered.
         let text = answer?.question ?? trimmedQuery
         switch row {
@@ -742,6 +743,7 @@ nonisolated struct FileScope: Sendable, Equatable {
                 self.files = foundFiles
                 self.languageUnsupported = unsupported
             }
+            DiagnosticsFlow.record("siri: \"\(text)\" in \(category.map { String(describing: $0) } ?? "root") → \(foundApps.count) apps, \(foundFiles.count) files (\(settings.matching))")
         }
     }
 
