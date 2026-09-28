@@ -216,17 +216,57 @@ import Observation
     }
 
     /// A bug report or feature request, with a diagnostics report attached if the user allowed it.
-    func sendFeedback(_ feedback: DiagnosticsFeedback, attachDiagnostics: Bool) async -> Bool {
+    func sendFeedback(_ feedback: DiagnosticsFeedback, attachDiagnostics: Bool,
+                      media: [DiagnosticsMediaFile] = []) async -> Bool {
         let report: DiagnosticsReport
         if attachDiagnostics {
-            await references.refresh()
-            let hours = feedback.kind == .bug ? Self.bugLogHours : Self.reportLogHours
-            report = await makeReport(logHours: hours, crashesSince: Date().addingTimeInterval(-3 * 86400))
+            report = await feedbackReport(for: feedback.kind)
         } else {
             report = await makeReport(logHours: 0, crashesSince: nil, basicOnly: true)
         }
+        preparedFeedback = nil
         let kind: DiagnosticsEnvelope.Kind = feedback.kind == .bug ? .bug : .feature
-        return await deliver(envelope(kind: kind, reason: nil, report: report, feedback: feedback))
+        var envelope = envelope(kind: kind, reason: nil, report: report, feedback: feedback)
+        if !media.isEmpty { envelope.media = media }
+        return await deliver(envelope)
+    }
+
+    /// The report a bug report or request carries, started as the form opens
+    /// (`prepareFeedback`): its day of log takes ~12 s to read (measured), which the user then
+    /// spends typing instead of waiting after Send.
+    @ObservationIgnored private var preparedFeedback: (kind: DiagnosticsFeedback.Kind, started: Date, report: Task<DiagnosticsReport, Never>)?
+    static let preparedLifetime: TimeInterval = 10 * 60
+
+    /// The form was opened: collect its report in the background.
+    func prepareFeedback(_ kind: DiagnosticsFeedback.Kind) {
+        if let preparedFeedback, preparedFeedback.kind == kind,
+           Date().timeIntervalSince(preparedFeedback.started) < Self.preparedLifetime { return }
+        preparedFeedback?.report.cancel()
+        let task = Task { [weak self] () -> DiagnosticsReport in
+            guard let self else { return DiagnosticsReport() }
+            return await self.collectFeedbackReport(kind)
+        }
+        preparedFeedback = (kind, Date(), task)
+    }
+
+    /// The form was closed without sending.
+    func discardPreparedFeedback() {
+        preparedFeedback?.report.cancel()
+        preparedFeedback = nil
+    }
+
+    private func feedbackReport(for kind: DiagnosticsFeedback.Kind) async -> DiagnosticsReport {
+        if let preparedFeedback, preparedFeedback.kind == kind,
+           Date().timeIntervalSince(preparedFeedback.started) < Self.preparedLifetime {
+            return await preparedFeedback.report.value
+        }
+        return await collectFeedbackReport(kind)
+    }
+
+    private func collectFeedbackReport(_ kind: DiagnosticsFeedback.Kind) async -> DiagnosticsReport {
+        await references.refresh()
+        let hours = kind == .bug ? Self.bugLogHours : Self.reportLogHours
+        return await makeReport(logHours: hours, crashesSince: Date().addingTimeInterval(-3 * 86400))
     }
 
     private func envelope(kind: DiagnosticsEnvelope.Kind, reason: DiagnosticsReason?, report: DiagnosticsReport,
@@ -283,6 +323,7 @@ import Observation
         await flushOutbox()
         do {
             try await route(envelope)
+            DiagnosticsMedia.discard(envelope.media ?? [])
             Log.app.notice("diagnostics sent: \(envelope.kind.rawValue, privacy: .public)")
             markSent()
             return true
@@ -301,6 +342,7 @@ import Observation
         guard destinations.users != nil else {
             guard let fallback = destinations.fallback else { return }
             _ = try await DiagnosticsUploader.post(DiagnosticsUploader.payload(for: envelope), files: envelope.files, to: fallback)
+            await postMedia(envelope.media, to: fallback, threadID: nil)
             return
         }
         let detail: DiagnosticsUploader.Posted
@@ -310,6 +352,7 @@ import Observation
             payload["thread_name"] = DiagnosticsUploader.feedbackThreadName(envelope)
             if let tag = envelope.kind == .bug ? destinations.bugTag : destinations.featureTag { payload["applied_tags"] = [tag] }
             detail = try await DiagnosticsUploader.post(payload, files: envelope.files, to: forum)
+            await postMedia(envelope.media, to: forum, threadID: detail.channelID)
             let link = destinations.link(channel: detail.channelID, message: detail.id)
             _ = try? await postToUserThread(DiagnosticsUploader.pointerPayload(for: envelope, link: link), files: [])
         } else {
@@ -318,6 +361,26 @@ import Observation
         if envelope.isAlert, let alerts = destinations.alerts {
             let link = destinations.link(channel: detail.channelID, message: detail.id)
             _ = try? await DiagnosticsUploader.post(DiagnosticsUploader.alertPayload(for: envelope, link: link), to: alerts)
+        }
+    }
+
+    /// The screenshots and videos, one message each, under the report. The report itself is already
+    /// posted: a video that fails is retried (a rate limit waited out) rather than the whole report
+    /// sent again, and one that still fails is left out.
+    private func postMedia(_ media: [DiagnosticsMediaFile]?, to webhook: URL, threadID: String?) async {
+        guard let media, !media.isEmpty else { return }
+        for (index, file) in media.enumerated() {
+            for attempt in 0..<3 {
+                do {
+                    try await DiagnosticsUploader.postMedia(file, index: index, of: media.count, to: webhook, threadID: threadID)
+                    break
+                } catch DiagnosticsUploader.Failure.rateLimited(let after) {
+                    try? await Task.sleep(for: .seconds(min(after, 30)))
+                } catch {
+                    Log.app.error("diagnostics media \(index + 1) failed (attempt \(attempt + 1)): \(String(describing: error), privacy: .public)")
+                    try? await Task.sleep(for: .seconds(2))
+                }
+            }
         }
     }
 
@@ -360,7 +423,12 @@ import Observation
         try? data.write(to: outbox.appendingPathComponent("\(stamp)-\(envelope.id.uuidString).json"), options: .atomic)
         // The oldest go first once the outbox is full.
         let files = Self.outboxFiles(outbox)
-        for file in files.dropLast(Self.outboxLimit) { try? FileManager.default.removeItem(at: file) }
+        for file in files.dropLast(Self.outboxLimit) {
+            if let data = try? Data(contentsOf: file), let old = try? JSONDecoder().decode(DiagnosticsEnvelope.self, from: data) {
+                DiagnosticsMedia.discard(old.media ?? [])
+            }
+            try? FileManager.default.removeItem(at: file)
+        }
         pending = min(files.count, Self.outboxLimit)
     }
 
@@ -374,6 +442,7 @@ import Observation
             }
             do {
                 try await route(envelope)
+                DiagnosticsMedia.discard(envelope.media ?? [])
                 try? FileManager.default.removeItem(at: file)
             } catch {
                 break

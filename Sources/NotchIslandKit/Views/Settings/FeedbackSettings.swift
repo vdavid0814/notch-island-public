@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Bug reports and feature requests
 
@@ -11,6 +12,12 @@ struct FeedbackSection: View {
     @State private var isSending = false
     @State private var sent: DiagnosticsFeedback.Kind?
     @State private var failure: String?
+    /// Screenshots and videos attached to the form, ready to send.
+    @State private var media: [DiagnosticsMediaFile] = []
+    /// Files being made ready (a video is re-encoded, which takes a few seconds).
+    @State private var preparing: [String] = []
+    @State private var mediaFailure: String?
+    @State private var isDropTargeted = false
 
     var body: some View {
         @Bindable var diagnostics = model.diagnostics
@@ -46,6 +53,8 @@ struct FeedbackSection: View {
             draft = DiagnosticsFeedback(kind: kind)
             sent = nil
             failure = nil
+            // Its report (a day of log, ~12 s) is collected while the form is filled in.
+            if attachDiagnostics { model.diagnostics.prepareFeedback(kind) }
         } label: {
             HStack(spacing: 10) {
                 SettingsTile(systemImage: kind == .bug ? "ladybug.fill" : "lightbulb.fill",
@@ -92,6 +101,7 @@ struct FeedbackSection: View {
             TextField("Why would it help?", text: field(\.why), prompt: Text("Optional"), axis: .vertical)
                 .lineLimit(2...5)
         }
+        attachments(isBug: isBug)
         TextField("Your name", text: name, prompt: Text("Optional"))
         Toggle(isOn: $attachDiagnostics) {
             Text("Attach diagnostics")
@@ -106,11 +116,125 @@ struct FeedbackSection: View {
             Button("Cancel") {
                 draft = nil
                 failure = nil
+                DiagnosticsMedia.discard(media)
+                media = []
+                mediaFailure = nil
+                model.diagnostics.discardPreparedFeedback()
             }
             .disabled(isSending)
             Button(isBug ? "Send Bug Report" : "Send Request") { send() }
                 .keyboardShortcut(.defaultAction)
-                .disabled(isSending || !(draft?.isComplete ?? false))
+                .disabled(isSending || !preparing.isEmpty || !(draft?.isComplete ?? false))
+        }
+        .onChange(of: attachDiagnostics) { _, attach in
+            if attach, let kind = draft?.kind { model.diagnostics.prepareFeedback(kind) }
+        }
+    }
+
+    // MARK: Screenshots and videos
+
+    @ViewBuilder
+    private func attachments(isBug: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(media) { file in
+                HStack(spacing: 8) {
+                    Image(systemName: file.isVideo ? "film" : "photo")
+                        .foregroundStyle(SettingsPalette.secondary)
+                        .frame(width: 18)
+                    Text(file.name).lineLimit(1).truncationMode(.middle)
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(file.bytes), countStyle: .file)
+                         + (file.wasTrimmed ? " · cut to fit" : ""))
+                        .font(.caption)
+                        .foregroundStyle(SettingsPalette.secondary)
+                    Spacer(minLength: 0)
+                    Button {
+                        DiagnosticsMedia.discard([file])
+                        media.removeAll { $0.id == file.id }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(SettingsPalette.secondary)
+                    .disabled(isSending)
+                    .accessibilityLabel("Remove \(file.name)")
+                }
+            }
+            ForEach(preparing, id: \.self) { name in
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small).frame(width: 18)
+                    Text("Preparing \(name)…").lineLimit(1).truncationMode(.middle)
+                        .foregroundStyle(SettingsPalette.secondary)
+                }
+            }
+            HStack {
+                Button {
+                    chooseMedia()
+                } label: {
+                    Label(isBug ? "Add Screenshot or Video…" : "Add Picture or Video…", systemImage: "paperclip")
+                }
+                .disabled(isSending || media.count + preparing.count >= DiagnosticsMedia.maxFiles)
+                Text("or drop them here · up to \(DiagnosticsMedia.maxFiles)")
+                    .font(.caption)
+                    .foregroundStyle(SettingsPalette.secondary)
+            }
+            if let mediaFailure {
+                Label(mediaFailure, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(isDropTargeted ? 0.8 : 0), lineWidth: 2)
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            let usable = urls.filter(DiagnosticsMedia.isSupported)
+            add(usable)
+            if usable.count < urls.count { mediaFailure = "Only pictures and videos can be attached." }
+            return !usable.isEmpty
+        } isTargeted: { isDropTargeted = $0 }
+    }
+
+    private func chooseMedia() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image, .movie]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.message = "Choose screenshots or screen recordings that show the problem."
+        panel.prompt = "Attach"
+        // Above the island, which lies over the menu bar.
+        panel.level = NSWindow.Level(rawValue: IslandPanel.restingLevel.rawValue + 1)
+        panel.directoryURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+        let island = NSApp.keyWindow
+        panel.begin { response in
+            island?.makeKey()
+            guard response == .OK else { return }
+            add(panel.urls)
+        }
+    }
+
+    private func add(_ urls: [URL]) {
+        mediaFailure = nil
+        let room = DiagnosticsMedia.maxFiles - media.count - preparing.count
+        if urls.count > room { mediaFailure = "At most \(DiagnosticsMedia.maxFiles) pictures or videos." }
+        for url in urls.prefix(max(0, room)) {
+            let name = url.lastPathComponent
+            preparing.append(name)
+            Task {
+                do {
+                    let file = try await DiagnosticsMedia.prepare(url)
+                    if draft == nil {
+                        DiagnosticsMedia.discard([file])
+                    } else {
+                        media.append(file)
+                    }
+                } catch {
+                    mediaFailure = error.localizedDescription
+                }
+                if let index = preparing.firstIndex(of: name) { preparing.remove(at: index) }
+            }
         }
     }
 
@@ -127,8 +251,12 @@ struct FeedbackSection: View {
         isSending = true
         failure = nil
         Task {
-            let delivered = await model.diagnostics.sendFeedback(feedback, attachDiagnostics: attachDiagnostics)
+            let attached = media
+            let delivered = await model.diagnostics.sendFeedback(feedback, attachDiagnostics: attachDiagnostics, media: attached)
             isSending = false
+            // Sent, or kept in the outbox with the report: either way no longer the form's.
+            media = []
+            mediaFailure = nil
             if delivered {
                 sent = feedback.kind
                 draft = nil

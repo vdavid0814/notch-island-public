@@ -1,4 +1,7 @@
+import CoreGraphics
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 import Testing
 @testable import NotchIslandKit
 
@@ -353,5 +356,79 @@ import Testing
         #expect(Set(baseline.metrics.keys).isSubset(of: known))
         #expect(Set((baseline.rules ?? [:]).keys).isSubset(of: known))
         #expect(baseline.value(.powerMW) != nil)
+    }
+}
+
+@Suite struct DiagnosticsMediaTests {
+    private func picture(width: Int, height: Int, type: UTType) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + (type.preferredFilenameExtension ?? "img"))
+        let context = try #require(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                             space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(red: 0.2, green: 0.5, blue: 0.9, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = try #require(context.makeImage())
+        let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        #expect(CGImageDestinationFinalize(destination))
+        return url
+    }
+
+    @Test func aSmallScreenshotIsSentAsItIs() async throws {
+        let source = try picture(width: 400, height: 300, type: .png)
+        let file = try await DiagnosticsMedia.prepare(source)
+        defer { DiagnosticsMedia.discard([file]) }
+        #expect(file.name == source.lastPathComponent)
+        #expect(file.contentType == "image/png")
+        #expect(!file.isVideo)
+        #expect(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    /// HEIC and TIFF are not shown in Discord: they become JPEGs, no larger than the limit.
+    @Test func otherPicturesBecomeJPEGs() async throws {
+        let source = try picture(width: 3000, height: 2000, type: .tiff)
+        let file = try await DiagnosticsMedia.prepare(source)
+        defer { DiagnosticsMedia.discard([file]) }
+        #expect(file.contentType == "image/jpeg")
+        #expect(file.name.hasSuffix(".jpg"))
+        #expect(file.bytes <= DiagnosticsMedia.maxBytes)
+        let image = try #require(CGImageSourceCreateWithURL(file.url as CFURL, nil))
+        let properties = CGImageSourceCopyPropertiesAtIndex(image, 0, nil) as? [CFString: Any]
+        #expect((properties?[kCGImagePropertyPixelWidth] as? Int).map { $0 <= DiagnosticsMedia.maxPixels } == true)
+    }
+
+    @Test func onlyPicturesAndVideos() async {
+        let text = FileManager.default.temporaryDirectory.appendingPathComponent("notes.txt")
+        #expect(!DiagnosticsMedia.isSupported(text))
+        #expect(DiagnosticsMedia.isSupported(URL(fileURLWithPath: "/tmp/a.mov")))
+        #expect(DiagnosticsMedia.isSupported(URL(fileURLWithPath: "/tmp/a.PNG")))
+        await #expect(throws: DiagnosticsMedia.Failure.unsupported("notes.txt")) {
+            try await DiagnosticsMedia.prepare(text)
+        }
+    }
+
+    @Test func aMediaMessageCarriesTheFileWithItsType() throws {
+        let data = Data([0xFF, 0xD8, 0xFF, 0x00])
+        let body = DiagnosticsUploader.mediaBody(payload: ["content": "🖼️ 1/1"], name: "shot\".jpg", contentType: "image/jpeg",
+                                                 data: data, boundary: "B")
+        let text = String(decoding: body, as: UTF8.self)
+        #expect(text.contains("name=\"payload_json\""))
+        #expect(text.contains("filename=\"shot.jpg\""))
+        #expect(text.contains("Content-Type: image/jpeg"))
+        #expect(body.range(of: data) != nil)
+        #expect(text.hasSuffix("--B--\r\n"))
+    }
+
+    @Test func theReportListsItsScreenshots() throws {
+        var envelope = DiagnosticsEnvelope(kind: .bug, reason: nil, sender: "Béla", installID: "abcdef123456", facts: [],
+                                           findings: [], feedback: DiagnosticsFeedback(kind: .bug, title: "T", details: "D"), files: [])
+        envelope.media = [DiagnosticsMediaFile(name: "rec.mp4", path: "/x", contentType: "video/mp4", bytes: 10, isVideo: true, wasTrimmed: true)]
+        let embed = try #require((DiagnosticsUploader.payload(for: envelope)["embeds"] as? [[String: Any]])?.first)
+        let fields = try #require(embed["fields"] as? [[String: Any]])
+        let value = fields.first { ($0["name"] as? String)?.contains("Screenshots") == true }?["value"] as? String
+        #expect(value?.contains("`rec.mp4` (cut to fit)") == true)
+        // Kept in the outbox with the report.
+        let decoded = try JSONDecoder().decode(DiagnosticsEnvelope.self, from: JSONEncoder().encode(envelope))
+        #expect(decoded.media == envelope.media)
     }
 }

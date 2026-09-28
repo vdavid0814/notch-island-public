@@ -97,6 +97,8 @@ nonisolated struct DiagnosticsEnvelope: Sendable, Codable, Equatable {
     var comparison: [String]? = nil
     /// "v0.4.4 on Mac16,12", or nil without a reference.
     var reference: String? = nil
+    /// Screenshots and recordings the user attached (bug reports), sent after the report itself.
+    var media: [DiagnosticsMediaFile]? = nil
 
     /// Worth a line in the alerts channel.
     var isAlert: Bool { kind != .report || !findings.isEmpty }
@@ -295,6 +297,10 @@ nonisolated enum DiagnosticsUploader {
             field("📈 Compared with the reference\(envelope.reference.map { " (\($0))" } ?? "")", comparison.joined(separator: "\n"), inline: false)
         }
         field("📎 Attached", envelope.files.map { "`\($0.name)`" }.joined(separator: " · "), inline: false)
+        if let media = envelope.media, !media.isEmpty {
+            field("🖼️ Screenshots and videos", media.map { "`\($0.name)`\($0.wasTrimmed ? " (cut to fit)" : "")" }
+                .joined(separator: " · ") + "\n(in the messages below)", inline: false)
+        }
 
         var embed: [String: Any] = [
             "title": clipped(title(envelope), titleLimit),
@@ -398,6 +404,43 @@ nonisolated enum DiagnosticsUploader {
             result.append(file)
         }
         return result
+    }
+
+    // MARK: Screenshots and videos
+
+    /// One screenshot or video as a message of its own (each may be up to `DiagnosticsMedia.maxBytes`,
+    /// so they do not share one request's 10 MB), into the report's thread.
+    static func postMedia(_ file: DiagnosticsMediaFile, index: Int, of count: Int, to webhook: URL, threadID: String?,
+                          session: URLSession = .shared) async throws {
+        let data = try Data(contentsOf: file.url)
+        let boundary = "NotchIsland-" + UUID().uuidString
+        var request = URLRequest(url: webhookURL(webhook, threadID: threadID))
+        request.httpMethod = "POST"
+        // An 8 MB video over a slow upload.
+        request.timeoutInterval = 300
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        let text = "\(file.isVideo ? "🎬" : "🖼️") \(index + 1)/\(count) · `\(file.name)`\(file.wasTrimmed ? " (cut to fit)" : "")"
+        request.httpBody = mediaBody(payload: ["content": clipped(text, contentLimit), "allowed_mentions": ["parse": [String]()]],
+                                     name: file.name, contentType: file.contentType, data: data, boundary: boundary)
+        let (body, response) = try await session.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if code == 429 {
+            let after = (try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["retry_after"] as? Double
+            throw Failure.rateLimited(retryAfter: after ?? 5)
+        }
+        guard (200..<300).contains(code) else { throw Failure.status(code, String(decoding: body.prefix(300), as: UTF8.self)) }
+    }
+
+    static func mediaBody(payload: [String: Any], name: String, contentType: String, data: Data, boundary: String) -> Data {
+        var body = Data()
+        let json = (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])) ?? Data("{}".utf8)
+        body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"payload_json\"\r\nContent-Type: application/json\r\n\r\n".utf8))
+        body.append(json)
+        let safe = name.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "\r", with: "").replacingOccurrences(of: "\n", with: "")
+        body.append(Data("\r\n--\(boundary)\r\nContent-Disposition: form-data; name=\"files[0]\"; filename=\"\(safe)\"\r\nContent-Type: \(contentType)\r\n\r\n".utf8))
+        body.append(data)
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        return body
     }
 
     static func clipped(_ text: String, _ limit: Int) -> String {
