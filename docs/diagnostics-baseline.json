@@ -1,21 +1,20 @@
 {
-  "build": "15",
-  "created": "2026-09-27T21:00:27Z",
+  "build": "17",
+  "created": "2026-09-28T19:15:41Z",
   "machine": "Mac17,3 \u00b7 Apple M5",
   "metrics": {
-    "appSearchSeconds": 0,
-    "cpuPercent": 5.71,
-    "gallerySeconds": 0.06,
-    "helpersPowerMW": 0.04,
-    "logErrorsPerHour": 7.33,
-    "memoryMB": 83.25,
-    "peakMemoryMB": 122.19,
-    "powerMW": 48.09,
-    "powerOnBatteryMW": 47.94,
-    "recentPowerMW": 47.94,
-    "spotlightMissingPercent": 2.17,
-    "wakeupsPerSecond": 35.75,
-    "worstPowerMW": 103.17
+    "appSearchSeconds": 0.01,
+    "cpuPercent": 0.16,
+    "gallerySeconds": 0.09,
+    "helpersPowerMW": 0,
+    "logErrorsPerHour": 2.33,
+    "memoryMB": 61.03,
+    "peakMemoryMB": 85.75,
+    "powerMW": 0.54,
+    "powerOnBatteryMW": 0.25,
+    "recentPowerMW": 0.38,
+    "spotlightMissingPercent": 2.2,
+    "wakeupsPerSecond": 2.14
   },
   "rules": {
     "memoryMB": {
@@ -39,6 +38,6 @@
       "minimum": 20
     }
   },
-  "uptimeHours": 0.3,
-  "version": "0.4.5"
+  "uptimeHours": 9,
+  "version": "0.4.7"
 }
