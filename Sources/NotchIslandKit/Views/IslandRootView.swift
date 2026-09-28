@@ -70,7 +70,13 @@ struct IslandRootView: View {
             // vibrancy instead (`SettingsBackdrop`), which the window server draws.
             let isOpaquePage = surfaceOf.isSettings
             // The AirPods card lies over macOS's own card to hide it: glass would let it show through.
-            let coversSystemCard: Bool = if case .banner(.airPods) = surfaceOf { AirPodsSystemCard.current == .cover } else { false }
+            let coversSystemCard: Bool = switch surfaceOf {
+            case .banner(.airPods): AirPodsSystemCard.current == .cover
+            // The volume card lies under the banner's upper part, which the fade keeps opaque; the
+            // user wanted the same see-through fade as every other banner here.
+            case .banner(.levelCovering): false
+            default: false
+            }
             let glassStyle = isOpaquePage || coversSystemCard ? IslandGlassStyle.black : model.effectiveGlassStyle
             let wantsGlass = glassStyle != .fade || outline.size.height > layout.notch.height + 0.5
             let reducesWork = model.activity.prefersReducedWork
@@ -87,6 +93,7 @@ struct IslandRootView: View {
                 size: outline.size,
                 bottomRadius: outline.bottomRadius,
                 shoulderRadius: outline.shoulderRadius,
+                shoulderDrop: outline.shoulderDrop,
                 notch: IslandOutline(size: layout.notch, bottomRadius: layout.bottomRadius(for: .idle),
                                      shoulderRadius: layout.shoulderRadius(for: .idle)),
                 glassStyle: glassStyle,
@@ -95,6 +102,7 @@ struct IslandRootView: View {
                 // the most expensive part of it (an offscreen pass over the whole island every frame).
                 blursGrowth: !(reduceMotion || reducesWork || isOpaquePage),
                 solidDepth: IslandLayout.overdraw + layout.notch.height,
+                fadeStretch: IslandLayout.liesOnSystemCard(surfaceOf) ? IslandFade.coveringStretch : 1,
                 // Under Reduce Motion the island cross-fades as SwiftUI animates it; otherwise it
                 // grows out of the notch on the render server. Between two open presentations the
                 // surface follows its outline here (`Motion.surfaceFollowsOutline`).
@@ -285,6 +293,7 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
     var size: CGSize
     var bottomRadius: CGFloat
     var shoulderRadius: CGFloat
+    let shoulderDrop: CGFloat
     /// The idle outline, where an emerging island starts.
     let notch: IslandOutline
     let glassStyle: IslandGlassStyle
@@ -292,6 +301,8 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
     let blursGrowth: Bool
     /// The shade's solid black from the top (fade style).
     let solidDepth: CGFloat
+    /// The fade style's fade runs this much longer (`IslandFade`).
+    var fadeStretch: CGFloat = 1
     /// The island is inserted and removed at its presentation: the render server grows it out of the
     /// notch and back (`IslandOutlineMotion`).
     let isStill: Bool
@@ -317,7 +328,7 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
     func body(content: Content) -> some View {
         // The outline the presentations morph between, and the one drawn: pulled into the notch
         // while the island emerges.
-        let frame = IslandOutline(size: size, bottomRadius: bottomRadius, shoulderRadius: shoulderRadius)
+        let frame = IslandOutline(size: size, bottomRadius: bottomRadius, shoulderRadius: shoulderRadius, shoulderDrop: shoulderDrop)
         let drawn = notch.mixed(with: frame, by: emergence)
         let reveal = min(max(emergence, 0), 1)
         // The glass's outline, `overdraw` taller at the top (above the screen edge), and the surface
@@ -341,6 +352,7 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
                 .padding(.top, IslandLayout.overdraw)
                 .islandSurfaceShade(glassStyle, solidDepth: solidDepth,
                                     size: CGSize(width: size.width, height: size.height + IslandLayout.overdraw),
+                                    fadeStretch: fadeStretch,
                                     in: surface.inset(by: -IslandGlassStyle.shadeBleed))
                 // Off, the glass is parked out of sight rather than taken down (`IslandGlassBody`);
                 // while SwiftUI animates the surface (Reduce Motion) it goes, as a parked glass

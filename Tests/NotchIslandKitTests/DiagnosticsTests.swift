@@ -432,3 +432,115 @@ import Testing
         #expect(decoded.media == envelope.media)
     }
 }
+
+@Suite struct DiagnosticsDetailTests {
+    private func defaults() -> UserDefaults {
+        let name = "diagnostics-detail-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    private func baseline(uptime: Double, machine: String = "Mac17,3 · Apple M5", metrics: [String: Double],
+                          settings: [String: String]? = nil) -> DiagnosticsBaseline {
+        DiagnosticsBaseline(version: "0.4.7", build: "17", created: Date(timeIntervalSince1970: 0), machine: machine,
+                            uptimeHours: uptime, metrics: metrics, rules: nil, settings: settings)
+    }
+
+    @Test func jsonCarriesSectionsNumbersAndFindings() throws {
+        var report = DiagnosticsReport()
+        var section = DiagnosticsReport.Section("App")
+        section.add("Version", "0.4.8")
+        report.sections = [section]
+        report.metrics = [.powerMW: 1.5]
+        report.attachments = [.init(name: "log.txt", text: "x")]
+        let comparisons = DiagnosticsComparison.compare(report.metrics, with: baseline(uptime: 9, metrics: ["powerMW": 0.5]))
+        let text = report.json(meta: ["kind": "report"], findings: ["one"], comparisons: comparisons)
+        let json = try #require(try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        #expect((json["meta"] as? [String: String])?["kind"] == "report")
+        #expect((json["findings"] as? [String]) == ["one"])
+        #expect((json["metrics"] as? [String: Double])?["powerMW"] == 1.5)
+        #expect((json["attachments"] as? [String]) == ["log.txt"])
+        let sections = try #require(json["sections"] as? [[String: Any]])
+        #expect(sections.first?["title"] as? String == "App")
+        let compared = try #require((json["comparisons"] as? [[String: Any]])?.first)
+        #expect(compared["reference"] as? Double == 0.5)
+    }
+
+    @Test func settingsAreComparedWithTheReference() {
+        var report = DiagnosticsReport()
+        report.sections = [
+            .init("Menu bar, Dock & Spaces", [.init(key: "dock.autohide", value: "1"), .init(key: "dock.tilesize", value: "48")]),
+            .init("App", [.init(key: "Version", value: "0.4.8")]),
+        ]
+        #expect(report.settings == ["Menu bar, Dock & Spaces › dock.autohide": "1", "Menu bar, Dock & Spaces › dock.tilesize": "48"])
+        let lines = DiagnosticsReport.differences(report.settings, from: [
+            "Menu bar, Dock & Spaces › dock.autohide": "0", "Menu bar, Dock & Spaces › dock.tilesize": "48",
+            "Keyboard & input › fn / 🌐 key": "Show emoji & symbols",
+        ])
+        #expect(lines == ["Keyboard & input › fn / 🌐 key: — (reference: Show emoji & symbols)",
+                          "Menu bar, Dock & Spaces › dock.autohide: 1 (reference: 0)"])
+    }
+
+    @Test func aShorterRunKeepsThePublishedNumbersButTakesTheSettings() {
+        let old = baseline(uptime: 9, metrics: ["powerMW": 0.5, "memoryMB": 61])
+        let new = baseline(uptime: 0.2, metrics: ["powerMW": 40, "worstPowerMW": 3], settings: ["a": "b"])
+        let merged = DiagnosticsCenter.mergedBaseline(new, over: old)
+        #expect(merged.metrics == ["powerMW": 0.5, "memoryMB": 61, "worstPowerMW": 3])
+        #expect(merged.uptimeHours == 9)
+        #expect(merged.settings == ["a": "b"])
+        // A longer run, another Mac, or none published: the new one as it is.
+        #expect(DiagnosticsCenter.mergedBaseline(baseline(uptime: 12, metrics: ["powerMW": 1]), over: old).metrics == ["powerMW": 1])
+        #expect(DiagnosticsCenter.mergedBaseline(baseline(uptime: 1, machine: "Mac16,1", metrics: ["powerMW": 1]), over: old).metrics == ["powerMW": 1])
+        #expect(DiagnosticsCenter.mergedBaseline(new, over: nil) == new)
+    }
+
+    @Test @MainActor func anUpdateOrACrashIsReportedSoon() {
+        let store = defaults()
+        let first = DiagnosticsHistory(defaults: store, version: "0.4.7")
+        #expect(!first.isNewVersion)
+        #expect(DiagnosticsCenter.firstReport(history: first, newCrash: false).reason == .launch)
+        first.markCleanExit()
+        let updated = DiagnosticsHistory(defaults: store, version: "0.4.8")
+        #expect(updated.isNewVersion)
+        #expect(DiagnosticsCenter.firstReport(history: updated, newCrash: false) == (.update, DiagnosticsCenter.urgentLaunchDelay))
+        #expect(DiagnosticsCenter.firstReport(history: updated, newCrash: true).reason == .crash)
+        // Not quit this time.
+        let killed = DiagnosticsHistory(defaults: store, version: "0.4.8")
+        #expect(!killed.isNewVersion)
+        #expect(DiagnosticsCenter.firstReport(history: killed, newCrash: false).reason == .crash)
+    }
+
+    @Test @MainActor func aSecondSendByHandSoonAfterSendsNothing() async {
+        let store = defaults()
+        store.set(Date(), forKey: DiagnosticsCenter.lastSentKey)
+        let center = DiagnosticsCenter(defaults: store, destinations: DiagnosticsDestinations(), outbox: nil)
+        // Without an address a real send fails; this one is not attempted at all.
+        #expect(await center.sendReport(.manual))
+        #expect(center.state == .idle)
+    }
+
+    @Test @MainActor func intervalsWithAReportInThemAreNotJudged() throws {
+        let meter = EnergyMeter(launchedAt: Date()) { .unknown }
+        func sample(_ offset: TimeInterval, _ joules: Double) -> EnergySample {
+            EnergySample(date: Date().addingTimeInterval(offset), own: ProcessUsage(energyNJ: UInt64(joules * 1e9), cpuNS: 1),
+                         helpers: ProcessUsage(), onBattery: false)
+        }
+        let before = try #require(EnergyInterval(from: sample(-1200, 0), to: sample(-600, 1)))
+        meter.beginCollecting()
+        #expect(meter.isCollection(try #require(EnergyInterval(from: sample(-600, 1), to: sample(1, 2)))))
+        meter.endCollecting()
+        #expect(!meter.isCollection(before))
+        #expect(meter.isCollection(try #require(EnergyInterval(from: sample(-600, 1), to: sample(600, 2)))))
+        #expect(!meter.isCollection(try #require(EnergyInterval(from: sample(60, 2), to: sample(660, 3)))))
+    }
+
+    @Test func environmentReadsThisMac() {
+        let keyboard = DiagnosticsEnvironment.keyboard()
+        #expect(keyboard.entries.contains { $0.key == "⌘Space: Spotlight" })
+        #expect(DiagnosticsEnvironment.format(["b": 1, "a": [true]]) == #"{"a":[true],"b":1}"#)
+        #expect(DiagnosticsEnvironment.format(nil) == "—")
+        let apps = DiagnosticsEnvironment.installedApps()
+        #expect(apps.entries.contains { $0.key == DiagnosticsEnvironment.interferingKey })
+    }
+}

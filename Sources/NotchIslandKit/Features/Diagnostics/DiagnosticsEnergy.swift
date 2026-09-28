@@ -177,6 +177,30 @@ final class EnergyMeter {
 
     private var task: Task<Void, Never>?
     private let powerState: () -> PowerState
+    /// When reports were being collected: their tools (`top`, `system_profiler`, `log show`) run
+    /// as NotchIsland's children, and an interval with one in it measures the report, not the app
+    /// (589 mW "worst 10 minutes" on a tester's Mac, v0.4.5, was the report being sent).
+    private(set) var collections: [ClosedRange<Date>] = []
+    private var collectingSince: Date?
+
+    /// A report starts being collected.
+    func beginCollecting() {
+        collectingSince = collectingSince ?? Date()
+    }
+
+    /// The report is collected: intervals overlapping it are not judged.
+    func endCollecting() {
+        guard let start = collectingSince else { return }
+        collectingSince = nil
+        collections.append(start...Date())
+        if collections.count > 64 { collections.removeFirst(collections.count - 64) }
+    }
+
+    /// The interval measured a report being collected (or one is being collected now).
+    func isCollection(_ interval: EnergyInterval) -> Bool {
+        if let collectingSince, interval.end >= collectingSince { return true }
+        return collections.contains { $0.overlaps(interval.start...interval.end) }
+    }
 
     init(launchedAt: Date, powerState: @escaping () -> PowerState) {
         self.powerState = powerState

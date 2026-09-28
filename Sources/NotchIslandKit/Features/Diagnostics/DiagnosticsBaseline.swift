@@ -79,6 +79,11 @@ nonisolated struct DiagnosticsBaseline: Sendable, Codable, Equatable {
     var metrics: [String: Double]
     /// Overrides of `DiagnosticsMetric.defaultRule`, by metric name.
     var rules: [String: DiagnosticsMetric.Rule]?
+    /// The reference Mac's settings (`DiagnosticsReport.settings`), so a report can list where a
+    /// user's Mac is set up differently; and when they were taken (later than the numbers when only
+    /// the settings were refreshed).
+    var settings: [String: String]?
+    var settingsCreated: Date?
 
     static let repository = "vdavid0814/notch-island-public"
     static let url = URL(string: "https://raw.githubusercontent.com/\(repository)/main/docs/diagnostics-baseline.json")!
@@ -150,9 +155,11 @@ nonisolated enum DiagnosticsVersions {
     }
 }
 
-/// Fetches the reference and the latest release from GitHub, at most every `lifetime`.
+/// Fetches the reference and the latest release from GitHub, at most every `lifetime`. A fetch
+/// that failed is tried again after `retry`, not a whole `lifetime` later.
 final class DiagnosticsReferenceStore {
-    static let lifetime: TimeInterval = 12 * 3600
+    static let lifetime: TimeInterval = 3600
+    static let retry: TimeInterval = 5 * 60
 
     private(set) var baseline: DiagnosticsBaseline?
     private(set) var latestVersion: String?
@@ -168,7 +175,9 @@ final class DiagnosticsReferenceStore {
             let (b, l) = await (baseline, latest)
             if let b { self.baseline = b }
             if let l { self.latestVersion = l }
-            self.fetched = Date()
+            // Both came: good for a `lifetime`. Otherwise try again soon (a release published an
+            // hour ago must not wait half a day to show up, as it did in v0.4.5).
+            self.fetched = b != nil && l != nil ? Date() : Date().addingTimeInterval(Self.retry - Self.lifetime)
             self.fetching = nil
         }
         fetching = task

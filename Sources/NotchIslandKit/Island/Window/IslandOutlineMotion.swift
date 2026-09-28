@@ -106,7 +106,8 @@ import SwiftUI
         nextID += 1
         let hold = SurfaceHold(
             id: nextID,
-            outline: IslandOutline(size: size, bottomRadius: tallest.bottomRadius, shoulderRadius: tallest.shoulderRadius),
+            outline: IslandOutline(size: size, bottomRadius: tallest.bottomRadius, shoulderRadius: tallest.shoulderRadius,
+                                   shoulderDrop: tallest.shoulderDrop),
             presentation: to.isIdle ? from : to
         )
         flight = Flight(id: nextID, start: now, origin: origin, delta: delta, velocity: velocity,
@@ -216,35 +217,41 @@ nonisolated struct OutlineVector: VectorArithmetic {
     var height: Double
     var bottomRadius: Double
     var shoulderRadius: Double
+    var shoulderDrop: Double
 
-    init(width: Double, height: Double, bottomRadius: Double, shoulderRadius: Double) {
+    init(width: Double, height: Double, bottomRadius: Double, shoulderRadius: Double, shoulderDrop: Double = 0) {
         self.width = width
         self.height = height
         self.bottomRadius = bottomRadius
         self.shoulderRadius = shoulderRadius
+        self.shoulderDrop = shoulderDrop
     }
 
     init(_ outline: IslandOutline) {
         self.init(width: outline.size.width, height: outline.size.height,
-                  bottomRadius: outline.bottomRadius, shoulderRadius: outline.shoulderRadius)
+                  bottomRadius: outline.bottomRadius, shoulderRadius: outline.shoulderRadius,
+                  shoulderDrop: outline.shoulderDrop)
     }
 
     /// Radii never below zero (the open's overshoot can carry them past it), as `IslandOutline.mixed`.
     var outline: IslandOutline {
         IslandOutline(size: CGSize(width: max(0, width), height: max(0, height)),
-                      bottomRadius: max(0, bottomRadius), shoulderRadius: max(0, shoulderRadius))
+                      bottomRadius: max(0, bottomRadius), shoulderRadius: max(0, shoulderRadius),
+                      shoulderDrop: max(0, shoulderDrop))
     }
 
     static var zero: OutlineVector { OutlineVector(width: 0, height: 0, bottomRadius: 0, shoulderRadius: 0) }
 
     static func + (a: OutlineVector, b: OutlineVector) -> OutlineVector {
         OutlineVector(width: a.width + b.width, height: a.height + b.height,
-                      bottomRadius: a.bottomRadius + b.bottomRadius, shoulderRadius: a.shoulderRadius + b.shoulderRadius)
+                      bottomRadius: a.bottomRadius + b.bottomRadius, shoulderRadius: a.shoulderRadius + b.shoulderRadius,
+                      shoulderDrop: a.shoulderDrop + b.shoulderDrop)
     }
 
     static func - (a: OutlineVector, b: OutlineVector) -> OutlineVector {
         OutlineVector(width: a.width - b.width, height: a.height - b.height,
-                      bottomRadius: a.bottomRadius - b.bottomRadius, shoulderRadius: a.shoulderRadius - b.shoulderRadius)
+                      bottomRadius: a.bottomRadius - b.bottomRadius, shoulderRadius: a.shoulderRadius - b.shoulderRadius,
+                      shoulderDrop: a.shoulderDrop - b.shoulderDrop)
     }
 
     mutating func scale(by rhs: Double) {
@@ -252,9 +259,11 @@ nonisolated struct OutlineVector: VectorArithmetic {
         height *= rhs
         bottomRadius *= rhs
         shoulderRadius *= rhs
+        shoulderDrop *= rhs
     }
 
     var magnitudeSquared: Double {
         width * width + height * height + bottomRadius * bottomRadius + shoulderRadius * shoulderRadius
+            + shoulderDrop * shoulderDrop
     }
 }

@@ -21,6 +21,9 @@ final class DiagnosticsHistory {
     let uncleanExits: Int
     let versions: [VersionSeen]
     let firstLaunch: Date
+    /// This launch is the first of a version other than the one that ran before (an update, or a
+    /// downgrade); false on the very first launch.
+    let isNewVersion: Bool
     /// Since this launch, by kind ("expanded", "assistant", "banner"…).
     private(set) var counters: [String: Int] = [:]
 
@@ -34,6 +37,7 @@ final class DiagnosticsHistory {
         uncleanExits = defaults.integer(forKey: Self.uncleanKey) + (previousEndedUncleanly ? 1 : 0)
         firstLaunch = defaults.object(forKey: Self.firstLaunchKey) as? Date ?? Date()
         var seen = defaults.data(forKey: Self.versionsKey).flatMap { try? JSONDecoder().decode([VersionSeen].self, from: $0) } ?? []
+        isNewVersion = seen.last.map { $0.version != version } ?? false
         if seen.last?.version != version { seen.append(VersionSeen(version: version, firstSeen: Date())) }
         versions = Array(seen.suffix(20))
         defaults.set(true, forKey: Self.runningKey)

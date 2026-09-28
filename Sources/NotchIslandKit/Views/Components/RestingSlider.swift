@@ -64,7 +64,7 @@ private struct SliderPicture: View {
     /// black, the filled part the accent a shade lighter (71, 147, 250 for blue).
     static let knobColor = Color(white: 0.86)
     static let trackColor = Color.white.opacity(0.082)
-    static let fillColor = Color.accentColor.mix(with: .white, by: 0.02)
+    static var fillColor: Color { Color.islandAccent.mix(with: .white, by: 0.02) }
 
     var body: some View {
         GeometryReader { proxy in

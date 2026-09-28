@@ -3,7 +3,7 @@ import Foundation
 
 /// An app or a file the assistant found for the query.
 nonisolated struct AssistantHit: Sendable, Hashable, Identifiable {
-    nonisolated enum Kind: Sendable, Hashable { case app, file }
+    nonisolated enum Kind: Sendable, Hashable { case app, file, folder }
 
     let kind: Kind
     let url: URL
@@ -101,7 +101,8 @@ nonisolated enum AssistantSearch {
         guard !term.isEmpty, !scope.paths.isEmpty else { return [] }
         // Word starts ("q*"cdw), or anywhere in the name ("*q*"cd).
         let pattern = scope.anywhere ? "\"*\(term)*\"cd" : "\"\(term)*\"cdw"
-        let predicate = "kMDItemDisplayName == \(pattern) && \(fileFilter)"
+        // Folders too, as in Spotlight (the recent list keeps to files).
+        let predicate = "kMDItemDisplayName == \(pattern) && \(notApps)"
         let hits = run(predicate, scopes: scope.paths, fetch: max(40, limit * 3), kind: .file)
         return Array(rank(hits, for: query).prefix(limit))
     }
@@ -115,9 +116,21 @@ nonisolated enum AssistantSearch {
         return Array(sorted.prefix(limit))
     }
 
-    private static let fileFilter = """
-        kMDItemContentTypeTree != "com.apple.application-bundle" && kMDItemContentType != "public.folder"
-        """
+    private static let notApps = #"kMDItemContentTypeTree != "com.apple.application-bundle""#
+    private static let fileFilter = notApps + #" && kMDItemContentType != "public.folder""#
+
+    /// Inside something no one looks for by name: hidden folders, dependencies, build output, and
+    /// the insides of packages (an app, a project, a library).
+    static func isBuried(_ path: String) -> Bool {
+        path.split(separator: "/").dropLast().contains { component in
+            component.hasPrefix(".") || buriedFolders.contains(String(component))
+                || packageExtensions.contains { component.hasSuffix($0) }
+        }
+    }
+
+    static let buriedFolders: Set<String> = ["node_modules", "DerivedData", "Pods", "build", "__pycache__", "venv"]
+    static let packageExtensions = [".app", ".bundle", ".framework", ".xcodeproj", ".xcworkspace", ".photoslibrary",
+                                    ".musiclibrary", ".pages", ".numbers", ".key", ".rtfd", ".playground"]
 
     static let shortcutsTool = "/usr/bin/shortcuts"
     static let shortcutsApp = "/System/Applications/Shortcuts.app"
@@ -177,14 +190,16 @@ nonisolated enum AssistantSearch {
             guard let raw = MDQueryGetResultAtIndex(query, index) else { continue }
             let item = Unmanaged<MDItem>.fromOpaque(raw).takeUnretainedValue()
             guard let path = MDItemCopyAttribute(item, kMDItemPath) as? String, seen.insert(path).inserted else { continue }
+            if kind != .app, isBuried(path) { continue }
             let url = URL(fileURLWithPath: path)
             var name = MDItemCopyAttribute(item, kMDItemDisplayName) as? String ?? url.lastPathComponent
             if kind == .app, name.hasSuffix(".app") { name.removeLast(4) }
+            let type = MDItemCopyAttribute(item, kMDItemContentType) as? String
             hits.append(AssistantHit(
-                kind: kind,
+                kind: kind == .file && type == "public.folder" ? .folder : kind,
                 url: url,
                 name: name,
-                contentType: MDItemCopyAttribute(item, kMDItemContentType) as? String,
+                contentType: type,
                 lastUsed: MDItemCopyAttribute(item, kMDItemLastUsedDate) as? Date
             ))
         }

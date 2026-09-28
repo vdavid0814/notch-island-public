@@ -39,7 +39,7 @@ struct InfoHint: View {
     var body: some View {
         Image(systemName: "info.circle")
             .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(isShown ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(SettingsPalette.secondary))
+            .foregroundStyle(isShown ? AnyShapeStyle(Color.islandAccent) : AnyShapeStyle(SettingsPalette.secondary))
             .contentShape(.circle)
             .onHover { overIcon = $0 }
             .onTapGesture { isShown.toggle() }
@@ -137,7 +137,7 @@ struct PictureChoice<Value: Hashable, Picture: View>: View {
                         picture(option)
                             .overlay {
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(isSelected ? Color.accentColor : .white.opacity(0.12),
+                                    .strokeBorder(isSelected ? Color.islandAccent : .white.opacity(0.12),
                                                   lineWidth: isSelected ? 3 : 1)
                             }
                         Text(title(option))
@@ -373,7 +373,7 @@ private struct MiniSlider: View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Capsule().fill(.white.opacity(0.25))
-                Capsule().fill(Color.accentColor).frame(width: proxy.size.width * value)
+                Capsule().fill(Color.islandAccent).frame(width: proxy.size.width * value)
             }
         }
         .frame(height: 3)

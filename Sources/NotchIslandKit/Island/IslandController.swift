@@ -48,7 +48,7 @@ nonisolated extension BannerKind {
     /// island out from under it.
     var isInteractive: Bool {
         switch self {
-        case .level, .levelPill, .timerFinished: true
+        case .level, .levelPill, .levelCovering, .timerFinished: true
         case .power, .dropTarget, .airPods: false
         }
     }
@@ -59,7 +59,7 @@ nonisolated extension BannerKind {
     var showsWhileHidden: Bool {
         switch self {
         case .level, .levelPill: true
-        case .power, .timerFinished, .dropTarget, .airPods: false
+        case .levelCovering, .power, .timerFinished, .dropTarget, .airPods: false
         }
     }
 }
@@ -125,6 +125,16 @@ nonisolated extension BannerKind {
     private var monitorInside: Bool?
 
     private var pointerInside: Bool { monitorInside ?? trackingInside }
+
+    /// The policy's own state, for diagnostics.
+    var diagnosticsSnapshot: [(String, String)] {
+        [("wantsExpanded", "\(wantsExpanded)"), ("isDragInProgress", "\(isDragInProgress)"),
+         ("openWasUserInitiated", "\(openWasUserInitiated)"), ("pointerHasVisited", "\(pointerHasVisited)"),
+         ("suppressHoverOpenUntilExit", "\(suppressHoverOpenUntilExit)"), ("isPointerSimulated", "\(isPointerSimulated)"),
+         ("isHidden", "\(isHidden)"), ("wantsAssistant", "\(wantsAssistant)"), ("wantsSettings", "\(wantsSettings)"),
+         ("trackingInside", "\(trackingInside)"), ("monitorInside", monitorInside.map { "\($0)" } ?? "—"),
+         ("isStarted", "\(isStarted)")]
+    }
 
     init(model: AppModel) {
         self.model = model

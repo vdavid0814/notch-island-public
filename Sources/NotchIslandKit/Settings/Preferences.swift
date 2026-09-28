@@ -31,6 +31,7 @@ import Foundation
         static let timerSound = prefix + "timerSound"
         static let showMenuBarIcon = prefix + "showMenuBarIcon"
         static let glassStyle = prefix + "glassStyle"
+        static let theme = prefix + "theme"
         static let animationDuration = prefix + "animationDuration"
         static let hideInFullscreen = prefix + "hideInFullscreen"
         static let commandSpaceOpensSiri = prefix + "commandSpaceOpensSiri"
@@ -45,6 +46,8 @@ import Foundation
         static let musicBars = prefix + "musicBars"
         static let musicBarsOnPower = prefix + "musicBarsOnPower"
         static let musicBarsContinuousOnPower = prefix + "musicBarsContinuousOnPower"
+        static let liquidVolume = prefix + "liquidVolume"
+        static let liquidAirPods = prefix + "liquidAirPods"
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -87,6 +90,14 @@ import Foundation
     var showMenuBarIcon: Bool { didSet { defaults.set(showMenuBarIcon, forKey: Key.showMenuBarIcon) } }
     /// The island's surface: Liquid Glass, black, or black fading into the glass.
     var glassStyle: IslandGlassStyle { didSet { defaults.set(glassStyle.rawValue, forKey: Key.glassStyle) } }
+    /// The island's colour (`IslandTheme`), shared with every view through `IslandThemeStore`.
+    var theme: IslandTheme {
+        didSet {
+            guard theme != oldValue else { return }
+            defaults.set(try? JSONEncoder().encode(theme), forKey: Key.theme)
+            IslandThemeStore.shared.theme = theme
+        }
+    }
     /// Seconds the island takes to grow out of the notch (and to shrink back into it).
     var animationDuration: Double { didSet { defaults.set(animationDuration, forKey: Key.animationDuration) } }
     /// Step aside while the playing video (a film, a YouTube video) is in full screen.
@@ -103,6 +114,10 @@ import Foundation
     /// … and on the charger (or a Mac without a battery).
     var musicBarsOnPower: MusicBarsStyle { didSet { defaults.set(musicBarsOnPower.rawValue, forKey: Key.musicBarsOnPower) } }
     /// Following the music: on the charger, listen 0.8 s in every 1.8 instead of 2 s in every 8.
+    /// The island's liquid runs out to macOS's own volume / AirPods card when that one comes up away
+    /// from the notch, and lies on it (`LiquidCard`).
+    var liquidVolume: Bool { didSet { defaults.set(liquidVolume, forKey: Key.liquidVolume) } }
+    var liquidAirPods: Bool { didSet { defaults.set(liquidAirPods, forKey: Key.liquidAirPods) } }
     var musicBarsContinuousOnPower: Bool {
         didSet { defaults.set(musicBarsContinuousOnPower, forKey: Key.musicBarsContinuousOnPower) }
     }
@@ -141,6 +156,7 @@ import Foundation
         timerSound = defaults.object(forKey: Key.timerSound) as? Bool ?? true
         showMenuBarIcon = defaults.object(forKey: Key.showMenuBarIcon) as? Bool ?? true
         glassStyle = IslandGlassStyle(storedValue: defaults.string(forKey: Key.glassStyle))
+        theme = defaults.data(forKey: Key.theme).flatMap { try? JSONDecoder().decode(IslandTheme.self, from: $0) } ?? .default
         hideInFullscreen = defaults.object(forKey: Key.hideInFullscreen) as? Bool ?? true
         commandSpaceOpensSiri = defaults.object(forKey: Key.commandSpaceOpensSiri) as? Bool ?? true
         let barsOnBattery = defaults.string(forKey: Key.musicBars).flatMap(MusicBarsStyle.init(rawValue:)) ?? .followMusic
@@ -148,6 +164,8 @@ import Foundation
         // Until chosen on its own, the charger follows the battery's choice.
         musicBarsOnPower = defaults.string(forKey: Key.musicBarsOnPower).flatMap(MusicBarsStyle.init(rawValue:)) ?? barsOnBattery
         musicBarsContinuousOnPower = defaults.object(forKey: Key.musicBarsContinuousOnPower) as? Bool ?? true
+        liquidVolume = defaults.object(forKey: Key.liquidVolume) as? Bool ?? true
+        liquidAirPods = defaults.object(forKey: Key.liquidAirPods) as? Bool ?? true
         siri = defaults.data(forKey: Key.siri).flatMap { try? JSONDecoder().decode(SiriSettings.self, from: $0) } ?? SiriSettings()
         let duration = defaults.object(forKey: Key.animationDuration) as? Double ?? Motion.defaultDuration
         animationDuration = min(

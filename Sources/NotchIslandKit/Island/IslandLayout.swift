@@ -62,6 +62,17 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     /// The AirPods card (see `size(for: .banner(.airPods))`).
     static let airPodsBannerWidth: CGFloat = 400
     static let airPodsDetailHeight: CGFloat = 112
+    /// Over macOS's volume card: its outline exactly (below the menu bar's height, a point, the
+    /// card's top offset and its height), so where the fade clears the island's edge is the card's.
+    static let coveringDetailHeight: CGFloat = 1 + SystemVolumeCard.Kind.volume.top + SystemVolumeCard.Kind.volume.size.height
+    static let coveringBodyWidth: CGFloat = SystemVolumeCard.Kind.volume.size.width
+    static let coveringBottomRadius: CGFloat = SystemVolumeCard.Kind.volume.radius
+    static let coveringShoulder: CGFloat = 10
+    /// The same over macOS's AirPods card, when the island covers it.
+    static let airPodsCoveringDetailHeight: CGFloat = 1 + SystemVolumeCard.Kind.airPods.top + SystemVolumeCard.Kind.airPods.size.height
+
+    /// The AirPods card lies on macOS's own (Settings ▸ Live Activities ▸ With macOS's own card).
+    static var coversAirPodsCard: Bool { AirPodsSystemCard.current == .cover }
     /// Each ear of the minimal level pill: the symbol on one side, a small slider on the other.
     static let levelPillEar: CGFloat = 92
     /// The detail row a banner adds below the header band.
@@ -130,6 +141,15 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         case .compact:
             // Never taller than the notch: a taller pill reads as a window stuck to the screen.
             return CGSize(width: notch.width + 2 * ear, height: notch.height)
+        case .banner(.levelCovering):
+            // macOS's volume card (293 × 64 pt, 11 pt below the menu bar's height, measured from its
+            // image): its body is exactly the card, with the shoulders beside it (asked for: the
+            // card's shape, lying over it, edge on edge).
+            return CGSize(width: Self.coveringBodyWidth + 2 * Self.coveringShoulder,
+                          height: notch.height + Self.coveringDetailHeight)
+        case .banner(.airPods) where Self.coversAirPodsCard:
+            return CGSize(width: SystemVolumeCard.Kind.airPods.size.width + 2 * Self.coveringShoulder,
+                          height: notch.height + Self.airPodsCoveringDetailHeight)
         case .banner(.airPods):
             // Large enough to lie over macOS's own AirPods card (about 300 × 60 pt under the
             // notch, in a 352 × 148 window with its shadow), which the island covers.
@@ -179,13 +199,26 @@ nonisolated struct IslandLayout: Sendable, Equatable {
 
     /// The island's outline in a presentation: its size and radii.
     func outline(for p: IslandPresentation) -> IslandOutline {
-        IslandOutline(size: size(for: p), bottomRadius: bottomRadius(for: p), shoulderRadius: shoulderRadius(for: p))
+        IslandOutline(size: size(for: p), bottomRadius: bottomRadius(for: p), shoulderRadius: shoulderRadius(for: p),
+                      shoulderDrop: Self.liesOnSystemCard(p) ? notch.height : 0)
+    }
+
+    /// Lies on macOS's own card, in its outline.
+    static func liesOnSystemCard(_ p: IslandPresentation) -> Bool {
+        switch p {
+        case .banner(.levelCovering(.volume)): true
+        case .banner(.airPods): coversAirPodsCard
+        default: false
+        }
     }
 
     func bottomRadius(for p: IslandPresentation) -> CGFloat {
         switch p {
         case .idle: min(8, notch.height / 2)
         case .compact, .banner(.levelPill): notch.height / 2
+        // A little rounder than macOS's volume card under it.
+        case .banner(.levelCovering): Self.coveringBottomRadius
+        case .banner(.airPods) where Self.coversAirPodsCard: SystemVolumeCard.Kind.airPods.radius
         case .banner: 24
         case .expanded, .assistant, .settings: 30 * scale.factor
         }
@@ -196,6 +229,8 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         switch p {
         case .idle: 0
         case .compact, .banner(.levelPill): 6
+        case .banner(.levelCovering): Self.coveringShoulder
+        case .banner(.airPods) where Self.coversAirPodsCard: Self.coveringShoulder
         case .banner: 8
         case .expanded, .assistant, .settings: 10
         }

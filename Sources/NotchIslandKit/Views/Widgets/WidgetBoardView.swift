@@ -237,7 +237,7 @@ private struct WidgetBackdrop: View {
             shape.fill(.white.opacity(0.28 * strength))
         case .tinted:
             shape.fill(LinearGradient(
-                colors: [(accent ?? .accentColor).opacity(strength), (accent ?? .accentColor).opacity(0.44 * strength)],
+                colors: [(accent ?? .islandAccent).opacity(strength), (accent ?? .islandAccent).opacity(0.44 * strength)],
                 startPoint: .topLeading, endPoint: .bottomTrailing
             ))
         case .artwork:

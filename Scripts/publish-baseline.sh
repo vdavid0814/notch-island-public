@@ -3,7 +3,9 @@
 # running now (the one published on GitHub). Run it after NotchIsland has run for a few hours as
 # usual (the energy averages need the time), then commit and push docs/diagnostics-baseline.json.
 #
-#   Scripts/publish-baseline.sh
+#   Scripts/publish-baseline.sh            # numbers from a shorter run than the published one are
+#                                          # not taken, only this Mac's settings (and missing numbers)
+#   Scripts/publish-baseline.sh --replace  # every number from this run
 #
 # The `rules` of the file already in docs/ (thresholds tuned by hand) are kept.
 set -euo pipefail
@@ -15,6 +17,9 @@ DEST="$ROOT/docs/diagnostics-baseline.json"
 pgrep -x NotchIsland >/dev/null || { echo "error: NotchIsland is not running" >&2; exit 1; }
 # Only a Mac marked as the reference may write one (a link on a web page cannot).
 defaults write com.davidvarga.notchisland ni2.diagnostics.reference -bool true
+if [[ "${1:-}" == "--replace" ]]; then
+  defaults write com.davidvarga.notchisland ni2.diagnostics.referenceReplace -bool true
+fi
 
 BEFORE="$(stat -f %m "$OUT" 2>/dev/null || echo 0)"
 open "notchisland://diagnostics/baseline"
@@ -35,6 +40,8 @@ if os.path.exists(dest):
         new["rules"] = old["rules"]
 json.dump(new, open(dest, "w"), indent=2, sort_keys=True)
 print(f"==> reference for v{new['version']} ({new['build']}) on {new['machine']}, {new['uptimeHours']} h of running")
+if new.get("settings"):
+    print(f"    {len(new['settings'])} settings, taken {new.get('settingsCreated', '?')}")
 for key, value in sorted(new["metrics"].items()):
     print(f"    {key:26} {value}")
 if new["uptimeHours"] < 2:

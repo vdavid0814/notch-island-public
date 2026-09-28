@@ -285,6 +285,10 @@ nonisolated enum DiagnosticsProbes {
         return reportFiles().count { $0.date > since }
     }
 
+    static func crashCount(since: Date) -> Int {
+        reportFiles().count { $0.date > since }
+    }
+
     /// Errors and faults in a compact-style log ("2026-09-27 21:10:40.892 E  NotchIsland…").
     static func errorLines(in log: String) -> [Substring] {
         log.split(separator: "\n").filter { line in

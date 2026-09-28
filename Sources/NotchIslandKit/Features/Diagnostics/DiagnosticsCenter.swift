@@ -4,9 +4,10 @@ import Observation
 /// Sends the developer diagnostics reports (when the user turned them on in About) and the user's
 /// bug reports and feature requests (always possible).
 ///
-/// Reports go at launch (after a pause, so the launch itself is not slowed), every
-/// `periodicInterval` while the app runs, when a new crash report turns up, when a 10-minute energy
-/// sample is well past the developer's reference twice in a row, and on request. Every number is set
+/// Reports go at launch (after a pause, so the launch itself is not slowed; sooner after a crash or
+/// an update), every `periodicInterval` while the app runs, when a new crash report turns up, when a
+/// 10-minute energy sample is well past the developer's reference twice in a row, when something
+/// breaks while running (`watchProblems`), and on request. Every number is set
 /// against the reference (`DiagnosticsBaseline`, from GitHub). A delivery that fails is kept in the
 /// outbox and sent before the next one.
 @Observable final class DiagnosticsCenter {
@@ -19,12 +20,24 @@ import Observation
     nonisolated static let lastAnomalyKey = "ni2.diagnostics.lastAnomaly"
     /// Set on the developer's Mac only (`Scripts/publish-baseline.sh`): it may write the reference.
     nonisolated static let referenceKey = "ni2.diagnostics.reference"
+    /// Set by `Scripts/publish-baseline.sh --replace`: the next reference replaces every number.
+    nonisolated static let referenceReplaceKey = "ni2.diagnostics.referenceReplace"
 
     static let launchDelay: Duration = .seconds(90)
-    static let periodicInterval: Duration = .seconds(6 * 3600)
-    /// Hours of log in an automatic report, and in a bug report.
+    /// After a crash or unclean exit, and on a new version's first launch.
+    static let urgentLaunchDelay: Duration = .seconds(25)
+    static let periodicInterval: Duration = .seconds(3600)
+    /// Hours of log in an automatic report, in the hourly one, and in a bug report.
     static let reportLogHours = 6
+    static let periodicLogHours = 1
     static let bugLogHours = 24
+    /// A second Send Report Now this soon after a report sends nothing (four in six seconds were
+    /// seen, v0.4.5).
+    static let manualGap: TimeInterval = 60
+    /// How often the running app is checked for something broken, and at most one report per
+    /// kind of problem in `problemGap`.
+    static let problemCheck: Duration = .seconds(60)
+    static let problemGap: TimeInterval = 3600
     nonisolated static let logLimit = 2_500_000
     static let outboxLimit = 8
     /// At most one anomaly report in this long.
@@ -82,6 +95,10 @@ import Observation
     @ObservationIgnored private var unusualRuns: [DiagnosticsMetric: Int] = [:]
     /// What set off the anomaly report being sent.
     @ObservationIgnored private var liveTrigger: [String] = []
+    @ObservationIgnored private var problemWatch: Task<Void, Never>?
+    /// Problems seen on the last check, and when each was last reported.
+    @ObservationIgnored private var problems: Set<String> = []
+    @ObservationIgnored private var problemsReported: [String: Date] = [:]
 
     init(defaults: UserDefaults = .standard,
          destinations: DiagnosticsDestinations = .from(info: Bundle.main.infoDictionary),
@@ -126,13 +143,28 @@ import Observation
         if history == nil { history = DiagnosticsHistory(defaults: defaults, version: "\(version) (\(build))") }
         installCounter(model)
         if isEnabled { energy.start() }
-        reschedule(firstDelay: Self.launchDelay, firstReason: .launch)
+        let first = Self.firstReport(history: history, newCrash: DiagnosticsProbes.crashCount(since: crashesSince) > 0)
+        reschedule(firstDelay: first.delay, firstReason: first.reason)
+    }
+
+    /// The first report of this launch: soon after a crash, an unclean exit or an update, else
+    /// after `launchDelay`.
+    static func firstReport(history: DiagnosticsHistory?, newCrash: Bool) -> (reason: DiagnosticsReason, delay: Duration) {
+        if newCrash || history?.previousEndedUncleanly == true { return (.crash, urgentLaunchDelay) }
+        if history?.isNewVersion == true { return (.update, urgentLaunchDelay) }
+        return (.launch, launchDelay)
+    }
+
+    private var crashesSince: Date {
+        defaults.object(forKey: Self.crashesSeenKey) as? Date ?? Date().addingTimeInterval(-7 * 86400)
     }
 
     /// The app is quitting: the run ended normally.
     func stop() {
         schedule?.cancel()
         schedule = nil
+        problemWatch?.cancel()
+        problemWatch = nil
         energy.stop()
         history?.markCleanExit()
     }
@@ -153,7 +185,10 @@ import Observation
     private func reschedule(firstDelay: Duration, firstReason: DiagnosticsReason) {
         schedule?.cancel()
         schedule = nil
+        problemWatch?.cancel()
+        problemWatch = nil
         guard isEnabled, isConfigured, model != nil else { return }
+        watchProblems()
         schedule = Task { [weak self] in
             var delay = firstDelay
             var reason = firstReason
@@ -171,7 +206,8 @@ import Observation
 
     /// Each 10-minute sample against the reference: two in a row past it sends a report at once.
     private func liveCheck(_ interval: EnergyInterval) {
-        guard isEnabled, let baseline = references.baseline else { return }
+        // A report being collected is not the app misbehaving.
+        guard isEnabled, let baseline = references.baseline, !energy.isCollection(interval) else { return }
         let values: [DiagnosticsMetric: Double] = [
             .recentPowerMW: interval.ownMW, .wakeupsPerSecond: interval.wakeupsPerSecond, .memoryMB: interval.footprintMB,
         ]
@@ -183,11 +219,47 @@ import Observation
             }
         }
         guard !triggered.isEmpty else { return }
+        // Counted again from zero: the next report needs two more readings in a row.
+        unusualRuns = [:]
         if let last = defaults.object(forKey: Self.lastAnomalyKey) as? Date, Date().timeIntervalSince(last) < Self.anomalyGap { return }
         defaults.set(Date(), forKey: Self.lastAnomalyKey)
         Log.app.notice("diagnostics: unusual \(triggered.joined(separator: "; "), privacy: .public)")
         liveTrigger = triggered
         Task { await self.sendReport(.anomaly) }
+    }
+
+    /// Every `problemCheck`: Accessibility taken away, the key interception failed, or the ⌘Space
+    /// tap stopped while wanted. A problem that newly appears sends a report at once (one per kind
+    /// per `problemGap`).
+    private func watchProblems() {
+        problemWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: Self.problemCheck, tolerance: .seconds(15)) } catch { return }
+                self?.checkProblems()
+            }
+        }
+    }
+
+    private func checkProblems() {
+        guard isEnabled, let model else { return }
+        var found: [String: String] = [:]
+        if !model.permissions.accessibilityTrusted {
+            found["accessibility"] = "Accessibility is not allowed (any more)"
+        }
+        let keys = String(describing: model.levels.interception)
+        if keys.hasPrefix("failed") { found["keys"] = "The volume/brightness key interception failed: \(keys)" }
+        if model.diagnosticsCommandSpaceWanted, !model.diagnosticsCommandSpaceTapRunning {
+            found["commandSpace"] = "The ⌘Space tap is wanted but not running"
+        }
+        let new = Set(found.keys).subtracting(problems)
+        problems = Set(found.keys)
+        let due = new.filter { problemsReported[$0].map { Date().timeIntervalSince($0) >= Self.problemGap } ?? true }
+        guard !due.isEmpty else { return }
+        for kind in due { problemsReported[kind] = Date() }
+        let lines = due.sorted().compactMap { found[$0] }
+        Log.app.notice("diagnostics: problem \(lines.joined(separator: "; "), privacy: .public)")
+        liveTrigger = lines
+        Task { await self.sendReport(.problem) }
     }
 
     /// For About: fresh numbers for the energy and version lines.
@@ -204,9 +276,14 @@ import Observation
     /// A diagnostics report. A new crash report makes it a crash report.
     @discardableResult
     func sendReport(_ reason: DiagnosticsReason) async -> Bool {
-        await references.refresh()
-        let crashesSince = defaults.object(forKey: Self.crashesSeenKey) as? Date ?? Date().addingTimeInterval(-7 * 86400)
-        let report = await makeReport(logHours: Self.reportLogHours, crashesSince: crashesSince)
+        if reason == .manual, let lastSent, Date().timeIntervalSince(lastSent) < Self.manualGap {
+            Log.app.notice("diagnostics: sent \(Int(Date().timeIntervalSince(lastSent)), privacy: .public) s ago, not again")
+            return true
+        }
+        // By hand: the newest version and reference, not an hour-old answer.
+        await references.refresh(force: reason == .manual)
+        let hours = reason == .periodic ? Self.periodicLogHours : Self.reportLogHours
+        let report = await makeReport(logHours: hours, crashesSince: crashesSince)
         let crashes = report.attachments.count { $0.name != "log.txt" }
         let kind: DiagnosticsEnvelope.Kind = crashes > 0 ? .crash : reason == .anomaly ? .anomaly : .report
         let delivered = await deliver(envelope(kind: kind, reason: reason, report: report, feedback: nil))
@@ -264,7 +341,7 @@ import Observation
     }
 
     private func collectFeedbackReport(_ kind: DiagnosticsFeedback.Kind) async -> DiagnosticsReport {
-        await references.refresh()
+        await references.refresh(force: true)
         let hours = kind == .bug ? Self.bugLogHours : Self.reportLogHours
         return await makeReport(logHours: hours, crashesSince: Date().addingTimeInterval(-3 * 86400))
     }
@@ -282,6 +359,11 @@ import Observation
         var files: [DiagnosticsEnvelope.File] = []
         if !report.sections.isEmpty {
             files.append(.init(name: "report.txt", text: header(kind: kind, reason: reason, findings: findings) + report.text))
+            let meta = ["kind": kind.rawValue, "reason": reason?.rawValue ?? "", "sender": sender, "install": installID,
+                        "written": DiagnosticsFormat.date(Date()), "version": version, "build": build,
+                        "reference": references.baseline.map { "v\($0.version) (\($0.build)) on \($0.machine)" } ?? "",
+                        "latestOnGitHub": references.latestVersion ?? ""]
+            files.append(.init(name: "report.json", text: report.json(meta: meta, findings: findings, comparisons: comparisons)))
         }
         files += report.attachments.map { .init(name: $0.name, text: $0.text) }
         var facts = DiagnosticsFindings.facts(report)
@@ -463,13 +545,17 @@ import Observation
             metrics = energyMetrics
             if let history { metrics[.uncleanExits] = history.previousEndedUncleanly ? 1 : 0 }
         }
+        // The tools the collection starts count as NotchIsland's helpers: that stretch is not judged.
+        energy.beginCollecting()
         let background = await Self.collect(launchedAt: launchedAt, logHours: logHours, crashesSince: crashesSince, basicOnly: basicOnly)
+        energy.endCollecting()
         metrics.merge(background.metrics) { $1 }
         var report = DiagnosticsReport()
         report.sections = Array(background.sections.prefix(3)) + appSections + background.sections.dropFirst(3)
         report.attachments = background.attachments
         if !basicOnly {
             report.sections.insert(referenceSection(metrics), at: min(3, report.sections.count))
+            report.sections.insert(differencesSection(report.settings), at: min(4, report.sections.count))
         }
         report.metrics = metrics
         return report
@@ -511,17 +597,21 @@ import Observation
         if let charger = EnergySummary(intervals.filter { !$0.onBattery }) {
             section.add("On the charger", charger.line)
         }
-        if let worst = intervals.max(by: { $0.ownMW < $1.ownMW }) {
+        // Only whole stretches without a report being collected in them: a few seconds of the
+        // report's own tools read as hundreds of milliwatts.
+        let judged = intervals.filter { $0.seconds >= Self.energyJudgedAfter && !energy.isCollection($0) }
+        if let worst = judged.max(by: { $0.ownMW < $1.ownMW }) {
             section.add("Worst 10 minutes", String(format: "%.1f mW, CPU %.2f%%, %.1f wakeups/s, ending %@",
                                                    worst.ownMW, worst.cpuPercent, worst.wakeupsPerSecond, DiagnosticsFormat.date(worst.end)))
-            if worst.seconds >= Self.energyJudgedAfter { metrics[.worstPowerMW] = worst.ownMW }
+            metrics[.worstPowerMW] = worst.ownMW
         }
         let timeline = intervals.suffix(24).map { interval in
-            String(format: "%@  %6.1f mW  helpers %5.1f  CPU %5.2f%%  %6.1f wk/s  %4.0f MB  %@%@",
+            String(format: "%@  %6.1f mW  helpers %5.1f  CPU %5.2f%%  %6.1f wk/s  %4.0f MB  %@%@%@",
                    interval.end.formatted(date: .omitted, time: .shortened), interval.ownMW, interval.helpersMW,
                    interval.cpuPercent, interval.wakeupsPerSecond, interval.footprintMB,
                    interval.onBattery ? "battery" : "charger",
-                   interval.drainPerHour.map { String(format: " −%.1f%%/h", $0) } ?? "")
+                   interval.drainPerHour.map { String(format: " −%.1f%%/h", $0) } ?? "",
+                   energy.isCollection(interval) ? "  (a report was collected)" : "")
         }
         section.add("Samples", energy.isRunning ? "\(energy.samples.count), every 10 minutes" : "not sampling (diagnostics are off)")
         if !timeline.isEmpty { section.add("Timeline (10-minute steps)", timeline.joined(separator: "\n")) }
@@ -542,6 +632,19 @@ import Observation
         return section
     }
 
+    /// Where this Mac is set up differently from the reference Mac.
+    private func differencesSection(_ settings: [String: String]) -> DiagnosticsReport.Section {
+        var section = DiagnosticsReport.Section("Differs from the reference Mac")
+        guard let reference = references.baseline?.settings else {
+            section.add("Differences", "the reference has no settings to compare with")
+            return section
+        }
+        let lines = DiagnosticsReport.differences(settings, from: reference)
+        section.add("Differences", lines.count)
+        if !lines.isEmpty { section.add("Settings", lines.prefix(150).joined(separator: "\n")) }
+        return section
+    }
+
     @concurrent nonisolated private static func collect(launchedAt: Date, logHours: Int, crashesSince: Date?,
                                                          basicOnly: Bool) async -> DiagnosticsReport {
         var report = DiagnosticsReport()
@@ -554,6 +657,8 @@ import Observation
         report.sections += spotlight.sections
         report.metrics = spotlight.metrics
         report.sections.append(DiagnosticsProbes.hardware())
+        report.sections += DiagnosticsEnvironment.sections()
+        report.sections.append(DiagnosticsEnvironment.trail())
         report.metrics[.crashes] = Double(DiagnosticsProbes.crashCount(days: 7))
         if logHours > 0 {
             let log = DiagnosticsProbes.log(hours: logHours, limit: logLimit)
@@ -588,12 +693,15 @@ import Observation
         // developer's Mac, where rebuilds kill the app all the time.
         let judged = report.metrics.filter { $0.key != .crashes && $0.key != .uncleanExits }
         let machine = [report.value("Model", in: "Mac"), report.value("Chip", in: "Mac")].compactMap { $0 }.joined(separator: " · ")
-        let baseline = DiagnosticsBaseline(
-            version: version, build: build, created: Date(), machine: machine,
-            uptimeHours: (Date().timeIntervalSince(launchedAt) / 360).rounded() / 10,
-            metrics: Dictionary(uniqueKeysWithValues: judged.map { ($0.key.rawValue, ($0.value * 100).rounded() / 100) }),
-            rules: references.baseline?.rules
-        )
+        let replace = defaults.bool(forKey: Self.referenceReplaceKey)
+        defaults.removeObject(forKey: Self.referenceReplaceKey)
+        let baseline = Self.mergedBaseline(
+            DiagnosticsBaseline(
+                version: version, build: build, created: Date(), machine: machine,
+                uptimeHours: (Date().timeIntervalSince(launchedAt) / 360).rounded() / 10,
+                metrics: Dictionary(uniqueKeysWithValues: judged.map { ($0.key.rawValue, ($0.value * 100).rounded() / 100) }),
+                rules: references.baseline?.rules, settings: report.settings, settingsCreated: Date()),
+            over: replace ? nil : references.baseline)
         guard let data = try? DiagnosticsBaseline.encoder.encode(baseline), let folder = Self.supportFolder else { return }
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try? data.write(to: folder.appendingPathComponent("diagnostics-baseline.json"), options: .atomic)
@@ -614,6 +722,19 @@ import Observation
             _ = try? await DiagnosticsUploader.post(payload, files: files, to: channel)
         }
         state = lastSent.map { .sent($0) } ?? .idle
+    }
+
+    /// A new reference over the published one: when this run is shorter than the one the published
+    /// numbers come from, on the same Mac, those numbers stay (hours of normal use say more than
+    /// minutes after a rebuild) and only the settings, and numbers it lacks, are taken.
+    nonisolated static func mergedBaseline(_ new: DiagnosticsBaseline, over old: DiagnosticsBaseline?) -> DiagnosticsBaseline {
+        guard let old, old.machine == new.machine, old.uptimeHours > new.uptimeHours else { return new }
+        var merged = old
+        merged.metrics.merge(new.metrics) { kept, _ in kept }
+        merged.settings = new.settings
+        merged.settingsCreated = new.settingsCreated
+        merged.rules = new.rules ?? old.rules
+        return merged
     }
 
     /// The report as it would be sent, in a folder of its own, opened for the user to read.

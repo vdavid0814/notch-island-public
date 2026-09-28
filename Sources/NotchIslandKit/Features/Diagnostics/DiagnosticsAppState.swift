@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 
 /// The readings that need the app's own state, taken on the main actor: the island, the screens,
 /// every feature's status, the preferences and what else is running.
@@ -11,7 +12,8 @@ enum DiagnosticsAppState {
     static let otherNotchAppsKey = DiagnosticsAppStateKeys.otherNotchApps
 
     static func sections(_ model: AppModel) -> [DiagnosticsReport.Section] {
-        [island(model), screens(), features(model), copies(), preferences(), runningApps()]
+        [island(model), internals(model), screens(), windows(), features(model), effectiveSettings(model), copies(),
+         preferences(), runningApps()]
     }
 
     private static func island(_ model: AppModel) -> DiagnosticsReport.Section {
@@ -55,14 +57,16 @@ enum DiagnosticsAppState {
     private static func features(_ model: AppModel) -> DiagnosticsReport.Section {
         var section = DiagnosticsReport.Section(featuresTitle)
         section.add("Accessibility trusted", model.permissions.accessibilityTrusted)
-        section.add("Launch at login", "\(String(describing: model.launchAtLogin.status))\(model.launchAtLogin.lastError.map { ", error: \($0)" } ?? "")")
+        section.add("Launch at login", "\(launchAtLogin(model.launchAtLogin.status))\(model.launchAtLogin.lastError.map { ", error: \($0)" } ?? "")")
         section.add("Suspended", model.activity.isSuspended)
         section.add("Low Power Mode", model.activity.isLowPowerMode)
         section.add("Thermally constrained", model.activity.isThermallyConstrained)
         section.add("Reduce Motion", model.activity.reduceMotion)
         section.add("Media status", String(describing: model.media.status))
-        // Which player only; the track itself stays private.
         section.add("Media player", model.media.item?.bundleIdentifier ?? "none")
+        if let item = model.media.item {
+            section.add("Now playing", "\(item.title) — \(item.artist) — \(item.album)\(item.duration.map { " (\(DiagnosticsFormat.duration($0)))" } ?? "")")
+        }
         section.add("Media playing / active", "\(model.media.isPlaying) / \(model.media.isActive)")
         section.add("Key interception", String(describing: model.levels.interception))
         section.add("Volume", String(describing: model.levels.volume))
@@ -72,9 +76,67 @@ enum DiagnosticsAppState {
         section.add("Countdown", String(describing: model.timers.countdown))
         section.add("Stopwatch", String(describing: model.timers.stopwatch))
         section.add("Shelf items", model.shelf.items.count)
-        section.add("Clipboard items", model.clipboard.items.count)
+        if !model.shelf.items.isEmpty {
+            section.add("Shelf", model.shelf.items.map { "\($0.displayName) — \($0.url.path)" }.joined(separator: "\n"))
+        }
+        // How many and how old only: what was copied may be a password.
+        section.add("Clipboard items", "\(model.clipboard.items.count)\(model.clipboard.items.first.map { ", newest \(DiagnosticsFormat.date($0.copied))" } ?? "")")
         section.add("Siri's app list (in memory)", model.assistant.allApps.count)
+        section.add("Siri query / category", "\"\(model.assistant.query)\" / \(model.assistant.category.map { String(describing: $0) } ?? "root")")
+        section.add("Siri hits (apps / files / selection)", "\(model.assistant.apps.count) / \(model.assistant.files.count) / \(model.assistant.selection)")
+        section.add("Widgets", model.widgets.board.widgets.map { String(describing: $0.kind) }.joined(separator: ", "))
+        section.add("Bluetooth outputs now", model.airPods.connectedOutputs.sorted().joined(separator: ", "))
+        section.add("AirPods events", model.airPods.recent.isEmpty ? "none since launch" : model.airPods.recent.joined(separator: "\n"))
         section.add("Siri reads files", UserDefaults.standard.bool(forKey: AssistantModel.filesKey))
+        return section
+    }
+
+    static func launchAtLogin(_ status: SMAppService.Status) -> String {
+        switch status {
+        case .notRegistered: "off (not registered)"
+        case .enabled: "on"
+        case .requiresApproval: "waiting for approval in Login Items"
+        case .notFound: "off (not found)"
+        @unknown default: "unknown (\(status.rawValue))"
+        }
+    }
+
+    /// The island's policy flags, the banner up now and why the app is (not) suspended.
+    private static func internals(_ model: AppModel) -> DiagnosticsReport.Section {
+        var section = DiagnosticsReport.Section("Island internals")
+        for (key, value) in model.controller?.diagnosticsSnapshot ?? [] { section.add(key, value) }
+        section.add("Interacting / drop targeted", "\(model.island.isInteracting) / \(model.island.isDropTargeted)")
+        section.add("Surface hold", model.island.surfaceHold.map { String(describing: $0) } ?? "—")
+        section.add("Revision", model.island.revision)
+        section.add("Banner", model.banners.current.map { String(describing: $0) } ?? "none")
+        section.add("Banner held", model.banners.isHeld)
+        section.add("Activity signals", model.activity.diagnosticsSignals)
+        section.add("⌘Space tap wanted / running", "\(model.diagnosticsCommandSpaceWanted) / \(model.diagnosticsCommandSpaceTapRunning)")
+        return section
+    }
+
+    /// Every window the app has: which is up, where, at what level.
+    private static func windows() -> DiagnosticsReport.Section {
+        var section = DiagnosticsReport.Section("Windows")
+        for (index, window) in NSApp.windows.enumerated() {
+            let name = "\(index) \(type(of: window))\(window.title.isEmpty ? "" : " “\(window.title)”")"
+            section.add(name, "\(DiagnosticsFormat.rect(window.frame)), level \(window.level.rawValue), visible \(window.isVisible), "
+                        + "on screen \(window.occlusionState.contains(.visible)), alpha \(window.alphaValue), "
+                        + "ignores mouse \(window.ignoresMouseEvents), key \(window.isKeyWindow), screen \(window.screen?.localizedName ?? "—")")
+        }
+        return section
+    }
+
+    /// Every setting as the app uses it now, defaults included (the `ni2.` keys hold only what was
+    /// changed).
+    private static func effectiveSettings(_ model: AppModel) -> DiagnosticsReport.Section {
+        var section = DiagnosticsReport.Section("Settings (effective)")
+        for child in Mirror(reflecting: model.preferences).children {
+            // Settings only: not the observation registrar or the store they are saved in.
+            guard var label = child.label, !label.hasPrefix("_$"), !(child.value is UserDefaults) else { continue }
+            if label.hasPrefix("_") { label.removeFirst() }
+            section.add(label, String(describing: child.value))
+        }
         return section
     }
 
@@ -96,7 +158,7 @@ enum DiagnosticsAppState {
         return section
     }
 
-    /// Every `ni2.` preference. The Shelf's list (file paths) is only counted in bytes; the
+    /// Every `ni2.` preference. The Shelf's list is in Features (its bookmarks are binary); the
     /// clipboard lives in its own file and is never read here.
     private static func preferences() -> DiagnosticsReport.Section {
         var section = DiagnosticsReport.Section("Preferences")

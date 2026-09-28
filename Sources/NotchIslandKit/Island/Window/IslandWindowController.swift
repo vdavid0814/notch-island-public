@@ -294,6 +294,7 @@ import SwiftUI
         if case .banner(.airPods) = presentation {
             return AirPodsSystemCard.current == .cover
         }
+        if case .banner(.levelCovering) = presentation { return true }
         return false
     }
 

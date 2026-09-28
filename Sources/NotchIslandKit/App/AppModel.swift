@@ -73,6 +73,8 @@ import Observation
     /// True between a forwarded `externalDragBegan()` and its `externalDragEnded()`, so the two
     /// always pair up even if the shelf is switched off or a drag-out flag flips mid-drag.
     @ObservationIgnored private var isForwardingDrag = false
+    /// The volume card that runs out to macOS's own when that one is not under the notch.
+    @ObservationIgnored private(set) lazy var liquidCard = LiquidCard(model: self)
 
     init(preferences: Preferences = Preferences()) {
         self.preferences = preferences
@@ -317,6 +319,8 @@ import Observation
     /// For diagnostics reports: the feature state last applied, and whether ⌘Space is listened for.
     var diagnosticsFeatureState: String { appliedFeatures.map { String(describing: $0) } ?? "stopped" }
     var diagnosticsCommandSpaceTapRunning: Bool { commandSpaceTap.isRunning }
+    /// The applied features want the ⌘Space tap (so a stopped tap is a problem).
+    var diagnosticsCommandSpaceWanted: Bool { appliedFeatures?.commandSpace ?? false }
 
     /// Settings ▸ Siri changed the shortcut: the key tap listens for the new modifier at once.
     func siriShortcutChanged(_ shortcut: SiriShortcut) {
@@ -331,7 +335,7 @@ import Observation
         airPods.systemCard = { [weak self] in self?.preferences.airPodsSystemCard ?? .cover }
         airPods.onUpdate = { [weak self] info in
             // Only into the card still up for these headphones.
-            guard let self, case .airPods(let shown)? = self.banners.current, shown.name == info.name, shown != info else { return }
+            guard let self, !self.liquidCard.airPodsUpdated(info), case .airPods(let shown)? = self.banners.current, shown.name == info.name, shown != info else { return }
             self.banners.post(.airPods(info), duration: self.preferences.airPodsDuration)
         }
         levels.onChange = { [weak self] kind, source in self?.levelChanged(kind, source: source) }
@@ -351,9 +355,18 @@ import Observation
     func airPodsConnected(_ info: AirPodsInfo) {
         // Passive, like a power notice: nothing appears by itself over a full-screen video.
         guard preferences.showAirPods, appliedFeatures?.hidden != true else { return }
+        // Covering macOS's card away from the notch: the liquid runs to it.
+        if preferences.airPodsSystemCard == .cover,
+           liquidCard.airPodsConnected(info, duration: preferences.airPodsDuration, flows: preferences.liquidAirPods) {
+            haptics.play(.alert)
+            return
+        }
         banners.post(.airPods(info), duration: preferences.airPodsDuration)
         haptics.play(.alert)
     }
+
+    /// How much longer a banner over macOS's volume card stays (asked for, v0.4.7).
+    static let coveringExtra: Double = 0.2
 
     private func levelChanged(_ kind: LevelKind, source: LevelChangeSource) {
         // `.island`: the user is dragging the island's own slider and already sees the value.
@@ -361,10 +374,21 @@ import Observation
         // Over a full-screen video only a key press is answered; a Control Center, AirPods or
         // auto-brightness change stays invisible there.
         if appliedFeatures?.hidden == true, source != .key { return }
+        // macOS's own card away from the notch (the desktop, a tiled window): the liquid runs to it.
+        if liquidCard.handleLevel(kind, source: source, duration: preferences.levelDuration + Self.coveringExtra,
+                                  flows: preferences.liquidVolume) {
+            if source == .key { haptics.play(.tick) }
+            return
+        }
         // A key press is the user asking to see the level; a change made elsewhere is only a notice
         // and must not bury a banner already up (a power event, a finished timer).
-        let banner: BannerKind = preferences.levelStyle == .pill ? .levelPill(kind) : .level(kind)
-        banners.post(banner, duration: preferences.levelDuration, preempting: source == .key)
+        // A volume change made elsewhere (an AirPods stem swipe) brings macOS's own volume card up
+        // under the notch, past any key tap; the banner then lies over it, in either style.
+        let banner: BannerKind = if kind == .volume, source == .external { .levelCovering(kind) }
+            else if preferences.levelStyle == .pill { .levelPill(kind) } else { .level(kind) }
+        // Over macOS's card a little longer: it stays up a moment past a banner of the usual length.
+        let duration = preferences.levelDuration + (banner == .levelCovering(kind) ? Self.coveringExtra : 0)
+        banners.post(banner, duration: duration, preempting: source == .key)
         // Only a key press is felt; a Control Center slider drag (`.external`) must not buzz.
         if source == .key { haptics.play(.tick) }
     }

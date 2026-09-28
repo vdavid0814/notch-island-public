@@ -6,12 +6,12 @@ import Foundation
 /// Plain strings throughout, so a new reading is one line where it is taken and the developer reads
 /// the report as text.
 nonisolated struct DiagnosticsReport: Sendable, Equatable {
-    nonisolated struct Entry: Sendable, Equatable {
+    nonisolated struct Entry: Sendable, Equatable, Codable {
         var key: String
         var value: String
     }
 
-    nonisolated struct Section: Sendable, Equatable {
+    nonisolated struct Section: Sendable, Equatable, Codable {
         var title: String
         var entries: [Entry] = []
 
@@ -66,6 +66,54 @@ nonisolated struct DiagnosticsReport: Sendable, Equatable {
     func value(_ key: String, in title: String) -> String? {
         sections.first { $0.title == title }?.entries.first { $0.key == key }?.value
     }
+
+    /// The sections whose lines are set against the reference Mac's ("Title › key": value).
+    static let comparedSections = [
+        "Permissions", "Settings (effective)", "Menu bar, Dock & Spaces", "Keyboard & input", "System settings",
+    ]
+
+    /// The settings set against the reference Mac's, flat.
+    var settings: [String: String] {
+        var settings: [String: String] = [:]
+        for section in sections where Self.comparedSections.contains(section.title) {
+            for entry in section.entries { settings["\(section.title) › \(entry.key)"] = entry.value }
+        }
+        return settings
+    }
+
+    /// "Dock › autohide: 1 (reference: 0)", for every setting that differs from the reference's.
+    static func differences(_ settings: [String: String], from reference: [String: String]) -> [String] {
+        Set(settings.keys).union(reference.keys).sorted().compactMap { key in
+            let value = settings[key], other = reference[key]
+            guard value != other else { return nil }
+            return "\(key): \(value ?? "—") (reference: \(other ?? "—"))"
+        }
+    }
+
+    /// The whole report as JSON (`report.json`), for scripts: the same sections as the text, plus
+    /// the numbers, what stood out and the comparison with the reference.
+    func json(meta: [String: String], findings: [String], comparisons: [DiagnosticsComparison]) -> String {
+        struct Compared: Encodable {
+            var metric: String, title: String, value: Double, reference: Double?, unusual: Bool
+        }
+        struct Document: Encodable {
+            var meta: [String: String]
+            var findings: [String]
+            var metrics: [String: Double]
+            var comparisons: [Compared]
+            var sections: [Section]
+            var attachments: [String]
+        }
+        let document = Document(
+            meta: meta, findings: findings,
+            metrics: Dictionary(uniqueKeysWithValues: metrics.map { ($0.key.rawValue, $0.value) }),
+            comparisons: comparisons.map { .init(metric: $0.metric.rawValue, title: $0.metric.title, value: $0.value,
+                                                 reference: $0.reference, unusual: $0.isUnusual) },
+            sections: sections, attachments: attachments.map(\.name))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return (try? encoder.encode(document)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+    }
 }
 
 /// Why a report was sent (the first word of its message, so the developer can filter).
@@ -84,6 +132,11 @@ nonisolated enum DiagnosticsReason: String, Sendable, Codable {
     case crash
     /// A 10-minute sample was well past the reference twice in a row.
     case anomaly
+    /// The first launch of a new version.
+    case update
+    /// Something broke while running (Accessibility taken away, the key interception or the
+    /// ⌘Space tap stopped).
+    case problem
 
     var title: String {
         switch self {
@@ -94,6 +147,8 @@ nonisolated enum DiagnosticsReason: String, Sendable, Codable {
         case .message: "Message"
         case .crash: "Crash"
         case .anomaly: "Unusual behaviour detected"
+        case .update: "New version"
+        case .problem: "Something broke"
         }
     }
 }

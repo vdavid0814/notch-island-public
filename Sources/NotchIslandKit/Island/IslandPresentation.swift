@@ -28,6 +28,10 @@ nonisolated enum BannerKind: Sendable, Equatable {
     case level(LevelKind)
     /// The minimal level style (`LevelHUDStyle.pill`): beside the notch only, pill-sized.
     case levelPill(LevelKind)
+    /// A volume change made on the headphones (an AirPods stem swipe): macOS then draws its own
+    /// volume card under the notch (MenuBarAgent, a 352 × 148 window at the pop-up menu level), which
+    /// no key tap can stop. The level banner is drawn at the AirPods card's size above it instead.
+    case levelCovering(LevelKind)
     case power(PowerEvent)
     case timerFinished
     /// A file drag is in progress somewhere on screen.
@@ -37,10 +41,15 @@ nonisolated enum BannerKind: Sendable, Equatable {
 }
 
 nonisolated extension BannerKind {
+    /// A level banner over macOS's own volume card.
+    var isCovering: Bool {
+        if case .levelCovering = self { true } else { false }
+    }
+
     /// The level a volume or brightness banner shows, in either style.
     var levelKind: LevelKind? {
         switch self {
-        case .level(let kind), .levelPill(let kind): kind
+        case .level(let kind), .levelPill(let kind), .levelCovering(let kind): kind
         default: nil
         }
     }
@@ -181,6 +190,8 @@ nonisolated enum IslandPresentation: Sendable, Equatable {
             "banner.level.\(kind.rawValue)"
         case .banner(.levelPill(let kind)):
             "banner.levelPill.\(kind.rawValue)"
+        case .banner(.levelCovering(let kind)):
+            "banner.levelCovering.\(kind.rawValue)"
         case .banner(.power):
             "banner.power"
         case .banner(.timerFinished):

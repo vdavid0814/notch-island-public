@@ -7,11 +7,15 @@ struct BannerView: View {
     var body: some View {
         switch kind {
         case .level(let level): LevelBanner(kind: level)
+        // Over macOS's own card: its lines, where it draws them.
+        case .levelCovering(.volume): SystemVolumeCovering()
+        case .levelCovering(let level): LevelBanner(kind: level, banner: .levelCovering(level))
         case .levelPill(let level): LevelPill(kind: level)
         case .power(let event): PowerBanner(event: event)
         case .timerFinished: TimerDoneBanner()
         case .dropTarget: DropBanner()
-        case .airPods(let info): AirPodsBanner(info: info)
+        case .airPods(let info):
+            if AirPodsSystemCard.current == .cover { SystemAirPodsCovering(info: info) } else { AirPodsBanner(info: info) }
         }
     }
 }
@@ -19,6 +23,16 @@ struct BannerView: View {
 /// Shared banner structure: a header band in the notch's height with the banner's identity in the
 /// leading ear and a short value in the trailing ear, and one detail row below.
 struct BannerLayout<HeaderLeading: View, HeaderTrailing: View, Row: View>: View {
+    /// Over macOS's volume card: the slider's bottom lies exactly where the fade starts to clear, so
+    /// the whole row stays on solid black (asked for, v0.4.7).
+    static func coveringRowBottom(layout: IslandLayout, kind: BannerKind) -> CGFloat {
+        let size = layout.size(for: .banner(kind))
+        let (start, _) = IslandFade.span(solidDepth: IslandLayout.overdraw + layout.notch.height,
+                                         height: size.height + IslandLayout.overdraw,
+                                         stretch: IslandFade.coveringStretch)
+        return max(size.height - (start - IslandLayout.overdraw), 0)
+    }
+
     let kind: BannerKind
     @ViewBuilder var headerLeading: HeaderLeading
     @ViewBuilder var headerTrailing: HeaderTrailing
@@ -46,9 +60,11 @@ struct BannerLayout<HeaderLeading: View, HeaderTrailing: View, Row: View>: View 
             HStack(spacing: Metrics.Banner.rowSpacing) {
                 row
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Over macOS's volume card the island is taller: the slider sits low in it, near the
+            // bottom edge, not in the middle of the space.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: kind.isCovering ? .bottom : .center)
             .padding(.horizontal, split.contentInset)
-            .padding(.bottom, Metrics.Banner.rowBottomInset)
+            .padding(.bottom, kind.isCovering ? Self.coveringRowBottom(layout: layout, kind: kind) : Metrics.Banner.rowBottomInset)
         }
     }
 }

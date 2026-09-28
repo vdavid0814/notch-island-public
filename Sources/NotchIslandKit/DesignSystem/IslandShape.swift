@@ -91,13 +91,18 @@ nonisolated struct IslandOutline: InsettableShape, Equatable {
     var shoulderRadius: CGFloat
     /// Height of the full-width strip above the visible top edge (see `IslandLayout.overdraw`).
     var topInset: CGFloat = 0
+    /// How far below the screen's top edge the shoulders start: the island is full width down to
+    /// there (the menu bar's height, over macOS's volume card), and its fillets meet the menu bar's
+    /// bottom edge instead of the screen's.
+    var shoulderDrop: CGFloat = 0
     private var insetAmount: CGFloat = 0
 
-    init(size: CGSize, bottomRadius: CGFloat, shoulderRadius: CGFloat, topInset: CGFloat = 0) {
+    init(size: CGSize, bottomRadius: CGFloat, shoulderRadius: CGFloat, topInset: CGFloat = 0, shoulderDrop: CGFloat = 0) {
         self.size = size
         self.bottomRadius = bottomRadius
         self.shoulderRadius = shoulderRadius
         self.topInset = topInset
+        self.shoulderDrop = shoulderDrop
     }
 
     func withTopInset(_ inset: CGFloat) -> IslandOutline {
@@ -115,7 +120,8 @@ nonisolated struct IslandOutline: InsettableShape, Equatable {
             size: CGSize(width: mix(size.width, other.size.width), height: mix(size.height, other.size.height)),
             bottomRadius: max(0, mix(bottomRadius, other.bottomRadius)),
             shoulderRadius: max(0, mix(shoulderRadius, other.shoulderRadius)),
-            topInset: other.topInset
+            topInset: other.topInset,
+            shoulderDrop: max(0, mix(shoulderDrop, other.shoulderDrop))
         )
     }
 
@@ -134,7 +140,7 @@ nonisolated struct IslandOutline: InsettableShape, Equatable {
             rect: body(in: rect).insetBy(dx: insetAmount, dy: insetAmount),
             bottomRadius: bottomRadius - insetAmount,
             shoulderRadius: shoulderRadius,
-            topInset: topInset
+            topInset: topInset + shoulderDrop
         )
     }
 

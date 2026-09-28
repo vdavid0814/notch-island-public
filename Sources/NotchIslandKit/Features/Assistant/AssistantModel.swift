@@ -36,6 +36,8 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
     case clip(ClipboardItem)
     /// A sum or a unit conversion worked out from the query (Return copies the result).
     case calculation(AssistantCalculation)
+    /// The query is a web address: Return opens it.
+    case openURL(URL)
     case askIntelligence
     case searchWeb
     case askChatGPT
@@ -47,6 +49,7 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
         case .action(let action): "action:\(action.id)"
         case .clip(let item): "clip:\(item.id)"
         case .calculation: "calculation"
+        case .openURL: "url"
         case .askIntelligence: "ask"
         case .searchWeb: "web"
         case .askChatGPT: "chatgpt"
@@ -323,7 +326,9 @@ nonisolated struct FileScope: Sendable, Equatable {
             guard !text.isEmpty else { return settings.categories.map(AssistantRow.category) }
             // A sum or a conversion is worked out at once and comes first, above everything, as in
             // Spotlight: "12 + 30 * 2" had five words and went to Apple Intelligence (seen, v0.4.5).
-            let calculation = calculation(for: text).map { [AssistantRow.calculation($0)] } ?? []
+            // A typed web address first of all, as in Spotlight ("github.com", Return).
+            let calculation = (AssistantURL.url(from: text).map { [AssistantRow.openURL($0)] } ?? [])
+                + (calculation(for: text).map { [AssistantRow.calculation($0)] } ?? [])
             let hits = (settings.showsApplications ? apps.map(AssistantRow.hit) : [])
                 + (settings.showsFiles ? files.map(AssistantRow.hit) : [])
                 + (settings.showsActions ? actions(matching: text).prefix(Self.rootActionLimit).map(AssistantRow.action) : [])
@@ -600,6 +605,9 @@ nonisolated struct FileScope: Sendable, Equatable {
             AssistantActions.runShortcut(named: name)
         case .clip(let item):
             onPaste?(item)
+        case .openURL(let url):
+            onClose?()
+            NSWorkspace.shared.open(url)
         case .calculation(let calculation):
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(calculation.result, forType: .string)
@@ -902,6 +910,9 @@ nonisolated enum AssistantMatch {
         case .file:
             // The type's icon, without reading the file.
             NSWorkspace.shared.icon(for: hit.contentType.flatMap(UTType.init) ?? .data)
+        case .folder:
+            // The folder's own (Downloads, a custom icon), or the plain one.
+            NSWorkspace.shared.icon(forFile: hit.url.path)
         }
         cache[hit.url.path] = icon
         return icon
@@ -972,6 +983,59 @@ nonisolated enum AssistantMatch {
             purge()
             purgeTask = nil
         }
+    }
+}
+
+/// A web address typed into the field: with its scheme, or a bare host ("github.com/apple",
+/// "localhost:3000"). A file name ("notes.md", "report.pdf") is not one: a top-level domain must be
+/// two letters (a country) or a common one, and not a file extension.
+nonisolated enum AssistantURL {
+    static let commonDomains: Set<String> = [
+        "com", "org", "net", "io", "dev", "app", "ai", "co", "edu", "gov", "info", "me", "tv", "xyz", "site", "online",
+        "tech", "store", "blog", "news", "cloud", "page", "so", "gg", "ly", "fm", "biz", "shop", "live", "design",
+    ]
+    /// Two-letter file extensions that are also countries' domains.
+    static let fileExtensions: Set<String> = ["md", "py", "js", "ts", "rb", "sh", "cs", "kt", "db", "gz", "ps"]
+
+    static func url(from text: String) -> URL? {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.count <= 2048, !text.contains(where: \.isWhitespace) else { return nil }
+        let lower = text.lowercased()
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") {
+            guard let url = URL(string: text), url.host?.isEmpty == false else { return nil }
+            return url
+        }
+        guard !text.contains("@") else { return nil }
+        var host = String(text.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
+        var hasPort = false
+        if let colon = host.lastIndex(of: ":") {
+            let port = host[host.index(after: colon)...]
+            guard !port.isEmpty, port.allSatisfy(\.isNumber) else { return nil }
+            host = String(host[..<colon])
+            hasPort = true
+        }
+        let labels = host.lowercased().split(separator: ".", omittingEmptySubsequences: false)
+        let isLocal = host.lowercased() == "localhost"
+        let isAddress = labels.count == 4 && labels.allSatisfy { UInt8($0) != nil }
+        if isLocal || isAddress {
+            // A bare "1.2.3.4" is as likely a version number.
+            guard isLocal || hasPort || text.contains("/") else { return nil }
+            return URL(string: "http://" + text)
+        }
+        guard labels.count >= 2, labels.allSatisfy({ label in
+            !label.isEmpty && !label.hasPrefix("-") && !label.hasSuffix("-")
+                && label.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" }
+        }), let top = labels.last.map(String.init) else { return nil }
+        let isCountry = top.count == 2 && top.allSatisfy(\.isLetter) && !fileExtensions.contains(top)
+        guard isCountry || commonDomains.contains(top) else { return nil }
+        return URL(string: "https://" + text)
+    }
+
+    /// "github.com/apple", as the row names it.
+    static func display(_ url: URL) -> String {
+        var text = url.absoluteString
+        for scheme in ["https://", "http://"] where text.hasPrefix(scheme) { text.removeFirst(scheme.count) }
+        return text.hasSuffix("/") ? String(text.dropLast()) : text
     }
 }
 

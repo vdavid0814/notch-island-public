@@ -587,11 +587,11 @@ private struct LayoutOption: View {
             }
             .frame(maxWidth: .infinity, minHeight: 50)
             .foregroundStyle(isSelected ? .primary : SettingsPalette.secondary)
-            .background(isSelected ? Color.accentColor.opacity(0.18) : .white.opacity(0.04),
+            .background(isSelected ? Color.islandAccent.opacity(0.18) : .white.opacity(0.04),
                         in: .rect(cornerRadius: 10, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 1.5)
+                    .strokeBorder(isSelected ? Color.islandAccent : .clear, lineWidth: 1.5)
             }
             .contentShape(.rect)
         }
@@ -649,7 +649,7 @@ private struct ElementRow: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(on ? .white : SettingsPalette.secondary)
                 .frame(width: 26, height: 26)
-                .background(on ? AnyShapeStyle(Color.accentColor.gradient) : AnyShapeStyle(.white.opacity(0.08)),
+                .background(on ? AnyShapeStyle(Color.islandAccent.gradient) : AnyShapeStyle(.white.opacity(0.08)),
                             in: .rect(cornerRadius: 7, style: .continuous))
             Text(option.title)
                 .foregroundStyle(on ? .primary : SettingsPalette.secondary)

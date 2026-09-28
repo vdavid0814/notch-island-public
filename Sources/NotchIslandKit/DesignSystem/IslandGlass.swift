@@ -35,7 +35,7 @@ enum IslandGlass {
         switch role {
         case .surface: style.material
         case .control: style.controlMaterial.interactive()
-        case .active: Glass.clear.tint(Color.accentColor.opacity(0.62)).interactive()
+        case .active: Glass.clear.tint(Color.islandAccent.opacity(0.62)).interactive()
         case .thumb: Glass.clear.interactive()
         }
     }
@@ -169,11 +169,12 @@ extension View {
     /// The same shade over the top `size.height` points of a larger canvas (the island's window),
     /// centred on it: the island's surface is `size` this frame, the canvas keeps its size (see
     /// `IslandRootView`).
-    func islandSurfaceShade(_ style: IslandGlassStyle, solidDepth: CGFloat, size: CGSize, in shape: some Shape) -> some View {
+    func islandSurfaceShade(_ style: IslandGlassStyle, solidDepth: CGFloat, size: CGSize, fadeStretch: CGFloat = 1,
+                            in shape: some Shape) -> some View {
         background {
             if style == .fade {
                 shape.fill(Color.black).mask(alignment: .top) {
-                    FadeShadeMask(solidDepth: solidDepth, size: size)
+                    FadeShadeMask(solidDepth: solidDepth, size: size, stretch: fadeStretch)
                 }
             }
         }
@@ -210,6 +211,23 @@ nonisolated private struct FadeCore: Shape {
     }
 }
 
+/// Where the fade style's black starts to clear down the island's middle, and where it ends, in
+/// points from the top of the shade (which starts `IslandLayout.overdraw` above the screen).
+nonisolated enum IslandFade {
+    static func span(solidDepth: CGFloat, height: CGFloat, stretch: CGFloat = 1) -> (start: CGFloat, end: CGFloat) {
+        let height = max(height, 1)
+        let below = max(height - solidDepth, 0)
+        let ramp = below * (1 - FadeShadeMask.hold) * FadeShadeMask.reach
+        let end = solidDepth + below * FadeShadeMask.hold + ramp
+        let start = min(max(end - ramp * FadeShadeMask.rampStretch * stretch, solidDepth), height)
+        return (start, end)
+    }
+
+    /// The covering volume banner's fade runs longer and starts earlier (asked for, v0.4.7): a fifth,
+    /// then more again on the lower banner.
+    static let coveringStretch: CGFloat = 1.45
+}
+
 /// Where the fade style's black lies over an island of `size`: solid down to `solidDepth` (the
 /// notch band, plus the overdraw above the screen) across the whole width; below it solid down the
 /// middle through about two thirds of the rest, easing slowly out towards the bottom (never quite
@@ -218,6 +236,8 @@ nonisolated private struct FadeCore: Shape {
 private struct FadeShadeMask: View {
     let solidDepth: CGFloat
     let size: CGSize
+    /// The fade to clear runs this much longer, starting earlier and ending where it did.
+    var stretch: CGFloat = 1
 
     /// Share of the island below the notch band that stays solid black down its middle. The fade
     /// starts there and runs the remaining 35.552% (a tenth and a hundredth longer than the earlier
@@ -246,7 +266,7 @@ private struct FadeShadeMask: View {
 
     var body: some View {
         let width = max(size.width, 1), height = max(size.height, 1)
-        LinearGradient(stops: Self.verticalStops(solidDepth: solidDepth, height: height),
+        LinearGradient(stops: Self.verticalStops(solidDepth: solidDepth, height: height, stretch: stretch),
                        startPoint: .top, endPoint: .bottom)
             .mask {
                 ZStack(alignment: .top) {
@@ -273,12 +293,9 @@ private struct FadeShadeMask: View {
     /// over a white page. Only the edges clear completely, where the glass shows its edge light.
     static let floor: Double = 0.5
 
-    static func verticalStops(solidDepth: CGFloat, height: CGFloat) -> [Gradient.Stop] {
-        let below = max(height - solidDepth, 0)
-        let ramp = below * (1 - hold) * reach
-        let end = (solidDepth + below * hold + ramp) / height
-        let solid = min(max(end - ramp * rampStretch / height, solidDepth / height), 1)
-        return smoothFade(from: solid, to: end, floor: floor)
+    static func verticalStops(solidDepth: CGFloat, height: CGFloat, stretch: CGFloat = 1) -> [Gradient.Stop] {
+        let (start, end) = IslandFade.span(solidDepth: solidDepth, height: height, stretch: stretch)
+        return smoothFade(from: start / height, to: end / height, floor: floor)
     }
 
     /// Opaque black up to `start`, easing out (smoothstep, in twelve steps so none shows) to

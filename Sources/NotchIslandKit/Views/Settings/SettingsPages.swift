@@ -43,6 +43,13 @@ struct GeneralSettingsPage: View {
             }
 
             Section {
+                ThemePicker(theme: $preferences.theme)
+                    .padding(.vertical, 4)
+            } header: {
+                InfoLabel("Theme", "The island's colour, where the system's blue was: sliders, selections, active controls and the widgets' glow. A colour of its own, or Mix: two colours of your choice blended.")
+            }
+
+            Section {
                 PictureChoice(options: IslandScale.allCases, selection: $preferences.scale, title: \.title) { scale in
                     IslandSizePicture(scale: scale)
                 }
@@ -148,6 +155,234 @@ struct GeneralSettingsPage: View {
 
 /// The surface styles as picture cards, like System Settings' Appearance: each shows the island
 /// drawn in that style over a desktop.
+/// The theme: the colour in use, and Mix, which opens the paint palette.
+private struct ThemePicker: View {
+    @Binding var theme: IslandTheme
+    @State private var isMixing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(theme.color)
+                    .overlay { Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1) }
+                    .frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(theme.preset == .custom ? "Mixed" : theme.preset.title)
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("The island's sliders, selections and glow")
+                        .font(.system(size: 11))
+                        .foregroundStyle(SettingsPalette.secondary)
+                }
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { isMixing.toggle() }
+                } label: {
+                    Label(isMixing ? "Done" : "Mix", systemImage: isMixing ? "checkmark" : "paintpalette.fill")
+                }
+            }
+            if isMixing {
+                PaintPalette(theme: $theme)
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.15, anchor: .topTrailing).combined(with: .opacity),
+                        removal: .scale(scale: 0.3, anchor: .topTrailing).combined(with: .opacity)))
+            }
+        }
+    }
+}
+
+/// The colour mixer: the basic colours as circles, and any colour from the spectrum (hue across,
+/// saturation down), its brightness beside it, the result with its hex code and RGB values.
+private struct PaintPalette: View {
+    @Binding var theme: IslandTheme
+    @State private var hue: Double = 0
+    @State private var saturation: Double = 0
+    @State private var brightness: Double = 1
+    @State private var hex = ""
+    @State private var appeared = false
+
+    private static let basics = IslandTheme.Preset.allCases.filter { $0 != .custom }
+    private let columns = Array(repeating: GridItem(.fixed(26), spacing: 10), count: 4)
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 26) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Basic colours")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(SettingsPalette.secondary)
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+                    ForEach(Array(Self.basics.enumerated()), id: \.element) { index, preset in
+                        Button { pick(preset) } label: {
+                            ColorCircle(color: preset.color?.color ?? .white, isSelected: theme.preset == preset)
+                        }
+                        .buttonStyle(.plain)
+                        .help(preset.title)
+                        .accessibilityLabel(preset.title)
+                        .scaleEffect(appeared ? 1 : 0.2)
+                        .opacity(appeared ? 1 : 0)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.7).delay(0.025 * Double(index)), value: appeared)
+                    }
+                }
+            }
+            .frame(width: 4 * 26 + 3 * 10, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    SpectrumField(hue: $hue, saturation: $saturation, onChange: apply)
+                        .frame(height: 140)
+                    BrightnessBar(hue: hue, saturation: saturation, brightness: $brightness, onChange: apply)
+                        .frame(width: 16, height: 140)
+                }
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(theme.color)
+                        .overlay { Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1) }
+                        .frame(width: 30, height: 30)
+                    TextField("Hex", text: $hex)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12).monospaced())
+                        .frame(width: 84)
+                        .onSubmit(applyHex)
+                    Spacer(minLength: 8)
+                    let rgb = theme.rgb
+                    ForEach([("R", rgb.red), ("G", rgb.green), ("B", rgb.blue)], id: \.0) { name, value in
+                        HStack(spacing: 3) {
+                            Text(name).foregroundStyle(SettingsPalette.secondary)
+                            Text("\(Int((value * 255).rounded()))").monospacedDigit()
+                        }
+                        .font(.system(size: 11))
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .background(Color.white.opacity(0.04), in: .rect(cornerRadius: 16, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1) }
+        .onAppear {
+            load(theme.rgb)
+            appeared = true
+        }
+    }
+
+    /// A basic colour, as it is.
+    private func pick(_ preset: IslandTheme.Preset) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { theme.preset = preset }
+        if let color = preset.color { load(color) }
+    }
+
+    /// The spectrum's colour becomes the theme (named after a basic colour when it is one).
+    private func apply() {
+        let color = NSColor(hue: hue, saturation: saturation, brightness: brightness, alpha: 1)
+        let rgb = IslandTheme.RGB(color)
+        theme.first = rgb
+        theme.mix = 0
+        theme.preset = Self.basics.first { $0.color == rgb } ?? .custom
+        hex = Self.hex(rgb)
+    }
+
+    private func applyHex() {
+        let digits = hex.trimmingCharacters(in: CharacterSet(charactersIn: "# ")).uppercased()
+        guard digits.count == 6, let value = Int(digits, radix: 16) else {
+            hex = Self.hex(theme.rgb)
+            return
+        }
+        load(IslandTheme.RGB(red: Double((value >> 16) & 0xFF) / 255, green: Double((value >> 8) & 0xFF) / 255,
+                             blue: Double(value & 0xFF) / 255))
+        apply()
+    }
+
+    private func load(_ rgb: IslandTheme.RGB) {
+        let color = NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
+        hue = Double(color.hueComponent)
+        saturation = Double(color.saturationComponent)
+        brightness = Double(color.brightnessComponent)
+        hex = Self.hex(rgb)
+    }
+
+    static func hex(_ rgb: IslandTheme.RGB) -> String {
+        func byte(_ c: Double) -> Int { Int((min(max(c, 0), 1) * 255).rounded()) }
+        return String(format: "#%02X%02X%02X", byte(rgb.red), byte(rgb.green), byte(rgb.blue))
+    }
+}
+
+/// A colour as a plain circle; the chosen one ringed.
+private struct ColorCircle: View {
+    let color: Color
+    var isSelected = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .overlay { Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1) }
+            .padding(isSelected ? 3 : 0)
+            .overlay { Circle().strokeBorder(Color.white.opacity(isSelected ? 0.9 : 0), lineWidth: 2) }
+            .frame(width: 26, height: 26)
+            .contentShape(Circle())
+    }
+}
+
+/// Hue across, saturation from full at the top to grey at the bottom; a ring marks the colour.
+private struct SpectrumField: View {
+    @Binding var hue: Double
+    @Binding var saturation: Double
+    let onChange: () -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            let size = proxy.size
+            ZStack(alignment: .topLeading) {
+                LinearGradient(colors: stride(from: 0.0, through: 1.0, by: 1 / 12).map { Color(hue: $0, saturation: 1, brightness: 1) },
+                               startPoint: .leading, endPoint: .trailing)
+                LinearGradient(colors: [.white.opacity(0), .white], startPoint: .top, endPoint: .bottom)
+                Circle()
+                    .strokeBorder(.white, lineWidth: 2)
+                    .background(Circle().fill(Color(hue: hue, saturation: saturation, brightness: 1)))
+                    .shadow(color: .black.opacity(0.4), radius: 2)
+                    .frame(width: 16, height: 16)
+                    .position(x: hue * size.width, y: (1 - saturation) * size.height)
+            }
+            .clipShape(.rect(cornerRadius: 10, style: .continuous))
+            .contentShape(.rect)
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                hue = min(max(value.location.x / size.width, 0), 0.9999)
+                saturation = 1 - min(max(value.location.y / size.height, 0), 1)
+                onChange()
+            })
+        }
+        .accessibilityLabel("Colour spectrum")
+    }
+}
+
+/// The colour's brightness, from full at the top to black.
+private struct BrightnessBar: View {
+    let hue: Double
+    let saturation: Double
+    @Binding var brightness: Double
+    let onChange: () -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .top) {
+                LinearGradient(colors: [Color(hue: hue, saturation: saturation, brightness: 1), .black],
+                               startPoint: .top, endPoint: .bottom)
+                    .clipShape(Capsule())
+                Circle()
+                    .strokeBorder(.white, lineWidth: 2)
+                    .background(Circle().fill(Color(hue: hue, saturation: saturation, brightness: brightness)))
+                    .shadow(color: .black.opacity(0.4), radius: 2)
+                    .frame(width: 16, height: 16)
+                    .offset(y: (1 - brightness) * (proxy.size.height - 16))
+            }
+            .contentShape(.rect)
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                brightness = 1 - min(max(value.location.y / proxy.size.height, 0), 1)
+                onChange()
+            })
+        }
+        .accessibilityLabel("Brightness")
+    }
+}
+
 private struct SurfacePicker: View {
     @Binding var selection: IslandGlassStyle
 
@@ -161,7 +396,7 @@ private struct SurfacePicker: View {
                         SurfaceThumbnail(style: style)
                             .overlay {
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(selection == style ? Color.accentColor : .white.opacity(0.12),
+                                    .strokeBorder(selection == style ? Color.islandAccent : .white.opacity(0.12),
                                                   lineWidth: selection == style ? 3 : 1)
                             }
                         Text(style.title)
@@ -373,6 +608,10 @@ struct ActivitiesSettingsPage: View {
                 }
                 .choiceBar()
                 .disabled(!preferences.showAirPods)
+                Toggle(isOn: $preferences.liquidAirPods) {
+                    InfoLabel("Flow out to macOS's card", "Where macOS puts its card away from the notch (on the desktop, beside a tiled window), the island's card runs out of the notch like a liquid, lies exactly on macOS's and runs back when it goes.")
+                }
+                .disabled(!preferences.showAirPods || preferences.airPodsSystemCard != .cover)
                 NoticeDuration(title: "Shown for", value: $preferences.airPodsDuration)
                     .disabled(!preferences.showAirPods)
             }
@@ -389,6 +628,10 @@ struct ActivitiesSettingsPage: View {
                 .opacity(preferences.showLevelHUD ? 1 : 0.5)
                 NoticeDuration(title: "Shown for", value: $preferences.levelDuration)
                     .disabled(!preferences.showLevelHUD)
+                Toggle(isOn: $preferences.liquidVolume) {
+                    InfoLabel("Flow out to macOS's volume card", "An AirPods swipe (or anything else no key tap sees) brings macOS's own volume card up. Away from the notch (on the desktop, beside a tiled window) the island runs out to it like a liquid, lies exactly on it with its own slider, and runs back when it goes.")
+                }
+                .disabled(!preferences.showLevelHUD)
                 Toggle(isOn: $preferences.replaceSystemHUD) {
                     InfoLabel("Replace the system HUD", "Handles the volume and brightness keys so only the island appears, not the system's own overlay. Needs Accessibility.")
                 }

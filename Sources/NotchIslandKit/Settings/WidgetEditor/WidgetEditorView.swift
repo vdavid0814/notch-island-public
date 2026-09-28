@@ -123,7 +123,7 @@ struct BoardEditor: View {
                 .allowsHitTesting(false)
                 .overlay {
                     RoundedRectangle(cornerRadius: min(WidgetMetrics.cornerRadius, contentFrame.height / 2), style: .continuous)
-                        .strokeBorder(isSelected ? Color.accentColor : .white.opacity(0.14), lineWidth: isSelected ? 2 : 1)
+                        .strokeBorder(isSelected ? Color.islandAccent : .white.opacity(0.14), lineWidth: isSelected ? 2 : 1)
                 }
                 .contentShape(.rect(cornerRadius: WidgetMetrics.cornerRadius))
                 .scaleEffect(isMoving ? 1.03 : 1)
@@ -288,7 +288,7 @@ private struct ResizeOutline: View {
     let isValid: Bool
 
     var body: some View {
-        let tint = isValid ? Color.accentColor : .red
+        let tint = isValid ? Color.islandAccent : .red
         RoundedRectangle(cornerRadius: min(WidgetMetrics.cornerRadius, frame.height / 2), style: .continuous)
             .strokeBorder(tint.opacity(0.9), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
             .overlay(alignment: rect.row == 0 ? .bottom : .top) {
@@ -314,7 +314,7 @@ private struct Ghost: View {
     let isValid: Bool
 
     var body: some View {
-        let tint = isValid ? Color.accentColor : .red
+        let tint = isValid ? Color.islandAccent : .red
         RoundedRectangle(cornerRadius: min(WidgetMetrics.cornerRadius, frame.height / 2), style: .continuous)
             .fill(tint.opacity(0.16))
             .strokeBorder(tint.opacity(0.9), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
@@ -367,7 +367,7 @@ private struct HandleDot: View {
     var body: some View {
         Circle()
             .fill(.white)
-            .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: 2))
+            .overlay(Circle().strokeBorder(Color.islandAccent, lineWidth: 2))
             .frame(width: 12, height: 12)
             .shadow(color: .black.opacity(0.4), radius: 2)
             .frame(width: 26, height: 26)

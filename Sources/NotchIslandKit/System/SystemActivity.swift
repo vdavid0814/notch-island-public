@@ -51,6 +51,9 @@ nonisolated struct ActivitySignals: Sendable, Equatable {
 
     var prefersReducedWork: Bool { isLowPowerMode || isThermallyConstrained }
 
+    /// Why it is (or is not) suspended, for diagnostics.
+    var diagnosticsSignals: String { String(describing: signals) }
+
     @ObservationIgnored private var signals = ActivitySignals()
     @ObservationIgnored private let tokens = NotificationTokens()
     @ObservationIgnored private var lockRelays: [DistributedNotificationRelay] = []

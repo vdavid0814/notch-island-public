@@ -5,12 +5,14 @@ import SwiftUI
 /// and the number sit with the slider they describe.
 struct LevelBanner: View {
     let kind: LevelKind
+    /// `.level`, or `.levelCovering` at the size of the system card it lies over.
+    var banner: BannerKind? = nil
 
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let reading = model.levels.reading(kind)
-        BannerLayout(kind: .level(kind)) {
+        BannerLayout(kind: banner ?? .level(kind)) {
             EmptyView()
         } headerTrailing: {
             EmptyView()

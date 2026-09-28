@@ -187,7 +187,7 @@ struct FeedbackSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.accentColor.opacity(isDropTargeted ? 0.8 : 0), lineWidth: 2)
+                .strokeBorder(Color.islandAccent.opacity(isDropTargeted ? 0.8 : 0), lineWidth: 2)
         }
         .dropDestination(for: URL.self) { urls, _ in
             let usable = urls.filter(DiagnosticsMedia.isSupported)
@@ -281,7 +281,7 @@ struct DiagnosticsSection: View {
         Section {
             Toggle(isOn: $diagnostics.isEnabled) {
                 Text("Send Diagnostics to the Developer")
-                Text("At launch, every 6 hours, when NotchIsland crashes and when it uses unusually much energy. Uses a little more battery.")
+                Text("At launch, every hour, after an update or a crash, when something stops working and when it uses unusually much energy. Uses a little more battery.")
             }
             .disabled(!diagnostics.isConfigured)
             TextField("Your name", text: $diagnostics.name, prompt: Text("Optional, so the developer knows who you are"))
@@ -313,13 +313,15 @@ struct DiagnosticsSection: View {
         } footer: {
             Text("""
                 Sent: NotchIsland's version, where it runs from and its permissions; the Mac's model, macOS \
-                version, language, displays and sound devices; the battery's health and charge; how much \
-                energy, CPU and memory NotchIsland uses (a reading every 10 minutes), and the apps using the \
-                most energy; every NotchIsland setting and feature's state; whether Spotlight finds your apps \
-                (with the names of those it misses); the names of running apps; NotchIsland's log and crash \
-                reports. The numbers are compared with the developer's Mac, and anything unusual is reported \
-                at once. \
-                Never sent: your clipboard, the files on the Shelf, what you search for, or what is playing.
+                version, language, displays, sound and Bluetooth devices; the battery's health and charge; how \
+                the menu bar, Dock, Spaces, keyboard shortcuts, trackpad, appearance, accessibility and power \
+                are set up; every installed app and its version, login items and the names of running apps; \
+                how much energy, CPU and memory NotchIsland uses (a reading every 10 minutes), and the apps \
+                using the most energy; every NotchIsland setting and its full state, including what is \
+                playing, what you typed into Siri and the files on the Shelf; whether Spotlight finds your \
+                apps; NotchIsland's log and crash reports. The numbers and settings are compared with the \
+                developer's Mac, and anything unusual is reported at once. \
+                Never sent: what is on your clipboard, or your passwords.
                 """)
         }
         .task { await diagnostics.refreshStatus() }

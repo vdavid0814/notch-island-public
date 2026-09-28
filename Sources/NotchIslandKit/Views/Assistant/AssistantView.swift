@@ -389,6 +389,8 @@ private struct RowView: View {
             Image(systemName: "doc.plaintext").foregroundStyle(.secondary).imageScale(.large)
         case .calculation:
             AssistantTile(symbol: "equal", color: .orange)
+        case .openURL:
+            AssistantTile(symbol: "globe", color: .blue)
         case .askIntelligence:
             Image(systemName: "apple.intelligence").foregroundStyle(AssistantGlow.gradient).imageScale(.large)
         case .searchWeb:
@@ -405,6 +407,7 @@ private struct RowView: View {
         case .action(let action): action.title
         case .clip(let item): item.preview
         case .calculation(let calculation): "\(calculation.expression) = \(calculation.result)"
+        case .openURL(let url): String(localized: "Open \(AssistantURL.display(url))")
         case .askIntelligence: String(localized: "Ask Apple Intelligence")
         case .searchWeb: String(localized: "Search the Web")
         case .askChatGPT: String(localized: "Ask ChatGPT")

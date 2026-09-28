@@ -85,6 +85,16 @@ nonisolated struct AirPodsInfo: Sendable, Equatable {
 
     private var listener: AudioObjectPropertyListenerBlock?
     private var known: Set<String> = []
+    /// What happened with the last connections (for diagnostics): what arrived, whether macOS's own
+    /// card was seen, and what the island showed.
+    private(set) var recent: [String] = []
+    /// The Bluetooth audio outputs connected now.
+    var connectedOutputs: Set<String> { known }
+
+    private func note(_ event: String) {
+        recent.append("\(Date().formatted(date: .omitted, time: .standard)) \(event)")
+        if recent.count > 30 { recent.removeFirst(recent.count - 30) }
+    }
     private var pending: Task<Void, Never>?
 
     func start() {
@@ -120,6 +130,7 @@ nonisolated struct AirPodsInfo: Sendable, Equatable {
         // What was already at the top of the screen: anything new there is macOS's own card.
         let before = TopEdgeOverlays.current()
         let mode = systemCard()
+        note("connected: \(name) (outputs: \(current.sorted().joined(separator: ", ")); card mode: \(mode))")
         pending?.cancel()
         pending = Task { [weak self] in
             if mode == .cover {
@@ -127,7 +138,10 @@ nonisolated struct AirPodsInfo: Sendable, Equatable {
                 // has a moment later follow into the same card.
                 if let info = await Self.readInfo(named: name), info.hasBattery || info.model != .headphones {
                     guard !Task.isCancelled else { return }
+                    self?.note("shown at once (cover): \(info)")
                     self?.onConnect?(info)
+                } else {
+                    self?.note("no headphone info yet for \(name)")
                 }
                 try? await Task.sleep(for: Self.settleDelay)
                 guard !Task.isCancelled, let fresh = await Self.readInfo(named: name), !Task.isCancelled else { return }
@@ -139,7 +153,10 @@ nonisolated struct AirPodsInfo: Sendable, Equatable {
             let info = await Self.readInfo(named: name)
             guard !Task.isCancelled, let self else { return }
             // Only headphones the profile knows as such (a Bluetooth speaker also has a name).
-            guard let info, info.hasBattery || info.model != .headphones else { return }
+            guard let info, info.hasBattery || info.model != .headphones else {
+                self.note("not shown: \(name) is not headphones the profile knows")
+                return
+            }
             // Never both at once: while macOS's own AirPods card is up, ours waits for it to go
             // (or, if the user chose so, stays away).
             // New at the top since the connection, or drawn by the processes that draw macOS's
@@ -147,6 +164,7 @@ nonisolated struct AirPodsInfo: Sendable, Equatable {
             var systemCard = TopEdgeOverlays.current().subtracting(before)
                 .union(TopEdgeOverlays.current(ownedBy: TopEdgeOverlays.noticeOwners))
             if !systemCard.isEmpty {
+                self.note("macOS's card seen (\(systemCard.count) window(s)); \(mode == .after ? "waiting for it to go" : "staying away")")
                 guard mode == .after else { return }
                 for _ in 0..<32 where !systemCard.isEmpty {
                     try? await Task.sleep(for: .milliseconds(250))
@@ -156,6 +174,7 @@ nonisolated struct AirPodsInfo: Sendable, Equatable {
                 try? await Task.sleep(for: .milliseconds(200))
                 guard !Task.isCancelled else { return }
             }
+            self.note("shown: \(info)")
             self.onConnect?(info)
         }
     }
