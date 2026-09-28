@@ -186,6 +186,7 @@ final class DiagnosticsReferenceStore {
 
     @concurrent nonisolated private static func fetchBaseline() async -> DiagnosticsBaseline? {
         var request = URLRequest(url: DiagnosticsBaseline.url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        request.setValue("close", forHTTPHeaderField: "Connection")
         request.setValue("NotchIsland", forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
@@ -194,6 +195,9 @@ final class DiagnosticsReferenceStore {
 
     @concurrent nonisolated private static func fetchLatestVersion() async -> String? {
         var request = URLRequest(url: DiagnosticsBaseline.latestReleaseURL, timeoutInterval: 20)
+        // One request an hour: a connection kept open for the next one only times out (logged as
+        // network errors in every report).
+        request.setValue("close", forHTTPHeaderField: "Connection")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("NotchIsland", forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await URLSession.shared.data(for: request),

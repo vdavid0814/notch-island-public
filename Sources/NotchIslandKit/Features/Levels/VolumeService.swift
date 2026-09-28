@@ -254,6 +254,8 @@ nonisolated private enum HAL {
     }
 
     static func has(_ object: AudioObjectID, _ address: AudioObjectPropertyAddress) -> Bool {
+        // No device (between two, as headphones come and go): asking logs a HAL error.
+        guard object != kAudioObjectUnknown else { return false }
         var address = address
         return AudioObjectHasProperty(object, &address)
     }

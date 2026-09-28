@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import CoreServices
 import Darwin
@@ -81,7 +82,13 @@ nonisolated enum DiagnosticsProbes {
         return "yes: " + String(decoding: buffer, as: UTF8.self)
     }
 
-    private static func signature() -> String {
+    /// Checked once per launch: the bundle does not change under a running app, and each check
+    /// logged sqlite errors from the system's detached-signature database (reports, both Macs).
+    private static let signatureOnce: String = checkSignature()
+
+    private static func signature() -> String { signatureOnce }
+
+    private static func checkSignature() -> String {
         var code: SecCode?
         guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return "unreadable" }
         var staticCode: SecStaticCode?
@@ -125,6 +132,11 @@ nonisolated enum DiagnosticsProbes {
     }
 
     private static func automation(_ bundleID: String) -> String {
+        // Asking about an app that is not running only logs `procNotFound` errors (every report,
+        // both Macs); the answer is the same without asking.
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty else {
+            return "unknown (app not running)"
+        }
         var target = AEAddressDesc()
         let status: OSStatus = bundleID.withCString { pointer in
             guard AECreateDesc(typeApplicationBundleID, pointer, strlen(pointer), &target) == noErr else { return OSStatus(-1) }

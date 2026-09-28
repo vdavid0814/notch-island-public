@@ -190,6 +190,7 @@ nonisolated enum DiagnosticsUploader {
                      threadID: String? = nil, session: URLSession = .shared) async throws -> Posted {
         let boundary = "NotchIsland-" + UUID().uuidString
         var request = URLRequest(url: webhookURL(webhook, threadID: threadID))
+        request.setValue("close", forHTTPHeaderField: "Connection")
         request.httpMethod = "POST"
         request.timeoutInterval = 60
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -415,6 +416,7 @@ nonisolated enum DiagnosticsUploader {
         let data = try Data(contentsOf: file.url)
         let boundary = "NotchIsland-" + UUID().uuidString
         var request = URLRequest(url: webhookURL(webhook, threadID: threadID))
+        request.setValue("close", forHTTPHeaderField: "Connection")
         request.httpMethod = "POST"
         // An 8 MB video over a slow upload.
         request.timeoutInterval = 300
