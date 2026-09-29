@@ -123,3 +123,53 @@ import Testing
         #expect(DiagnosticsAppState.setsSorted(#"{"x":1}"#, of: 1) == nil)
     }
 }
+
+@Suite struct DiagnosticsTrailTests {
+    @Test func theTrailIsThisRunsOwnLines() {
+        let log = """
+            Timestamp               Ty Process[PID:TID]
+            2026-09-29 04:01:50.413 E  NotchIsland[7:2a5612] [com.apple.CFBundle:plugin] AddInstanceForFactory
+            2026-09-29 04:01:51.000 Df NotchIsland[7:2a5612] [com.davidvarga.notchisland:app] launched
+            2026-09-29 03:01:51.000 Df NotchIsland[6:2a5612] [com.davidvarga.notchisland:app] earlier run
+            2026-09-29 04:02:26.860 E  NotchIsland[7:2a5612] [com.davidvarga.notchisland:levels] tap failed
+            """
+        let section = DiagnosticsEnvironment.trail(fromLog: log, pid: 7)
+        #expect(section.entries.first { $0.key == "Lines" }?.value == "2")
+        #expect(section.entries.first { $0.key == "Log" }?.value == "04:01:51.000 Df [app] launched\n04:02:26.860 E  [levels] tap failed")
+    }
+}
+
+@Suite struct DiagnosticsThrottleTests {
+    @Test func aThrottledToolStillRunsToTheEnd() async {
+        // Off the test's shared threads: blocking one for half a second starved the timing tests.
+        let output = await withCheckedContinuation { continuation in
+            Thread.detachNewThread {
+                continuation.resume(returning: DiagnosticsProbes.run(
+                    "/bin/sh", ["-c", "echo a; i=0; while [ $i -lt 5000 ]; do i=$((i+1)); done; echo b"],
+                    timeout: 20, throttled: true))
+            }
+        }
+        #expect(output == "a\nb")
+    }
+}
+
+@Suite struct DiagnosticsTopUsersTests {
+    @Test func theHeaviestProcessComesFirst() {
+        let before: [pid_t: (name: String, usage: ProcessUsage)] = [
+            1: ("Quiet", ProcessUsage(energyNJ: 0, cpuNS: 0)), 2: ("Busy", ProcessUsage(energyNJ: 0, cpuNS: 0)),
+        ]
+        let after: [pid_t: (name: String, usage: ProcessUsage)] = [
+            1: ("Quiet", ProcessUsage(energyNJ: 1_000_000, cpuNS: 1_000_000)), 2: ("Busy", ProcessUsage(energyNJ: 500_000_000, cpuNS: 250_000_000)),
+            3: ("New", ProcessUsage(energyNJ: 9_000_000_000)),
+        ]
+        let lines = BatteryProbe.topLines(before: before, after: after, seconds: 1)
+        #expect(lines.count == 2)
+        #expect(lines.first?.contains("Busy") == true)
+        #expect(lines.first?.contains("500.0 mW") == true)
+        #expect(lines.first?.contains("CPU  25.0%") == true)
+    }
+
+    @Test func everyProcessIncludesThisOne() {
+        #expect(BatteryProbe.everyProcess()[getpid()] != nil)
+    }
+}

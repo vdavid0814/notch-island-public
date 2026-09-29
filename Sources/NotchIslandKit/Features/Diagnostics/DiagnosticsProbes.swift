@@ -277,7 +277,7 @@ nonisolated enum DiagnosticsProbes {
     static func log(since start: Date, limit: Int) -> DiagnosticsReport.Attachment {
         let predicate = #"process == "NotchIsland" AND (subsystem == "\#(Log.subsystem)" OR messageType >= error)"#
         let output = run("/usr/bin/log", ["show", "--start", logDate(start), "--info", "--style", "compact", "--predicate", predicate],
-                         timeout: 40, outputLimit: limit * 3) ?? "log show failed"
+                         timeout: 150, outputLimit: limit * 3, throttled: true) ?? "log show failed"
         return DiagnosticsReport.Attachment(name: "log.txt", text: DiagnosticsFormat.tail(output, limit: limit))
     }
 
@@ -346,7 +346,7 @@ nonisolated enum DiagnosticsProbes {
     static func hardware() -> DiagnosticsReport.Section {
         var section = DiagnosticsReport.Section("Hardware")
         for (title, type) in [("Audio", "SPAudioDataType"), ("Displays", "SPDisplaysDataType")] {
-            let output = run("/usr/sbin/system_profiler", ["-detailLevel", "mini", type], timeout: 15) ?? "unavailable"
+            let output = run("/usr/sbin/system_profiler", ["-detailLevel", "mini", type], timeout: 30, throttled: true) ?? "unavailable"
             section.add(title, DiagnosticsFormat.head(output, limit: 3000))
         }
         return section
@@ -371,15 +371,29 @@ nonisolated enum DiagnosticsProbes {
 
     /// Runs a tool and returns its trimmed standard output and error, or nil if it could not start.
     /// Killed after `timeout` seconds; reads at most `outputLimit` bytes.
-    static func run(_ tool: String, _ arguments: [String], timeout: TimeInterval = 8, outputLimit: Int = 1_000_000) -> String? {
+    /// `throttled`: the tool runs `Throttle.on` of every `Throttle.period` and is paused the rest,
+    /// so it never takes a whole core (40 % of one at most) — `log show` did for seconds, and Activity Monitor showed
+    /// NotchIsland's Energy Impact near 100 while a report was collected.
+    static func run(_ tool: String, _ arguments: [String], timeout: TimeInterval = 8, outputLimit: Int = 1_000_000,
+                    throttled: Bool = false) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = arguments
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
+        // On the efficiency cores: nobody waits on a report, and `log show` on the performance
+        // cores was most of a report's ~20 J (4.8 J at background, measured).
+        process.qualityOfService = .background
         do { try process.run() } catch { return nil }
-        let killer = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        let pid = process.processIdentifier
+        let throttle = throttled ? Throttle.start(pid) : nil
+        let killer = DispatchWorkItem {
+            guard process.isRunning else { return }
+            throttle?.cancel()
+            process.terminate()
+            kill(pid, SIGCONT)
+        }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: killer)
         var data = Data()
         let handle = pipe.fileHandleForReading
@@ -391,8 +405,29 @@ nonisolated enum DiagnosticsProbes {
             if data.count > outputLimit { data.removeFirst(data.count - outputLimit) }
         }
         process.waitUntilExit()
+        throttle?.cancel()
         killer.cancel()
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Pauses and resumes a child process (SIGSTOP / SIGCONT) so it gets `on` of every `period`.
+    enum Throttle {
+        /// Milliseconds: the tool runs `on` of every `period`.
+        static let period = 500
+        static let on = 200
+
+        static func start(_ pid: pid_t) -> any DispatchSourceTimer {
+            let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+            timer.schedule(deadline: .now() + .milliseconds(on), repeating: .milliseconds(period), leeway: .milliseconds(10))
+            timer.setEventHandler {
+                kill(pid, SIGSTOP)
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .milliseconds(period - on)) { kill(pid, SIGCONT) }
+            }
+            // Never left paused: a cancel resumes it.
+            timer.setCancelHandler { kill(pid, SIGCONT) }
+            timer.resume()
+            return timer
+        }
     }
 }
 

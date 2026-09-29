@@ -1,7 +1,6 @@
 import AudioToolbox
 import CoreAudio
 import Foundation
-import OSLog
 
 /// How the Mac around NotchIsland is set up: the menu bar, Dock and Spaces, the keyboard and its
 /// shortcuts, appearance and accessibility, sound devices and Bluetooth, power and security, every
@@ -121,7 +120,8 @@ nonisolated enum DiagnosticsEnvironment {
             if !roles.isEmpty { line += " — " + roles.joined(separator: ", ") }
             section.add(deviceName(device) ?? "device \(device)", line)
         }
-        let bluetooth = DiagnosticsProbes.run("/usr/sbin/system_profiler", ["-detailLevel", "mini", "SPBluetoothDataType"], timeout: 15)
+        let bluetooth = DiagnosticsProbes.run("/usr/sbin/system_profiler", ["-detailLevel", "mini", "SPBluetoothDataType"],
+                                                  timeout: 30, throttled: true)
         section.add("Bluetooth", DiagnosticsFormat.head(bluetooth ?? "unavailable", limit: 8000))
         return section
     }
@@ -260,82 +260,27 @@ nonisolated enum DiagnosticsEnvironment {
 
     // MARK: The app's own log
 
-    /// This run's NotchIsland log, read in-process (no `log show`, which takes seconds): the last
-    /// `limit` lines.
-    static func trail(limit: Int = 400) -> DiagnosticsReport.Section {
+    /// This run's NotchIsland lines, the last `limit`, taken from the `log show` output the full
+    /// report already has (reading them again through `OSLogStore` waited ~1.3 s on the log
+    /// daemon, billed to the app). As far back as that log reaches: before it, the previous report.
+    static func trail(fromLog log: String, pid: Int32 = ProcessInfo.processInfo.processIdentifier,
+                      limit: Int = 400) -> DiagnosticsReport.Section {
         var section = DiagnosticsReport.Section(trailTitle)
-        do {
-            let store = try OSLogStore(scope: .currentProcessIdentifier)
-            let entries = try store.getEntries(matching: NSPredicate(format: "subsystem == %@", Log.subsystem))
-            var lines: [String] = []
-            lines.reserveCapacity(limit)
-            let formatter = Date.ISO8601FormatStyle(includingFractionalSeconds: true).time(includingFractionalSeconds: true)
-            for case let entry as OSLogEntryLog in entries {
-                lines.append("\(entry.date.formatted(formatter)) \(level(entry.level)) [\(entry.category)] \(entry.composedMessage)")
-                if lines.count > limit * 2 { lines.removeFirst(lines.count - limit) }
-            }
-            section.add("Lines", lines.count > limit ? "last \(limit)" : "\(lines.count)")
-            section.add("Log", lines.suffix(limit).joined(separator: "\n"))
-        } catch {
-            section.add("Log", "unavailable: \(error.localizedDescription)")
+        let process = "NotchIsland[\(pid):"
+        let own = "[\(Log.subsystem):"
+        var lines: [Substring] = []
+        for line in log.split(separator: "\n") where line.contains(process) && line.contains(own) {
+            // "2026-09-29 04:01:50.413 Df NotchIsland[39751:2a5612] [subsystem:category] message"
+            // → "04:01:50.413 Df [category] message"
+            let time = line.dropFirst(11).prefix(12)
+            let type = line.dropFirst(24).prefix(2)
+            let rest = line[line.range(of: own)!.upperBound...]
+            lines.append("\(time) \(type) [\(rest)")
+            if lines.count > limit * 2 { lines.removeFirst(lines.count - limit) }
         }
+        section.add("Lines", lines.count > limit ? "last \(limit)" : "\(lines.count)")
+        section.add("Log", lines.suffix(limit).joined(separator: "\n"))
         return section
-    }
-
-    /// This run's log since `since`, read in-process in one pass: NotchIsland's own lines and every
-    /// error or fault in the process, as `log show --style compact` writes them (so the same parsing
-    /// applies), and the trail of NotchIsland's lines. For the light hourly report: `log show` cost
-    /// ~0.6–1.8 s of CPU and the log daemon's work besides.
-    static func ownLog(since: Date, limit: Int, trailLimit: Int = 400) -> (DiagnosticsReport.Attachment, DiagnosticsReport.Section) {
-        var trail = DiagnosticsReport.Section(trailTitle)
-        var lines: [String] = []
-        var trailLines: [String] = []
-        let pid = ProcessInfo.processInfo.processIdentifier
-        do {
-            let store = try OSLogStore(scope: .currentProcessIdentifier)
-            let entries = try store.getEntries(at: store.position(date: since))
-            let stamp = DateFormatter()
-            stamp.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-            let short = Date.ISO8601FormatStyle(includingFractionalSeconds: true).time(includingFractionalSeconds: true)
-            var size = 0
-            for case let entry as OSLogEntryLog in entries {
-                let own = entry.subsystem == Log.subsystem
-                let isError = entry.level == .error || entry.level == .fault
-                guard own || isError else { continue }
-                let type = switch entry.level {
-                case .error: "E "
-                case .fault: "Fa"
-                case .info: "I "
-                case .debug: "Db"
-                default: "Df"
-                }
-                let line = "\(stamp.string(from: entry.date)) \(type) NotchIsland[\(pid):0] [\(entry.subsystem):\(entry.category)] \(entry.composedMessage)"
-                lines.append(line)
-                size += line.utf8.count + 1
-                if size > limit * 2 { size -= (lines.first?.utf8.count ?? 0) + 1; lines.removeFirst() }
-                if own, entry.level != .debug {
-                    trailLines.append("\(entry.date.formatted(short)) \(level(entry.level)) [\(entry.category)] \(entry.composedMessage)")
-                    if trailLines.count > trailLimit * 2 { trailLines.removeFirst(trailLines.count - trailLimit) }
-                }
-            }
-            trail.add("Lines", trailLines.count > trailLimit ? "last \(trailLimit)" : "\(trailLines.count)")
-            trail.add("Log", trailLines.suffix(trailLimit).joined(separator: "\n"))
-        } catch {
-            trail.add("Log", "unavailable: \(error.localizedDescription)")
-        }
-        let text = "Timestamp               Ty Process[PID:TID]\n" + lines.joined(separator: "\n")
-        return (DiagnosticsReport.Attachment(name: "log.txt", text: DiagnosticsFormat.tail(text, limit: limit)), trail)
-    }
-
-    private static func level(_ level: OSLogEntryLog.Level) -> String {
-        switch level {
-        case .debug: "D"
-        case .info: "I"
-        case .notice: "N"
-        case .error: "E"
-        case .fault: "F"
-        default: "?"
-        }
     }
 
     // MARK: Preferences

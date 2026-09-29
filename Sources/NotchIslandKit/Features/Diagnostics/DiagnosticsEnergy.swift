@@ -301,24 +301,57 @@ nonisolated enum BatteryProbe {
         return section
     }
 
-    /// The processes using the most energy right now (`top`, two samples a second apart: the first
-    /// has no rates), and power assertions NotchIsland holds.
+    /// The processes using the most energy right now: every process's counters read twice a
+    /// second apart, in-process (~10 ms of CPU; `top -l 2` took ~0.4 s and a whole core for a
+    /// second). The kernel measures energy for the user's own processes; the system's (root)
+    /// ones are listed by CPU from `ps`.
     static func topUsers() -> DiagnosticsReport.Section {
         var section = DiagnosticsReport.Section("Top energy users")
-        let output = DiagnosticsProbes.run("/usr/bin/top", ["-l", "2", "-s", "1", "-o", "power", "-n", "12", "-stats", "pid,command,cpu,power,idlew,mem"],
-                                           timeout: 10) ?? ""
-        // The second sample is the block after the last header line.
-        let lines = output.components(separatedBy: "\n")
-        if let header = lines.lastIndex(where: { $0.hasPrefix("PID") }) {
-            section.add("top (power)", lines[header...].prefix(13).joined(separator: "\n"))
-        } else {
-            section.add("top (power)", "unavailable")
-        }
+        let before = Self.everyProcess()
+        Thread.sleep(forTimeInterval: 1)
+        let after = Self.everyProcess()
+        section.add("By energy (1 s)", Self.topLines(before: before, after: after, seconds: 1).joined(separator: "\n"))
+        let system = (DiagnosticsProbes.run("/bin/ps", ["-A", "-r", "-o", "pid=,user=,%cpu=,rss=,comm="]) ?? "")
+            .split(separator: "\n").filter { $0.contains(" root ") || $0.contains(" _") }.prefix(8)
+        section.add("System processes by CPU (ps)", system.isEmpty ? "unavailable" : system.joined(separator: "\n"))
         let pid = ProcessInfo.processInfo.processIdentifier
         let assertions = (DiagnosticsProbes.run("/usr/bin/pmset", ["-g", "assertions"]) ?? "")
             .components(separatedBy: "\n")
             .filter { $0.contains("pid \(pid)(") || $0.contains("NotchIsland") }
         section.add("NotchIsland's power assertions", assertions.isEmpty ? "none" : assertions.joined(separator: "\n"))
         return section
+    }
+}
+
+nonisolated extension BatteryProbe {
+    /// Every process whose counters can be read (the user's own), with its name.
+    static func everyProcess() -> [pid_t: (name: String, usage: ProcessUsage)] {
+        var pids = [pid_t](repeating: 0, count: 4096)
+        let count = Int(proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size)))
+        var result: [pid_t: (name: String, usage: ProcessUsage)] = [:]
+        for pid in pids.prefix(max(count, 0)) where pid > 0 {
+            guard let usage = ProcessUsage.read(pid) else { continue }
+            var name = [CChar](repeating: 0, count: 256)
+            proc_name(pid, &name, UInt32(name.count))
+            result[pid] = (String(cString: name), usage)
+        }
+        return result
+    }
+
+    /// The `limit` processes that used the most energy between two readings, as lines.
+    static func topLines(before: [pid_t: (name: String, usage: ProcessUsage)], after: [pid_t: (name: String, usage: ProcessUsage)],
+                         seconds: Double, limit: Int = 12) -> [String] {
+        let rows = after.compactMap { pid, now -> (pid: pid_t, name: String, mW: Double, cpu: Double, wakeups: Double, mb: Double)? in
+            guard let then = before[pid]?.usage else { return nil }
+            let energy = now.usage.energyNJ >= then.energyNJ ? now.usage.energyNJ - then.energyNJ : 0
+            let cpu = now.usage.cpuNS >= then.cpuNS ? now.usage.cpuNS - then.cpuNS : 0
+            let wakeups = now.usage.wakeups >= then.wakeups ? now.usage.wakeups - then.wakeups : 0
+            return (pid, now.name, Double(energy) / 1e6 / seconds, Double(cpu) / 1e9 / seconds * 100, Double(wakeups) / seconds,
+                    Double(now.usage.footprint) / 1_048_576)
+        }
+        return rows.sorted { ($0.mW, $0.cpu) > ($1.mW, $1.cpu) }.prefix(limit).map {
+            String(format: "%6d  ", $0.pid) + String($0.name.prefix(28)).padding(toLength: 29, withPad: " ", startingAt: 0)
+                + String(format: "%7.1f mW  CPU %5.1f%%  %5.0f wakeups/s  %6.0f MB", $0.mW, $0.cpu, $0.wakeups, $0.mb)
+        }
     }
 }

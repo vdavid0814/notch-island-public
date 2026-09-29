@@ -766,7 +766,6 @@ import Observation
         report.metrics = spotlight.metrics
         report.sections.append(DiagnosticsProbes.hardware())
         report.sections += DiagnosticsEnvironment.sections()
-        report.sections.append(DiagnosticsEnvironment.trail())
         report.metrics[.crashes] = Double(DiagnosticsProbes.crashCount(days: 7))
         if logHours > 0 {
             let start = logSince ?? Date().addingTimeInterval(-Double(logHours) * 3600)
@@ -781,6 +780,7 @@ import Observation
             section.add("Last errors", errors.suffix(15).joined(separator: "\n"))
             report.sections.append(section)
             report.attachments.append(log)
+            report.sections.append(DiagnosticsEnvironment.trail(fromLog: log.text))
         }
         if let crashesSince {
             report.attachments += DiagnosticsProbes.crashReports(since: crashesSince, limit: 4, perFile: 600_000)
