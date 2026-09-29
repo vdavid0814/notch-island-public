@@ -309,6 +309,9 @@ def show(query, n):
     message = report["message"]
     print(f"== {path.relative_to(OUT)} ==")
     print(f"{message['timestamp'][:19].replace('T', ' ')} UTC · v{report['version']} · {kind_of(message)} · {message['link']}")
+    depth = value(report, "App", "Report depth")
+    if depth:
+        print(f"  depth: {depth.split(' (')[0]}")
     for name in ("macOS", "Mac", "Chip", "Runs from", "Accessibility", "Energy", "Latest on GitHub"):
         if name in report["fields"]:
             print(f"  {name}: {report['fields'][name]}")

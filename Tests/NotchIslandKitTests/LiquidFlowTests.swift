@@ -53,3 +53,39 @@ import Testing
         #expect(memory.expected(fullscreenApps: 0, notch: notch, screen: screen) == window)
     }
 }
+
+@Suite struct LiquidFieldTests {
+    private let notch = CGRect(x: 562, y: 804, width: 156, height: 28)
+    private let clip = CGRect(x: 520, y: 600, width: 740, height: 262)
+
+    private func scene(drop: CGRect, neck: CGFloat) -> LiquidScene {
+        LiquidScene(notch: CGRect(x: notch.minX, y: notch.minY, width: notch.width, height: notch.height + 30), notchRadius: 8,
+                    drop: LiquidBlob(rect: drop, radius: 20), neckFrom: CGPoint(x: notch.maxX - 17, y: notch.maxY - 13),
+                    neckTo: CGPoint(x: drop.midX, y: drop.midY), neckThickness: neck)
+    }
+
+    @Test func outlineHoldsTheNotchAndTheDrop() {
+        let drop = CGRect(x: 900, y: 700, width: 280, height: 64)
+        let path = LiquidField.path(scene(drop: drop, neck: 0), clip: clip)
+        #expect(path.contains(CGPoint(x: drop.midX, y: drop.midY)))
+        #expect(path.contains(CGPoint(x: notch.midX, y: notch.midY)))
+        #expect(!path.contains(CGPoint(x: 820, y: 760)))
+        // Its edge lies on the drop's, within the grid.
+        #expect(path.contains(CGPoint(x: drop.minX + 2, y: drop.midY)))
+        #expect(!path.contains(CGPoint(x: drop.minX - 3, y: drop.midY)))
+    }
+
+    @Test func aThickNeckJoinsAndAThinOneParts() {
+        let drop = CGRect(x: 900, y: 700, width: 280, height: 64)
+        // Halfway along the neck, towards the drop.
+        let a = CGPoint(x: notch.maxX - 17, y: notch.maxY - 13), b = CGPoint(x: drop.midX, y: drop.midY)
+        let middle = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+        #expect(LiquidField.path(scene(drop: drop, neck: 28), clip: clip).contains(middle))
+        #expect(!LiquidField.path(scene(drop: drop, neck: 5), clip: clip).contains(middle))
+    }
+
+    @Test func smoothMinimumFillsBetween() {
+        #expect(LiquidField.smoothMin(3, 3, 12) < 3)
+        #expect(LiquidField.smoothMin(1, 40, 12) == 1)
+    }
+}

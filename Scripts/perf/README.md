@@ -105,3 +105,28 @@ Where the memory went, and what took it back (footprint = Activity Monitor's Mem
   background policy (`taskpolicy -b`, 7× the CPU).
 - `NI_TRACE=1` logs main run-loop turns over 2 ms (`TURN`) and URL commands (`MARK`) in the window
   category.
+
+## The night of September 29, 2026 (v0.4.9 → next, MacBook Air M5, on the charger)
+
+New tools: `levels_bench.py` (volume changes made elsewhere: the island's cover or the liquid card),
+`events_bench.py` (every demo event on its own: CPU ms, Energy Impact peak, MB), `report_bench.py`
+(one diagnostics report) — and `coalition.py` for anything that starts processes.
+
+| | before | after |
+|---|---|---|
+| Liquid card, per volume change (CPU / EI peak) | 1474 ms / 72 | 51 ms / 3 |
+| Diagnostics report with its tools (coalition) | ~21 J | hourly: ~0.02 J (light); full every 6 h |
+| AirPods card (EI peak) | 33 | 20 |
+| At rest (coalition) | — | 0.02–0.04 mW, no wakeups |
+
+- **The liquid card** drew its blur-and-threshold `Canvas` on the CPU every frame (RenderBox runs on
+  the CPU here, `RB_DISABLE_GPU`). Its outline is now a smooth minimum of signed distances traced by
+  marching squares for every 1/120 s of a move (~1.5 ms a frame in release), played as a Core
+  Animation keyframe path, and worked out ahead at background priority (after launch, when full
+  screen changes, once the card came up somewhere new).
+- **Watching macOS's card**: one window-list read is 0.5 ms, but at 20 ms it was a third of the main
+  thread's work per change: off the main thread now, every 25 ms for the first 0.6 s, 60 ms after.
+- **Diagnostics**: `log show` is the expensive part (6 h: 1.8 s of CPU plus logd's work billed to the
+  app), then `top -l 2` (0.35 s). Reading even the process's own log through `OSLogStore`
+  (`.currentProcessIdentifier`) waits ~1.3 s on logd, billed to the app: the light report has no log.
+- Timer page at rest 0.01 % (a 1 % reading earlier was one sample); panel with media playing 0.58 %.

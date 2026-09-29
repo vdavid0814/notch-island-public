@@ -29,7 +29,7 @@ def main():
         r0 = rusage(p); t0 = time.time()
         url(event)
         time.sleep(seconds)
-        if "siri" in event:
+        if "siri" in event or event.startswith("settings"):
             url("close"); time.sleep(1.5)
         r1 = rusage(p); t1 = time.time()
         peak = max([v for t, v in power.items() if t0 - 0.5 <= t <= t1 + 1] or [0])
