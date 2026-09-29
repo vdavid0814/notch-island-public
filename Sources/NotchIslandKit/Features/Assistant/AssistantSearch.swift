@@ -78,6 +78,11 @@ nonisolated enum AssistantSearch {
                         contentType: "com.apple.application-bundle",
                         lastUsed: nil
                     ))
+                    // Its own tools (Xcode's Device Hub, Simulator…), listed as Spotlight does.
+                    for tools in ["Contents/Applications", "Contents/Developer/Applications"] {
+                        let folder = url.appendingPathComponent(tools, isDirectory: true)
+                        if manager.fileExists(atPath: folder.path) { scan(folder, depth: 0) }
+                    }
                 } else if depth > 0, (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
                     scan(url, depth: depth - 1)
                 }
@@ -99,7 +104,9 @@ nonisolated enum AssistantSearch {
         let own = Bundle.main.bundleURL.resolvingSymlinksInPath().path
         let hits = merged(run(#"kMDItemContentTypeTree == "com.apple.application-bundle""#, scopes: everywhere, fetch: 4000, kind: .app),
                           diskApps())
-            .filter { !$0.url.deletingLastPathComponent().path.contains(".app") && $0.url.resolvingSymlinksInPath().path != own }
+            // Inside another app only as its own tools (`isListedApp`).
+            .filter { ($0.url.deletingLastPathComponent().path.contains(".app") ? embeddingApp($0.url.path) != nil : true)
+                && $0.url.resolvingSymlinksInPath().path != own }
         return hits.sorted { a, b in
             let da = a.lastUsed ?? .distantPast, db = b.lastUsed ?? .distantPast
             if da != db { return da > db }
@@ -141,12 +148,27 @@ nonisolated enum AssistantSearch {
     static func isListedApp(_ path: String) -> Bool {
         var path = path
         if path.hasPrefix("/System/Volumes/Data/") { path.removeFirst("/System/Volumes/Data".count) }
+        // The tools an app carries for the user, as Spotlight lists them: Xcode's Device Hub,
+        // Simulator, Instruments (in Contents/Applications or Contents/Developer/Applications).
+        if let outer = embeddingApp(path) { return isListedApp(outer) }
         if path.hasPrefix("/System/") {
             return path.hasPrefix("/System/Applications/") || path.hasPrefix(coreServicesApps + "/") || path == finder
         }
         if path.hasPrefix("/Volumes/") || path.hasPrefix("/usr/") || path.hasPrefix("/opt/") || path.hasPrefix("/private/") { return false }
         if path.contains("/Library/") || path.contains("/.Trash/") { return false }
         return !isBuried(path)
+    }
+
+    /// The app whose own Applications folder holds `path` ("/Applications/Xcode.app" for
+    /// ".../Xcode.app/Contents/Applications/DeviceHub.app"), nil otherwise.
+    static func embeddingApp(_ path: String) -> String? {
+        for folder in ["/Contents/Applications/", "/Contents/Developer/Applications/"] {
+            guard let range = path.range(of: folder, options: .backwards), path.hasSuffix(".app") else { continue }
+            let outer = String(path[..<range.lowerBound]), inner = path[range.upperBound...]
+            guard outer.hasSuffix(".app"), !inner.contains("/") else { continue }
+            return outer
+        }
+        return nil
     }
 
     static func isBuried(_ path: String) -> Bool {

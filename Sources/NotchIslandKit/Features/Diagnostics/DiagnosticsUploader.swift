@@ -189,15 +189,14 @@ nonisolated enum DiagnosticsUploader {
     }
 
     static func post(_ payload: [String: Any], files: [DiagnosticsEnvelope.File] = [], to webhook: URL,
-                     threadID: String? = nil, session: URLSession = .shared) async throws -> Posted {
+                     threadID: String? = nil, session: URLSession? = nil) async throws -> Posted {
         let boundary = "NotchIsland-" + UUID().uuidString
         var request = URLRequest(url: webhookURL(webhook, threadID: threadID))
-        request.setValue("close", forHTTPHeaderField: "Connection")
         request.httpMethod = "POST"
         request.timeoutInterval = 60
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = body(payload: payload, files: files, boundary: boundary)
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await DiagnosticsNetwork.data(for: request, session: session)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         if code == 429 {
             let after = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["retry_after"] as? Double
@@ -421,11 +420,10 @@ nonisolated enum DiagnosticsUploader {
     /// One screenshot or video as a message of its own (each may be up to `DiagnosticsMedia.maxBytes`,
     /// so they do not share one request's 10 MB), into the report's thread.
     static func postMedia(_ file: DiagnosticsMediaFile, index: Int, of count: Int, to webhook: URL, threadID: String?,
-                          session: URLSession = .shared) async throws {
+                          session: URLSession? = nil) async throws {
         let data = try Data(contentsOf: file.url)
         let boundary = "NotchIsland-" + UUID().uuidString
         var request = URLRequest(url: webhookURL(webhook, threadID: threadID))
-        request.setValue("close", forHTTPHeaderField: "Connection")
         request.httpMethod = "POST"
         // An 8 MB video over a slow upload.
         request.timeoutInterval = 300
@@ -433,7 +431,7 @@ nonisolated enum DiagnosticsUploader {
         let text = "\(file.isVideo ? "🎬" : "🖼️") \(index + 1)/\(count) · `\(file.name)`\(file.wasTrimmed ? " (cut to fit)" : "")"
         request.httpBody = mediaBody(payload: ["content": clipped(text, contentLimit), "allowed_mentions": ["parse": [String]()]],
                                      name: file.name, contentType: file.contentType, data: data, boundary: boundary)
-        let (body, response) = try await session.data(for: request)
+        let (body, response) = try await DiagnosticsNetwork.data(for: request, session: session)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         if code == 429 {
             let after = (try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["retry_after"] as? Double
@@ -456,5 +454,19 @@ nonisolated enum DiagnosticsUploader {
 
     static func clipped(_ text: String, _ limit: Int) -> String {
         text.count <= limit ? text : String(text.prefix(limit - 1)) + "…"
+    }
+}
+
+/// Diagnostics' few requests (a report, the reference, the newest version): each on a session of
+/// its own, closed when it is done. On the shared session an idle connection kept for the next
+/// request an hour later timed out and was logged as network errors in every report; asking the
+/// server to close it at once ("Connection: close") logged others instead, the system reading a
+/// connection already gone (both seen in reports, v0.4.9 and v0.4.10).
+nonisolated enum DiagnosticsNetwork {
+    static func data(for request: URLRequest, session: URLSession? = nil) async throws -> (Data, URLResponse) {
+        if let session { return try await session.data(for: request) }
+        let own = URLSession(configuration: .ephemeral)
+        defer { own.finishTasksAndInvalidate() }
+        return try await own.data(for: request)
     }
 }

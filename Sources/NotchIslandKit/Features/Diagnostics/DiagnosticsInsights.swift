@@ -79,8 +79,9 @@ nonisolated enum DiagnosticsInsights {
     static func errorSection(_ log: String) -> DiagnosticsReport.Section {
         var counts: [String: (count: Int, example: Substring)] = [:]
         for line in DiagnosticsProbes.errorLines(in: log) {
-            let source = line.firstRange(of: /\[[A-Za-z][^\]\s]*:[^\]]*\]/).map { String(line[$0]) }
+            let found = line.firstRange(of: /\[[A-Za-z][^\]\s]*:[^\]]*\]/).map { String(line[$0]) }
                 ?? (line.contains("(CoreAudio)") ? "(CoreAudio)" : "(other)")
+            let source = DiagnosticsProbes.isKnownNoise(line) ? "\(found) (known system noise)" : found
             let entry = counts[source]
             counts[source] = ((entry?.count ?? 0) + 1, entry?.example ?? line)
         }

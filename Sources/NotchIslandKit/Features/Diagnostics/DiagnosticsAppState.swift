@@ -128,7 +128,11 @@ enum DiagnosticsAppState {
         line("Liquid volume card", wanted: preferences.liquidVolume, running: true, model.liquidCard.diagnosticsSummary)
         line("Siri's files", wanted: preferences.siri.showsFiles, running: UserDefaults.standard.bool(forKey: AssistantModel.filesKey),
              "folders: \(preferences.siri.folders.count)")
-        line("Launch at login", wanted: true, running: model.launchAtLogin.status == .enabled, launchAtLogin(model.launchAtLogin.status))
+        // Wanted only once registered: "not found" is a login item never turned on, not a failure
+        // (it read as one on a tester's Mac, v0.4.10).
+        let login = model.launchAtLogin.status
+        line("Launch at login", wanted: login == .enabled || login == .requiresApproval, running: login == .enabled,
+             launchAtLogin(login))
         line("Accessibility", wanted: true, running: model.permissions.accessibilityTrusted)
         return section
     }

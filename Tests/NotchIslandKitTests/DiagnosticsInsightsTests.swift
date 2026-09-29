@@ -251,3 +251,17 @@ import Testing
         #expect(DiagnosticsVerdict.make(report: light, metrics: [:], comparisons: [], crashes: 0).ownErrors.hasPrefix("not read"))
     }
 }
+
+@Suite struct DiagnosticsNoiseTests {
+    @Test func theSystemsKnownNoiseIsCountedApart() {
+        let log = """
+            2026-09-29 11:05:02.442 E  NotchIsland[1:2] [com.apple.network:connection] nw_connection_copy_protocol_metadata_internal_block_invoke [C4] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
+            2026-09-29 11:05:03.000 E  NotchIsland[1:2] [com.davidvarga.notchisland:levels] tap failed
+            """
+        let lines = DiagnosticsProbes.errorLines(in: log)
+        #expect(lines.count == 2)
+        #expect(lines.filter { !DiagnosticsProbes.isKnownNoise($0) }.count == 1)
+        let section = DiagnosticsInsights.errorSection(log)
+        #expect(section.entries.contains { $0.key == "1× [com.apple.network:connection] (known system noise)" })
+    }
+}

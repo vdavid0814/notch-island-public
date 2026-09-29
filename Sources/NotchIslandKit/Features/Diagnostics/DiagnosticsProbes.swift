@@ -352,6 +352,20 @@ nonisolated enum DiagnosticsProbes {
         }
     }
 
+    /// Errors the system logs in every app for its own reasons, harmless and outside the app's
+    /// reach (each looked into, v0.4.9–v0.4.10): an HTTP/3 connection's inner stream read as it
+    /// closes, CoreAudio's missing plug-in factory at launch, the menu bar item's scene, a text
+    /// cursor's remote view, the Dock's task port. Counted apart: they hid the real errors.
+    static let knownNoise = [
+        "on unconnected nw_connection", "AddInstanceForFactory: No factory registered",
+        "No matching scene to invalidate", "BSBlockSentinel:FBSWorkspaceScenesClient", "ViewBridge to RemoteViewService Terminated",
+        "com.apple.ViewBridge.error Code=18", "Unable to obtain a task name port right",
+    ]
+
+    static func isKnownNoise(_ line: Substring) -> Bool {
+        knownNoise.contains { line.contains($0) }
+    }
+
     /// Sound and displays as System Information lists them (short form).
     static func hardware() -> DiagnosticsReport.Section {
         var section = DiagnosticsReport.Section("Hardware")

@@ -35,7 +35,6 @@ final class ScriptablePlayersSource: MediaSource {
 
     private let bridge = AppleScriptBridge()
     private let relay = NotificationRelay()
-    private lazy var downloads = URLSession(configuration: .ephemeral)
     private var state = ScriptableState()
     private var isStarted = false
     private var isSuspended = false
@@ -312,7 +311,9 @@ final class ScriptablePlayersSource: MediaSource {
         components.scheme = "https"
         guard let url = components.url else { return nil }
         do {
-            let (data, response) = try await downloads.data(from: url)
+            // A session of its own, closed after the picture: a kept-alive connection timed out idle
+            // between tracks and logged network errors (`DiagnosticsNetwork`).
+            let (data, response) = try await DiagnosticsNetwork.data(for: URLRequest(url: url, timeoutInterval: 20))
             guard (response as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty else { return nil }
             return data
         } catch {

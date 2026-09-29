@@ -47,7 +47,8 @@ import Testing
         #expect(!AssistantSearch.isListedApp("/System/Library/CoreServices/Dock.app"))
         #expect(!AssistantSearch.isListedApp("/Users/g/Library/Developer/Xcode/DerivedData/A-x/Build/Products/Debug/A.app"))
         #expect(!AssistantSearch.isListedApp("/Users/g/Library/Application Support/Steam/Steam Helper.app"))
-        #expect(!AssistantSearch.isListedApp("/Applications/Xcode.app/Contents/Applications/Simulator.app"))
+        #expect(AssistantSearch.isListedApp("/Applications/Xcode.app/Contents/Applications/Simulator.app"))
+        #expect(!AssistantSearch.isListedApp("/Applications/Xcode.app/Contents/MacOS/Helper.app"))
         #expect(!AssistantSearch.isListedApp("/Users/g/Projects/App/build/Release/App.app"))
         #expect(!AssistantSearch.isListedApp("/Volumes/NotchIsland/NotchIsland.app"))
         #expect(!AssistantSearch.isListedApp("/Users/g/.Trash/Old.app"))
@@ -55,5 +56,25 @@ import Testing
 
     @Test func finderIsAmongTheApps() {
         #expect(AssistantSearch.diskApps().contains { $0.url.path == AssistantSearch.finder && $0.name == "Finder" })
+    }
+}
+
+@Suite struct AssistantEmbeddedAppTests {
+    @Test func toolsInsideAnAppAreListed() {
+        #expect(AssistantSearch.isListedApp("/Applications/Xcode-beta.app/Contents/Applications/DeviceHub.app"))
+        #expect(AssistantSearch.isListedApp("/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app"))
+        #expect(!AssistantSearch.isListedApp("/Applications/Xcode.app/Contents/SharedFrameworks/X.framework/Helper.app"))
+        #expect(!AssistantSearch.isListedApp("/Users/g/Library/Foo.app/Contents/Applications/Bar.app"))
+        #expect(AssistantSearch.embeddingApp("/Applications/Xcode.app/Contents/Applications/DeviceHub.app") == "/Applications/Xcode.app")
+        #expect(AssistantSearch.embeddingApp("/Applications/Xcode.app/Contents/Applications/A.app/Contents/Applications/B.app")
+                == "/Applications/Xcode.app/Contents/Applications/A.app")
+    }
+
+    @Test func camelCaseNamesAreWords() {
+        #expect(AssistantMatch.matches("DeviceHub", "device hub"))
+        #expect(AssistantMatch.matches("DeviceHub", "hub"))
+        #expect(AssistantMatch.matches("FileMerge", "merge", .wordStart))
+        #expect(!AssistantMatch.matches("Safari", "ari", .wordStart))
+        #expect(AssistantMatch.matches("Visual Studio Code", "stu", .wordStart))
     }
 }

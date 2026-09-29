@@ -253,6 +253,10 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// selection the keys moved: scrolling slides a new row under a still pointer, and scrolling
     /// that one into view would slide the next one under it, down to the end.
     @ObservationIgnored private(set) var selectionFollowsPointer = false
+    /// The keys moved the selection: its row is marked (a plate in the theme's colour) until the
+    /// user types or points. Only then: a plate always under the first row read as a stuck hover
+    /// (v0.4.5); without one, ↑/↓ showed nothing of where they were (a tester, v0.4.10).
+    private(set) var marksSelection = false
     /// Files reads running that may be waiting on the system's folder-access prompt.
     @ObservationIgnored private var fileAccessReads = 0
 
@@ -483,6 +487,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         selection = 0
         selectionIsUsers = false
         selectionFollowsPointer = false
+        marksSelection = false
         answer = nil
         languageUnsupported = false
         revealsSuggestions = false
@@ -500,6 +505,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         if !rowsAreShowing {
             revealsSuggestions = true
             selection = 0
+            marksSelection = true
             return
         }
         revealsSuggestions = true
@@ -508,6 +514,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         selection = min(max(selection + delta, 0), count - 1)
         selectionIsUsers = true
         selectionFollowsPointer = false
+        marksSelection = true
     }
 
     func select(_ row: AssistantRow) {
@@ -515,6 +522,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         selection = index
         selectionIsUsers = true
         selectionFollowsPointer = true
+        marksSelection = false
     }
 
     /// Return: runs the selected row. On an answer it asks again if the question was edited; on the
@@ -578,6 +586,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         selection = 0
         selectionIsUsers = false
         selectionFollowsPointer = false
+        marksSelection = false
         files = []
         apps = []
         search(now: true)
@@ -665,6 +674,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         selection = 0
         selectionIsUsers = false
         selectionFollowsPointer = false
+        marksSelection = false
         if answer != nil, answer?.isResponding == false { answer = nil }
         // Until the new search lands only the hits that still match stay, so Return never runs a
         // hit from an earlier, shorter query.
@@ -706,8 +716,10 @@ nonisolated struct FileScope: Sendable, Equatable {
         let hitLimit = settings.resultsPerKind
         let scope = FileScope(settings)
         let delay = settings.searchDelay
-        // Word starts are what Spotlight can match; anywhere and fuzzy match the app list in memory.
-        let inMemoryApps: [AssistantHit]? = settings.matching == .wordStart || allApps.isEmpty ? nil
+        // The app list in memory in every mode (it has the apps Spotlight's name query misses:
+        // "device hub" for DeviceHub, v0.4.10), with Spotlight's hits (other names: localized,
+        // alternate) merged in.
+        let inMemoryApps: [AssistantHit]? = allApps.isEmpty ? nil
             : Array(AssistantSearch.rank(allApps.filter { AssistantMatch.matches($0.name, text, settings.matching) }, for: text)
                 .prefix(hitLimit))
         searchTask = Task { [weak self] in
@@ -750,8 +762,9 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// The root's apps: already matched in memory, or from Spotlight.
     nonisolated private static func apps(_ text: String, _ limit: Int, inMemory: [AssistantHit]?,
                                          sources: AssistantSources) async -> [AssistantHit] {
-        if let inMemory { return inMemory }
-        return await sources.apps(text, limit)
+        let indexed = await sources.apps(text, limit)
+        guard let inMemory else { return indexed }
+        return Array(AssistantSearch.rank(AssistantSearch.merged(inMemory, indexed), for: text).prefix(limit))
     }
 
     /// Every app for Applications; the shortcuts for Actions and for root queries.
@@ -856,11 +869,12 @@ nonisolated struct FileScope: Sendable, Equatable {
 nonisolated enum AssistantMatch {
     /// Whether `name` matches what was typed, in the user's matching mode (`SiriMatching`).
     static func matches(_ name: String, _ query: String, _ mode: SiriMatching = .wordStart) -> Bool {
+        let original = name
         let name = fold(name)
         let query = fold(query).trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return true }
         if name.hasPrefix(query) { return true }
-        let words = name.split { !$0.isLetter && !$0.isNumber }
+        let words = Self.words(of: original)
         let tokens = query.split(whereSeparator: \.isWhitespace)
         let wordStarts = tokens.allSatisfy { token in words.contains { $0.hasPrefix(token) } }
         switch mode {
@@ -871,6 +885,31 @@ nonisolated enum AssistantMatch {
         case .fuzzy:
             return wordStarts || tokens.allSatisfy { name.contains($0) } || isSubsequence(query.filter { !$0.isWhitespace }, of: name)
         }
+    }
+
+    /// The name's words, folded: split at spaces and marks, and where a capital follows a small
+    /// letter ("DeviceHub" is "device" and "hub": "device hub" found no app, v0.4.10).
+    static func words(of name: String) -> [Substring] {
+        var words: [String] = []
+        var current = ""
+        var previousWasLower = false
+        for character in name {
+            guard character.isLetter || character.isNumber else {
+                if !current.isEmpty { words.append(current) }
+                current = ""
+                previousWasLower = false
+                continue
+            }
+            if character.isUppercase, previousWasLower, !current.isEmpty {
+                words.append(current)
+                current = ""
+            }
+            current.append(character)
+            previousWasLower = character.isLowercase
+        }
+        if !current.isEmpty { words.append(current) }
+        let whole = fold(name).split { !$0.isLetter && !$0.isNumber }
+        return whole + words.map { Substring(fold($0)) }.filter { !whole.contains($0) }
     }
 
     /// The name starts with what was typed ("application" and "appl" start "Applications"); case

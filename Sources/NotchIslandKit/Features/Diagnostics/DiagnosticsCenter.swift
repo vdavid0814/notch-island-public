@@ -799,13 +799,15 @@ import Observation
         if logHours > 0 {
             let start = logSince ?? Date().addingTimeInterval(-Double(logHours) * 3600)
             let log = DiagnosticsProbes.log(since: start, limit: logLimit)
-            let errors = DiagnosticsProbes.errorLines(in: log.text)
+            let all = DiagnosticsProbes.errorLines(in: log.text)
+            let errors = all.filter { !DiagnosticsProbes.isKnownNoise($0) }
             // The log spans earlier runs too, so the rate is over its whole window (an hour at
             // least: a launch's one or two errors over ten minutes are not ten an hour).
             let hours = max(1, Date().timeIntervalSince(start) / 3600)
             report.metrics[.logErrorsPerHour] = Double(errors.count) / hours
             var section = DiagnosticsReport.Section("Log")
-            section.add("Errors and faults", "\(errors.count) since \(DiagnosticsFormat.date(start))")
+            section.add("Errors and faults", "\(errors.count) since \(DiagnosticsFormat.date(start))"
+                        + " (and \(all.count - errors.count) of the system's known noise, left out)")
             section.add("Last errors", errors.suffix(15).joined(separator: "\n"))
             report.sections.append(section)
             report.attachments.append(log)

@@ -249,7 +249,7 @@ private struct RowsList: View {
             ScrollView {
                 LazyVStack(spacing: IslandLayout.assistantRowSpacing) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        RowView(row: row)
+                        RowView(row: row, isMarked: assistant.marksSelection && index == assistant.selection)
                             .id(row.id)
                             .contentShape(.rect)
                             .onTapGesture { assistant.perform(row) }
@@ -281,7 +281,7 @@ private struct AppGallery: View {
                 LazyVGrid(columns: columns, spacing: IslandLayout.galleryRowSpacing) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         if case .hit(let hit) = row {
-                            GalleryCell(hit: hit)
+                            GalleryCell(hit: hit, isMarked: assistant.marksSelection && index == assistant.selection)
                                 .id(row.id)
                                 .contentShape(.rect)
                                 .onTapGesture { assistant.perform(row) }
@@ -299,6 +299,8 @@ private struct AppGallery: View {
 
 private struct GalleryCell: View {
     let hit: AssistantHit
+    /// The keys moved the selection here (`AssistantModel.marksSelection`).
+    var isMarked = false
 
     static let iconSize: CGFloat = AssistantIcons.galleryIconSize
     @State private var icon: NSImage?
@@ -327,11 +329,11 @@ private struct GalleryCell: View {
         .padding(.horizontal, Metrics.Spacing.xxSmall)
         // Exactly the height `IslandLayout` sizes the gallery by, so N rows fill it.
         .frame(maxWidth: .infinity, minHeight: IslandLayout.galleryCellHeight, maxHeight: IslandLayout.galleryCellHeight)
+        .background { SelectionPlate(isShown: isMarked) }
     }
 }
 
-/// Brings a selection the keys moved into view. Nothing marks the selection: no plate, as asked
-/// (the grey plate under the first row read as a stuck hover, v0.4.5).
+/// Brings a selection the keys moved into view (`SelectionPlate` marks it then).
 private struct SelectionScroller: View {
     let assistant: AssistantModel
     let count: Int
@@ -347,9 +349,23 @@ private struct SelectionScroller: View {
     }
 }
 
+/// Where ↑/↓ are: a soft plate in the theme's colour, only after the keys moved the selection.
+private struct SelectionPlate: View {
+    let isShown: Bool
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(Color.islandAccent.opacity(0.16))
+            .opacity(isShown ? 1 : 0)
+            .animation(.easeOut(duration: 0.12), value: isShown)
+    }
+}
+
 /// An icon and a name, nothing else (a suggestion also shows its shortcut, as the system does).
 private struct RowView: View {
     let row: AssistantRow
+    /// The keys moved the selection here (`AssistantModel.marksSelection`).
+    var isMarked = false
 
     var body: some View {
         HStack(spacing: Metrics.Spacing.large) {
@@ -369,6 +385,7 @@ private struct RowView: View {
         }
         .padding(.horizontal, Metrics.Spacing.large)
         .frame(height: IslandLayout.assistantRowHeight)
+        .background { SelectionPlate(isShown: isMarked) }
     }
 
     @ViewBuilder private var icon: some View {

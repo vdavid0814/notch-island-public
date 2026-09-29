@@ -129,6 +129,21 @@ import Testing
         #expect(model.category == .files && model.needsList)
     }
 
+    @Test func onlyTheKeysMarkTheSelection() {
+        let model = model()
+        #expect(!model.marksSelection)
+        model.moveSelection(by: 1)
+        #expect(model.marksSelection)
+        model.moveSelection(by: 1)
+        #expect(model.marksSelection && model.selection == 1)
+        model.select(model.rows[2])
+        #expect(!model.marksSelection && model.selection == 2)
+        model.moveSelection(by: -1)
+        #expect(model.marksSelection)
+        model.query = "s"
+        #expect(!model.marksSelection)
+    }
+
     @Test func roomFollowsWhatShows() async {
         let model = model(stubSources(apps: ["Safari", "Safari Technology Preview", "Safe"]))
         #expect(model.room == .field)
