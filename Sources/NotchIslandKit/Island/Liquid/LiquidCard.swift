@@ -629,8 +629,6 @@ struct LiquidCardContent: View {
 struct LiquidAirPodsContent: View {
     let info: AirPodsInfo
 
-    @State private var hasAppeared = false
-
     /// Positions in the card (points, from its top left).
     static let iconCenter = CGPoint(x: 30.5, y: 26)
     static let nameBaseline: CGFloat = 22.5
@@ -648,7 +646,6 @@ struct LiquidAirPodsContent: View {
             Image(systemName: info.symbol)
                 .font(.system(size: 22, weight: .regular))
                 .symbolRenderingMode(.hierarchical)
-                .symbolEffect(.bounce.up.byLayer, options: .nonRepeating, value: hasAppeared)
                 .position(Self.iconCenter)
             Text(info.name)
                 .font(Self.nameFont)
@@ -663,11 +660,12 @@ struct LiquidAirPodsContent: View {
             if let level {
                 ZStack {
                     Circle().stroke(Color.white.opacity(0.16), lineWidth: Self.ringWidth)
+                    // Still, as macOS's ring under it: an animated fill was redrawn on the CPU every
+                    // frame (and ran ahead of or behind macOS's).
                     Circle()
-                        .trim(from: 0, to: hasAppeared ? CGFloat(level) / 100 : 0)
+                        .trim(from: 0, to: CGFloat(level) / 100)
                         .stroke(level <= 20 ? Color.red : Color.green, style: StrokeStyle(lineWidth: Self.ringWidth, lineCap: .round))
                         .rotationEffect(.degrees(-90))
-                        .animation(.easeOut(duration: 0.6).delay(0.1), value: hasAppeared)
                     Text("\(level)")
                         .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -679,10 +677,6 @@ struct LiquidAirPodsContent: View {
         .frame(width: 236, height: 52, alignment: .topLeading)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .combine)
-        .task {
-            try? await Task.sleep(for: .milliseconds(60))
-            hasAppeared = true
-        }
     }
 
     /// Where a line of text of the system font is centred for its baseline to lie at `baseline`
