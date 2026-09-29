@@ -470,6 +470,7 @@ private struct NoticeDuration: View {
                     if snapped != value { value = snapped }
                 }), in: Preferences.noticeDurationRange)
                 .labelsHidden()
+                .tint(Color.islandAccent)
                 .frame(minWidth: 160, maxWidth: 240)
                 ReservedWidthText(Self.format(value), fitting: [Self.format(Preferences.noticeDurationRange.lowerBound),
                                                                 Self.format(Preferences.noticeDurationRange.upperBound)])
@@ -544,6 +545,7 @@ struct DurationSlider: View {
                 if snapped != value { set(snapped) }
             }), in: range)
             .labelsHidden()
+            .tint(Color.islandAccent)
             .frame(minWidth: 160, maxWidth: 240)
             ReservedWidthText(SettingsFormat.hoverDelay(value),
                               fitting: [SettingsFormat.hoverDelay(range.lowerBound), SettingsFormat.hoverDelay(range.upperBound)])

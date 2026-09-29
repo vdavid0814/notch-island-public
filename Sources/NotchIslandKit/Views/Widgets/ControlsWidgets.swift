@@ -371,6 +371,7 @@ struct KeyboardWidget: View {
                 model.island.isInteracting = editing
             }
             .labelsHidden()
+            .tint(Color.islandAccent)
             .ownDirection()
             if widget.shows(.levelValue), size.width >= 150 {
                 Text(IslandFormat.percent(level))

@@ -442,6 +442,7 @@ private struct WidgetInspector: View {
                                 .foregroundStyle(SettingsPalette.secondary)
                         }
                         .toggleStyle(.switch)
+                        .tint(Color.islandControlAccent)
                         if !widget.plainButtons {
                             VStack(alignment: .leading, spacing: 12) {
                                 ForEach(TransportButton.allCases) { button in
@@ -467,6 +468,7 @@ private struct WidgetInspector: View {
                         .foregroundStyle(SettingsPalette.secondary)
                 }
                 .toggleStyle(.switch)
+                .tint(Color.islandControlAccent)
             }
         }
     }
@@ -520,6 +522,7 @@ private struct BackgroundOpacitySlider: View {
                 Text("Opacity")
             }
             .labelsHidden()
+            .tint(Color.islandAccent)
             .frame(maxWidth: 260)
             ReservedWidthText(value.formatted(.percent.precision(.fractionLength(0))),
                               fitting: [Double(0).formatted(.percent.precision(.fractionLength(0))),
@@ -674,6 +677,7 @@ private struct ElementRow: View {
                 }
             }))
             .toggleStyle(.switch)
+            .tint(Color.islandControlAccent)
             .labelsHidden()
             .controlSize(.small)
         }

@@ -48,8 +48,9 @@ struct SystemVolumeCardContent: View {
                 .fill(Color.white.opacity(Self.trackOpacity))
                 .frame(width: Self.bar.width, height: Self.bar.height)
                 .offset(x: Self.bar.minX, y: Self.bar.minY)
+            // The level in the theme's colour (white by default, as macOS's).
             Capsule()
-                .fill(Color.white)
+                .fill(Color.islandAccent)
                 .frame(width: max(Self.bar.height, Self.bar.width * level), height: Self.bar.height)
                 .opacity(level > 0 ? 1 : 0)
                 .offset(x: Self.bar.minX, y: Self.bar.minY)

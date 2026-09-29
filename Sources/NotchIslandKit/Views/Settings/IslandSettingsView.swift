@@ -257,7 +257,9 @@ private struct SettingsSidebar: View {
             .padding(.top, 16)
             .padding(.bottom, 8)
 
-            List(selection: Binding(get: { selection }, set: { if let new = $0 { selection = new } })) {
+            // The selected page on a plate in the theme's colour (the list's own selection is the
+            // system's grey or blue): ↑ and ↓ still move it.
+            List {
                 ForEach(Array(IslandSettingsPane.groups.enumerated()), id: \.offset) { _, group in
                     Section {
                         ForEach(group) { pane in
@@ -267,14 +269,41 @@ private struct SettingsSidebar: View {
                                 SettingsTile(systemImage: pane.systemImage, tint: pane.tint, side: 24)
                             }
                             .padding(.vertical, 3)
-                            .tag(pane)
+                            .padding(.horizontal, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 3)
+                            .background {
+                                if pane == selection {
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(Color.islandAccent.opacity(Self.plateOpacity))
+                                }
+                            }
+                            .contentShape(.rect)
+                            .onTapGesture { selection = pane }
+                            .accessibilityAddTraits(pane == selection ? [.isButton, .isSelected] : .isButton)
                         }
                     }
                 }
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
+            .focusable()
+            .focusEffectDisabled()
+            .onKeyPress(.upArrow) { move(by: -1) }
+            .onKeyPress(.downArrow) { move(by: 1) }
         }
+    }
+}
+
+extension SettingsSidebar {
+    /// The plate is the theme's colour this faint (white gives the grey of the system's plate).
+    static let plateOpacity = 0.2
+
+    private func move(by step: Int) -> KeyPress.Result {
+        let panes = IslandSettingsPane.groups.flatMap { $0 }
+        guard let index = panes.firstIndex(of: selection) else { return .ignored }
+        selection = panes[min(max(index + step, 0), panes.count - 1)]
+        return .handled
     }
 }
 
@@ -314,6 +343,8 @@ private struct SettingsDetail: View {
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
+            // Switches and sliders in the theme's colour, where the system's blue was.
+            .toggleStyle(.islandSwitch)
             .frame(maxWidth: pane == .widgets ? .infinity : 720)
             .frame(maxWidth: .infinity)
         }
