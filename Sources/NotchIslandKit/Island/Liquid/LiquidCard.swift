@@ -52,6 +52,8 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     /// before, so the next change reuses them).
     private var framesCache: [String: [CGPath]] = [:]
     private var playID = 0
+    /// The card came up somewhere: the frames for there are worked out once the liquid is home.
+    private var needsPrewarm = false
     private var watch: Task<Void, Never>?
     private var hideAfter = Date.distantPast
     private var cardSeen = false
@@ -204,6 +206,10 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
                 self.liquidLayer.removeAllAnimations()
                 self.liquidLayer.path = nil
                 self.panel?.orderOut(nil)
+                if self.needsPrewarm {
+                    self.needsPrewarm = false
+                    self.prewarm()
+                }
             }
         }
         Log.levels.notice("liquid card back")
@@ -249,6 +255,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
                     if !self.cardSeen {
                         self.cardSeen = true
                         self.memory.learn(card, fullscreenApps: situation, screen: metrics.screenFrame)
+                        self.needsPrewarm = true
                         Log.levels.notice("macOS's card at \(card.logDescription, privacy: .public) (\(now.timeIntervalSince(started) * 1000, format: .fixed(precision: 0), privacy: .public) ms)")
                     }
                     let cover = LiquidFlow.cover(overCardWindow: card, kind: self.isShown ? self.state.kind.card : cardKind)
@@ -338,23 +345,69 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         return panel
     }
 
+    // MARK: Frames
+
+    /// Works out ahead, at background priority, the frames of the way out to where macOS's card is
+    /// expected and back (for both cards), so the first change does not wait on them (~0.45 s of
+    /// CPU on a performance core at that moment, measured). After launch and whenever the
+    /// situation or the card's place changes.
+    func prewarm() {
+        guard let metrics = model.metrics, !isShown else { return }
+        let situation = model.fullscreen.fullscreenApps.count
+        let window = memory.expected(fullscreenApps: situation, notch: metrics.notchRect, screen: metrics.screenFrame)
+        guard !SystemVolumeCard.isUnderNotch(window, notch: metrics.notchRect) else { return }
+        var jobs: [(key: String, scenes: [LiquidScene], clip: CGRect, origin: CGPoint)] = []
+        for kind in [SystemVolumeCard.Kind.volume, .airPods] {
+            let cover = LiquidFlow.cover(overCardWindow: window, kind: kind)
+            let notchCard = LiquidFlow.cover(overCardWindow: SystemVolumeCard.guess(fullscreenApps: 1, notch: metrics.notchRect,
+                                                                                      screen: metrics.screenFrame))
+            let frame = frame(covering: [cover.rect, notchCard.rect], metrics: metrics)
+            let from = LiquidFlow.start(notch: metrics.notchRect, towards: cover.rect)
+            let out = "out|\(kind)|\(metrics.notchRect)|\(frame)|\(cover.rect)"
+            let back = "back|\(kind)|\(metrics.notchRect)|\(frame)|\(cover.rect)"
+            let clip = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height + LiquidCardState.overdraw)
+            if framesCache[out] == nil {
+                jobs.append((out, Self.scenes({ .out(start: $0, from: from, to: cover) }, duration: LiquidFlow.out.total,
+                                              notch: metrics.notchRect), clip, frame.origin))
+            }
+            if framesCache[back] == nil {
+                let total = max(LiquidFlow.back.total, 0.2 + Double(LiquidCardState.absorb))
+                jobs.append((back, Self.scenes({ .back(start: $0, from: cover) }, duration: total, notch: metrics.notchRect), clip, frame.origin))
+            }
+        }
+        guard !jobs.isEmpty else { return }
+        Task(priority: .background) { [weak self] in
+            for job in jobs {
+                let paths = await Self.trace(job.scenes, clip: job.clip, origin: job.origin)
+                guard let self else { return }
+                if self.framesCache.count > 12 { self.framesCache.removeAll() }
+                self.framesCache[job.key] = paths
+            }
+        }
+    }
+
+    /// Every frame's scene of a move, 120 a second.
+    private static func scenes(_ make: (Date) -> LiquidCardState.Motion, duration: TimeInterval, notch: CGRect) -> [LiquidScene] {
+        let nominal = Date()
+        let motion = make(nominal)
+        let leftNotch: Date? = if case .out = motion { nominal } else { nil }
+        let count = max(2, Int((duration * 120).rounded(.up)) + 1)
+        return (0..<count).map { index in
+            LiquidCardState.scene(motion: motion, leftNotch: leftNotch, notch: notch,
+                                  at: nominal.addingTimeInterval(min(Double(index) / 120, duration)))
+        }
+    }
+
     /// Plays a move on the render server: its outline at every frame (120 a second), worked out off
     /// the main thread (or reused), then the state follows from the moment it starts.
     private func play(_ make: @escaping (Date) -> LiquidCardState.Motion, duration: TimeInterval, key: String?,
                       then started: @escaping () -> Void) {
         playID += 1
         let id = playID
-        let nominal = Date()
-        let motion = make(nominal)
-        let leftNotch: Date? = if case .out = motion { nominal } else { nil }
         let notch = state.notch, frame = state.frame
-        let count = max(2, Int((duration * 120).rounded(.up)) + 1)
-        let scenes = (0..<count).map { index in
-            LiquidCardState.scene(motion: motion, leftNotch: leftNotch, notch: notch,
-                                  at: nominal.addingTimeInterval(min(Double(index) / 120, duration)))
-        }
-        let clip = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height + LiquidCardState.overdraw)
         let cached = key.flatMap { framesCache[$0] }
+        let scenes = cached == nil ? Self.scenes(make, duration: duration, notch: notch) : []
+        let clip = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height + LiquidCardState.overdraw)
         Task { [weak self] in
             let paths = if let cached { cached } else { await Self.trace(scenes, clip: clip, origin: frame.origin) }
             guard let self, self.playID == id else { return }

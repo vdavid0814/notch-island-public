@@ -153,6 +153,11 @@ import Observation
         installTransitionHaptics()
         observeFeatures()
         diagnostics.start(model: self)
+        // The liquid card's frames for where macOS's card is expected, once the launch has settled.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            self?.liquidCard.prewarm()
+        }
 
         let queued = pendingCommands
         pendingCommands.removeAll()
@@ -537,6 +542,8 @@ import Observation
             controller.setHidden(hidden)
         case .setFullscreenPresent(let present):
             controller.setFullscreenPresent(present)
+            // Where macOS's card comes up depends on it: its frames, if not worked out yet.
+            liquidCard.prewarm()
         case .setCommandSpace(let enabled):
             if enabled { commandSpaceTap.start() } else { commandSpaceTap.stop() }
         }
