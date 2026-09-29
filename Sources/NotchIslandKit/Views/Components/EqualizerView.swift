@@ -101,11 +101,18 @@ final class EqualizerBarsView: NSView {
     nonisolated static let tintFraction: CGFloat = 0.9
 
     var tint: ArtworkColor? {
-        didSet { if tint != oldValue { applyColors(animated: true) } }
+        didSet { if tint != oldValue { coverChanged() } }
     }
 
     var palette: [ArtworkColor] = [] {
-        didSet { if palette != oldValue { applyColors(animated: true) } }
+        didSet { if palette != oldValue { coverChanged() } }
+    }
+
+    /// A new cover is a new track: its colours ease in, and a rest under way ends, so the bars take
+    /// the new song's character within a window instead of after the rest.
+    private func coverChanged() {
+        applyColors(animated: true)
+        if isListening { AudioSpectrumTap.shared.wake() }
     }
 
     var listensToAudio = false {

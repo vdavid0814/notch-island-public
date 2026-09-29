@@ -169,7 +169,8 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
     static let rate: Double = 30
 
     let levels = Mutex(SpectrumLevels())
-    /// Set while the tap rests (`AudioSpectrumTap.rest`): the I/O cycles still arrive, nothing is analysed.
+    /// Set while the tap rests or nobody holds it (`AudioSpectrumTap.applyRunning`): the I/O cycles
+    /// that still arrive analyse nothing.
     let isResting = Atomic(false)
 
     private let sampleRate: Double
@@ -443,9 +444,11 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
     @ObservationIgnored private var session: Session?
     @ObservationIgnored private var outputListener: AudioObjectPropertyListenerBlock?
 
-    /// A release waits this long before the tap is torn down: the island rebuilding the compact
-    /// view (a resize, a banner passing) should not restart it.
-    static let stopDelay: Duration = .seconds(2)
+    /// A release stops the device at once; the tap and its aggregate device stay in memory this
+    /// long, so the compact view coming back (the panel closed, a banner gone, the next track after
+    /// a pause) only starts the device again instead of creating a process tap and an aggregate
+    /// device in coreaudiod each time (it tore them down 2 s after every release before).
+    static let keepDuration: Duration = .seconds(60)
 
     private init() {}
 
@@ -459,17 +462,31 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
         stopTask?.cancel()
         stopTask = nil
         if session == nil { start() }
+        applyRunning()
     }
 
     func release() {
         holders = max(holders - 1, 0)
-        guard holders == 0, stopTask == nil else { return }
+        guard holders == 0 else { return }
+        restTask?.cancel()
+        restTask = nil
+        applyRunning()
+        guard stopTask == nil else { return }
         stopTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.stopDelay)
+            try? await Task.sleep(for: Self.keepDuration, tolerance: .seconds(5))
             guard !Task.isCancelled, let self, self.holders == 0 else { return }
             self.stopTask = nil
             self.stop()
         }
+    }
+
+    /// The device runs while someone holds the tap; a rest only pauses the analyses. Stopping and
+    /// starting the device for every rest cost more than its I/O cycles do meanwhile (measured on
+    /// battery: 19 ms of CPU and ~1 mW per 15 s against 16 ms and none), and the system's
+    /// audio-recording indicator stays on steadily instead of flashing at every rest.
+    private func applyRunning() {
+        session?.setRunning(holders > 0)
+        session?.analyzer.isResting.store(holders == 0 || restTask != nil, ordering: .relaxed)
     }
 
     private func start() {
@@ -482,20 +499,18 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
         }
     }
 
-    /// Stops listening for `duration` (the I/O thread sleeps; nothing is torn down), then
-    /// listens again. The equalizer needs a few seconds of music every so often, not all of it:
-    /// the tap's I/O cycles were most of the app's cost while music played.
+    /// Stops analysing for `duration` (the I/O thread only returns; nothing is torn down), then
+    /// analyses again. The equalizer needs a few seconds of music every so often, not all of it.
     func rest(for duration: Duration) {
-        guard let session, restTask == nil else { return }
-        session.pause()
+        guard session != nil, holders > 0, restTask == nil else { return }
         restTask = Task { [weak self] in
             // The tolerance lets the system group wake-ups, but never more than half the rest.
             try? await Task.sleep(for: duration, tolerance: min(.milliseconds(500), duration / 2))
-            guard let self else { return }
+            guard let self, !Task.isCancelled else { return }
             self.restTask = nil
-            guard !Task.isCancelled else { return }
-            self.session?.resume()
+            self.applyRunning()
         }
+        applyRunning()
     }
 
     /// Ends a rest under way: the analyses start again at once.
@@ -503,7 +518,7 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
         guard restTask != nil else { return }
         restTask?.cancel()
         restTask = nil
-        session?.resume()
+        applyRunning()
     }
 
     private func stop() {
@@ -535,6 +550,7 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
         restTask = nil
         session = nil
         session = try? Session()
+        applyRunning()
     }
 
     // MARK: Core Audio
@@ -616,7 +632,6 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
                     var frames = UInt32(block * max(1, min(Self.analysesPerCycle, largest / block)))
                     AudioObjectSetPropertyData(aggregate, &bufferAddress, 0, nil, bufferSize, &frames)
                 }
-                try HAL.check("start", AudioDeviceStart(aggregate, proc))
             } catch {
                 Self.destroy(tap: tap, aggregate: aggregate, proc: proc)
                 throw error
@@ -625,14 +640,26 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
 
         deinit { Self.destroy(tap: tap, aggregate: aggregate, proc: proc) }
 
-        /// The device keeps running while the tap rests, so the system's audio-recording
-        /// indicator stays on steadily instead of flashing at every rest: only the analyses stop.
-        func pause() {
-            analyzer.isResting.store(true, ordering: .relaxed)
-        }
+        /// Created stopped; `AudioSpectrumTap.applyRunning` starts and stops it.
+        private(set) var isRunning = false
 
-        func resume() {
-            analyzer.isResting.store(false, ordering: .relaxed)
+        /// Starts or stops the device. Stopped, nothing runs in the app for the tap at all (the
+        /// objects stay, so starting again is one call). The analyses are held off before the device
+        /// stops (a cycle may be under way); after a start the first analysis waits for a whole
+        /// block, which overwrites the ring's sound from before.
+        func setRunning(_ running: Bool) {
+            guard running != isRunning, let proc else { return }
+            if running {
+                let status = AudioDeviceStart(aggregate, proc)
+                isRunning = status == noErr
+                if status != noErr {
+                    Log.media.error("audio spectrum tap did not start (\(status, privacy: .public))")
+                }
+            } else {
+                analyzer.isResting.store(true, ordering: .relaxed)
+                AudioDeviceStop(aggregate, proc)
+                isRunning = false
+            }
         }
 
         /// Built outside any actor: the block runs on the I/O queue.
