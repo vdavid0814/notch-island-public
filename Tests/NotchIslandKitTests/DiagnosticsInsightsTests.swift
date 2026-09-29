@@ -262,6 +262,17 @@ import Testing
         #expect(lines.count == 2)
         #expect(lines.filter { !DiagnosticsProbes.isKnownNoise($0) }.count == 1)
         let section = DiagnosticsInsights.errorSection(log)
-        #expect(section.entries.contains { $0.key == "1× [com.apple.network:connection] (known system noise)" })
+        #expect(!section.entries.contains { $0.key.contains("com.apple.network") })
+        #expect(section.entries.contains { $0.key == "1× [com.davidvarga.notchisland:levels]" })
+        let noise = DiagnosticsSystemNoise.section(lines.filter(DiagnosticsProbes.isKnownNoise))
+        #expect(noise.entries.contains { $0.key == "1× Network connection closing" })
+        #expect(noise.entries.first?.value.contains("not counted as errors") == true)
+    }
+
+    @Test func ownLinesAreNeverNoise() {
+        let own: Substring = "2026-09-29 07:57:20.478 E  NotchIsland[1:2] [com.davidvarga.notchisland:app] diagnostics failed: The Internet connection appears to be offline."
+        #expect(!DiagnosticsProbes.isKnownNoise(own))
+        #expect(DiagnosticsCenter.isOffline(URLError(.notConnectedToInternet)))
+        #expect(!DiagnosticsCenter.isOffline(URLError(.badServerResponse)))
     }
 }

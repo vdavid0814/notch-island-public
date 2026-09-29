@@ -238,7 +238,9 @@ struct ChosenDesktopBackdrop: View {
     }
 
     nonisolated private static func downsample(_ url: URL?, maximumPixels: Int) -> CGImage? {
-        guard let url, let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
+        // Not there yet (the first frame of an aerial not taken, a preview not downloaded): ImageIO
+        // logged an error for each (a tester's log, v0.4.9).
+        guard let url, FileManager.default.fileExists(atPath: url.path), let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
         else { return nil }
         return CGImageSourceCreateThumbnailAtIndex(source, 0, [
             kCGImageSourceCreateThumbnailFromImageAlways: true,

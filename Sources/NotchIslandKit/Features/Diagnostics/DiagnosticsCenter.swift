@@ -468,6 +468,12 @@ import Observation
             + "Quick diagnosis:\n\(diagnosis)\n\n"
     }
 
+    nonisolated static func isOffline(_ error: any Error) -> Bool {
+        let offline: Set<URLError.Code> = [.notConnectedToInternet, .networkConnectionLost, .dataNotAllowed,
+                                           .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed, .timedOut]
+        return (error as? URLError).map { offline.contains($0.code) } ?? false
+    }
+
     /// Sends what waits in the outbox, then `envelope`; a failure keeps it in the outbox.
     private func deliver(_ envelope: DiagnosticsEnvelope) async -> Bool {
         guard isConfigured else {
@@ -489,7 +495,12 @@ import Observation
             markSent()
             return true
         } catch {
-            Log.app.error("diagnostics failed: \(String(describing: error), privacy: .public)")
+            // Offline is expected, not a failure: the delivery waits in the outbox.
+            if Self.isOffline(error) {
+                Log.app.notice("diagnostics waiting (offline): \(error.localizedDescription, privacy: .public)")
+            } else {
+                Log.app.error("diagnostics failed: \(String(describing: error), privacy: .public)")
+            }
             save(envelope)
             state = .failed("\(error.localizedDescription). It will be sent again later.")
             return false
@@ -801,15 +812,18 @@ import Observation
             let log = DiagnosticsProbes.log(since: start, limit: logLimit)
             let all = DiagnosticsProbes.errorLines(in: log.text)
             let errors = all.filter { !DiagnosticsProbes.isKnownNoise($0) }
+            let noise = all.filter { DiagnosticsProbes.isKnownNoise($0) }
             // The log spans earlier runs too, so the rate is over its whole window (an hour at
             // least: a launch's one or two errors over ten minutes are not ten an hour).
             let hours = max(1, Date().timeIntervalSince(start) / 3600)
             report.metrics[.logErrorsPerHour] = Double(errors.count) / hours
             var section = DiagnosticsReport.Section("Log")
-            section.add("Errors and faults", "\(errors.count) since \(DiagnosticsFormat.date(start))"
-                        + " (and \(all.count - errors.count) of the system's known noise, left out)")
-            section.add("Last errors", errors.suffix(15).joined(separator: "\n"))
+            section.add("Errors and faults", "\(errors.count) since \(DiagnosticsFormat.date(start)) (NotchIsland's and the system's real ones)")
+            section.add("System messages, not errors", noise.isEmpty ? "none"
+                        : "\(noise.count): known and harmless, explained under \(DiagnosticsSystemNoise.title)")
+            section.add("Last errors", errors.isEmpty ? "none" : errors.suffix(15).joined(separator: "\n"))
             report.sections.append(section)
+            report.sections.append(DiagnosticsSystemNoise.section(noise))
             report.attachments.append(log)
             report.sections.append(DiagnosticsEnvironment.trail(fromLog: log.text))
         }

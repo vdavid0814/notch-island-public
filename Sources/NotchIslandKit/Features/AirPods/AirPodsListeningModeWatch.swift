@@ -71,6 +71,8 @@ import Foundation
 
     private func remove(_ name: String) {
         guard let entry = watched.removeValue(forKey: name) else { return }
+        // Gone with the headphones: removing it from a device that is no more logs a HAL error.
+        guard HAL.isAlive(entry.device) else { return }
         var address = Self.address
         AudioObjectRemovePropertyListenerBlock(entry.device, &address, .main, entry.listener)
     }

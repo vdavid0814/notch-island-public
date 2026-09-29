@@ -78,10 +78,11 @@ nonisolated enum DiagnosticsInsights {
     /// feature), the most frequent first, with one example each.
     static func errorSection(_ log: String) -> DiagnosticsReport.Section {
         var counts: [String: (count: Int, example: Substring)] = [:]
-        for line in DiagnosticsProbes.errorLines(in: log) {
+        // The system's known messages are not errors: they have a section of their own.
+        for line in DiagnosticsProbes.errorLines(in: log) where !DiagnosticsProbes.isKnownNoise(line) {
             let found = line.firstRange(of: /\[[A-Za-z][^\]\s]*:[^\]]*\]/).map { String(line[$0]) }
                 ?? (line.contains("(CoreAudio)") ? "(CoreAudio)" : "(other)")
-            let source = DiagnosticsProbes.isKnownNoise(line) ? "\(found) (known system noise)" : found
+            let source = found
             let entry = counts[source]
             counts[source] = ((entry?.count ?? 0) + 1, entry?.example ?? line)
         }

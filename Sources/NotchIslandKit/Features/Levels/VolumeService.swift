@@ -173,15 +173,19 @@ actor VolumeService {
     }
 
     private func unbind() {
-        for var listener in deviceListeners {
-            AudioObjectRemovePropertyListenerBlock(device, &listener.address, queue, listener.block)
+        // A device that has gone (headphones taken off) took its listeners with it; asking it to
+        // remove them logged "no object with given ID" (a tester's log, v0.4.9).
+        if HAL.isAlive(device) {
+            for var listener in deviceListeners {
+                AudioObjectRemovePropertyListenerBlock(device, &listener.address, queue, listener.block)
+            }
         }
         deviceListeners.removeAll()
         device = AudioObjectID(kAudioObjectUnknown)
     }
 
     private func read() -> VolumeSnapshot {
-        guard device != kAudioObjectUnknown else { return .noDevice }
+        guard device != kAudioObjectUnknown, HAL.isAlive(device) else { return .noDevice }
         var snapshot = VolumeSnapshot.noDevice
         if HAL.has(device, HAL.virtualMainVolumeAddress) {
             snapshot.value = Double(HAL.float32(device, HAL.virtualMainVolumeAddress) ?? 0)
@@ -218,7 +222,7 @@ actor VolumeService {
 }
 
 /// Thin, typed wrappers over the AudioObject C API. Only ever called from `VolumeService`'s queue.
-nonisolated private enum HAL {
+nonisolated enum HAL {
     static let systemObject = AudioObjectID(kAudioObjectSystemObject)
 
     static let defaultOutputDeviceAddress = AudioObjectPropertyAddress(
@@ -251,6 +255,19 @@ nonisolated private enum HAL {
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
         let status = AudioObjectGetPropertyData(systemObject, &address, 0, nil, &size, &device)
         return status == noErr ? device : AudioObjectID(kAudioObjectUnknown)
+    }
+
+    /// Still among the system's devices: asking a device that has gone anything logs a HAL error.
+    static func isAlive(_ object: AudioObjectID) -> Bool {
+        guard object != kAudioObjectUnknown else { return false }
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else { return false }
+        var devices = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &devices) == noErr else { return false }
+        return devices.contains(object)
     }
 
     static func has(_ object: AudioObjectID, _ address: AudioObjectPropertyAddress) -> Bool {

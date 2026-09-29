@@ -361,20 +361,10 @@ nonisolated enum DiagnosticsProbes {
         }
     }
 
-    /// Errors the system logs in every app for its own reasons, harmless and outside the app's
-    /// reach (each looked into, v0.4.9–v0.4.10): an HTTP/3 connection's inner stream read as it
-    /// closes, CoreAudio's missing plug-in factory at launch, the menu bar item's scene, a text
-    /// cursor's remote view, the Dock's task port. Counted apart: they hid the real errors.
-    static let knownNoise = [
-        "on unconnected nw_connection", "AddInstanceForFactory: No factory registered",
-        "No matching scene to invalidate", "BSBlockSentinel:FBSWorkspaceScenesClient", "ViewBridge to RemoteViewService Terminated",
-        "com.apple.ViewBridge.error Code=18", "Unable to obtain a task name port right",
-        // A server's reset arriving after the connection was closed (state=CLOSED).
-        "state=CLOSED rcv_nxt=",
-    ]
-
+    /// A message macOS logs at error level in every app, harmless (`DiagnosticsSystemNoise`);
+    /// never one of NotchIsland's own.
     static func isKnownNoise(_ line: Substring) -> Bool {
-        knownNoise.contains { line.contains($0) }
+        !line.contains("[\(Log.subsystem):") && DiagnosticsSystemNoise.kind(of: line) != nil
     }
 
     /// Sound and displays as System Information lists them (short form).
