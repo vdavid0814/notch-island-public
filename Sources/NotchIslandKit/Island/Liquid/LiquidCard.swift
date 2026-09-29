@@ -78,6 +78,10 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     func handleLevel(_ kind: LevelKind, source: LevelChangeSource, duration: TimeInterval, flows: Bool = true) -> Bool {
         guard kind == .volume else { return false }
         if source == .external || isShown { lastChange = Date() }
+        if state.isLeaving {
+            // Running back as the volume changes again: back to the card.
+            return source == .external || source == .key ? comeBack(duration: duration) : false
+        }
         if isShown {
             if case .airPods = state.kind {} else { state.kind = .volume(name: Self.outputName()) }
             hideAfter = max(hideAfter, Date().addingTimeInterval(duration))
@@ -90,6 +94,10 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     /// Headphones connected, the island's card meant to cover macOS's. True when this card shows them.
     func airPodsConnected(_ info: AirPodsInfo, duration: TimeInterval, flows: Bool = true) -> Bool {
         lastChange = Date()
+        if state.isLeaving {
+            state.kind = .airPods(info)
+            return comeBack(duration: duration)
+        }
         if isShown {
             state.kind = .airPods(info)
             hideAfter = max(hideAfter, Date().addingTimeInterval(duration))
@@ -150,6 +158,25 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         DiagnosticsFlow.record("liquid card out (\(String(describing: kind.card))) to \(window.logDescription)")
     }
 
+    /// A change while the liquid runs back (macOS's card comes up again): the drop turns round from
+    /// where it is to the card, and the cleanup of the way back is called off.
+    private func comeBack(duration: TimeInterval) -> Bool {
+        guard case .back(_, let from) = state.motion else { return false }
+        landing?.cancel()
+        hideAfter = Date().addingTimeInterval(duration)
+        setLiquid(shown: true, duration: 0)
+        let now = state.drop(at: Date())
+        play({ .move(start: $0, from: now, to: from) }, duration: LiquidFlow.move.total, key: nil) { [weak self] in
+            self?.land(after: LiquidFlow.move.total)
+        }
+        let situation = model.fullscreen.fullscreenApps.count
+        watchCard(situation: situation, duration: duration, flowing: true, kind: state.kind,
+                  islandBanner: .levelCovering(.volume), flows: true)
+        Log.levels.notice("liquid card comes back")
+        DiagnosticsFlow.record("liquid card comes back")
+        return true
+    }
+
     /// macOS's card came up elsewhere than expected: there instead, as liquid again.
     private func move(to window: CGRect) {
         guard let metrics = model.metrics else { return }
@@ -192,6 +219,8 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         // Liquid again (the black over the surface) as it already runs back: macOS's card has gone.
         setLiquid(shown: true, duration: Self.toLiquid)
         let from = state.drop(at: Date())
+        // Leaving from now on, even before the frames are worked out (a change meanwhile turns it round).
+        state.start(.back(start: Date(), from: from))
         let total = max(LiquidFlow.back.total, 0.2 + Double(LiquidCardState.absorb))
         play({ .back(start: $0, from: from) }, duration: total,
              key: "back|\(state.kind.card)|\(state.notch)|\(state.frame)|\(from.rect)") { [weak self] in
@@ -500,6 +529,11 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     var contentVisible = false
     /// The pointer is on the card.
     var isHeld = false
+
+    /// Running back into the notch.
+    var isLeaving: Bool {
+        if case .back = motion { true } else { false }
+    }
 
     var isAnimating: Bool {
         switch motion {
