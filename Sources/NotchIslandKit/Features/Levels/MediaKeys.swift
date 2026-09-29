@@ -37,6 +37,16 @@ nonisolated enum MediaKeyDecoder {
     static let keyDownState = 0x0A
     static let keyUpState = 0x0B
 
+    /// A system-defined event's subtype and `data1`, read from its CGEvent fields (99 and 149,
+    /// found by building events with known values and reading every field back): what
+    /// `NSEvent(cgEvent:)` would give, without it (see `TapSession.handle`).
+    static let subtypeField = CGEventField(rawValue: 99)!
+    static let data1Field = CGEventField(rawValue: 149)!
+
+    static func fields(of event: CGEvent) -> (subtype: Int16, data1: Int) {
+        (Int16(truncatingIfNeeded: event.getIntegerValueField(subtypeField)), Int(event.getIntegerValueField(data1Field)))
+    }
+
     /// `data1` layout: key code in bits 16–31; key state (0x0A down, 0x0B up) in bits 8–15;
     /// repeat flag in bit 0.
     static func decode(subtype: Int16, data1: Int, flags: CGEventFlags) -> MediaKeyEvent? {

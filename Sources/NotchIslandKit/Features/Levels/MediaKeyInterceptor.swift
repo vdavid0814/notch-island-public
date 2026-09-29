@@ -287,12 +287,11 @@ nonisolated private final class TapSession {
             break
         }
         guard type.rawValue == MediaKeyDecoder.systemDefinedEventType else { return Unmanaged.passUnretained(event) }
-        // The thread's run loop never drains an autorelease pool per callout; the NSEvent made here
-        // (for every system-defined event, mouse-button changes included) would pile up.
-        let key: MediaKeyEvent? = autoreleasepool {
-            guard let nsEvent = NSEvent(cgEvent: event) else { return nil }
-            return MediaKeyDecoder.decode(subtype: nsEvent.subtype.rawValue, data1: nsEvent.data1, flags: event.flags)
-        }
+        // Read straight from the CGEvent: making an NSEvent of it here, off the main thread, runs
+        // HIToolbox's Caps Lock handling, which asserts the main queue and crashed the app on a Caps
+        // Lock press (crash reports, v0.3.1 and v0.3.3).
+        let (subtype, data1) = MediaKeyDecoder.fields(of: event)
+        let key = MediaKeyDecoder.decode(subtype: subtype, data1: data1, flags: event.flags)
         guard let key else { return Unmanaged.passUnretained(event) }
 
         switch presses.action(for: key, policy: shared.policy) {

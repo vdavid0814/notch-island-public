@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import Testing
@@ -87,5 +88,19 @@ import Testing
     @Test func smoothMinimumFillsBetween() {
         #expect(LiquidField.smoothMin(3, 3, 12) < 3)
         #expect(LiquidField.smoothMin(1, 40, 12) == 1)
+    }
+}
+
+@Suite struct MediaKeyFieldsTests {
+    /// The CGEvent fields give what NSEvent would, for media keys and anything else system-defined.
+    @Test func fieldsMatchNSEvent() throws {
+        for (subtype, data1) in [(8, 0x0000_0A00), (8, 0x0001_0B00), (8, 0x0010_0A01), (7, 0x1234_5678), (1, 0)] {
+            let ns = try #require(NSEvent.otherEvent(with: .systemDefined, location: .zero, modifierFlags: NSEvent.ModifierFlags(rawValue: 0xa00),
+                                                     timestamp: 0, windowNumber: 0, context: nil, subtype: Int16(subtype), data1: data1, data2: -1))
+            let cg = try #require(ns.cgEvent)
+            let fields = MediaKeyDecoder.fields(of: cg)
+            #expect(fields.subtype == ns.subtype.rawValue)
+            #expect(fields.data1 == ns.data1)
+        }
     }
 }
