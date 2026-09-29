@@ -100,3 +100,24 @@ import Testing
         #expect(DiagnosticsCenter.logHours(sinceFull: .infinity) == 6)
     }
 }
+
+@Suite struct DiagnosticsSignatureTests {
+    @Test func theSignatureIsReadFromTheKernel() {
+        let signature = DiagnosticsProbes.checkSignature()
+        #expect(!signature.hasPrefix("unreadable"))
+        #expect(signature.contains("valid"))
+    }
+}
+
+@Suite struct DiagnosticsStableSettingsTests {
+    @Test func setsReadTheSameEveryTime() {
+        var siri = SiriSettings()
+        siri.folders = [.downloads, .desktop, .iCloudDrive]
+        let encoder = JSONEncoder()
+        let json = String(data: try! encoder.encode(siri), encoding: .utf8)!
+        let text = DiagnosticsAppState.setsSorted(json, of: siri)
+        #expect(text?.contains(#""folders":["desktop","downloads","iCloudDrive"]"#) == true)
+        #expect(DiagnosticsAppState.setsSorted(#"["b","a"]"#, of: Set(["a", "b"])) == #"["a","b"]"#)
+        #expect(DiagnosticsAppState.setsSorted(#"{"x":1}"#, of: 1) == nil)
+    }
+}

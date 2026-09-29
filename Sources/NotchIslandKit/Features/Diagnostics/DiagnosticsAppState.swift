@@ -175,10 +175,30 @@ enum DiagnosticsAppState {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             if let data = try? encoder.encode(encodable), let text = String(data: data, encoding: .utf8), text.first == "{" || text.first == "[" {
-                return text
+                return setsSorted(text, of: value) ?? text
             }
         }
         return String(describing: value)
+    }
+
+    /// A set encodes in a different order on every run (Siri's folders showed as changed from one
+    /// report to the next): the arrays that are sets — the value itself, or its properties — sorted.
+    nonisolated static func setsSorted(_ json: String, of value: Any) -> String? {
+        let mirror = Mirror(reflecting: value)
+        let setKeys = Set(mirror.children.compactMap { child in
+            Mirror(reflecting: child.value).displayStyle == .set ? child.label : nil
+        })
+        guard mirror.displayStyle == .set || !setKeys.isEmpty,
+              var object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) else { return nil }
+        func sorted(_ array: [Any]) -> [Any] { array.sorted { "\($0)" < "\($1)" } }
+        if mirror.displayStyle == .set, let array = object as? [Any] {
+            object = sorted(array)
+        } else if var dictionary = object as? [String: Any] {
+            for key in setKeys { if let array = dictionary[key] as? [Any] { dictionary[key] = sorted(array) } }
+            object = dictionary
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes]) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     /// Every copy of NotchIsland Launch Services knows, and how many run: an older copy that

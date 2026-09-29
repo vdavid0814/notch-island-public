@@ -3,7 +3,6 @@ import ApplicationServices
 import CoreServices
 import Darwin
 import Foundation
-import Security
 
 /// The readings that need no app state: the Mac, the bundle, the process, permissions that can be
 /// asked about without a prompt, the Spotlight index Siri's app search stands on, the log and the
@@ -82,26 +81,45 @@ nonisolated enum DiagnosticsProbes {
         return "yes: " + String(decoding: buffer, as: UTF8.self)
     }
 
-    /// Checked once per launch: the bundle does not change under a running app, and each check
-    /// logged sqlite errors from the system's detached-signature database (reports, both Macs).
+    /// Read from the kernel (`csops`), which checked the signature when the app launched and
+    /// keeps checking its pages: Security's `SecCodeCopySelf` logged sqlite errors from the
+    /// system's detached-signature database at every call (seen in reports, both Macs), and the
+    /// static check hashed the whole bundle again. Once per launch: it does not change.
     private static let signatureOnce: String = checkSignature()
 
     private static func signature() -> String { signatureOnce }
 
-    private static func checkSignature() -> String {
-        var code: SecCode?
-        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return "unreadable" }
-        var staticCode: SecStaticCode?
-        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return "unreadable" }
-        var information: CFDictionary?
-        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,
-              let info = information as? [String: Any] else { return "unsigned" }
-        let identifier = info[kSecCodeInfoIdentifier as String] as? String ?? "?"
-        let team = info[kSecCodeInfoTeamIdentifier as String] as? String
-        let flags = (info[kSecCodeInfoFlags as String] as? NSNumber)?.uint32Value ?? 0
-        let adHoc = flags & 0x2 != 0
-        let valid = SecStaticCodeCheckValidity(staticCode, [], nil)
-        return "\(identifier), team \(team ?? "none")\(adHoc ? ", ad hoc" : ""), \(valid == errSecSuccess ? "valid" : "INVALID (\(valid))")"
+    static func checkSignature() -> String {
+        var flags: UInt32 = 0
+        guard csops(getpid(), CodeSigning.status, &flags, MemoryLayout<UInt32>.size) == 0 else { return "unreadable" }
+        guard flags & CodeSigning.signed != 0 || flags & CodeSigning.valid != 0 else { return "unsigned" }
+        let identifier = CodeSigning.string(CodeSigning.identity) ?? Bundle.main.bundleIdentifier ?? "?"
+        let team = CodeSigning.string(CodeSigning.teamID)
+        let adHoc = flags & (CodeSigning.adHoc | CodeSigning.linkerSigned) != 0
+        return "\(identifier), team \(team ?? "none")\(adHoc ? ", ad hoc" : ""), \(flags & CodeSigning.valid != 0 ? "valid" : "INVALID (flags 0x\(String(flags, radix: 16)))")"
+    }
+
+    /// The kernel's code-signing operations (`<sys/codesign.h>`, not in the SDK).
+    private enum CodeSigning {
+        static let status: UInt32 = 0
+        static let identity: UInt32 = 11
+        static let teamID: UInt32 = 14
+        static let valid: UInt32 = 0x1
+        static let adHoc: UInt32 = 0x2
+        static let linkerSigned: UInt32 = 0x20000
+        static let signed: UInt32 = 0x2000_0000
+
+        /// A string the kernel hands back as a blob: 8 bytes of header (magic, big-endian length),
+        /// then the C string.
+        static func string(_ operation: UInt32) -> String? {
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            let result = buffer.withUnsafeMutableBytes { csops(getpid(), operation, $0.baseAddress, $0.count) }
+            guard result == 0 else { return nil }
+            let length = Int(UInt32(bigEndian: buffer.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 4, as: UInt32.self) }))
+            guard length > 8, length <= buffer.count else { return nil }
+            let text = String(decoding: buffer[8..<length].prefix { $0 != 0 }, as: UTF8.self)
+            return text.isEmpty ? nil : text
+        }
     }
 
     private static func memoryFootprint() -> (UInt64?, UInt64?) {
@@ -363,3 +381,6 @@ nonisolated enum DiagnosticsProbes {
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
+
+@_silgen_name("csops")
+nonisolated private func csops(_ pid: pid_t, _ operation: UInt32, _ buffer: UnsafeMutableRawPointer?, _ size: Int) -> Int32

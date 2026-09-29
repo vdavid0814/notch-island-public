@@ -8,11 +8,15 @@ nonisolated struct ClipboardItem: Hashable, Identifiable, Sendable, Codable {
     var text: String
     var copied: Date
 
-    /// The first line, for a row (the whole text is what gets pasted).
+    /// The first line, for a row (the whole text is what gets pasted): read up to the first line
+    /// break only, and no longer than a row shows (splitting a long copy into all its lines ran on
+    /// every redraw of the list).
     var preview: String {
-        let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
-        return line.trimmingCharacters(in: .whitespaces)
+        let start = text.drop { $0.isNewline }
+        return String(start.prefix { !$0.isNewline }.prefix(Self.previewLength)).trimmingCharacters(in: .whitespaces)
     }
+
+    static let previewLength = 300
 }
 
 /// What the user copied, newest first, for Siri's Clipboard (⌘4), as the system's Spotlight keeps
