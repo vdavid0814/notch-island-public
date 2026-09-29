@@ -135,8 +135,10 @@ struct PreviewMenuBar: View {
 struct AppMark: View {
     var side: CGFloat = 38
 
+    static func cornerRadius(side: CGFloat) -> CGFloat { side * 0.24 }
+
     var body: some View {
-        RoundedRectangle(cornerRadius: side * 0.24, style: .continuous)
+        RoundedRectangle(cornerRadius: Self.cornerRadius(side: side), style: .continuous)
             .fill(LinearGradient(colors: [Color(red: 0.16, green: 0.36, blue: 0.86), Color(red: 0.05, green: 0.08, blue: 0.26)],
                                  startPoint: .top, endPoint: .bottom))
             .overlay(alignment: .top) {
@@ -158,7 +160,7 @@ struct AppMark: View {
                     }
             }
             .overlay {
-                RoundedRectangle(cornerRadius: side * 0.24, style: .continuous).strokeBorder(.white.opacity(0.15), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: Self.cornerRadius(side: side), style: .continuous).strokeBorder(.white.opacity(0.15), lineWidth: 0.5)
             }
             .frame(width: side, height: side)
             .accessibilityHidden(true)

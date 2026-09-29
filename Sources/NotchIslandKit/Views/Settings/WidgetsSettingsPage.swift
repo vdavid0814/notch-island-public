@@ -112,10 +112,23 @@ private struct StudioStage: View {
     let notice: String?
 
     @Environment(AppModel.self) private var model
+    /// The round Stage button's height: the hint's capsule is made as tall, and the stage's lower
+    /// corners concentric with both.
+    @State private var controlHeight: CGFloat = 28
+
+    /// Between the hint and the button and the stage's edges.
+    static let controlInset: CGFloat = 12
 
     var body: some View {
         let layout = model.layout
         let island = layout.size(for: .expanded(.home))
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: 18,
+            bottomLeadingRadius: controlHeight / 2 + Self.controlInset,
+            bottomTrailingRadius: controlHeight / 2 + Self.controlInset,
+            topTrailingRadius: 18,
+            style: .continuous
+        )
         ZStack(alignment: .top) {
             DesktopBackdrop(style: backdrop)
                 .contentShape(.rect)
@@ -136,9 +149,9 @@ private struct StudioStage: View {
         }
         .frame(height: layout.notch.height + island.height + 70)
         .frame(maxWidth: .infinity)
-        .clipShape(.rect(cornerRadius: 18, style: .continuous))
+        .clipShape(shape)
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.1))
+            shape.strokeBorder(.white.opacity(0.1))
         }
         .overlay(alignment: .bottom) {
             HStack(spacing: 10) {
@@ -152,7 +165,7 @@ private struct StudioStage: View {
                     .foregroundStyle(notice == nil ? AnyShapeStyle(.white) : AnyShapeStyle(.orange))
                     .lineLimit(1)
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    .frame(minHeight: controlHeight)
                     .glassEffect(.regular, in: .capsule)
                 Spacer()
                 Menu {
@@ -174,9 +187,10 @@ private struct StudioStage: View {
                 .labelStyle(.iconOnly)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlHeight = $0 }
                 .help("Wallpaper and reset")
             }
-            .padding(12)
+            .padding(Self.controlInset)
             .environment(\.colorScheme, .dark)
         }
     }
@@ -498,8 +512,11 @@ private struct StudioCard<Content: View>: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SettingsPalette.card, in: .rect(cornerRadius: 16, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(SettingsPalette.cardStroke) }
+        // Rounded as the form's cards on the other pages.
+        .background(SettingsPalette.card, in: .rect(cornerRadius: SettingsForm.cardRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: SettingsForm.cardRadius, style: .continuous).strokeBorder(SettingsPalette.cardStroke)
+        }
     }
 }
 
@@ -769,6 +786,11 @@ private struct GalleryCard: View {
     /// them stalled the frame Settings opened in; each now arrives a few frames after the last.
     @State private var showsPreview = false
 
+    /// The preview's well, and how far in it sits: the card's corners are concentric with it.
+    static let wellRadius: CGFloat = 9
+    static let inset: CGFloat = 10
+    static let radius = wellRadius + inset
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             ZStack {
@@ -779,7 +801,7 @@ private struct GalleryCard: View {
             }
                 .frame(maxWidth: .infinity)
                 .frame(height: 78)
-                .background(.black.opacity(0.32), in: .rect(cornerRadius: 9, style: .continuous))
+                .background(.black.opacity(0.32), in: .rect(cornerRadius: Self.wellRadius, style: .continuous))
                 .overlay(alignment: .topTrailing) {
                     if isAdded {
                         Image(systemName: "checkmark.circle.fill")
@@ -804,10 +826,10 @@ private struct GalleryCard: View {
                 .lineLimit(2, reservesSpace: true)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(10)
-        .background(SettingsPalette.card, in: .rect(cornerRadius: 12, style: .continuous))
+        .padding(Self.inset)
+        .background(SettingsPalette.card, in: .rect(cornerRadius: Self.radius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: Self.radius, style: .continuous)
                 .strokeBorder(isHovered ? .white.opacity(0.14) : SettingsPalette.cardStroke)
         }
         .help(kind.summary)

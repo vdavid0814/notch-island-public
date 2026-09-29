@@ -10,9 +10,6 @@ import SwiftUI
 /// General and appearance on one page: how the island looks first (surface cards, size), then how
 /// it opens, how it behaves, and startup.
 struct GeneralSettingsPage: View {
-    /// How far a grouped form's footer sits inside its section's edges.
-    static let footerInset: CGFloat = 10
-
     @Environment(AppModel.self) private var model
     @AppStorage(DesktopBackdropStyle.key) private var previewWallpaper: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
 
@@ -31,7 +28,8 @@ struct GeneralSettingsPage: View {
 
             Section {
                 SurfacePicker(selection: $preferences.glassStyle)
-                    .padding(.vertical, 4)
+                    // The thumbnails' corners (10 pt) concentric with the card's.
+                    .padding(.vertical, SettingsForm.cardRadius - SettingsForm.inset - 10)
                 if model.activity.isLowPowerMode {
                     Label("Low Power Mode is on: the island is drawn plain black to save battery.",
                           systemImage: "leaf.fill")
@@ -44,7 +42,7 @@ struct GeneralSettingsPage: View {
 
             Section {
                 ThemePicker(theme: $preferences.theme)
-                    .padding(.vertical, 4)
+                    .settingsCornerElement(radius: ThemePicker.swatch / 2)
             } header: {
                 InfoLabel("Theme", "The island's colour, where the system's blue was: sliders, selections, active controls and the widgets' glow. A colour of its own, or Mix: two colours of your choice blended.")
             }
@@ -53,7 +51,7 @@ struct GeneralSettingsPage: View {
                 PictureChoice(options: IslandScale.allCases, selection: $preferences.scale, title: \.title) { scale in
                     IslandSizePicture(scale: scale)
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, SettingsForm.cardRadius - SettingsForm.inset - 10)
             } header: {
                 InfoLabel("Size when open", "How large the island opens: the panel, its widgets and its controls. The pill beside the notch always matches the notch.")
             }
@@ -139,15 +137,10 @@ struct GeneralSettingsPage: View {
                 }
             }
 
-            // The card is the section: as the footer, it gets none of the form's own row box
-            // (a squarer, taller box around the capsule; row backgrounds cannot be cleared here).
             Section {
+                WallpaperRow(selection: $previewWallpaper)
             } header: {
                 InfoLabel("Preview Wallpaper", "The desktop behind the island in Settings' pictures and in the widget studio: your own desktop picture, the macOS default wallpaper (dark or light), or a black and white test pattern that shows exactly what the glass lets through.")
-            } footer: {
-                WallpaperCard(selection: $previewWallpaper)
-                    // A footer is inset from the section's edges: out to the width of the boxes above.
-                    .padding(.horizontal, -Self.footerInset)
             }
         }
     }
@@ -160,13 +153,16 @@ private struct ThemePicker: View {
     @Binding var theme: IslandTheme
     @State private var isMixing = false
 
+    /// The colour's circle, the row's tallest part: the card is rounded concentric with it.
+    static let swatch: CGFloat = 30
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 Circle()
                     .fill(theme.color)
                     .overlay { Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1) }
-                    .frame(width: 30, height: 30)
+                    .frame(width: Self.swatch, height: Self.swatch)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(theme.preset == .custom ? "Mixed" : theme.preset.title)
                         .font(.system(size: 13, weight: .semibold))
@@ -180,7 +176,11 @@ private struct ThemePicker: View {
                 } label: {
                     Label(isMixing ? "Done" : "Mix", systemImage: isMixing ? "checkmark" : "paintpalette.fill")
                 }
+                // As far in from the side as the row's height puts it from the top: its capsule
+                // concentric with the card's corner too.
+                .padding(.trailing, (Self.swatch - 2 * SettingsForm.controlRadius) / 2)
             }
+            .frame(minHeight: Self.swatch)
             if isMixing {
                 PaintPalette(theme: $theme)
                     .transition(.asymmetric(
@@ -625,7 +625,7 @@ struct ActivitiesSettingsPage: View {
                 PictureChoice(options: LevelHUDStyle.allCases, selection: $preferences.levelStyle, title: \.title) { style in
                     LevelStylePicture(style: style)
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, SettingsForm.cardRadius - SettingsForm.inset - 10)
                 .disabled(!preferences.showLevelHUD)
                 .opacity(preferences.showLevelHUD ? 1 : 0.5)
                 NoticeDuration(title: "Shown for", value: $preferences.levelDuration)
@@ -957,6 +957,8 @@ struct AboutSettingsPage: View {
     @Environment(AppModel.self) private var model
     @State private var isConfirmingClear = false
 
+    static let markSide: CGFloat = 72
+
     /// Privacy & Security ▸ Automation, where Music/Spotify access is granted or revoked.
     private static let automationSettingsURL =
         URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
@@ -968,8 +970,8 @@ struct AboutSettingsPage: View {
         let keys = SettingsFormat.interceptionStatus(model.levels.interception)
         Form {
             Section {
-                HStack(spacing: 16) {
-                    AppMark(side: 72)
+                HStack(alignment: .top, spacing: 16) {
+                    AppMark(side: Self.markSide)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("NotchIsland").font(.system(size: 20, weight: .bold))
                         Text(SettingsFormat.version(Bundle.main.infoDictionary))
@@ -980,7 +982,7 @@ struct AboutSettingsPage: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(.vertical, 6)
+                .settingsCornerElement(radius: AppMark.cornerRadius(side: Self.markSide))
             }
 
             UpdateSection()
@@ -1014,7 +1016,9 @@ struct AboutSettingsPage: View {
             DiagnosticsSection()
 
             Section("Shelf") {
-                LabeledContent("Items on the Shelf", value: count.formatted())
+                LabeledContent("Items on the Shelf") {
+                    Text(count.formatted()).foregroundStyle(SettingsPalette.secondary)
+                }
                 LabeledContent("Remove every item") {
                     Button("Clear Shelf…", role: .destructive) { isConfirmingClear = true }
                         .disabled(count == 0)

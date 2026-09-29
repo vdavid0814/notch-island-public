@@ -56,10 +56,11 @@ struct AssistantView: View {
                     if let answer = assistant.answer {
                         AnswerPane(answer: answer)
                     } else if isGallery {
-                        AppGallery(assistant: assistant)
+                        AppGallery(assistant: assistant, plateRadius: layout.assistantGalleryPlateRadius)
                             .frame(width: galleryWidth)
                     } else {
-                        RowsList(assistant: assistant)
+                        RowsList(assistant: assistant,
+                                 extraInset: layout.assistantRowInset - Metrics.Expanded.horizontalInset)
                     }
                 }
                 // Their own short cross-fade: the island's spring does not reach in here (the
@@ -241,6 +242,9 @@ struct AssistantTile: View {
 /// pointer does not move the selection: it only clicks (reported: following it felt slow, v0.4.5).
 private struct RowsList: View {
     let assistant: AssistantModel
+    /// The rows further in than the field, so their capsules are concentric with the panel's
+    /// corners (`IslandLayout.assistantRowInset`).
+    let extraInset: CGFloat
 
     var body: some View {
         let rows = assistant.rows
@@ -249,12 +253,14 @@ private struct RowsList: View {
             ScrollView {
                 LazyVStack(spacing: IslandLayout.assistantRowSpacing) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        RowView(row: row, isMarked: assistant.marksSelection && index == assistant.selection)
+                        RowView(row: row, isMarked: assistant.marksSelection && index == assistant.selection,
+                                leadingInset: max(Metrics.Spacing.small, Metrics.Spacing.large - extraInset))
                             .id(row.id)
                             .contentShape(.rect)
                             .onTapGesture { assistant.perform(row) }
                     }
                 }
+                .padding(.horizontal, extraInset)
                 .background { SelectionScroller(assistant: assistant, count: count) { proxy.scrollTo(rows[$0].id) } }
             }
             .scrollIndicators(.never)
@@ -268,6 +274,7 @@ private struct RowsList: View {
 /// view; the field filters it.
 private struct AppGallery: View {
     let assistant: AssistantModel
+    let plateRadius: CGFloat
 
     var body: some View {
         // The user's column count (Settings ▸ Siri ▸ App Gallery); the window widens with it.
@@ -281,7 +288,8 @@ private struct AppGallery: View {
                 LazyVGrid(columns: columns, spacing: IslandLayout.galleryRowSpacing) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         if case .hit(let hit) = row {
-                            GalleryCell(hit: hit, isMarked: assistant.marksSelection && index == assistant.selection)
+                            GalleryCell(hit: hit, isMarked: assistant.marksSelection && index == assistant.selection,
+                                        plateRadius: plateRadius)
                                 .id(row.id)
                                 .contentShape(.rect)
                                 .onTapGesture { assistant.perform(row) }
@@ -301,6 +309,7 @@ private struct GalleryCell: View {
     let hit: AssistantHit
     /// The keys moved the selection here (`AssistantModel.marksSelection`).
     var isMarked = false
+    var plateRadius: CGFloat = 10
 
     static let iconSize: CGFloat = AssistantIcons.galleryIconSize
     @State private var icon: NSImage?
@@ -329,7 +338,7 @@ private struct GalleryCell: View {
         .padding(.horizontal, Metrics.Spacing.xxSmall)
         // Exactly the height `IslandLayout` sizes the gallery by, so N rows fill it.
         .frame(maxWidth: .infinity, minHeight: IslandLayout.galleryCellHeight, maxHeight: IslandLayout.galleryCellHeight)
-        .background { SelectionPlate(isShown: isMarked) }
+        .background { SelectionPlate(isShown: isMarked, shape: .rect(cornerRadius: plateRadius, style: .continuous)) }
     }
 }
 
@@ -350,11 +359,18 @@ private struct SelectionScroller: View {
 }
 
 /// Where ↑/↓ are: a soft plate in the theme's colour, only after the keys moved the selection.
+/// A list row's is a capsule, a gallery cell's rounded concentric with the panel's corners.
 private struct SelectionPlate: View {
     let isShown: Bool
+    var shape: AnyShape = AnyShape(Capsule())
+
+    init(isShown: Bool, shape: some Shape = Capsule()) {
+        self.isShown = isShown
+        self.shape = AnyShape(shape)
+    }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
+        shape
             .fill(Color.islandAccent.opacity(0.16))
             .opacity(isShown ? 1 : 0)
             .animation(.easeOut(duration: 0.12), value: isShown)
@@ -366,6 +382,9 @@ private struct RowView: View {
     let row: AssistantRow
     /// The keys moved the selection here (`AssistantModel.marksSelection`).
     var isMarked = false
+    /// From the capsule's ends to the icon and the shortcut: the icon lines up with the field's
+    /// magnifying glass above.
+    var leadingInset: CGFloat = Metrics.Spacing.large
 
     var body: some View {
         HStack(spacing: Metrics.Spacing.large) {
@@ -383,7 +402,7 @@ private struct RowView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, Metrics.Spacing.large)
+        .padding(.horizontal, leadingInset)
         .frame(height: IslandLayout.assistantRowHeight)
         .background { SelectionPlate(isShown: isMarked) }
     }

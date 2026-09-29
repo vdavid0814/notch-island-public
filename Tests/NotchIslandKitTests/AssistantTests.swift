@@ -15,8 +15,11 @@ import Testing
         #expect(field.width == expanded.width && suggestions.width == expanded.width && list.width == expanded.width)
         // Only the field: the top inset, the 40 pt field and the bottom inset.
         #expect(field.height == CGFloat(28 + 8 + 40 + 12))
-        // The four suggestions exactly: four rows and their spacing, one inset between.
-        #expect(suggestions.height == field.height + 8 + 4 * 32 + 3 * 2)
+        // The four suggestions exactly: four rows and their spacing, one inset between, and the
+        // last row as far above the bottom as the rows are in from the side (30 − 16 = 14, not
+        // the field's 12): its capsule is concentric with the panel's corners.
+        #expect(layout.assistantRowInset == 14)
+        #expect(suggestions.height == field.height + 8 + 4 * 32 + 3 * 2 + 2)
         #expect(list.height == 28 + IslandLayout.assistantPageHeight)
         #expect(field.height < suggestions.height && suggestions.height < list.height)
         #expect(layout.bottomRadius(for: .assistant(.field)) == layout.bottomRadius(for: .expanded(.home)))

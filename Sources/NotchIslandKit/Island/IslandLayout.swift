@@ -128,6 +128,19 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         return assistantFieldPageHeight + assistantTopInset + rows * assistantRowHeight + (rows - 1) * assistantRowSpacing
     }
 
+    /// How far a list row's selection capsule sits in from the panel's side and bottom: this far in,
+    /// its ends are concentric with the panel's lower corners (a 32-pt row rounds 16 pt at most, the
+    /// panel 30 pt at the standard size, so 14 pt); never nearer than the page's own inset.
+    var assistantRowInset: CGFloat {
+        max(Metrics.Expanded.horizontalInset, bottomRadius(for: .assistant(.list)) - Self.assistantRowHeight / 2)
+    }
+
+    /// A gallery cell's selection plate: concentric with the panel's lower corners from the page's
+    /// inset, where the last row's cells sit.
+    var assistantGalleryPlateRadius: CGFloat {
+        bottomRadius(for: .assistant(.gallery)) - Metrics.Expanded.pageBottomInset
+    }
+
     /// Width of each ear beside the notch in compact and banner: as narrow as the
     /// glyph allows — the compact shoulder (6), the glyph's outer inset (4), the
     /// glyph itself (notch height − 2 × 4) and the clearance from the notch (4).
@@ -183,7 +196,10 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             let list = (Self.assistantPageHeight * f * CGFloat(siri.listRows) / 7).rounded()
             let page: CGFloat = switch room {
             case .field: Self.assistantFieldPageHeight
-            case .rows(let count): min(Self.assistantRowsPageHeight(count), max(list, Self.assistantSuggestionsPageHeight))
+            // The last row as far above the bottom as the rows are in from the side
+            // (`assistantRowInset`), instead of the field's bottom inset.
+            case .rows(let count): min(Self.assistantRowsPageHeight(count) - Self.assistantBottomInset + assistantRowInset,
+                                       max(list, Self.assistantSuggestionsPageHeight))
             case .list: max(list, Self.assistantSuggestionsPageHeight)
             case .gallery: Self.galleryPageHeight(rows: siri.galleryRows)
             case .galleryRows(let count): Self.galleryPageHeight(rows: min(count, siri.galleryRows))

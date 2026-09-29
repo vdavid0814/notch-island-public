@@ -14,10 +14,22 @@ extension Color {
 /// would colour the info buttons in the labels too (as it coloured every glass button, v0.4.8).
 struct IslandSwitchStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
+        IslandSwitch(configuration: configuration)
+    }
+}
+
+private struct IslandSwitch: View {
+    let configuration: ToggleStyleConfiguration
+
+    @Environment(\.isSettingsForm) private var isSettingsForm
+
+    var body: some View {
         LabeledContent {
             Toggle(isOn: configuration.$isOn) { configuration.label }
                 .labelsHidden()
                 .toggleStyle(.switch)
+                // Settings' form shows the small switch the system's grouped form has.
+                .controlSize(isSettingsForm ? .mini : .regular)
                 .tint(Color.islandControlAccent)
         } label: {
             configuration.label

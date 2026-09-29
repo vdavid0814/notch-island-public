@@ -641,21 +641,14 @@ struct SegmentBar: NSViewRepresentable {
     static func purge() { placeholders.removeAll() }
 }
 
-/// The bar on a card of its own, only as tall as the bar and rounded concentric with it (a
-/// form's row is a squarer, taller box around a capsule).
-struct WallpaperCard: View {
+/// The bar as a row of Settings' form, the card rounded concentric with it (`SettingsFormStyle`).
+struct WallpaperRow: View {
     @Binding var selection: DesktopBackdropStyle
     @State private var barHeight: CGFloat = 32
 
-    static let inset: CGFloat = 8
-
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: barHeight / 2 + Self.inset, style: .continuous)
         WallpaperBar(selection: $selection)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { barHeight = $0 }
-            .padding(Self.inset)
-            .frame(maxWidth: .infinity)
-            .background(SettingsPalette.card, in: shape)
-            .overlay { shape.strokeBorder(SettingsPalette.cardStroke) }
+            .settingsCornerElement(radius: barHeight / 2)
     }
 }

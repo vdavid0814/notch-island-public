@@ -18,6 +18,8 @@ struct FeedbackSection: View {
     @State private var preparing: [String] = []
     @State private var mediaFailure: String?
     @State private var isDropTargeted = false
+    /// The two buttons' height.
+    @State private var choiceHeight: CGFloat = 54
 
     var body: some View {
         @Bindable var diagnostics = model.diagnostics
@@ -29,7 +31,9 @@ struct FeedbackSection: View {
                     choice(.bug)
                     choice(.feature)
                 }
-                .padding(.vertical, 4)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { choiceHeight = $0 }
+                // The card rounded concentric with the two capsules at its corners.
+                .settingsCornerElement(radius: choiceHeight / 2)
                 if let sent {
                     Label(sent == .bug ? "Thank you! Your bug report was sent to the developer."
                                        : "Thank you! Your idea was sent to the developer.",
@@ -82,27 +86,27 @@ struct FeedbackSection: View {
             SettingsTile(systemImage: isBug ? "ladybug.fill" : "lightbulb.fill", tint: isBug ? .red : .green, side: 28)
             Text(isBug ? "Bug Report" : "Feature Request").font(.headline)
         }
-        TextField("Title", text: field(\.title),
+        SettingsTextField("Title", text: field(\.title),
                   prompt: Text(isBug ? "In a few words, e.g. “Spotlight finds no apps”" : "In a few words, e.g. “A weather widget”"))
-        TextField(isBug ? "What happened?" : "Your idea", text: field(\.details),
+        SettingsTextField(isBug ? "What happened?" : "Your idea", text: field(\.details),
                   prompt: Text(isBug ? "Describe what went wrong" : "What would you like NotchIsland to do?"),
                   axis: .vertical)
             .lineLimit(3...8)
         if isBug {
-            TextField("What did you expect?", text: field(\.expected), prompt: Text("Optional"), axis: .vertical)
+            SettingsTextField("What did you expect?", text: field(\.expected), prompt: Text("Optional"), axis: .vertical)
                 .lineLimit(2...5)
-            TextField("How can it be repeated?", text: field(\.steps), prompt: Text("Optional: 1. Open … 2. Click …"), axis: .vertical)
+            SettingsTextField("How can it be repeated?", text: field(\.steps), prompt: Text("Optional: 1. Open … 2. Click …"), axis: .vertical)
                 .lineLimit(2...6)
             Picker("How often?", selection: field(\.frequency)) {
                 ForEach(DiagnosticsFeedback.Frequency.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
         } else {
-            TextField("Why would it help?", text: field(\.why), prompt: Text("Optional"), axis: .vertical)
+            SettingsTextField("Why would it help?", text: field(\.why), prompt: Text("Optional"), axis: .vertical)
                 .lineLimit(2...5)
         }
         attachments(isBug: isBug)
-        TextField("Your name", text: name, prompt: Text("Optional"))
+        SettingsTextField("Your name", text: name, prompt: Text("Optional"))
         Toggle(isOn: $attachDiagnostics) {
             Text("Attach diagnostics")
             Text("The app's state, its log and details of this Mac, so the problem can be found. See Diagnostics below for what is included.")
@@ -284,13 +288,14 @@ struct DiagnosticsSection: View {
                 Text("At launch, after an update or a crash, when something stops working or uses unusually much energy, and every hour (a short report; the full one every 6 hours). Barely uses battery.")
             }
             .disabled(!diagnostics.isConfigured)
-            TextField("Your name", text: $diagnostics.name, prompt: Text("Optional, so the developer knows who you are"))
+            SettingsTextField("Your name", text: $diagnostics.name, prompt: Text("Optional, so the developer knows who you are"))
             LabeledContent("Status") {
                 status(diagnostics)
             }
             if let power = diagnostics.ownPowerMW {
                 LabeledContent("NotchIsland's energy use") {
                     Text(Self.energy(power, reference: diagnostics.referencePowerMW))
+                        .foregroundStyle(SettingsPalette.secondary)
                 }
             }
             if let latest = diagnostics.latestVersion {

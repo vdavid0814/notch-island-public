@@ -341,8 +341,7 @@ private struct SettingsDetail: View {
                 case .about: AboutSettingsPage()
                 }
             }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
+            .formStyle(.settings)
             // Switches and sliders in the theme's colour, where the system's blue was.
             .toggleStyle(.islandSwitch)
             // Every button the system's own, in its capsule (as the pickers are): the square-ish

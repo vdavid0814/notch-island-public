@@ -458,6 +458,7 @@ struct SettingPictureRow<Picture: View>: View {
     var body: some View {
         picture
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 4)
+            // The picture's corners (10 pt) concentric with the card's (it opens a section).
+            .padding(.vertical, SettingsForm.cardRadius - SettingsForm.inset - 10)
     }
 }

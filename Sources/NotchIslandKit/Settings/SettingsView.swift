@@ -181,7 +181,7 @@ private struct GeneralSettings: View {
                 Text("With the icon hidden, open NotchIsland again from Finder or Spotlight to return to Settings.")
             }
         }
-        .formStyle(.grouped)
+        .formStyle(.settings)
     }
 
     /// Snaps to 10 ms, like the hover delay.
@@ -273,7 +273,7 @@ private struct ActivitiesSettings: View {
                 Toggle("Play a sound when a timer ends", isOn: $preferences.timerSound)
             }
         }
-        .formStyle(.grouped)
+        .formStyle(.settings)
     }
 }
 
@@ -334,7 +334,7 @@ private struct PermissionsSettings: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .formStyle(.settings)
     }
 }
 
@@ -377,7 +377,7 @@ private struct AboutSettings: View {
                 .disabled(count == 0)
             }
         }
-        .formStyle(.grouped)
+        .formStyle(.settings)
         .confirmationDialog("Clear the Shelf?", isPresented: $isConfirmingClear) {
             Button("Clear Shelf", role: .destructive) {
                 model.shelf.clear()
