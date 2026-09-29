@@ -130,3 +130,11 @@ New tools: `levels_bench.py` (volume changes made elsewhere: the island's cover 
   app), then `top -l 2` (0.35 s). Reading even the process's own log through `OSLogStore`
   (`.currentProcessIdentifier`) waits ~1.3 s on logd, billed to the app: the light report has no log.
 - Timer page at rest 0.01 % (a 1 % reading earlier was one sample); panel with media playing 0.58 %.
+- **A full report** (by hand, 6 h of log): 19.6 J with a coalition Energy Impact peak of 99.5 → 3.1 J,
+  peak 42. Its tools run at background priority (efficiency cores, ~4× less energy) and `log show` and
+  `system_profiler` are paused and resumed so they take 40 % of a core (`DiagnosticsProbes.Throttle`);
+  `top -l 2` (a whole core for a second) is replaced by reading every process's counters in-process;
+  the event trail comes from the report's own `log show` instead of `OSLogStore`. Automatic reports read
+  the log only back to the previous full report (20 minutes of it: 0.5 s of CPU instead of 2.7 s).
+- **Siri's app gallery**: thumbnails drawn in Core Animation's BGRA layout: Energy Impact peak 33 → 23.
+- **Rounds a–d**: every scenario under 40, memory flat in every rest (64–69 MB after Settings, 28 MB idle).
