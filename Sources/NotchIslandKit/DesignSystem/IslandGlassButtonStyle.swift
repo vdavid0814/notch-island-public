@@ -73,3 +73,35 @@ extension View {
             .buttonBorderShape(.capsule)
     }
 }
+
+/// A choice bar that measures itself right from the start. Some of the system's bars (the Spotlight
+/// shortcut's) are sized short until their selection changes — 213 pt for 246 of segments, read
+/// through accessibility, the segments reaching past the row until clicked; built again, or at its
+/// own fixed width, it stayed short. So it starts with nothing selected and takes the value a
+/// moment after it appears: the same change a click makes, without touching the setting.
+struct SettledChoiceBar<Value: Hashable, Label: View>: View {
+    @Binding var selection: Value
+    let options: [Value]
+    let title: (Value) -> String
+    @ViewBuilder let label: () -> Label
+
+    @State private var shown: Value?
+
+    var body: some View {
+        Picker(selection: Binding(get: { shown }, set: { value in
+            shown = value
+            if let value { selection = value }
+        })) {
+            ForEach(options, id: \.self) { Text(title($0)).tag(Optional($0)) }
+        } label: {
+            label()
+        }
+        .choiceBar()
+        .task {
+            // After its first layout: set in the same turn, the change merged into it.
+            try? await Task.sleep(for: .milliseconds(60))
+            shown = selection
+        }
+        .onChange(of: selection) { _, value in shown = value }
+    }
+}

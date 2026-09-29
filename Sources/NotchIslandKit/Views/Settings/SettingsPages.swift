@@ -686,12 +686,9 @@ struct SiriSettingsPage: View {
                 Toggle(isOn: $preferences.commandSpaceOpensSiri) {
                     InfoLabel("Open Spotlight with \(siri.shortcut.title)", "Spotlight opens in the notch instead of the system's search window. Needs Accessibility, which lets NotchIsland see the shortcut before the system does.")
                 }
-                Picker(selection: $preferences.siri.shortcut) {
-                    ForEach(SiriShortcut.allCases) { Text($0.title).tag($0) }
-                } label: {
+                SettledChoiceBar(selection: $preferences.siri.shortcut, options: SiriShortcut.allCases, title: \.title) {
                     InfoLabel("Shortcut", "The keys that open Spotlight: Space with Command, Option or Control. ⌘Space replaces the system's search; the others leave it where it is.")
                 }
-                .choiceBar()
                 .disabled(!preferences.commandSpaceOpensSiri)
                 Toggle(isOn: $preferences.siri.shortcutCloses) {
                     InfoLabel("Shortcut again closes Spotlight", "Like the system's search: the same keys close Spotlight. Off, they only open it and Esc closes it.")
