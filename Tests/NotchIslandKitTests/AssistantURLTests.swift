@@ -34,3 +34,26 @@ import Testing
         #expect(!AssistantSearch.isBuried("/Users/a/Documents/node_modules"))
     }
 }
+
+@Suite struct AssistantListedAppTests {
+    @Test func appsAnywhereAreListedButNotTheIndexsOthers() {
+        #expect(AssistantSearch.isListedApp("/Users/g/Downloads/Xcode.app"))
+        #expect(AssistantSearch.isListedApp("/Users/g/Documents/curseforge/minecraft/Install/Minecraft.app"))
+        #expect(AssistantSearch.isListedApp("/Applications/Safari.app"))
+        #expect(AssistantSearch.isListedApp("/System/Applications/Utilities/Terminal.app"))
+        #expect(AssistantSearch.isListedApp("/System/Library/CoreServices/Finder.app"))
+        #expect(AssistantSearch.isListedApp("/System/Library/CoreServices/Applications/Archive Utility.app"))
+        #expect(AssistantSearch.isListedApp("/System/Volumes/Data/Users/g/Desktop/Tool.app"))
+        #expect(!AssistantSearch.isListedApp("/System/Library/CoreServices/Dock.app"))
+        #expect(!AssistantSearch.isListedApp("/Users/g/Library/Developer/Xcode/DerivedData/A-x/Build/Products/Debug/A.app"))
+        #expect(!AssistantSearch.isListedApp("/Users/g/Library/Application Support/Steam/Steam Helper.app"))
+        #expect(!AssistantSearch.isListedApp("/Applications/Xcode.app/Contents/Applications/Simulator.app"))
+        #expect(!AssistantSearch.isListedApp("/Users/g/Projects/App/build/Release/App.app"))
+        #expect(!AssistantSearch.isListedApp("/Volumes/NotchIsland/NotchIsland.app"))
+        #expect(!AssistantSearch.isListedApp("/Users/g/.Trash/Old.app"))
+    }
+
+    @Test func finderIsAmongTheApps() {
+        #expect(AssistantSearch.diskApps().contains { $0.url.path == AssistantSearch.finder && $0.name == "Finder" })
+    }
+}

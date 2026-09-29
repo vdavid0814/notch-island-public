@@ -26,6 +26,14 @@ nonisolated enum AssistantSearch {
     static let appScopes: [String] = [
         "/Applications", "/System/Applications", NSHomeDirectory() + "/Applications",
     ]
+    /// The system's apps that live outside the app folders and that Spotlight lists (Finder, Archive
+    /// Utility, Screen Sharing…).
+    static let finder = "/System/Library/CoreServices/Finder.app"
+    static let coreServicesApps = "/System/Library/CoreServices/Applications"
+    /// Apps are looked for everywhere Spotlight indexes, as the system's Spotlight does: an app
+    /// anywhere else (an Xcode unpacked in Downloads, a game in Documents) was never found — the
+    /// search kept to the three app folders (a tester's "Siri does not bring up my apps", v0.4.9).
+    static let everywhere = [kMDQueryScopeComputer as String]
     static let iCloudDrive = NSHomeDirectory() + "/Library/Mobile Documents/com~apple~CloudDocs"
     static let fileScopes: [String] = ["Desktop", "Documents", "Downloads"].map { NSHomeDirectory() + "/" + $0 }
         + [iCloudDrive]
@@ -37,7 +45,8 @@ nonisolated enum AssistantSearch {
             kMDItemContentTypeTree == "com.apple.application-bundle" && \
             (kMDItemDisplayName == "\(term)*"cdw || kMDItemAlternateNames == "\(term)*"cdw)
             """
-        let indexed = run(predicate, scopes: appScopes, fetch: 20, kind: .app)
+        // More than shown: the index's other apps (builds, helpers) are left out afterwards.
+        let indexed = run(predicate, scopes: everywhere, fetch: 80, kind: .app)
         let onDisk = diskApps().filter { AssistantMatch.matches($0.name, query) }
         return Array(rank(merged(indexed, onDisk), for: query).prefix(limit))
     }
@@ -75,6 +84,11 @@ nonisolated enum AssistantSearch {
             }
         }
         for scope in appScopes { scan(URL(fileURLWithPath: scope), depth: 1) }
+        scan(URL(fileURLWithPath: coreServicesApps), depth: 0)
+        if manager.fileExists(atPath: finder) {
+            hits.append(AssistantHit(kind: .app, url: URL(fileURLWithPath: finder), name: manager.displayName(atPath: finder)
+                .replacingOccurrences(of: ".app", with: ""), contentType: "com.apple.application-bundle", lastUsed: nil))
+        }
         return hits
     }
 
@@ -83,7 +97,7 @@ nonisolated enum AssistantSearch {
     @concurrent static func allApps() async -> [AssistantHit] {
         // NotchIsland itself would always come first (it is active while the assistant is open).
         let own = Bundle.main.bundleURL.resolvingSymlinksInPath().path
-        let hits = merged(run(#"kMDItemContentTypeTree == "com.apple.application-bundle""#, scopes: appScopes, fetch: 2000, kind: .app),
+        let hits = merged(run(#"kMDItemContentTypeTree == "com.apple.application-bundle""#, scopes: everywhere, fetch: 4000, kind: .app),
                           diskApps())
             .filter { !$0.url.deletingLastPathComponent().path.contains(".app") && $0.url.resolvingSymlinksInPath().path != own }
         return hits.sorted { a, b in
@@ -121,6 +135,20 @@ nonisolated enum AssistantSearch {
 
     /// Inside something no one looks for by name: hidden folders, dependencies, build output, and
     /// the insides of packages (an app, a project, a library).
+    /// An app Spotlight lists to the user: not one inside another app or package, in a Library
+    /// (builds in DerivedData, helpers in Application Support, the system's agents), hidden, in the
+    /// Trash or on a mounted disk image; the system's own only from its app folders and Finder.
+    static func isListedApp(_ path: String) -> Bool {
+        var path = path
+        if path.hasPrefix("/System/Volumes/Data/") { path.removeFirst("/System/Volumes/Data".count) }
+        if path.hasPrefix("/System/") {
+            return path.hasPrefix("/System/Applications/") || path.hasPrefix(coreServicesApps + "/") || path == finder
+        }
+        if path.hasPrefix("/Volumes/") || path.hasPrefix("/usr/") || path.hasPrefix("/opt/") || path.hasPrefix("/private/") { return false }
+        if path.contains("/Library/") || path.contains("/.Trash/") { return false }
+        return !isBuried(path)
+    }
+
     static func isBuried(_ path: String) -> Bool {
         path.split(separator: "/").dropLast().contains { component in
             component.hasPrefix(".") || buriedFolders.contains(String(component))
@@ -190,7 +218,7 @@ nonisolated enum AssistantSearch {
             guard let raw = MDQueryGetResultAtIndex(query, index) else { continue }
             let item = Unmanaged<MDItem>.fromOpaque(raw).takeUnretainedValue()
             guard let path = MDItemCopyAttribute(item, kMDItemPath) as? String, seen.insert(path).inserted else { continue }
-            if kind != .app, isBuried(path) { continue }
+            if kind == .app ? !isListedApp(path) : isBuried(path) { continue }
             let url = URL(fileURLWithPath: path)
             var name = MDItemCopyAttribute(item, kMDItemDisplayName) as? String ?? url.lastPathComponent
             if kind == .app, name.hasSuffix(".app") { name.removeLast(4) }
