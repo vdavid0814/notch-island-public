@@ -163,9 +163,22 @@ enum DiagnosticsAppState {
             // Settings only: not the observation registrar or the store they are saved in.
             guard var label = child.label, !label.hasPrefix("_$"), !(child.value is UserDefaults) else { continue }
             if label.hasPrefix("_") { label.removeFirst() }
-            section.add(label, String(describing: child.value))
+            section.add(label, stable(child.value))
         }
         return section
+    }
+
+    /// A setting as text that reads the same every time: JSON with sorted keys where it can be (a
+    /// set's description changes order from run to run, and reports are compared line by line).
+    private static func stable(_ value: Any) -> String {
+        if let encodable = value as? any Encodable {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            if let data = try? encoder.encode(encodable), let text = String(data: data, encoding: .utf8), text.first == "{" || text.first == "[" {
+                return text
+            }
+        }
+        return String(describing: value)
     }
 
     /// Every copy of NotchIsland Launch Services knows, and how many run: an older copy that
@@ -196,6 +209,10 @@ enum DiagnosticsAppState {
             let value = all[key]
             if key == ShelfStore.defaultsKey, let data = value as? Data {
                 section.add(key, "<\(data.count) bytes, not sent>")
+            } else if let data = value as? Data, let object = try? JSONSerialization.jsonObject(with: data),
+                      let sorted = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes]) {
+                // Stored JSON (Siri, the widgets) with its keys in order, so it reads the same each time.
+                section.add(key, DiagnosticsFormat.head(String(decoding: sorted, as: UTF8.self), limit: 4000))
             } else if let data = value as? Data {
                 let text = String(data: data, encoding: .utf8)
                 section.add(key, text.map { DiagnosticsFormat.head($0, limit: 4000) } ?? "<\(data.count) bytes>")

@@ -44,7 +44,10 @@ final class DiagnosticsHistory {
         defaults.set(launches, forKey: Self.launchesKey)
         defaults.set(uncleanExits, forKey: Self.uncleanKey)
         defaults.set(firstLaunch, forKey: Self.firstLaunchKey)
-        defaults.set(try? JSONEncoder().encode(versions), forKey: Self.versionsKey)
+        // Sorted keys: the same history reads the same in every report (reports are compared).
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        defaults.set(try? encoder.encode(versions), forKey: Self.versionsKey)
     }
 
     /// The app is quitting normally.

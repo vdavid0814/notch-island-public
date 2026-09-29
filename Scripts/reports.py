@@ -32,7 +32,8 @@ API = "https://discord.com/api/v10"
 BROWSER = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
 # Sections that change on every report: left out of "what changed since the previous report".
 VOLATILE = {"Energy", "Event trail (this run)", "Log", "Top energy users", "Battery", "Compared with the reference",
-            "History", "Windows", "Island internals", "Differs from the reference Mac"}
+            "History", "Windows", "Island internals", "Differs from the reference Mac", "Errors by source", "User flow",
+            "Likely causes", "Crash analysis"}
 VOLATILE_KEYS = {"PID", "Running for", "Launched", "Uptime", "Disk free", "Memory footprint", "CPU time",
                  "Clipboard items", "Revision", "Written"}
 
@@ -260,7 +261,7 @@ def flat(report):
     """Every setting and state line, timings left out (they differ on every report)."""
     timing = re.compile(r"\s*\(?(query |in )?\d+ ms\)?")
     return {f"{s['title']} › {e['key']}": timing.sub("", e["value"]) for s in report["sections"] if s["title"] not in VOLATILE
-            for e in s["entries"] if e["key"] not in VOLATILE_KEYS}
+            for e in s["entries"] if e["key"] not in VOLATILE_KEYS and not e["key"].startswith("ni2.diagnostics.")}
 
 
 def installs():
@@ -362,7 +363,12 @@ def show(query, n):
                 if a != b and a is not None and b is not None and abs(b - a) > max(abs(a) * 0.25, 0.05):
                     print(f"  {key}: {a:.2f} → {b:.2f}")
         now, before = flat(report), flat(previous)
-        changed = [k for k in sorted(set(now) | set(before)) if now.get(k) != before.get(k)]
+        # A light report lacks the full one's sections: only lines both have are compared.
+        shared = set(now) & set(before)
+        titles_now = {k.split(" › ")[0] for k in now}
+        titles_before = {k.split(" › ")[0] for k in before}
+        changed = [k for k in sorted(shared) if now.get(k) != before.get(k)]
+        changed += [k for k in sorted(set(now) ^ set(before)) if k.split(" › ")[0] in titles_now & titles_before]
         for key in changed[:80]:
             old, new = (before.get(key) or "—").replace("\n", " ⏎ "), (now.get(key) or "—").replace("\n", " ⏎ ")
             print(f"  {key}: {old[:160]} → {new[:160]}")
