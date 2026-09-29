@@ -88,13 +88,20 @@ struct SystemVolumeCardContent: View {
 /// under the notch, one point below the menu bar's height and `top` more).
 struct SystemVolumeCovering: View {
     @Environment(AppModel.self) private var model
+    /// The output's name, asked of CoreAudio once while the banner is up, not in every `body`.
+    @State private var outputName = OutputName()
 
     var body: some View {
         let notch = model.layout.notch
-        SystemVolumeCardContent(name: LiquidCard.outputName())
+        SystemVolumeCardContent(name: outputName.value)
             .padding(.top, notch.height + 1 + SystemVolumeCard.Kind.volume.top)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
+}
+
+/// Read on first use, then kept for the view's life.
+private final class OutputName {
+    lazy var value = LiquidCard.outputName()
 }
 
 /// The AirPods over macOS's card under the notch, the same way.

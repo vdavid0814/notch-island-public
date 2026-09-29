@@ -125,19 +125,15 @@ struct IslandSettingsView: View {
                 // The sidebar floats as far from the island's side as from its bottom, its lower
                 // outer corner concentric with the island's (radius = the island's minus the gap).
                 let gap = Self.sidebarGap
-                let islandRadius = layout.bottomRadius(for: .settings)
-                let sidebarShape = UnevenRoundedRectangle(
-                    topLeadingRadius: 16,
-                    bottomLeadingRadius: max(16, islandRadius - gap),
-                    bottomTrailingRadius: 16,
-                    topTrailingRadius: 16,
-                    style: .continuous
+                let placement = SettingsPages.Placement(
+                    outerRadius: max(16, layout.bottomRadius(for: .settings) - gap),
+                    leading: layout.shoulderRadius(for: .settings) + gap,
+                    gap: gap
                 )
                 // In a view graph of its own, dropped with it when Settings closes: in the island's
                 // graph, the pages' caches outlived them (measured: ~70 MB kept after one visit).
-                IsolatedFillHosting {
-                    SettingsPages(sidebarShape: sidebarShape,
-                                  sidebarLeading: layout.shoulderRadius(for: .settings) + gap, gap: gap)
+                IsolatedFillHosting(input: placement) {
+                    SettingsPages(placement: placement)
                         .environment(model)
                         .environment(\.colorScheme, .dark)
                         .environment(\.appearsActive, true)
@@ -172,20 +168,35 @@ struct IslandSettingsView: View {
 
 /// The sidebar and the page beside it.
 private struct SettingsPages: View {
-    let sidebarShape: UnevenRoundedRectangle
-    let sidebarLeading: CGFloat
-    let gap: CGFloat
+    /// Where the sidebar floats: all the pages take from outside their graph.
+    nonisolated struct Placement: Equatable {
+        /// The sidebar's lower outer corner.
+        var outerRadius: CGFloat
+        /// From the island's side to the sidebar.
+        var leading: CGFloat
+        /// Under the sidebar.
+        var gap: CGFloat
+    }
+
+    let placement: Placement
 
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        let sidebarShape = UnevenRoundedRectangle(
+            topLeadingRadius: 16,
+            bottomLeadingRadius: placement.outerRadius,
+            bottomTrailingRadius: 16,
+            topTrailingRadius: 16,
+            style: .continuous
+        )
         HStack(spacing: 0) {
             SettingsSidebar(selection: Binding(get: { model.settingsPane }, set: { model.settingsPane = $0 }))
                 .frame(width: 236)
                 // Liquid Glass, smoked towards the black of the island.
                 .glassEffect(Glass.regular.tint(Color.black.opacity(0.45)), in: sidebarShape)
-                .padding(.leading, sidebarLeading)
-                .padding(.bottom, gap)
+                .padding(.leading, placement.leading)
+                .padding(.bottom, placement.gap)
                 .padding(.top, 4)
             SettingsDetail(pane: model.settingsPane)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -28,6 +28,24 @@ nonisolated enum ArtworkDecoder {
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
+    /// The cover in Core Animation's own layout, 8-bit premultiplied BGRA, as Siri's app icons are
+    /// drawn: ImageIO gives XRGB, which Core Animation copied into a layout of its own as the cover
+    /// went on screen. Only an opaque 8-bit sRGB cover is redrawn, where that moves its bytes and
+    /// changes none of them; any other (Display P3, 16-bit, transparent) stays as it is.
+    static func displayReady(_ image: CGImage) async -> CGImage {
+        await Thrifty.run {
+            let opaque: [CGImageAlphaInfo] = [.none, .noneSkipFirst, .noneSkipLast]
+            guard image.bitsPerComponent == 8, opaque.contains(image.alphaInfo), let space = image.colorSpace,
+                  (space.name as String?) == (CGColorSpace.sRGB as String),
+                  let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
+                                          bytesPerRow: 0, space: space,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+            else { return image }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            return context.makeImage() ?? image
+        }
+    }
+
     /// The cover's overall colour, for widgets that tint themselves from it: the average of a
     /// 1 × 1 downsample, pushed toward a readable brightness (a black cover still gives a colour
     /// the controls can sit on).

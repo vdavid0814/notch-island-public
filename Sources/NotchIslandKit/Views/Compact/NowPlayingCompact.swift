@@ -11,9 +11,7 @@ struct NowPlayingCompact: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// On the charger, or a Mac without a battery.
-    private var onCharger: Bool {
-        !model.power.state.hasBattery || model.power.state.isPluggedIn
-    }
+    private var onCharger: Bool { !model.power.isOnBattery }
 
     var body: some View {
         let media = model.media
@@ -29,7 +27,7 @@ struct NowPlayingCompact: View {
             // thermal pressure): the bars are decoration, the artwork already says "playing".
             EqualizerView(
                 isAnimating: media.isPlaying && !reduceMotion && !model.activity.prefersReducedWork,
-                onBattery: model.power.state.hasBattery && !model.power.state.isPluggedIn,
+                onBattery: model.power.isOnBattery,
                 // The cover's square: at full level a bar is as tall as the artwork opposite.
                 size: CGSize(width: glyphSide, height: glyphSide),
                 barWidth: glyphSide * Metrics.Compact.equalizerBarShare,

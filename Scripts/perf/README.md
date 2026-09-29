@@ -87,7 +87,7 @@ Where the memory went, and what took it back (footprint = Activity Monitor's Mem
   16 ms apart cost 8 mJ. At background quality of service a 100 ms burst cost 12 mJ instead of 72
   (utility changed nothing). `MainThrift` (System/Thrifty.swift) uses that for updates nobody waits
   on within the frame; a dispatch job's end restores the thread's quality of service, so it
-  lays out and flushes inside (`run`) or sets it from a run-loop block (`lowPower`).
+  sets it from a run-loop block (`lowPower`).
 - **Below ~30 % battery** the system kept NotchIsland (and v0.4.2 alike) entirely on the
   efficiency cores: no performance-core time at all, everything 3–5× slower (a Settings page
   ~1 s). Compare builds only back to back, in the same state.
@@ -138,3 +138,18 @@ New tools: `levels_bench.py` (volume changes made elsewhere: the island's cover 
   the log only back to the previous full report (20 minutes of it: 0.5 s of CPU instead of 2.7 s).
 - **Siri's app gallery**: thumbnails drawn in Core Animation's BGRA layout: Energy Impact peak 33 → 23.
 - **Rounds a–d**: every scenario under 40, memory flat in every rest (64–69 MB after Settings, 28 MB idle).
+
+## The energy campaign of September 29, 2026 (v0.5 → next)
+
+The before/after tables, what changed and what was left out are in `docs/ENERGY-LOG.md` (it also
+ships inside the app). Points for these tools:
+- **Activity Monitor's Energy Impact is the coalition's mW**, not `top`'s POWER: opening Settings
+  read 245 on screen while POWER peaked at 54. `anim.py`'s worst 1 s / 5 s windows are the number.
+- **Energy follows the performance cores' clock**: opening Settings took ~3 mJ per ms of CPU
+  (RenderBox drawing shadows with distance filters, blurs and gradients at 16 bits per channel on
+  user-interactive threads). An 8-bit island window and the first 0.7 s on the efficiency cores
+  took it from ~2.4 J to ~1.4 J.
+- Test builds keep their Discord destinations: a launch that lasts 90 s sends a diagnostics report.
+  Strip `NIDiagnosticsConfig` from a measuring copy's Info.plist and sign it again.
+- A test run can hang loading its bundle (system policy) in the shared `.build`: `Scripts/test.sh
+  --scratch-path <elsewhere>` runs.

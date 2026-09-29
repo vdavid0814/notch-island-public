@@ -395,9 +395,10 @@ import AppKit
             let image = await ArtworkDecoder.decode(bytes)
             let color = if let image { await ArtworkDecoder.averageColor(image)?.accent } else { ArtworkColor?.none }
             let palette = if let image { await ArtworkDecoder.palette(image) } else { [ArtworkColor]() }
+            let shown: CGImage? = if let image { await ArtworkDecoder.displayReady(image) } else { nil }
             guard !Task.isCancelled, let self, self.artworkBytes == bytes else { return }
             self.artworkTask = nil
-            self.artwork = image.map { NSImage(cgImage: $0, size: .zero) }
+            self.artwork = shown.map { NSImage(cgImage: $0, size: .zero) }
             if self.artworkColor != color { self.artworkColor = color }
             if self.artworkPalette != palette { self.artworkPalette = palette }
         }

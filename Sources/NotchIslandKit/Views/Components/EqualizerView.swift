@@ -305,7 +305,9 @@ final class EqualizerBarsView: NSView {
         CATransaction.setDisableActions(true)
         for (index, holder) in pulseLayers.enumerated() {
             // Mid-swell, the old beat is not cut off (a visible snap back to 1): it eases down first.
-            let swell = (holder.presentation()?.value(forKeyPath: "transform.scale.y") as? CGFloat) ?? 1
+            // A holder without a beat stands at 1: no copy of its presentation is needed to know.
+            let swell = holder.animationKeys() == nil
+                ? 1 : (holder.presentation()?.value(forKeyPath: "transform.scale.y") as? CGFloat) ?? 1
             let settling = abs(swell - 1) > 0.01
             guard index < pulses.count, let pulse = pulses[index], pulse.period > 0.15 else {
                 if settling {
@@ -471,8 +473,6 @@ final class EqualizerBarsView: NSView {
         /// shorter gap between two songs keeps the music's.
         static let silence: CFTimeInterval = 1
 
-        var isFollowing: Bool { lock.withLock { isActive && following } }
-
         private var onCharger = false
         var charging: Bool {
             get { lock.withLock { onCharger } }
@@ -597,9 +597,13 @@ final class EqualizerBarsView: NSView {
             }
             reset()
             handOver = reading
-            let bass = reading.pulses[0].map { String(format: "%.0f bpm ×%.2f", 60 / $0.period, $0.peak) } ?? "-"
-            let treble = reading.pulses[4].map { String(format: "%.0f bpm ×%.2f", 60 / $0.period, $0.peak) } ?? "-"
-            Log.media.debug("beat: bass \(bass, privacy: .public) treble \(treble, privacy: .public) specs \(reading.specs != nil, privacy: .public)")
+            // Formatted inside the message: only when debug logging is on, not at every hand-over.
+            let bass = reading.pulses[0], treble = reading.pulses[4], specs = reading.specs != nil
+            Log.media.debug("""
+                beat: bass \(bass.map { String(format: "%.0f bpm ×%.2f", 60 / $0.period, $0.peak) } ?? "-", privacy: .public) \
+                treble \(treble.map { String(format: "%.0f bpm ×%.2f", 60 / $0.period, $0.peak) } ?? "-", privacy: .public) \
+                specs \(specs, privacy: .public)
+                """)
         }
 
         /// How much higher a beat lifts its bar (a share of its height), from how much the beats

@@ -23,8 +23,7 @@ struct ExpandedView: View {
         let scale = layout.scale.factor
         // As the island's own content swaps (`IslandRootView`): on battery, or when the system asks
         // for less work, a plain cross-fade — the blur-replace blurs both pages every frame.
-        let lightSwap = model.activity.prefersReducedWork
-            || (model.power.state.hasBattery && !model.power.state.isPluggedIn)
+        let lightSwap = model.activity.prefersReducedWork || model.power.isOnBattery
 
         VStack(spacing: 0) {
             ExpandedHeader(split: split, height: layout.notch.height)

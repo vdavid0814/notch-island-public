@@ -21,6 +21,9 @@ nonisolated struct PowerState: Sendable, Equatable {
     /// Low Power Mode. Exists on desktops too, so it is meaningful without a battery.
     var isLowPowerMode: Bool
 
+    /// Running from the battery: there is one, and the charger is not connected.
+    var isOnBattery: Bool { hasBattery && !isPluggedIn }
+
     static let unknown = PowerState(
         hasBattery: false, level: 0, isCharging: false, isPluggedIn: false,
         isCharged: false, minutesRemaining: nil, isLowPowerMode: false

@@ -1,54 +1,5 @@
 import SwiftUI
 
-/// The island's one Liquid Glass material — the same glass the CAD app wears.
-///
-/// Taken verbatim from the CAD app (`CadGlassRole.material`, `NavyGlassButtonStyle`,
-/// `CadLiquidSegment.thumb`) so the two apps read as one family: a smoked, perfectly
-/// clear glass that refracts what is behind it instead of frosting it. Every island
-/// surface uses exactly these values, so there is one place to change them.
-///
-/// Like the CAD app's floating UI, the island's window is pinned to the dark
-/// appearance (`IslandPanel`), because Liquid Glass samples the window's appearance
-/// and a smoked glass needs light content on top of it.
-enum IslandGlass {
-    /// What a piece of glass is for. The material itself comes from the user's `IslandGlassStyle`,
-    /// resolved where the glass is drawn (`islandGlass(_:in:)`), so call sites name a role only.
-    nonisolated enum Role: Sendable {
-        case surface, control, active, thumb
-    }
-
-    /// The glass every surface wears.
-    static let surface = Role.surface
-
-    /// Glass under a tappable control: the same material, responding to the pointer.
-    static let control = Role.control
-
-    /// An active, selected or primary control, tinted with the system accent colour.
-    static let active = Role.active
-
-    /// A moving selection thumb: fully clear, so the label under it stays sharp.
-    static let thumb = Role.thumb
-
-    /// The material for a role in a style. Only the surface (and the control, which is the surface
-    /// responding to the pointer) follows the style; the accent and the thumb keep their own glass.
-    static func material(_ role: Role, style: IslandGlassStyle) -> Glass {
-        switch role {
-        case .surface: style.material
-        case .control: style.controlMaterial.interactive()
-        case .active: Glass.clear.tint(Color.islandAccent.opacity(0.62)).interactive()
-        case .thumb: Glass.clear.interactive()
-        }
-    }
-
-    /// The CAD app's press response (`CadMotion.press`): immediate and heavily damped, because a
-    /// press must never wobble.
-    static let press: Animation = .spring(response: 0.11, dampingFraction: 0.86)
-
-    /// The selection thumb gliding to its segment: slower than a press so the backdrop can be seen
-    /// flowing through the moving glass, damped enough to settle in one movement.
-    static let glide: Animation = .spring(response: 0.3, dampingFraction: 0.8)
-}
-
 /// The user's choice of island surface (Settings ▸ General ▸ Surface).
 ///
 /// The glass itself is not a choice: the CAD app's smoked Liquid Glass follows the system (with the
@@ -112,9 +63,6 @@ nonisolated enum IslandGlassStyle: String, Sendable, CaseIterable, Identifiable,
     /// anti-aliased edge pixels half-covered, and the light showed through as a line around the
     /// compact pill.
     static let shadeBleed: CGFloat = 2
-
-    /// Glass under controls: the CAD app's smoke, so buttons read a shade lighter than the surface.
-    var controlMaterial: Glass { .clear.tint(Color.black.opacity(0.5)) }
 }
 
 extension EnvironmentValues {
@@ -123,15 +71,18 @@ extension EnvironmentValues {
 }
 
 extension View {
-    /// Puts the view on the island's glass, in the material the user chose for that role.
-    /// `isEnabled: false` keeps the view where it is but draws (and samples) no glass.
-    func islandGlass(_ role: IslandGlass.Role = .surface, in shape: some Shape, isEnabled: Bool = true) -> some View {
-        modifier(IslandGlassModifier(role: role, shape: shape, isEnabled: isEnabled))
+    /// Puts the view on the island's glass, in the style the user chose (`IslandGlassStyle.material`):
+    /// the CAD app's smoked, perfectly clear glass, which refracts what is behind it instead of
+    /// frosting it. Like the CAD app's floating UI, the island's window is pinned to the dark
+    /// appearance (`IslandPanel`): Liquid Glass samples the window's appearance, and a smoked glass
+    /// needs light content on top of it. `isEnabled: false` keeps the view where it is but draws
+    /// (and samples) no glass.
+    func islandGlass(in shape: some Shape, isEnabled: Bool = true) -> some View {
+        modifier(IslandGlassModifier(shape: shape, isEnabled: isEnabled))
     }
 }
 
 private struct IslandGlassModifier<S: Shape>: ViewModifier {
-    let role: IslandGlass.Role
     let shape: S
     var isEnabled = true
 
@@ -142,10 +93,10 @@ private struct IslandGlassModifier<S: Shape>: ViewModifier {
         // identity. A branch here rebuilt everything on the island — with Settings open, SwiftUI's
         // key-view loop over the rebuilt form never terminated and the app hung at 100% CPU.
         // Solid black draws no glass (`.identity`, nothing sampled) and a black fill instead.
-        let isSolid = role == .surface && !style.hasGlassSurface
+        let isSolid = !style.hasGlassSurface
         content
             .background(Color.black.opacity(isSolid ? 1 : 0), in: shape)
-            .glassEffect(isEnabled && !isSolid ? IslandGlass.material(role, style: style) : .identity, in: shape)
+            .glassEffect(isEnabled && !isSolid ? style.material : .identity, in: shape)
     }
 }
 

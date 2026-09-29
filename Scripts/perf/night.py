@@ -37,11 +37,8 @@ def url(u):
 
 
 def music(verb):
-    """play / pause / state"""
-    script = {"play": 'tell application "Music" to play', "pause": 'tell application "Music" to pause',
-              "state": 'tell application "Music" to player state as string',
-              "next": 'tell application "Music" to next track'}[verb]
-    return subprocess.run(["osascript", "-e", script], capture_output=True, text=True).stdout.strip()
+    """play / pause / next, through the island's own media commands (Music's scripting can hang on an Automation prompt)"""
+    url("media/" + verb)
 
 
 class Sampler:

@@ -38,14 +38,22 @@ struct IsolatedHosting<Content: View>: NSViewRepresentable {
 
 /// SwiftUI in a view graph of its own that fills whatever it is given: a large surface (Settings)
 /// whose graph — and every cache in it — goes when the surface closes.
-struct IsolatedFillHosting<Content: View>: NSViewRepresentable {
+///
+/// The content is handed to its graph again only when `input` (all it takes from outside besides
+/// the model it observes itself) changes: the view around it updates with every change of the
+/// island (its presentation, its layout), and each new root view had the whole nested graph
+/// compared and updated.
+struct IsolatedFillHosting<Input: Equatable, Content: View>: NSViewRepresentable {
+    let input: Input
     let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    init(input: Input, @ViewBuilder content: () -> Content) {
+        self.input = input
         self.content = content()
     }
 
     func makeNSView(context: Context) -> NSHostingView<Content> {
+        context.coordinator.input = input
         let view = NSHostingView(rootView: content)
         view.sizingOptions = []
         view.safeAreaRegions = []
@@ -53,7 +61,16 @@ struct IsolatedFillHosting<Content: View>: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSHostingView<Content>, context: Context) {
+        guard context.coordinator.input != input else { return }
+        context.coordinator.input = input
         view.rootView = content
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    /// The input the content was last built from.
+    final class Coordinator {
+        var input: Input?
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSHostingView<Content>, context: Context) -> CGSize? {

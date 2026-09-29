@@ -8,8 +8,14 @@ struct TransportControls: View {
     let isPlaying: Bool
     var showsPlay = true
     var showsSkip = true
-    /// Each button's glass; nil is the plain glass.
-    var glass: (TransportButton) -> Glass? = { _ in nil }
+    /// Each button's look (`IslandWidget.buttonLooks`); nil: all three in the plain glass. Values,
+    /// not a closure: a closure never compares equal, so every re-render of the card rebuilt the
+    /// buttons and set their interactive glass springing (see `PlayedLine`).
+    var looks: [String: ButtonLook]?
+
+    private func glass(_ button: TransportButton) -> Glass? {
+        looks.map { ($0[button.rawValue] ?? ButtonLook()).glass }
+    }
 
     @Environment(AppModel.self) private var model
     @Environment(\.controlSize) private var controlSize
@@ -230,10 +236,14 @@ struct PlayedLine: NSViewRepresentable {
     let rate: Double
     let opacity: Double
 
+    /// In the kept, hidden panel the line waits: its animation had the window server update it
+    /// twice a second for as long as the panel was kept, unseen.
+    @Environment(\.isIslandPanelHidden) private var isHidden
+
     func makeNSView(context: Context) -> PlayedLineView { PlayedLineView() }
 
     func updateNSView(_ view: PlayedLineView, context: Context) {
-        view.update(fraction: fraction, rate: rate, opacity: opacity)
+        view.update(fraction: fraction, rate: rate, opacity: opacity, isPaused: isHidden)
     }
 }
 
@@ -243,6 +253,8 @@ final class PlayedLineView: NSView {
     private var rate = 0.0
     /// When `fraction` was true.
     private var since = CACurrentMediaTime()
+    /// Hidden: the line stands where it is, and runs on from where the time puts it when shown.
+    private var isPaused = false
     /// About one point of travel per frame on a ~200-pt line for a three-minute track.
     nonisolated static let frameRate = CAFrameRateRange(minimum: 1, maximum: 4, preferred: 2)
     nonisolated static let animationKey = "played"
@@ -263,12 +275,16 @@ final class PlayedLineView: NSView {
     /// Clicks and drags belong to the SwiftUI track around it.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func update(fraction: Double, rate: Double, opacity: Double) {
+    func update(fraction: Double, rate: Double, opacity: Double, isPaused: Bool) {
         fill.opacity = Float(opacity)
-        guard fraction != self.fraction || rate != self.rate else { return }
-        self.fraction = fraction
-        self.rate = rate
-        since = CACurrentMediaTime()
+        let moved = fraction != self.fraction || rate != self.rate
+        guard moved || isPaused != self.isPaused else { return }
+        if moved {
+            self.fraction = fraction
+            self.rate = rate
+            since = CACurrentMediaTime()
+        }
+        self.isPaused = isPaused
         restart()
     }
 
@@ -288,7 +304,7 @@ final class PlayedLineView: NSView {
         fill.cornerRadius = height / 2
         fill.position = CGPoint(x: 0, y: height / 2)
         fill.bounds = CGRect(x: 0, y: 0, width: Self.width(now, in: width, height: height), height: height)
-        if rate > 0, now < 1, width > 0 {
+        if rate > 0, now < 1, width > 0, !isPaused {
             let animation = CABasicAnimation(keyPath: "bounds.size.width")
             animation.fromValue = Self.width(now, in: width, height: height)
             animation.toValue = Self.width(1, in: width, height: height)

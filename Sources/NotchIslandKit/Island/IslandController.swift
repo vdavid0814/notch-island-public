@@ -273,6 +273,10 @@ nonisolated extension BannerKind {
         guard !wantsSettings else { return }
         wantsSettings = true
         openWasUserInitiated = true
+        // Opening Settings draws a page near the screen's size on the CPU (shadows, blurs,
+        // gradients): on the performance cores that burst cost ~1 J; on the efficiency cores, a
+        // little slower, a fraction of it. The growth itself runs in the render server.
+        MainThrift.lowPower(for: 0.7)
         inputsChanged()
     }
 

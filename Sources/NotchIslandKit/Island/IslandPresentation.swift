@@ -142,11 +142,6 @@ nonisolated enum IslandPresentation: Sendable, Equatable {
 
     var isIdle: Bool { self == .idle }
 
-    var isCompact: Bool {
-        if case .compact = self { return true }
-        return false
-    }
-
     var isBanner: Bool {
         if case .banner = self { return true }
         return false

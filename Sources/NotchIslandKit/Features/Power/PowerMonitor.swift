@@ -13,6 +13,11 @@ import Observation
     /// What the UI shows: the demo state while one is injected, the real state otherwise.
     private(set) var state: PowerState = .unknown
 
+    /// `state.isOnBattery` on its own. On battery the level and the time left change about once a
+    /// minute; the island's views that only pick lighter work on battery read this instead of
+    /// `state`, so those changes do not re-evaluate them (the island's root among them).
+    private(set) var isOnBattery = false
+
     /// Plug / unplug / charged / low. Fired for real transitions only (never for the first
     /// reading after `start()`, never while a demo state is showing).
     @ObservationIgnored var onEvent: ((PowerEvent) -> Void)?
@@ -144,6 +149,7 @@ import Observation
         // Observation notifies on every assignment; IOKit posts for fields we do not
         // model, so skip no-op writes.
         if state != next { state = next }
+        if isOnBattery != next.isOnBattery { isOnBattery = next.isOnBattery }
     }
 
     // MARK: IOKit bridge

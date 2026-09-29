@@ -386,6 +386,8 @@ private struct RowView: View {
     /// magnifying glass above.
     var leadingInset: CGFloat = Metrics.Spacing.large
 
+    @Environment(\.displayScale) private var displayScale
+
     var body: some View {
         HStack(spacing: Metrics.Spacing.large) {
             icon
@@ -412,13 +414,13 @@ private struct RowView: View {
         case .category(let category):
             category.tile
         case .hit(let hit):
-            Image(nsImage: AssistantIcons.icon(for: hit))
+            Image(nsImage: AssistantIcons.icon(for: hit, scale: displayScale))
                 .resizable()
                 .aspectRatio(contentMode: .fit)
         case .action(.island(let action)):
             AssistantTile(symbol: action.symbol, color: .gray)
         case .action(.shortcut):
-            Image(nsImage: AssistantIcons.shortcuts)
+            Image(nsImage: AssistantIcons.shortcuts(scale: displayScale))
                 .resizable()
                 .aspectRatio(contentMode: .fit)
         case .clip:

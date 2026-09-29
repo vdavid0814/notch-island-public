@@ -59,6 +59,8 @@ else
 fi
 # The app's icon (Support/AppIcon.png, rendered to .icns): shown in Finder, the Dock and the DMG.
 cp "$ROOT/Support/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+# The energy log and the performance tests behind it: every build and download carries them.
+cp "$ROOT/docs/ENERGY-LOG.md" "$ROOT/docs/PERFORMANCE-TESTS.md" "$APP/Contents/Resources/"
 
 if [[ -d "$VENDOR" ]]; then
   REVISION="$(head -n 1 "$VENDOR/REVISION" 2>/dev/null || echo 'unknown revision')"

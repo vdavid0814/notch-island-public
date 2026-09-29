@@ -34,7 +34,7 @@ final class IslandPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         // Always dark, like the CAD app's floating UI: Liquid Glass samples the
-        // window's appearance, and the smoked `IslandGlass` needs light content.
+        // window's appearance, and the smoked glass (`islandGlass`) needs light content.
         appearance = NSAppearance(named: .darkAqua)
         // Glass draws its own shadow; a window shadow is non-zero alpha that
         // would swallow menu-bar clicks.
@@ -51,6 +51,7 @@ final class IslandPanel: NSPanel {
         tabbingMode = .disallowed
         // Hover comes from a tracking area; mouse-moved events would only cost wake-ups.
         acceptsMouseMovedEvents = false
+        depthLimit = .twentyfourBitRGB
     }
 
     /// Moves the stage and has SwiftUI lay the current content out for it before returning.

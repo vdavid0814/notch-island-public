@@ -207,7 +207,8 @@ import Observation
         let busy = isWriting(.brightness)
         let availabilityChanged = reading.isAvailable != brightness.isAvailable
         if busy {
-            brightness.isAvailable = reading.isAvailable
+            // Only when it differs: a level changed in place tells its views even when nothing did.
+            if availabilityChanged { brightness.isAvailable = reading.isAvailable }
         } else {
             brightness = reading
         }
@@ -221,7 +222,7 @@ import Observation
         let capabilitiesChanged = !snapshot.hasSameCapabilities(as: volumeState)
         volumeState = snapshot
         if keepValue {
-            volume.isAvailable = snapshot.canSetVolume
+            if volume.isAvailable != snapshot.canSetVolume { volume.isAvailable = snapshot.canSetVolume }
         } else {
             volume = snapshot.reading
         }
@@ -267,7 +268,7 @@ import Observation
             case .toggleMute: nil
             }
             guard generation == self.generation else { return }
-            if let result, !hasPendingSet(.brightness) { brightness.value = result }
+            if let result, result != brightness.value, !hasPendingSet(.brightness) { brightness.value = result }
         }
         // Fired even when nothing moved (a key at a limit): the HUD must still answer the key.
         onChange?(kind, write.source)

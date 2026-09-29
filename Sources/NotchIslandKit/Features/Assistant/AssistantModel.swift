@@ -750,6 +750,9 @@ nonisolated struct FileScope: Sendable, Equatable {
                 if self.fileAccessReads == 0 { self.onFileAccessSettled?() }
             }
             guard !Task.isCancelled, self.generation == generation else { return }
+            // The rows come with their icons, drawn off the main thread.
+            await AssistantIcons.prepare((foundApps + foundFiles).map(AssistantIcons.source(for:)))
+            guard !Task.isCancelled, self.generation == generation else { return }
             self.replaceLists {
                 self.apps = foundApps
                 self.files = foundFiles
@@ -779,6 +782,8 @@ nonisolated struct FileScope: Sendable, Equatable {
             async let apps = needsApps ? sources.allApps() : []
             async let shortcuts = needsShortcuts ? sources.shortcuts() : nil
             let (foundApps, foundShortcuts) = await (apps, shortcuts)
+            // The shortcuts' rows come with their icon, drawn off the main thread.
+            if foundShortcuts?.isEmpty == false { await AssistantIcons.prepare([AssistantIcons.shortcutsSource]) }
             guard !Task.isCancelled, let self else { return }
             self.loadTask = nil
             self.replaceLists {
@@ -936,27 +941,74 @@ nonisolated enum AssistantMatch {
     }
 }
 
-/// Row icons, kept while the assistant is open (a list re-renders on every keystroke and hover).
+/// Siri's icons, looked up and drawn off the main thread and kept while Siri is used (a list
+/// re-renders on every keystroke and hover). A row's is the very picture SwiftUI took from the
+/// system's full icon (the same pixels on screen), which the rows used to look up, and SwiftUI to
+/// draw, on the main thread; a gallery cell's is drawn once at the size it is shown (2x).
 @MainActor enum AssistantIcons {
-    private static var cache: [String: NSImage] = [:]
-    private static var thumbnails: [String: NSImage] = [:]
+    /// Where an icon comes from.
+    nonisolated enum Source: Hashable, Sendable {
+        /// An app's, resolved first: a linked app (Safari in /Applications) shows an alias arrow.
+        case app(String)
+        /// A folder's own (Downloads, a custom icon), or the plain one.
+        case folder(String)
+        /// A file's type's, without reading the file.
+        case type(String)
+    }
 
-    /// Full icons for the few rows of a list.
-    static func icon(for hit: AssistantHit) -> NSImage {
-        if let icon = cache[hit.url.path] { return icon }
-        let icon: NSImage = switch hit.kind {
-        case .app:
-            // Resolved, or a linked app (Safari in /Applications) shows an alias arrow.
-            NSWorkspace.shared.icon(forFile: hit.url.resolvingSymlinksInPath().path)
-        case .file:
-            // The type's icon, without reading the file.
-            NSWorkspace.shared.icon(for: hit.contentType.flatMap(UTType.init) ?? .data)
-        case .folder:
-            // The folder's own (Downloads, a custom icon), or the plain one.
-            NSWorkspace.shared.icon(forFile: hit.url.path)
+    /// A row's icon on a screen of a scale: SwiftUI took the icon's variant for that scale.
+    private struct Key: Hashable {
+        let source: Source
+        let scale: CGFloat
+    }
+
+    private static var icons: [Key: NSImage] = [:]
+    private static var thumbnails: [String: NSImage] = [:]
+    /// The scale the rows last showed at, which `prepare` draws for.
+    private static var rowScale: CGFloat = 2
+
+    /// The rows' icon side.
+    nonisolated static let rowIconSize: CGFloat = 22
+
+    static func source(for hit: AssistantHit) -> Source {
+        switch hit.kind {
+        case .app: .app(hit.url.path)
+        case .file: .type(hit.contentType ?? UTType.data.identifier)
+        case .folder: .folder(hit.url.path)
         }
-        cache[hit.url.path] = icon
+    }
+
+    static let shortcutsSource = Source.app(AssistantSearch.shortcutsApp)
+
+    /// A row's icon: drawn ahead with the rows' search (`prepare`), or here the first time.
+    static func icon(for hit: AssistantHit, scale: CGFloat) -> NSImage { icon(source(for: hit), scale: scale) }
+
+    static func shortcuts(scale: CGFloat) -> NSImage { icon(shortcutsSource, scale: scale) }
+
+    private static func icon(_ source: Source, scale: CGFloat) -> NSImage {
+        rowScale = scale
+        let key = Key(source: source, scale: scale)
+        if let icon = icons[key] { return icon }
+        let icon = rowPicture(source, scale: scale).map { rowImage($0, scale: scale) } ?? systemIcon(source)
+        icons[key] = icon
         return icon
+    }
+
+    private static func rowImage(_ cgImage: CGImage, scale: CGFloat) -> NSImage {
+        NSImage(cgImage: cgImage, size: NSSize(width: CGFloat(cgImage.width) / scale, height: CGFloat(cgImage.height) / scale))
+    }
+
+    /// Draws the icons of rows about to be shown (a search's hits) before they show.
+    static func prepare(_ sources: [Source]) async {
+        let scale = rowScale
+        let missing = Set(sources).filter { icons[Key(source: $0, scale: scale)] == nil }
+        guard !missing.isEmpty else { return }
+        let pictures = await Thrifty.run { missing.compactMap { source in rowPicture(source, scale: scale).map { (source, $0) } } }
+        for (source, picture) in pictures {
+            let key = Key(source: source, scale: scale)
+            // A row may have drawn it meanwhile: the one it shows stays.
+            if icons[key] == nil { icons[key] = rowImage(picture, scale: scale) }
+        }
     }
 
     /// A gallery icon, drawn once at the size it is shown (2x) off the main thread: a hundred full
@@ -970,10 +1022,10 @@ nonisolated enum AssistantMatch {
     static func thumbnail(for hit: AssistantHit, points: CGFloat, prewarming: Bool = false) async -> NSImage? {
         let key = hit.url.path
         if let image = thumbnails[key] { return image }
-        let path = hit.url.resolvingSymlinksInPath().path
+        let source = Source.app(hit.url.path)
         let pixels = Int(points * 2)
-        let rendered = prewarming ? await Thrifty.runInBackground { draw(path: path, pixels: pixels) }
-                                  : await render(path: path, pixels: pixels)
+        let rendered = prewarming ? await Thrifty.runInBackground { draw(source, pixels: pixels) }
+                                  : await render(source, pixels: pixels)
         guard let cgImage = rendered, !Task.isCancelled else { return nil }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: points, height: points))
         thumbnails[key] = image
@@ -982,35 +1034,45 @@ nonisolated enum AssistantMatch {
 
     /// On the `Thrifty` queue: a gallery of icons drawn in parallel from its cells ran every
     /// performance core at full clock (measured 2.2 W for half a second).
-    private static func render(path: String, pixels: Int) async -> CGImage? {
-        await Thrifty.run { draw(path: path, pixels: pixels) }
+    private static func render(_ source: Source, pixels: Int) async -> CGImage? {
+        await Thrifty.run { draw(source, pixels: pixels) }
     }
 
-    nonisolated private static func draw(path: String, pixels: Int) -> CGImage? {
-        let icon = NSWorkspace.shared.icon(forFile: path)
+    nonisolated private static func systemIcon(_ source: Source) -> NSImage {
+        switch source {
+        case .app(let path): NSWorkspace.shared.icon(forFile: URL(fileURLWithPath: path).resolvingSymlinksInPath().path)
+        case .folder(let path): NSWorkspace.shared.icon(forFile: path)
+        case .type(let identifier): NSWorkspace.shared.icon(for: UTType(identifier) ?? .data)
+        }
+    }
+
+    /// The system icon's own picture for a row: its variant for the row's size at the screen's
+    /// scale (48 pixels for 22 points at 2x), which Core Animation scales to the row as it did the
+    /// full icon's.
+    nonisolated private static func rowPicture(_ source: Source, scale: CGFloat) -> CGImage? {
+        var rect = CGRect(x: 0, y: 0, width: rowIconSize, height: rowIconSize)
+        let transform = NSAffineTransform()
+        transform.scale(by: scale)
+        return systemIcon(source).cgImage(forProposedRect: &rect, context: nil, hints: [.ctm: transform])
+    }
+
+    nonisolated private static func draw(_ source: Source, pixels: Int) -> CGImage? {
         var rect = CGRect(x: 0, y: 0, width: pixels, height: pixels)
-        guard let source = icon.cgImage(forProposedRect: &rect, context: nil, hints: nil),
+        guard let full = systemIcon(source).cgImage(forProposedRect: &rect, context: nil, hints: nil),
               let context = CGContext(data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: 0,
                                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                       // Core Animation's own layout (BGRA), as the wallpapers: it
                                       // copies an RGBA picture into one before drawing it.
                                       bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
         context.interpolationQuality = .high
-        context.draw(source, in: CGRect(x: 0, y: 0, width: pixels, height: pixels))
+        context.draw(full, in: CGRect(x: 0, y: 0, width: pixels, height: pixels))
         return context.makeImage()
     }
 
-    static var shortcuts: NSImage {
-        if let icon = cache[AssistantSearch.shortcutsApp] { return icon }
-        let icon = NSWorkspace.shared.icon(forFile: AssistantSearch.shortcutsApp)
-        cache[AssistantSearch.shortcutsApp] = icon
-        return icon
-    }
-
-    /// The full icons go; the gallery's thumbnails (small, drawn off the main thread) stay, so
-    /// the gallery never draws a hundred icons again at an opening.
+    /// The rows' icons go; the gallery's thumbnails stay, so the gallery never draws a hundred
+    /// icons again at an opening.
     static func purge() {
-        cache = [:]
+        icons = [:]
     }
 
     private static var purgeTask: Task<Void, Never>?

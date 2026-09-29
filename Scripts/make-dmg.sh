@@ -19,6 +19,8 @@ xcrun swiftc -O "$ROOT/Scripts/set-icon.swift" -o "$WORK/set-icon"
 mkdir -p "$WORK/stage"
 cp -R "$APP" "$WORK/stage/"
 ln -s /Applications "$WORK/stage/Applications"
+# The performance tests and energy log beside the app, readable before installing.
+cp "$ROOT/docs/PERFORMANCE-TESTS.md" "$ROOT/docs/ENERGY-LOG.md" "$WORK/stage/"
 
 echo "==> image"
 hdiutil create -quiet -volname NotchIsland -srcfolder "$WORK/stage" -fs HFS+ -format UDRW -ov "$WORK/rw.dmg"

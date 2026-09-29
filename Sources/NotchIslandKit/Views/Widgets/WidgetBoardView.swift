@@ -470,7 +470,7 @@ struct NowPlayingWidget: View {
                 TransportControls(isPlaying: media.isPlaying,
                                   showsPlay: widget.shows(.playbackButtons),
                                   showsSkip: widget.shows(.skipButtons) && size.width >= 170,
-                                  glass: { [widget] button in widget.plainButtons ? nil : widget.look(of: button).glass })
+                                  looks: widget.plainButtons ? nil : widget.buttonLooks)
                     .controlSize(WidgetType.controlSize(size.height < WidgetMetrics.singleRowHeight ? .small : .regular,
                                                         widget.size(of: .playbackButtons)))
                     .fixedSize()

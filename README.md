@@ -9,17 +9,36 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.5 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.5.1 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
 </p>
 
 For older versions, see the **[Releases page](https://github.com/vdavid0814/notch-island-public/releases)**.
+How much energy each animation and the idle state take, measured before and after the latest energy work:
+**[docs/ENERGY-LOG.md](docs/ENERGY-LOG.md)**, and the tests behind it with their results:
+**[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also in the .dmg and inside the app).
 
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.5.1
+
+Less energy for the same island: every animation looks and moves as before.
+
+- **Settings opens on about 40 % less energy**: Activity Monitor's peak about halved.
+- **Opening the panel** drops under 30 in Activity Monitor (38 before); Siri's rooms, the timer
+  page and the volume card that runs out to macOS's own take less too (the card's peak 28 → 5).
+- **Music bars**: fewer wake-ups between analyses, no audio-device restart for every banner, and
+  almost no work while the music is silent.
+- **AirPods**: the headphones' details are read with one process instead of two, off the main
+  thread.
+- **About 10 MB less memory** at rest.
+- The measurements, before and after, and the tests behind them ship with every copy:
+  [docs/ENERGY-LOG.md](docs/ENERGY-LOG.md) and [docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)
+  (also in the .dmg and inside the app).
 
 ## What's new in v0.5
 

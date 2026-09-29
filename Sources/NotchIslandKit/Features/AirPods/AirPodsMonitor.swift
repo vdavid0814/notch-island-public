@@ -114,6 +114,11 @@ nonisolated enum AirPodsListeningMode: UInt8, Sendable, Equatable, CaseIterable 
     static let settleDelay: Duration = .milliseconds(1200)
 
     private var listener: AudioObjectPropertyListenerBlock?
+    /// Where the device list is listened to: the spectrum tap's private aggregate device comes and
+    /// goes with the music and changes the list each time, so the Bluetooth outputs are worked out
+    /// here and the main thread hears only of a change to them (as quickly as before: a connection
+    /// is covered at once).
+    private let queue = DispatchQueue(label: "com.davidvarga.notchisland.airpods", qos: .userInitiated)
     private var known: Set<String> = []
     /// What happened with the last connections (for diagnostics): what arrived, whether macOS's own
     /// card was seen, and what the island showed.
@@ -142,11 +147,9 @@ nonisolated enum AirPodsListeningMode: UInt8, Sendable, Equatable, CaseIterable 
         guard listener == nil else { return }
         known = Self.bluetoothOutputs()
         onOutputsChanged?(known)
-        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.devicesChanged() }
-        }
+        let block = Self.listener(from: known, to: self)
         var address = Self.devicesAddress
-        let status = AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, .main, block)
+        let status = AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, block)
         if status == noErr {
             listener = block
         } else {
@@ -159,21 +162,38 @@ nonisolated enum AirPodsListeningMode: UInt8, Sendable, Equatable, CaseIterable 
         pending = nil
         if let listener {
             var address = Self.devicesAddress
-            AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, .main, listener)
+            AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, listener)
         }
         listener = nil
     }
 
-    private func devicesChanged() {
-        let current = Self.bluetoothOutputs()
+    /// Runs on `queue`, where the HAL calls it: the main actor is told only when the Bluetooth
+    /// outputs differ from the last ones seen.
+    nonisolated private static func listener(from initial: Set<String>, to monitor: AirPodsMonitor) -> AudioObjectPropertyListenerBlock {
+        let last = OSAllocatedUnfairLock(initialState: initial)
+        return { [weak monitor] _, _ in
+            let current = bluetoothOutputs()
+            guard last.withLock({ seen in
+                defer { seen = current }
+                return seen != current
+            }) else { return }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { monitor?.outputsChanged(to: current) }
+            }
+        }
+    }
+
+    private func outputsChanged(to current: Set<String>) {
+        // Stopped since the list was read.
+        guard listener != nil else { return }
         let arrived = current.subtracting(known)
-        let changed = current != known
         known = current
-        if changed { onOutputsChanged?(current) }
+        onOutputsChanged?(current)
         guard let name = arrived.first else { return }
-        // What was already at the top of the screen: anything new there is macOS's own card.
-        let before = TopEdgeOverlays.current()
         let mode = systemCard()
+        // What was already at the top of the screen: anything new there is macOS's own card (only
+        // looked for when the island does not cover it).
+        let before: Set<CGWindowID> = mode == .cover ? [] : Set(TopEdgeOverlays.current().keys)
         note("connected: \(name) (outputs: \(current.sorted().joined(separator: ", ")); card mode: \(mode))")
         pending?.cancel()
         pending = Task { [weak self] in
@@ -205,17 +225,14 @@ nonisolated enum AirPodsListeningMode: UInt8, Sendable, Equatable, CaseIterable 
             }
             // Never both at once: while macOS's own AirPods card is up, ours waits for it to go
             // (or, if the user chose so, stays away).
-            // New at the top since the connection, or drawn by the processes that draw macOS's
-            // notices (it may have come up a moment before the audio device did).
-            var systemCard = TopEdgeOverlays.current().subtracting(before)
-                .union(TopEdgeOverlays.current(ownedBy: TopEdgeOverlays.noticeOwners))
+            var systemCard = await TopEdgeOverlays.systemCard(since: before)
             if !systemCard.isEmpty {
                 self.note("macOS's card seen (\(systemCard.count) window(s)); \(mode == .after ? "waiting for it to go" : "staying away")")
                 guard mode == .after else { return }
                 for _ in 0..<32 where !systemCard.isEmpty {
                     try? await Task.sleep(for: .milliseconds(250))
                     guard !Task.isCancelled else { return }
-                    systemCard.formIntersection(TopEdgeOverlays.current())
+                    systemCard = await TopEdgeOverlays.stillUp(systemCard)
                 }
                 try? await Task.sleep(for: .milliseconds(200))
                 guard !Task.isCancelled else { return }
@@ -228,13 +245,13 @@ nonisolated enum AirPodsListeningMode: UInt8, Sendable, Equatable, CaseIterable 
 
     // MARK: CoreAudio
 
-    private static let devicesAddress = AudioObjectPropertyAddress(
+    nonisolated private static let devicesAddress = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyDevices,
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain)
 
     /// Names of the Bluetooth devices that can play audio right now.
-    private static func bluetoothOutputs() -> Set<String> {
+    nonisolated private static func bluetoothOutputs() -> Set<String> {
         var address = devicesAddress
         var size: UInt32 = 0
         let system = AudioObjectID(kAudioObjectSystemObject)
@@ -247,7 +264,7 @@ nonisolated enum AirPodsListeningMode: UInt8, Sendable, Equatable, CaseIterable 
         })
     }
 
-    private static func isBluetooth(_ device: AudioObjectID) -> Bool {
+    nonisolated private static func isBluetooth(_ device: AudioObjectID) -> Bool {
         var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyTransportType,
                                                  mScope: kAudioObjectPropertyScopeGlobal,
                                                  mElement: kAudioObjectPropertyElementMain)
@@ -257,7 +274,7 @@ nonisolated enum AirPodsListeningMode: UInt8, Sendable, Equatable, CaseIterable 
         return transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
     }
 
-    private static func hasOutput(_ device: AudioObjectID) -> Bool {
+    nonisolated private static func hasOutput(_ device: AudioObjectID) -> Bool {
         var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams,
                                                  mScope: kAudioDevicePropertyScopeOutput,
                                                  mElement: kAudioObjectPropertyElementMain)
@@ -265,7 +282,7 @@ nonisolated enum AirPodsListeningMode: UInt8, Sendable, Equatable, CaseIterable 
         return AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr && size > 0
     }
 
-    private static func name(of device: AudioObjectID) -> String? {
+    nonisolated private static func name(of device: AudioObjectID) -> String? {
         var address = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyName,
                                                  mScope: kAudioObjectPropertyScopeGlobal,
                                                  mElement: kAudioObjectPropertyElementMain)
@@ -279,10 +296,14 @@ nonisolated enum AirPodsListeningMode: UInt8, Sendable, Equatable, CaseIterable 
     // MARK: system_profiler
 
     /// The device's entry in the Bluetooth profile, off the main thread.
+    ///
+    /// `-nospawn` has the report made in this one process: by default `system_profiler` starts a
+    /// second copy of itself with it (seen in the process list) to make each report in, which cost
+    /// another launch and ~20 % more CPU for the same JSON (compared byte for byte, macOS 27).
     @concurrent static func readInfo(named name: String) async -> AirPodsInfo? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/system_profiler")
-        process.arguments = ["SPBluetoothDataType", "-json"]
+        process.arguments = ["-nospawn", "SPBluetoothDataType", "-json"]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
@@ -322,32 +343,44 @@ nonisolated enum AirPodsListeningMode: UInt8, Sendable, Equatable, CaseIterable 
 /// card, a HUD) are made of. Window numbers and bounds only: no names, so no Screen Recording
 /// permission is needed.
 nonisolated enum TopEdgeOverlays {
-    /// `screen`: the notch screen in window-list coordinates (top-left origin); nil takes the
-    /// main display.
     /// The processes whose windows at the top are macOS's notices (the AirPods card was a
     /// MenuBarAgent window, 352 × 148 under the notch, on macOS 27 — seen in the window list).
     static let noticeOwners: Set<String> = ["MenuBarAgent", "ControlCenter", "BluetoothUIService", "BluetoothUIServer"]
 
-    static func current(ownedBy owners: Set<String>? = nil, on screen: CGRect? = nil) -> Set<CGWindowID> {
+    /// Those on the main display now, with the process that drew each.
+    static func current() -> [CGWindowID: String] {
         let own = ProcessInfo.processInfo.processIdentifier
-        let screen = screen ?? CGDisplayBounds(CGMainDisplayID())
+        let screen = CGDisplayBounds(CGMainDisplayID())
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] ?? []
-        return Set(windows.compactMap { window -> CGWindowID? in
+        var overlays: [CGWindowID: String] = [:]
+        for window in windows {
             // The Dock puts small windows along the top for Mission Control and Spaces (seen in
             // the window list): not a notice.
             let owner = window[kCGWindowOwnerName as String] as? String ?? ""
             guard (window[kCGWindowOwnerPID as String] as? Int32) != own,
                   owner != "Dock",
-                  owners.map({ $0.contains(owner) }) ?? true,
                   (window[kCGWindowLayer as String] as? Int ?? 0) > 0,
                   let number = window[kCGWindowNumber as String] as? CGWindowID,
                   let bounds = (window[kCGWindowBounds as String] as? NSDictionary)
                       .flatMap({ CGRect(dictionaryRepresentation: $0 as CFDictionary) }),
                   screen.contains(bounds.origin),
-                  isOverlay(bounds.offsetBy(dx: -screen.minX, dy: -screen.minY)) else { return nil }
-            return number
-        })
+                  isOverlay(bounds.offsetBy(dx: -screen.minX, dy: -screen.minY)) else { continue }
+            overlays[number] = owner
+        }
+        return overlays
+    }
+
+    /// macOS's card, if it is up: windows new at the top since `before`, or drawn by the processes
+    /// that draw macOS's notices (it may have come up a moment before the audio device did). One
+    /// window-list read, off the main thread.
+    @concurrent static func systemCard(since before: Set<CGWindowID>) async -> Set<CGWindowID> {
+        Set(current().filter { !before.contains($0.key) || noticeOwners.contains($0.value) }.keys)
+    }
+
+    /// Those of `windows` still up, read off the main thread.
+    @concurrent static func stillUp(_ windows: Set<CGWindowID>) async -> Set<CGWindowID> {
+        windows.intersection(current().keys)
     }
 
     /// Near the top, small, and not the menu bar (which spans the screen).

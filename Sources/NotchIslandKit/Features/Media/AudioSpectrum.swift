@@ -67,7 +67,7 @@ nonisolated enum SpectrumBands {
 /// the motion: a critically damped spring (`stiffness`) carries each bar to its target. It never
 /// overshoots and its speed never jumps, so a waver becomes a soft sway while a real beat still
 /// swings the bar through most of its height.
-nonisolated struct SpectrumLeveler: Sendable {
+nonisolated struct SpectrumLeveler: Sendable, Equatable {
     /// The span of a bar, in dB below the shared ceiling.
     static let range: Float = 28
     /// Added to each band (bass → treble) before comparing them.
@@ -169,14 +169,24 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
     static let rate: Double = 30
 
     let levels = Mutex(SpectrumLevels())
-    /// Set while the tap rests or nobody holds it (`AudioSpectrumTap.applyRunning`): the I/O cycles
-    /// that still arrive analyse nothing.
-    let isResting = Atomic(false)
+    /// Until when (host time) the I/O cycles analyse nothing: 0 while listening, the end of a rest
+    /// (`AudioSpectrumTap.rest`), or `.max` while nobody holds the tap. The rest ends on the I/O
+    /// thread itself, at the first cycle past it: nothing wakes the app for it.
+    let restsUntil = Atomic<UInt64>(.max)
 
     private let sampleRate: Double
     let hop: Int
     /// Samples per analysis: `hop` rounded up to whole device buffers (set when the tap starts).
-    var block: Int
+    var block: Int {
+        didSet { settled = false }
+    }
+    /// Samples of exact silence in a row, the latest last: at least the ring's length, and the ring
+    /// holds nothing else.
+    private var zeros = 0
+    /// The last analysis read a ring of silence and left the leveler as it was: the next one on
+    /// silence gives the same to the bit, so it is not run. A tap without the permission (or muted
+    /// playback) delivers nothing but zeros, for as long as music plays.
+    private var settled = false
     /// This cycle's analyses (capacity kept).
     private var batch: [SpectrumLevels] = []
     private let bins: [Range<Int>]
@@ -295,10 +305,17 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
                 var peak: Float = 0
                 vDSP_maxmgv(out, 1, &peak, vDSP_Length(count))
                 if peak > 1e-4 { loud = true }
+                // Exact silence into a ring, and filters, that hold only silence already changes
+                // nothing in them: that work is left out.
+                let silent = peak == 0
                 // Into the ring the analyses read, oldest overwritten. (Left out when the folding
                 // moved to vDSP: every analysis read silence, and the bars followed only the beats.)
                 ring.withUnsafeMutableBufferPointer { ring in
                     let size = ring.count
+                    guard !silent || zeros < size else {
+                        ringIndex = (ringIndex + count) % size
+                        return
+                    }
                     var copied = 0
                     while copied < count {
                         let run = min(count - copied, size - ringIndex)
@@ -307,17 +324,23 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
                         copied += run
                     }
                 }
+                zeros = silent ? zeros + count : 0
                 // The attack bands: filtered by vDSP, then their energy summed slice by slice.
+                let still = silent && bassDelay.allSatisfy { $0 == 0 } && trebleDelay.allSatisfy { $0 == 0 }
                 bassBand.withUnsafeMutableBufferPointer { bass in
                     trebleBand.withUnsafeMutableBufferPointer { treble in
-                        vDSP_biquad(bassFilter, &bassDelay, out, 1, bass.baseAddress!, 1, vDSP_Length(count))
-                        vDSP_biquad(trebleFilter, &trebleDelay, out, 1, treble.baseAddress!, 1, vDSP_Length(count))
+                        if !still {
+                            vDSP_biquad(bassFilter, &bassDelay, out, 1, bass.baseAddress!, 1, vDSP_Length(count))
+                            vDSP_biquad(trebleFilter, &trebleDelay, out, 1, treble.baseAddress!, 1, vDSP_Length(count))
+                        }
                         var position = 0
                         while position < count {
                             let run = min(count - position, Self.onsetFrames - sliceFrames)
                             var bassSum: Float = 0, trebleSum: Float = 0
-                            vDSP_svesq(bass.baseAddress! + position, 1, &bassSum, vDSP_Length(run))
-                            vDSP_svesq(treble.baseAddress! + position, 1, &trebleSum, vDSP_Length(run))
+                            if !still {
+                                vDSP_svesq(bass.baseAddress! + position, 1, &bassSum, vDSP_Length(run))
+                                vDSP_svesq(treble.baseAddress! + position, 1, &trebleSum, vDSP_Length(run))
+                            }
                             bassEnergy += bassSum
                             trebleEnergy += trebleSum
                             sliceFrames += run
@@ -340,7 +363,7 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
             if sinceAnalysis >= block {
                 let elapsed = Float(sinceAnalysis) / Float(sampleRate)
                 sinceAnalysis = 0
-                batch.append(analyse(elapsed: elapsed))
+                batch.append(settled && zeros >= ring.count ? levels.withLock { $0 } : analyse(elapsed: elapsed))
             }
         }
         if !batch.isEmpty || !onsets.isEmpty {
@@ -379,7 +402,10 @@ nonisolated final class SpectrumAnalyzer: @unchecked Sendable {
             }
             decibels[band] = 10 * log10(mean * scale + 1e-14)
         }
+        // Kept only on silence: a copy taken during music would make the update copy its arrays.
+        let before = zeros >= size ? leveler : nil
         leveler.update(decibels: decibels, elapsed: elapsed)
+        settled = before == leveler
         let bands = leveler.levels
         return levels.withLock { levels -> SpectrumLevels in
             levels.bands = bands
@@ -416,7 +442,7 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
 /// plays. The tap feeds a private aggregate device clocked by the default output, and follows the
 /// default output when it changes (AirPods connecting). Nothing is recorded or kept: each buffer is
 /// folded into the five levels and dropped.
-@Observable final class AudioSpectrumTap {
+final class AudioSpectrumTap {
     static let shared = AudioSpectrumTap()
 
     /// Who hears each analysis, on the I/O thread.
@@ -438,24 +464,22 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
         }
     }
 
-    @ObservationIgnored private var holders = 0
-    @ObservationIgnored private var stopTask: Task<Void, Never>?
-    @ObservationIgnored private var restTask: Task<Void, Never>?
-    @ObservationIgnored private var session: Session?
-    @ObservationIgnored private var outputListener: AudioObjectPropertyListenerBlock?
+    private var holders = 0
+    private var stopTask: Task<Void, Never>?
+    private var session: Session?
+    private var outputListener: AudioObjectPropertyListenerBlock?
 
-    /// A release stops the device at once; the tap and its aggregate device stay in memory this
-    /// long, so the compact view coming back (the panel closed, a banner gone, the next track after
-    /// a pause) only starts the device again instead of creating a process tap and an aggregate
-    /// device in coreaudiod each time (it tore them down 2 s after every release before).
+    /// A release holds the analyses off at once and stops the device this long after: a banner
+    /// passing (every volume change) takes the compact view away for about that long, and stopping
+    /// and starting the device for it cost more than its idle cycles meanwhile (see `applyRunning`).
+    static let stopDelay: Duration = .seconds(2)
+    /// Once stopped, the tap and its aggregate device stay in memory this long, so the compact view
+    /// coming back (the panel closed, the next track after a pause) only starts the device again
+    /// instead of creating a process tap and an aggregate device in coreaudiod each time (it tore
+    /// them down 2 s after every release before).
     static let keepDuration: Duration = .seconds(60)
 
     private init() {}
-
-    /// The current levels (zeros while stopped).
-    var levels: SpectrumLevels {
-        session?.analyzer.levels.withLock { $0 } ?? SpectrumLevels()
-    }
 
     func acquire() {
         holders += 1
@@ -467,14 +491,14 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
 
     func release() {
         holders = max(holders - 1, 0)
-        guard holders == 0 else { return }
-        restTask?.cancel()
-        restTask = nil
-        applyRunning()
-        guard stopTask == nil else { return }
+        guard holders == 0, stopTask == nil else { return }
+        session?.analyzer.restsUntil.store(.max, ordering: .relaxed)
         stopTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.keepDuration, tolerance: .seconds(5))
+            try? await Task.sleep(for: Self.stopDelay, tolerance: .milliseconds(500))
             guard !Task.isCancelled, let self, self.holders == 0 else { return }
+            self.applyRunning()
+            try? await Task.sleep(for: Self.keepDuration, tolerance: .seconds(5))
+            guard !Task.isCancelled, self.holders == 0 else { return }
             self.stopTask = nil
             self.stop()
         }
@@ -485,8 +509,16 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
     /// battery: 19 ms of CPU and ~1 mW per 15 s against 16 ms and none), and the system's
     /// audio-recording indicator stays on steadily instead of flashing at every rest.
     private func applyRunning() {
-        session?.setRunning(holders > 0)
-        session?.analyzer.isResting.store(holders == 0 || restTask != nil, ordering: .relaxed)
+        guard let session else { return }
+        if holders > 0 {
+            // Held again: the analyses start with the first cycle (a rest ends with the release).
+            if session.analyzer.restsUntil.load(ordering: .relaxed) == .max {
+                session.analyzer.restsUntil.store(0, ordering: .relaxed)
+            }
+            session.setRunning(true)
+        } else {
+            session.setRunning(false)
+        }
     }
 
     private func start() {
@@ -501,29 +533,25 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
 
     /// Stops analysing for `duration` (the I/O thread only returns; nothing is torn down), then
     /// analyses again. The equalizer needs a few seconds of music every so often, not all of it.
+    /// The rest's end is a host time the I/O thread checks each cycle, not a timer: a task sleeping
+    /// on the main actor woke the app once more per rest only to say "listen again".
     func rest(for duration: Duration) {
-        guard session != nil, holders > 0, restTask == nil else { return }
-        restTask = Task { [weak self] in
-            // The tolerance lets the system group wake-ups, but never more than half the rest.
-            try? await Task.sleep(for: duration, tolerance: min(.milliseconds(500), duration / 2))
-            guard let self, !Task.isCancelled else { return }
-            self.restTask = nil
-            self.applyRunning()
-        }
-        applyRunning()
+        guard let analyzer = session?.analyzer, holders > 0 else { return }
+        let now = mach_absolute_time()
+        // A rest under way runs to its end.
+        guard analyzer.restsUntil.load(ordering: .relaxed) <= now else { return }
+        let (seconds, attoseconds) = duration.components
+        let nanoseconds = Double(seconds) * 1e9 + Double(attoseconds) * 1e-9
+        analyzer.restsUntil.store(now + UInt64(nanoseconds / SpectrumAnalyzer.hostTick), ordering: .relaxed)
     }
 
-    /// Ends a rest under way: the analyses start again at once.
+    /// Ends a rest under way: the next I/O cycle analyses again.
     func wake() {
-        guard restTask != nil else { return }
-        restTask?.cancel()
-        restTask = nil
-        applyRunning()
+        guard holders > 0, let analyzer = session?.analyzer else { return }
+        analyzer.restsUntil.store(0, ordering: .relaxed)
     }
 
     private func stop() {
-        restTask?.cancel()
-        restTask = nil
         session = nil
         if let outputListener {
             var address = HAL.defaultOutputAddress
@@ -546,8 +574,6 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
 
     private func outputChanged() {
         guard session != nil else { return }
-        restTask?.cancel()
-        restTask = nil
         session = nil
         session = try? Session()
         applyRunning()
@@ -656,16 +682,17 @@ nonisolated protocol SpectrumSink: AnyObject, Sendable {
                     Log.media.error("audio spectrum tap did not start (\(status, privacy: .public))")
                 }
             } else {
-                analyzer.isResting.store(true, ordering: .relaxed)
+                analyzer.restsUntil.store(.max, ordering: .relaxed)
                 AudioDeviceStop(aggregate, proc)
                 isRunning = false
             }
         }
 
-        /// Built outside any actor: the block runs on the I/O queue.
+        /// Built outside any actor: the block runs on the I/O queue. While resting, a cycle is one
+        /// comparison and nothing else.
         private static func ioBlock(_ analyzer: SpectrumAnalyzer) -> AudioDeviceIOBlock {
             { _, input, inputTime, _, _ in
-                guard !analyzer.isResting.load(ordering: .relaxed) else { return }
+                guard mach_absolute_time() >= analyzer.restsUntil.load(ordering: .relaxed) else { return }
                 analyzer.consume(input, hostTime: inputTime.pointee.mHostTime)
             }
         }

@@ -73,10 +73,9 @@ struct IslandRootView: View {
             // lines lie on macOS's own, so nothing doubles where it clears (asked for).
             let glassStyle = isOpaquePage ? IslandGlassStyle.black : model.effectiveGlassStyle
             let wantsGlass = glassStyle != .fade || outline.size.height > layout.notch.height + 0.5
-            let reducesWork = model.activity.prefersReducedWork
             // On battery the content swaps with a plain cross-fade: the blur-replace costs about a
             // seventh of an open's main-thread time (measured).
-            let lightContentSwap = reducesWork || (model.power.state.hasBattery && !model.power.state.isPluggedIn)
+            let lightContentSwap = model.activity.prefersReducedWork || model.power.isOnBattery
             IslandContentStack(
                 presentation: presentation,
                 layout: layout,
@@ -92,9 +91,6 @@ struct IslandRootView: View {
                                      shoulderRadius: layout.shoulderRadius(for: .idle)),
                 glassStyle: glassStyle,
                 showsGlass: wantsGlass || isGlassRetired == false,
-                // Low Power Mode or thermal pressure: the growth is drawn without its animated blur,
-                // the most expensive part of it (an offscreen pass over the whole island every frame).
-                blursGrowth: !(reduceMotion || reducesWork || isOpaquePage),
                 solidDepth: IslandLayout.overdraw + layout.notch.height,
                 fadeStretch: IslandLayout.liesOnSystemCard(surfaceOf) ? IslandFade.coveringStretch : 1,
                 // Under Reduce Motion the island cross-fades as SwiftUI animates it; otherwise it
@@ -193,7 +189,7 @@ extension IslandContentStack {
             .frame(width: contentSize.width, height: contentSize.height, alignment: .top)
             // Where the glass shows through, text and symbols keep a soft dark halo, so they
             // stay readable over a bright desktop without darkening the glass itself.
-            .modifier(GlassLegibility())
+            .modifier(GlassLegibility(isInNotchBand: presentation.isPillShaped))
             // Concentric corners inside (the artwork) follow the island they belong to.
             .containerShape(IslandShape(bottomRadius: layout.bottomRadius(for: presentation),
                                         shoulderRadius: layout.shoulderRadius(for: presentation)))
@@ -221,13 +217,19 @@ extension EnvironmentValues {
 /// a glow around every word and tile, so it is a whisper now — tight and light. The fade style's
 /// black under the content does most of the work.
 private struct GlassLegibility: ViewModifier {
+    /// The content lies within the notch band (the pills). The fade style's band is solid black
+    /// under it in every frame, also over a larger island held during a move (`FadeShadeMask`), and
+    /// a dark halo on solid black changes no pixel: none is asked for there, as on solid black.
+    let isInNotchBand: Bool
+
     @Environment(\.islandGlassStyle) private var style
 
     static let opacity: Double = 0.18
     static let radius: CGFloat = 1.2
 
     func body(content: Content) -> some View {
-        content.shadow(color: .black.opacity(style.hasGlassSurface ? Self.opacity : 0), radius: Self.radius)
+        let isSeen = style.hasGlassSurface && !(isInNotchBand && style == .fade)
+        content.shadow(color: .black.opacity(isSeen ? Self.opacity : 0), radius: Self.radius)
     }
 }
 
@@ -292,7 +294,6 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
     let notch: IslandOutline
     let glassStyle: IslandGlassStyle
     let showsGlass: Bool
-    let blursGrowth: Bool
     /// The shade's solid black from the top (fade style).
     let solidDepth: CGFloat
     /// The fade style's fade runs this much longer (`IslandFade`).
@@ -339,8 +340,9 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
         let parksGlass = isStill
         GlassEffectContainer {
             content
+                // Under Reduce Motion the island fades in and out as it grows out of the notch and
+                // back into it; otherwise it is always whole (`isStill`).
                 .opacity(reveal)
-                .blur(radius: blursGrowth ? 6 * (1 - reveal) : 0)
                 // The glass extends `overdraw` above the window, where the window edge clips it, so
                 // its top edge (and the rim light that comes with an edge) is never on screen.
                 .padding(.top, IslandLayout.overdraw)

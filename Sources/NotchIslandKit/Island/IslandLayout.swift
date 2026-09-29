@@ -93,10 +93,8 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     static let settingsMinimum = CGSize(width: 820, height: 520)
     /// Standing in for the screen before one is known (a 14-inch MacBook's default resolution).
     static let fallbackScreen = CGSize(width: 1512, height: 982)
-    /// The app gallery (Applications ⌘1): wider and taller than the list, for nine columns of apps
-    /// and four rows of them.
+    /// The app gallery (Applications ⌘1): wider than the list, for nine columns of apps.
     static let assistantGalleryWidth: CGFloat = 820
-    static let assistantGalleryPageHeight: CGFloat = 440
     /// One app in the gallery (`GalleryCell`: 6 + 48-pt icon + 4 + caption line + 6) and the space
     /// between rows: the gallery is exactly the user's number of rows tall, never a cut-off row.
     static let galleryCellHeight: CGFloat = 77
