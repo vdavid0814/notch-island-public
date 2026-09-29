@@ -41,6 +41,12 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     let memory = SystemVolumeCardMemory()
     let state = LiquidCardState()
     private var panel: IslandPanel?
+    /// The liquid itself: an outline worked out for every frame, played by the render server.
+    private let liquidLayer = CAShapeLayer()
+    /// The frames of a move already worked out, by where it goes (the card comes up where it did
+    /// before, so the next change reuses them).
+    private var framesCache: [String: [CGPath]] = [:]
+    private var playID = 0
     private var watch: Task<Void, Never>?
     private var hideAfter = Date.distantPast
     private var cardSeen = false
@@ -120,15 +126,19 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         state.kind = kind
         state.notch = metrics.notchRect
         state.frame = frame(covering: [cover.rect, notchCard.rect], metrics: metrics)
-        state.liquidShown = true
         state.surfaceShown = false
         let panel = self.panel ?? makePanel()
         panel.level = IslandPanel.coveringLevel
         panel.ignoresMouseEvents = true
         panel.stage(state.frame)
+        setLiquid(shown: true, duration: 0)
+        liquidLayer.path = nil
         panel.orderFrontRegardless()
-        state.start(.out(start: Date(), from: LiquidFlow.start(notch: metrics.notchRect, towards: cover.rect), to: cover))
-        land(after: LiquidFlow.out.total)
+        let from = LiquidFlow.start(notch: metrics.notchRect, towards: cover.rect)
+        play({ .out(start: $0, from: from, to: cover) }, duration: LiquidFlow.out.total,
+             key: "out|\(kind.card)|\(metrics.notchRect)|\(state.frame)|\(cover.rect)") { [weak self] in
+            self?.land(after: LiquidFlow.out.total)
+        }
         Log.levels.notice("liquid card out to \(window.logDescription, privacy: .public)")
         DiagnosticsFlow.record("liquid card out (\(String(describing: kind.card))) to \(window.logDescription)")
     }
@@ -142,11 +152,13 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
             state.frame = frame
             panel?.stage(frame)
         }
-        state.liquidShown = true
+        setLiquid(shown: true, duration: 0)
         state.surfaceShown = false
         state.contentVisible = false
-        state.start(.move(start: Date(), from: state.drop(at: Date()), to: cover))
-        land(after: LiquidFlow.move.total)
+        let from = state.drop(at: Date())
+        play({ .move(start: $0, from: from, to: cover) }, duration: LiquidFlow.move.total, key: nil) { [weak self] in
+            self?.land(after: LiquidFlow.move.total)
+        }
         Log.levels.notice("liquid card moved to \(window.logDescription, privacy: .public)")
     }
 
@@ -161,7 +173,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
             guard !Task.isCancelled else { return }
             self.state.settle()
             self.state.surfaceShown = true
-            self.state.liquidShown = false
+            self.setLiquid(shown: false, duration: Self.toSurface)
             self.panel?.ignoresMouseEvents = false
         }
     }
@@ -171,16 +183,23 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         panel?.ignoresMouseEvents = true
         state.contentVisible = false
         // Liquid again (the black over the surface) as it already runs back: macOS's card has gone.
-        state.liquidShown = true
-        state.start(.back(start: Date(), from: state.drop(at: Date())))
-        landing = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Self.toLiquid))
-            guard !Task.isCancelled, let self else { return }
-            self.state.surfaceShown = false
-            try? await Task.sleep(for: .seconds(max(LiquidFlow.back.total, 0.2 + LiquidCardState.absorb) - Self.toLiquid))
-            guard !Task.isCancelled else { return }
-            self.state.stop()
-            self.panel?.orderOut(nil)
+        setLiquid(shown: true, duration: Self.toLiquid)
+        let from = state.drop(at: Date())
+        let total = max(LiquidFlow.back.total, 0.2 + Double(LiquidCardState.absorb))
+        play({ .back(start: $0, from: from) }, duration: total,
+             key: "back|\(state.kind.card)|\(state.notch)|\(state.frame)|\(from.rect)") { [weak self] in
+            guard let self else { return }
+            self.landing = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(Self.toLiquid))
+                guard !Task.isCancelled, let self else { return }
+                self.state.surfaceShown = false
+                try? await Task.sleep(for: .seconds(total - Self.toLiquid))
+                guard !Task.isCancelled else { return }
+                self.state.stop()
+                self.liquidLayer.removeAllAnimations()
+                self.liquidLayer.path = nil
+                self.panel?.orderOut(nil)
+            }
         }
         Log.levels.notice("liquid card back")
         DiagnosticsFlow.record("liquid card back")
@@ -286,13 +305,83 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
 
     // MARK: Window
 
+    /// Three layers: the card's surface (SwiftUI), the liquid over it (Core Animation), and the
+    /// card's content on top (SwiftUI).
     private func makePanel() -> IslandPanel {
         let panel = IslandPanel(contentRect: state.frame)
-        let host = NSHostingView(rootView: LiquidCardView(state: state).environment(model))
-        host.sizingOptions = []
-        panel.contentView = host
+        let container = NSView(frame: CGRect(origin: .zero, size: state.frame.size))
+        container.wantsLayer = true
+        let surface = NSHostingView(rootView: LiquidSurfaceLayer(state: state).environment(model))
+        let content = NSHostingView(rootView: LiquidContentLayer(state: state).environment(model))
+        let liquid = NSView(frame: container.bounds)
+        liquid.wantsLayer = true
+        liquidLayer.fillColor = CGColor(gray: 0, alpha: 1)
+        liquidLayer.frame = liquid.bounds
+        liquidLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        liquid.layer?.addSublayer(liquidLayer)
+        for view in [surface, liquid, content] as [NSView] {
+            (view as? NSHostingView<AnyView>)?.sizingOptions = []
+            view.frame = container.bounds
+            view.autoresizingMask = [.width, .height]
+            container.addSubview(view)
+        }
+        surface.sizingOptions = []
+        content.sizingOptions = []
+        panel.contentView = container
         self.panel = panel
         return panel
+    }
+
+    /// Plays a move on the render server: its outline at every frame (120 a second), worked out off
+    /// the main thread (or reused), then the state follows from the moment it starts.
+    private func play(_ make: @escaping (Date) -> LiquidCardState.Motion, duration: TimeInterval, key: String?,
+                      then started: @escaping () -> Void) {
+        playID += 1
+        let id = playID
+        let nominal = Date()
+        let motion = make(nominal)
+        let leftNotch: Date? = if case .out = motion { nominal } else { nil }
+        let notch = state.notch, frame = state.frame
+        let count = max(2, Int((duration * 120).rounded(.up)) + 1)
+        let scenes = (0..<count).map { index in
+            LiquidCardState.scene(motion: motion, leftNotch: leftNotch, notch: notch,
+                                  at: nominal.addingTimeInterval(min(Double(index) / 120, duration)))
+        }
+        let clip = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height + LiquidCardState.overdraw)
+        let cached = key.flatMap { framesCache[$0] }
+        Task { [weak self] in
+            let paths = if let cached { cached } else { await Self.trace(scenes, clip: clip, origin: frame.origin) }
+            guard let self, self.playID == id else { return }
+            if let key, cached == nil { self.framesCache[key] = paths }
+            if self.framesCache.count > 12 { self.framesCache.removeAll() }
+            self.state.start(make(Date()))
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            self.liquidLayer.path = paths.last
+            let animation = CAKeyframeAnimation(keyPath: "path")
+            animation.values = paths
+            animation.duration = duration
+            animation.calculationMode = .discrete
+            self.liquidLayer.add(animation, forKey: "flow")
+            CATransaction.commit()
+            started()
+        }
+    }
+
+    @concurrent nonisolated private static func trace(_ scenes: [LiquidScene], clip: CGRect, origin: CGPoint) async -> [CGPath] {
+        var move = CGAffineTransform(translationX: -origin.x, y: -origin.y)
+        return scenes.map { LiquidField.path($0, clip: clip).copy(using: &move) ?? CGMutablePath() }
+    }
+
+    /// The liquid shows (black over the surface) or clears (the surface under it shows).
+    private func setLiquid(shown: Bool, duration: TimeInterval) {
+        let target: Float = shown ? 1 : 0
+        CATransaction.begin()
+        CATransaction.setDisableActions(duration == 0)
+        CATransaction.setAnimationDuration(duration)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+        liquidLayer.opacity = target
+        CATransaction.commit()
     }
 
     /// Everything the liquid may reach: the notch, the card and the neck between, with room for the
@@ -325,9 +414,9 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     }
 
     /// Past the screen's top edge, so the blur never rounds the island off there.
-    static let overdraw: CGFloat = 30
+    nonisolated static let overdraw: CGFloat = 30
     /// How long the notch swells as the drop runs back into it.
-    static let absorb: CGFloat = 0.2
+    nonisolated static let absorb: CGFloat = 0.2
 
     var frame: CGRect = .zero
     var notch: CGRect = .zero
@@ -335,8 +424,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     /// When the drop left the notch: its neck thins with that time, also through a move.
     private var leftNotch: Date?
     var kind: LiquidCardKind = .volume(name: "")
-    /// The black liquid; the island's surface (glass and shade) the landed card becomes; its content.
-    var liquidShown = true
+    /// The island's surface (glass and shade) the landed card becomes, and its content.
     var surfaceShown = false
     var contentVisible = false
     /// The pointer is on the card.
@@ -377,7 +465,6 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         leftNotch = nil
         contentVisible = false
         surfaceShown = false
-        liquidShown = true
         isHeld = false
     }
 
@@ -403,28 +490,37 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         }
     }
 
-    /// Every shape at `date`, in global coordinates.
-    func shapes(at date: Date) -> [Path] {
-        guard motion != nil else { return [] }
-        let drop = drop(at: date)
+    /// The liquid at `date` of `motion`: the notch swelling as the drop gathers or comes back, the
+    /// drop, and the neck between them (thinning as the drop leaves, from `leftNotch`).
+    nonisolated static func scene(motion: Motion, leftNotch: Date?, notch: CGRect, at date: Date) -> LiquidScene {
+        func progress(_ curve: LiquidCurve, since start: Date) -> Double { curve.value(at: date.timeIntervalSince(start)) }
+        let drop: LiquidBlob = switch motion {
+        case .out(let start, let from, let to): LiquidFlow.drop(progress(LiquidFlow.out, since: start), from: from, to: to)
+        case .move(let start, let from, let to): from.mixed(with: to, by: progress(LiquidFlow.move, since: start))
+        case .landed(let blob): blob
+        case .back(let start, let from):
+            // The way out, backwards: up to the menu bar, then along it into the notch.
+            LiquidFlow.drop(1 - progress(LiquidFlow.back, since: start), from: LiquidFlow.start(notch: notch, towards: from.rect), to: from)
+        }
         var swell: CGFloat = 0
         var neck: CGFloat = 0
         let h = notch.height
         if let leftNotch {
-            let t = CGFloat(date.timeIntervalSince(leftNotch))
-            let p = CGFloat(progress(LiquidFlow.out, since: leftNotch, at: date))
-            swell = LiquidFlow.bump(t, over: 0.18)
-            neck = h * (1 - LiquidFlow.smoothstep(0.45, 0.9, p))
+            swell = LiquidFlow.bump(CGFloat(date.timeIntervalSince(leftNotch)), over: 0.18)
+            neck = h * (1 - LiquidFlow.smoothstep(0.45, 0.9, CGFloat(progress(LiquidFlow.out, since: leftNotch))))
         }
         if case .back(let start, _) = motion {
-            let q = CGFloat(progress(LiquidFlow.back, since: start, at: date))
-            neck = h * LiquidFlow.smoothstep(0.2, 0.6, q)
+            neck = h * LiquidFlow.smoothstep(0.2, 0.6, CGFloat(progress(LiquidFlow.back, since: start)))
             // The notch takes the drop in, swelling and settling before the window goes.
-            swell = LiquidFlow.bump(CGFloat(date.timeIntervalSince(start)) - 0.2, over: Self.absorb)
+            swell = LiquidFlow.bump(CGFloat(date.timeIntervalSince(start)) - 0.2, over: absorb)
         }
-        var shapes = [LiquidFlow.notch(notch, swell: swell, overdraw: Self.overdraw), LiquidFlow.path(drop)]
-        if let bridge = LiquidFlow.neck(notch: notch, to: drop.rect, thickness: neck) { shapes.append(bridge) }
-        return shapes
+        let grow = 12 * swell
+        let notchRect = CGRect(x: notch.minX - grow, y: notch.minY - grow * 0.5, width: notch.width + 2 * grow,
+                               height: notch.height + grow * 0.5 + overdraw)
+        let right = drop.rect.midX >= notch.midX
+        let anchor = CGPoint(x: right ? notch.maxX - h * 0.6 : notch.minX + h * 0.6, y: notch.maxY - h * 0.45)
+        return LiquidScene(notch: notchRect, notchRadius: min(8 + grow, notch.height / 2), drop: drop,
+                           neckFrom: anchor, neckTo: CGPoint(x: drop.rect.midX, y: drop.rect.midY), neckThickness: neck)
     }
 
     /// Global coordinates (y up) → the canvas's (y down, `overdraw` above the window).
@@ -438,15 +534,13 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     }
 }
 
-/// The liquid, blurred and cut at half alpha so its shapes flow into each other; the island's
-/// surface the landed card becomes, in the card's own outline; and what the card shows.
-struct LiquidCardView: View {
+/// The bottom layer: the island's surface the landed card becomes, in the card's own outline.
+struct LiquidSurfaceLayer: View {
     let state: LiquidCardState
 
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let overdraw = LiquidCardState.overdraw
         ZStack(alignment: .topLeading) {
             if let target = state.target {
                 let rect = state.windowRect(target)
@@ -455,21 +549,19 @@ struct LiquidCardView: View {
                     .offset(x: rect.minX, y: rect.minY)
                     .opacity(state.surfaceShown ? 1 : 0)
             }
-            TimelineView(.animation(paused: !state.isAnimating)) { timeline in
-                let shapes = state.shapes(at: timeline.date)
-                let transform = state.canvasTransform
-                Canvas { context, _ in
-                    context.addFilter(.alphaThreshold(min: 0.5, color: .black))
-                    context.addFilter(.blur(radius: LiquidFlow.blur))
-                    context.drawLayer { layer in
-                        for shape in shapes { layer.fill(shape.applying(transform), with: .color(.black)) }
-                    }
-                }
-            }
-            .frame(width: state.frame.width, height: state.frame.height + overdraw)
-            .offset(y: -overdraw)
-            .opacity(state.liquidShown ? 1 : 0)
-            .animation(.easeInOut(duration: state.liquidShown ? LiquidCard.toLiquid : LiquidCard.toSurface), value: state.liquidShown)
+        }
+        .frame(width: state.frame.width, height: state.frame.height, alignment: .topLeading)
+        .allowsHitTesting(false)
+        .environment(\.colorScheme, .dark)
+    }
+}
+
+/// The top layer: what the card shows, over the liquid.
+struct LiquidContentLayer: View {
+    let state: LiquidCardState
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
             if let target = state.target {
                 let rect = state.windowRect(target)
                 LiquidCardContent(kind: state.kind)
