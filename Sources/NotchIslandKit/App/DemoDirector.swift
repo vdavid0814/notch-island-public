@@ -60,6 +60,14 @@ import SwiftUI
         case .siriClipboard:
             model.controller.openAssistant()
             model.assistant.open(.clipboard)
+        case .siriType(let text):
+            model.controller.openAssistant()
+            Task { @MainActor in
+                for index in text.indices {
+                    try? await Task.sleep(for: .milliseconds(120))
+                    model.assistant.query = String(text[...index])
+                }
+            }
         case .timerUnit:
             NotificationCenter.default.post(name: .demoNextTimerUnit, object: nil)
         case .surface(let style):

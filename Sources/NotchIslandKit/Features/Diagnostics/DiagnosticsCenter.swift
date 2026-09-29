@@ -452,7 +452,7 @@ import Observation
         } else {
             detail = try await postToUserThread(DiagnosticsUploader.payload(for: envelope), files: envelope.files)
         }
-        if envelope.isAlert, let alerts = destinations.alerts {
+        if envelope.isAlert, shouldAlert(envelope), let alerts = destinations.alerts {
             let link = destinations.link(channel: detail.channelID, message: detail.id)
             _ = try? await DiagnosticsUploader.post(DiagnosticsUploader.alertPayload(for: envelope, link: link), to: alerts)
         }
@@ -477,6 +477,30 @@ import Observation
             }
         }
     }
+
+    /// The same findings in a plain report alert once a day at most (reports go every hour and a
+    /// lasting finding, a second copy on disk, would post the same alert each time). Crashes,
+    /// anomalies, problems and feedback always alert.
+    nonisolated static let lastAlertKey = "ni2.diagnostics.lastAlert"
+    static let repeatAlertAfter: TimeInterval = 24 * 3600
+
+    private func shouldAlert(_ envelope: DiagnosticsEnvelope) -> Bool {
+        guard envelope.kind == .report else { return true }
+        // Each finding by its words (numbers change every time, "589 mW"); alert when one has not
+        // alerted in the last day. The light report lacks some of the full one's findings, so a
+        // whole-list comparison would alert at every change of depth.
+        let now = Date()
+        var alerted = (defaults.dictionary(forKey: Self.lastAlertKey) as? [String: Date] ?? [:])
+            .filter { now.timeIntervalSince($0.value) < Self.repeatAlertAfter }
+        let keys = envelope.findings.map { $0.filter { !$0.isNumber } }
+        let fresh = keys.filter { alerted[$0] == nil }
+        guard !fresh.isEmpty else { return false }
+        for key in keys { alerted[key] = now }
+        defaults.set(alerted, forKey: Self.lastAlertKey)
+        return true
+    }
+
+    func shouldAlertForTests(_ envelope: DiagnosticsEnvelope) -> Bool { envelope.isAlert && shouldAlert(envelope) }
 
     /// Into this install's forum post, made on the first delivery (and again if it was deleted).
     private func postToUserThread(_ payload: [String: Any], files: [DiagnosticsEnvelope.File]) async throws -> DiagnosticsUploader.Posted {

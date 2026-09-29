@@ -16,6 +16,8 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case siriApps
     /// Siri opened on the clipboard history (as ⌘Space then ⌘4).
     case siriClipboard
+    /// Types `text` into Siri a letter every 120 ms, as a person would (for measuring a search).
+    case siriType(String)
     /// Switches the island's surface style, as the Settings cards do (animated).
     case surface(IslandGlassStyle)
     /// Holds every island spring this long after its start (nil: runs them again), so single frames
@@ -138,6 +140,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "demo/timerunit": return .demo(.timerUnit)
         case "demo/siriapps": return .demo(.siriApps)
         case "demo/siriclipboard": return .demo(.siriClipboard)
+        case "demo/siritype": return .demo(.siriType(query["text"] ?? "notch"))
         case "demo/surface":
             return query["style"].flatMap { IslandGlassStyle(rawValue: $0.lowercased()) }.map { .demo(.surface($0)) }
         case "demo/freeze":

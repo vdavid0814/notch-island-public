@@ -50,3 +50,23 @@ import Testing
         #expect(DiagnosticsFlow.section().entries.count == 2)
     }
 }
+
+@Suite struct DiagnosticsAlertTests {
+    @Test @MainActor func aLastingFindingAlertsOnceADay() {
+        let name = "alerts-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        let center = DiagnosticsCenter(defaults: defaults, destinations: DiagnosticsDestinations(), outbox: nil)
+        func envelope(_ findings: [String], kind: DiagnosticsEnvelope.Kind = .report) -> DiagnosticsEnvelope {
+            DiagnosticsEnvelope(kind: kind, reason: .periodic, sender: "T", installID: "i", facts: [], findings: findings,
+                                feedback: nil, files: [], comparison: [], reference: nil)
+        }
+        #expect(center.shouldAlertForTests(envelope(["4 copies of NotchIsland on disk"])))
+        #expect(!center.shouldAlertForTests(envelope(["5 copies of NotchIsland on disk"])))
+        // A new finding alerts; a lighter report without the earlier one does not.
+        #expect(center.shouldAlertForTests(envelope(["4 copies of NotchIsland on disk", "2 apps are missing from Spotlight"])))
+        #expect(!center.shouldAlertForTests(envelope(["4 copies of NotchIsland on disk"])))
+        #expect(center.shouldAlertForTests(envelope(["4 copies of NotchIsland on disk"], kind: .crash)))
+        #expect(!center.shouldAlertForTests(envelope([])))
+    }
+}
