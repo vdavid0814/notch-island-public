@@ -196,6 +196,15 @@ nonisolated enum DiagnosticsProbes {
             section.add("\(scope)", "on disk \(onDisk.count), in Spotlight \(indexed.count) (query \(DiagnosticsFormat.duration(took))), missing \(absent.count)")
             missing += absent.map { ($0 as NSString).abbreviatingWithTildeInPath }
         }
+        // Apps the user has outside the app folders, which Siri found only from v0.4.10 on (an Xcode
+        // unpacked in Downloads: "Siri does not bring up my apps").
+        let elsewhere = queryPaths(predicate, scope: kMDQueryScopeComputer as String)
+            .filter { path in
+                AssistantSearch.isListedApp(path) && !path.hasPrefix("/System/")
+                    && !AssistantSearch.appScopes.contains { path.hasPrefix($0 + "/") }
+            }
+        section.add("Apps elsewhere (Spotlight)", elsewhere.isEmpty ? "none"
+            : "\(elsewhere.count): " + elsewhere.prefix(40).map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: ", "))
         section.add(missingKey, missing.count)
         if onDiskTotal > 0 {
             report.metrics[.spotlightMissingPercent] = Double(missing.count) / Double(onDiskTotal) * 100
