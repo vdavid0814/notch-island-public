@@ -281,7 +281,7 @@ struct DiagnosticsSection: View {
         Section {
             Toggle(isOn: $diagnostics.isEnabled) {
                 Text("Send Diagnostics to the Developer")
-                Text("At launch, every hour, after an update or a crash, when something stops working and when it uses unusually much energy. Uses a little more battery.")
+                Text("At launch, after an update or a crash, when something stops working or uses unusually much energy, and every hour (a short report; the full one every 6 hours). Barely uses battery.")
             }
             .disabled(!diagnostics.isConfigured)
             TextField("Your name", text: $diagnostics.name, prompt: Text("Optional, so the developer knows who you are"))
