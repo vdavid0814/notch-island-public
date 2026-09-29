@@ -29,6 +29,23 @@ nonisolated enum AssistantSearch {
     /// The system's apps that live outside the app folders and that Spotlight lists (Finder, Archive
     /// Utility, Screen Sharing…).
     static let finder = "/System/Library/CoreServices/Finder.app"
+    /// The apps among macOS's own services a user opens (Screen Time, Paired Devices, Apple
+    /// Diagnostics…): an app category and not a background agent (Dock, loginwindow and the like
+    /// are agents), read once from their Info.plist.
+    static let coreServicesUserApps: Set<String> = {
+        let folder = "/System/Library/CoreServices"
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []
+        return Set(names.filter { $0.hasSuffix(".app") }.compactMap { name -> String? in
+            let path = folder + "/" + name
+            guard let info = Bundle(path: path)?.infoDictionary, info["LSApplicationCategoryType"] != nil,
+                  !flag(info["LSUIElement"]), !flag(info["LSBackgroundOnly"]) else { return nil }
+            return path
+        })
+    }()
+
+    private static func flag(_ value: Any?) -> Bool {
+        (value as? Bool) ?? (value as? NSNumber)?.boolValue ?? ((value as? String).map { $0 == "1" || $0.lowercased() == "yes" } ?? false)
+    }
     static let coreServicesApps = "/System/Library/CoreServices/Applications"
     /// Apps are looked for everywhere Spotlight indexes, as the system's Spotlight does: an app
     /// anywhere else (an Xcode unpacked in Downloads, a game in Documents) was never found — the
@@ -90,9 +107,10 @@ nonisolated enum AssistantSearch {
         }
         for scope in appScopes { scan(URL(fileURLWithPath: scope), depth: 1) }
         scan(URL(fileURLWithPath: coreServicesApps), depth: 0)
-        if manager.fileExists(atPath: finder) {
-            hits.append(AssistantHit(kind: .app, url: URL(fileURLWithPath: finder), name: manager.displayName(atPath: finder)
-                .replacingOccurrences(of: ".app", with: ""), contentType: "com.apple.application-bundle", lastUsed: nil))
+        for path in coreServicesUserApps.union([finder]).sorted() where manager.fileExists(atPath: path) {
+            let name = manager.displayName(atPath: path)
+            hits.append(AssistantHit(kind: .app, url: URL(fileURLWithPath: path), name: name.hasSuffix(".app") ? String(name.dropLast(4)) : name,
+                                     contentType: "com.apple.application-bundle", lastUsed: nil))
         }
         return hits
     }
@@ -153,6 +171,7 @@ nonisolated enum AssistantSearch {
         if let outer = embeddingApp(path) { return isListedApp(outer) }
         if path.hasPrefix("/System/") {
             return path.hasPrefix("/System/Applications/") || path.hasPrefix(coreServicesApps + "/") || path == finder
+                || coreServicesUserApps.contains(path)
         }
         if path.hasPrefix("/Volumes/") || path.hasPrefix("/usr/") || path.hasPrefix("/opt/") || path.hasPrefix("/private/") { return false }
         if path.contains("/Library/") || path.contains("/.Trash/") { return false }

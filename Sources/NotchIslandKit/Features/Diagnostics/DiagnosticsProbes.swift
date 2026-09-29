@@ -198,7 +198,15 @@ nonisolated enum DiagnosticsProbes {
         }
         // Apps the user has outside the app folders, which Siri found only from v0.4.10 on (an Xcode
         // unpacked in Downloads: "Siri does not bring up my apps").
-        let elsewhere = queryPaths(predicate, scope: kMDQueryScopeComputer as String)
+        let everywhere = queryPaths(predicate, scope: kMDQueryScopeComputer as String)
+        // What Spotlight knows and Siri's list leaves out, but for macOS's own internals and the
+        // Libraries' helpers: the next "Siri does not find my app" is in here.
+        let leftOut = everywhere.filter { path in
+            !AssistantSearch.isListedApp(path) && !path.hasPrefix("/System/") && !path.contains("/Library/")
+        }
+        section.add(leftOutKey, leftOut.isEmpty ? "none"
+            : "\(leftOut.count): " + leftOut.prefix(40).map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: ", "))
+        let elsewhere = everywhere
             .filter { path in
                 AssistantSearch.isListedApp(path) && !path.hasPrefix("/System/")
                     && !AssistantSearch.appScopes.contains { path.hasPrefix($0 + "/") }
@@ -238,6 +246,7 @@ nonisolated enum DiagnosticsProbes {
     static let missingKey = "Apps missing from Spotlight"
     static let galleryKey = "allApps() (the gallery)"
     static let elsewhereKey = "Apps elsewhere (Spotlight)"
+    static let leftOutKey = "Left out of Siri's list (Spotlight)"
 
     private static func normalized(_ path: String) -> String {
         URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path.lowercased()

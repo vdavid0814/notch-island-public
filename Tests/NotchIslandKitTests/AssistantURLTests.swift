@@ -70,6 +70,13 @@ import Testing
                 == "/Applications/Xcode.app/Contents/Applications/A.app")
     }
 
+    @Test func macOSsOwnUserAppsAreListedAndItsAgentsNot() {
+        #expect(AssistantSearch.coreServicesUserApps.contains("/System/Library/CoreServices/Screen Time.app"))
+        #expect(!AssistantSearch.coreServicesUserApps.contains("/System/Library/CoreServices/Dock.app"))
+        #expect(AssistantSearch.isListedApp("/System/Library/CoreServices/Screen Time.app"))
+        #expect(!AssistantSearch.isListedApp("/System/Library/CoreServices/loginwindow.app"))
+    }
+
     @Test func camelCaseNamesAreWords() {
         #expect(AssistantMatch.matches("DeviceHub", "device hub"))
         #expect(AssistantMatch.matches("DeviceHub", "hub"))
