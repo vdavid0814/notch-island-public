@@ -128,10 +128,11 @@ import Testing
 
 @Suite struct LiquidCardExitTests {
     @Test @MainActor func eachCardLeavesWithItsOwnLead() {
-        #expect(LiquidCard.exitLead(for: "volume", underNotch: true) == 0.37)
-        #expect(LiquidCard.exitLead(for: "volume", underNotch: false) == 0.35)
-        #expect(LiquidCard.exitLead(for: "airPodsMode", underNotch: true) == 0.27)
-        #expect(LiquidCard.exitLead(for: "airPodsMode", underNotch: false) == 0.25)
-        #expect(LiquidCard.exitLead(for: "airPods", underNotch: false) == LiquidCard.exitLead)
+        #expect(LiquidCard.exitLead(for: "volume", at: .notch) == 0.37)
+        #expect(LiquidCard.exitLead(for: "volume", at: .splitView) == 0.33)
+        #expect(LiquidCard.exitLead(for: "volume", at: .desktop) == 0.35)
+        #expect(LiquidCard.exitLead(for: "airPodsMode", at: .notch) == 0.27)
+        #expect(LiquidCard.exitLead(for: "airPodsMode", at: .splitView) == 0.25)
+        #expect(LiquidCard.exitLead(for: "airPods", at: .desktop) == LiquidCard.exitLead)
     }
 }
