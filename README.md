@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.4.5 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.5 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -18,6 +18,50 @@ events, volume/brightness and dropped files live there the rest of the time.
 For older versions, see the **[Releases page](https://github.com/vdavid0814/notch-island-public/releases)**.
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.5
+
+Spotlight that finds every app, an Update button, and Settings that look native down to the corners.
+
+**Spotlight** (called Siri before)
+- **Every app is found:** tools that live inside other apps (Xcode's Device Hub, Instruments,
+  Simulator…), macOS's own user apps (Screen Time, Paired Devices…) and apps outside the
+  Applications folders. Names written together are split at their capitals, so "hub" finds
+  DeviceHub.
+- **↑/↓ show where you are:** the row the keys moved to is marked in the theme's colour.
+- The selection sits in the panel's rounded corner exactly.
+- In Settings the page is now called **Spotlight**, with a magnifying glass.
+
+**Updates** (Settings ▸ About)
+- NotchIsland looks up the newest version itself. **Download Update** saves it into your Downloads
+  folder and opens it: quit NotchIsland, drag it onto Applications and choose Replace. macOS checks
+  it like any download.
+
+**Settings**
+- Every button is the system's own, in a capsule; the main actions are highlighted.
+- The choice bars (Follow the Music / Animation, the shortcut, the widths…) have their final width
+  as soon as the page opens, instead of widening on the first click.
+- Every grey card is rounded concentric with the controls in its corners, as in macOS's own
+  settings; switches, text fields and footnotes are laid out as there.
+- The widget studio's stage and gallery cards match too.
+
+**Diagnostics** (for testers who turned them on)
+- macOS's own harmless log messages are listed apart, each explained, and no longer counted as
+  errors. Being offline is a wait, not a failure.
+- More honest findings: an update or a new build is not an unclean exit, battery energy is judged
+  only after half an hour on battery, only new crash reports count, and apps missing from macOS's
+  Spotlight index are shown as found by NotchIsland rather than as a problem.
+- Reports list what Spotlight knows that the app list leaves out, so a missing app can be traced.
+
+**Fixes**
+- No more errors from audio devices that have just disconnected, or from wallpaper pictures that
+  are gone.
+
+For v0.4.6 – v0.4.10 (liquid volume and AirPods cards, AirPods noise control, the theme colour,
+calculations in Spotlight, screenshots in bug reports, a much lighter battery footprint), see the
+**[Releases page](https://github.com/vdavid0814/notch-island-public/releases)**.
 
 ---
 
