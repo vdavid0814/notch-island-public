@@ -139,8 +139,8 @@ private struct GeneralSettings: View {
                     Text("Liquid Glass, solid black like the hardware island, or black at the notch fading into glass.")
                 }
                 Toggle(isOn: $preferences.commandSpaceOpensSiri) {
-                    Text("Open Siri with ⌘Space")
-                    Text("Siri opens in the notch instead of the system's search. Needs Accessibility.")
+                    Text("Open Spotlight with ⌘Space")
+                    Text("Spotlight opens in the notch instead of the system's search. Needs Accessibility.")
                 }
                 Toggle(isOn: $preferences.hideInFullscreen) {
                     Text("Hide during full-screen video")

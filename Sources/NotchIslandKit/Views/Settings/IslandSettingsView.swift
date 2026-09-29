@@ -24,7 +24,7 @@ nonisolated enum IslandSettingsPane: String, CaseIterable, Identifiable, Sendabl
         case .general: "General"
         case .widgets: "Widgets"
         case .activities: "Live Activities"
-        case .siri: "Siri"
+        case .siri: "Spotlight"
         case .about: "About"
         }
     }
@@ -45,7 +45,7 @@ nonisolated enum IslandSettingsPane: String, CaseIterable, Identifiable, Sendabl
         case .general: "gearshape.fill"
         case .widgets: "square.grid.2x2.fill"
         case .activities: "waveform"
-        case .siri: "siri"
+        case .siri: "magnifyingglass"
         case .about: "info.circle.fill"
         }
     }

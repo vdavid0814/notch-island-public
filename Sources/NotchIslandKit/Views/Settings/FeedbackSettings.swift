@@ -83,7 +83,7 @@ struct FeedbackSection: View {
             Text(isBug ? "Bug Report" : "Feature Request").font(.headline)
         }
         TextField("Title", text: field(\.title),
-                  prompt: Text(isBug ? "In a few words, e.g. “Siri finds no apps”" : "In a few words, e.g. “A weather widget”"))
+                  prompt: Text(isBug ? "In a few words, e.g. “Spotlight finds no apps”" : "In a few words, e.g. “A weather widget”"))
         TextField(isBug ? "What happened?" : "Your idea", text: field(\.details),
                   prompt: Text(isBug ? "Describe what went wrong" : "What would you like NotchIsland to do?"),
                   axis: .vertical)
@@ -318,7 +318,7 @@ struct DiagnosticsSection: View {
                 are set up; every installed app and its version, login items and the names of running apps; \
                 how much energy, CPU and memory NotchIsland uses (a reading every 10 minutes), and the apps \
                 using the most energy; every NotchIsland setting and its full state, including what is \
-                playing, what you typed into Siri and the files on the Shelf; whether Spotlight finds your \
+                playing, what you typed into Spotlight and the files on the Shelf; whether macOS's Spotlight index has your \
                 apps; NotchIsland's log, crash reports and the hangs or exceptions macOS itself reports. The numbers and settings are compared with the \
                 developer's Mac, and anything unusual is reported at once. \
                 Never sent: what is on your clipboard, or your passwords.

@@ -671,7 +671,7 @@ struct ActivitiesSettingsPage: View {
     }
 }
 
-// MARK: - Siri
+// MARK: - Spotlight (the assistant, called Siri in the code)
 
 struct SiriSettingsPage: View {
     @Environment(AppModel.self) private var model
@@ -684,26 +684,26 @@ struct SiriSettingsPage: View {
         Form {
             Section {
                 Toggle(isOn: $preferences.commandSpaceOpensSiri) {
-                    InfoLabel("Open Siri with \(siri.shortcut.title)", "Siri opens in the notch instead of the system's search window. Needs Accessibility, which lets NotchIsland see the shortcut before the system does.")
+                    InfoLabel("Open Spotlight with \(siri.shortcut.title)", "Spotlight opens in the notch instead of the system's search window. Needs Accessibility, which lets NotchIsland see the shortcut before the system does.")
                 }
                 Picker(selection: $preferences.siri.shortcut) {
                     ForEach(SiriShortcut.allCases) { Text($0.title).tag($0) }
                 } label: {
-                    InfoLabel("Shortcut", "The keys that open Siri: Space with Command, Option or Control. ⌘Space replaces the system's search; the others leave it where it is.")
+                    InfoLabel("Shortcut", "The keys that open Spotlight: Space with Command, Option or Control. ⌘Space replaces the system's search; the others leave it where it is.")
                 }
                 .choiceBar()
                 .disabled(!preferences.commandSpaceOpensSiri)
                 Toggle(isOn: $preferences.siri.shortcutCloses) {
-                    InfoLabel("Shortcut again closes Siri", "Like the system's search: the same keys close Siri. Off, they only open it and Esc closes it.")
+                    InfoLabel("Shortcut again closes Spotlight", "Like the system's search: the same keys close Spotlight. Off, they only open it and Esc closes it.")
                 }
                 .disabled(!preferences.commandSpaceOpensSiri)
                 Toggle(isOn: $preferences.siri.swipeOpens) {
-                    InfoLabel("Swipe down on the notch", "With the pointer on the notch, a light two-finger swipe down on the trackpad (or the mouse wheel turned down) opens Siri.")
+                    InfoLabel("Swipe down on the notch", "With the pointer on the notch, a light two-finger swipe down on the trackpad (or the mouse wheel turned down) opens Spotlight.")
                 }
                 Toggle(isOn: $preferences.siri.hoverRevealsSuggestions) {
-                    InfoLabel("Show suggestions on hover", "With the pointer over Siri, Applications, Files and Actions come down under the field. Off, only ↓ brings them.")
+                    InfoLabel("Show suggestions on hover", "With the pointer over Spotlight, Applications, Files and Actions come down under the field. Off, only ↓ brings them.")
                 }
-                LabeledContent("Open Siri now") {
+                LabeledContent("Open Spotlight now") {
                     Button("Open") {
                         model.controller.closeSettings()
                         model.perform(.assistant)
@@ -717,7 +717,7 @@ struct SiriSettingsPage: View {
                 Picker(selection: $preferences.siri.panelSize) {
                     ForEach(SiriPanelSize.allCases) { Text($0.title).tag($0) }
                 } label: {
-                    InfoLabel("Width", "How wide Siri's window grows out of the notch. The island's own size (General) scales it too.")
+                    InfoLabel("Width", "How wide Spotlight's window grows out of the notch. The island's own size (General) scales it too.")
                 }
                 .choiceBar()
                 RowsStepper(title: "List height", detail: "How many results — and how much of an answer — show before the list scrolls.",
@@ -745,7 +745,7 @@ struct SiriSettingsPage: View {
                         preferences.siri.searchDelay = $0
                     }
                 } label: {
-                    InfoLabel("Search after typing", "How long Siri waits after a key before it searches. 0 ms searches on every key; a longer wait searches once you pause, which is lighter on the Mac.")
+                    InfoLabel("Search after typing", "How long Spotlight waits after a key before it searches. 0 ms searches on every key; a longer wait searches once you pause, which is lighter on the Mac.")
                 }
                 Picker(selection: $preferences.siri.matching) {
                     ForEach(SiriMatching.allCases) { Text($0.title).tag($0) }
@@ -773,7 +773,7 @@ struct SiriSettingsPage: View {
                     InfoLabel("Clipboard  ⌘4", "The last 50 texts you copied, kept on this Mac; Return pastes one where you were typing. Copies that password managers mark as secret are never kept. Off, nothing is watched.")
                 }
             } header: {
-                InfoLabel("Suggestions", "What Siri lists and searches. A suggestion that is off does not open with its shortcut either.")
+                InfoLabel("Suggestions", "What Spotlight lists and searches. A suggestion that is off does not open with its shortcut either.")
             }
 
             Section {
@@ -796,7 +796,7 @@ struct SiriSettingsPage: View {
                 }
                 .choiceBar()
             } header: {
-                InfoLabel("Files", "The folders Siri searches for files. macOS asks for access to each of them the first time.")
+                InfoLabel("Files", "The folders Spotlight searches for files. macOS asks for access to each of them the first time.")
             }
             .disabled(!siri.showsFiles)
 
@@ -972,7 +972,7 @@ struct AboutSettingsPage: View {
                         Text("NotchIsland").font(.system(size: 20, weight: .bold))
                         Text(SettingsFormat.version(Bundle.main.infoDictionary))
                             .foregroundStyle(SettingsPalette.secondary)
-                        Text("The notch as a Liquid Glass island: what's playing, timers, volume and brightness, charging, Siri, Control Center's switches and a shelf for files.")
+                        Text("The notch as a Liquid Glass island: what's playing, timers, volume and brightness, charging, Spotlight, Control Center's switches and a shelf for files.")
                             .font(.callout)
                             .foregroundStyle(SettingsPalette.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -986,7 +986,7 @@ struct AboutSettingsPage: View {
             FeedbackSection()
 
             Section {
-                PermissionRow(title: "Accessibility", detail: "⌘Space for Siri, and replacing the volume and brightness HUD.",
+                PermissionRow(title: "Accessibility", detail: "⌘Space for Spotlight, and replacing the volume and brightness HUD.",
                               systemImage: "accessibility", tint: .blue,
                               status: trusted ? "Allowed" : "Not allowed", tone: trusted ? .ok : .attention) {
                     if !trusted {
