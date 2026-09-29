@@ -369,6 +369,8 @@ nonisolated enum DiagnosticsProbes {
         "on unconnected nw_connection", "AddInstanceForFactory: No factory registered",
         "No matching scene to invalidate", "BSBlockSentinel:FBSWorkspaceScenesClient", "ViewBridge to RemoteViewService Terminated",
         "com.apple.ViewBridge.error Code=18", "Unable to obtain a task name port right",
+        // A server's reset arriving after the connection was closed (state=CLOSED).
+        "state=CLOSED rcv_nxt=",
     ]
 
     static func isKnownNoise(_ line: Substring) -> Bool {
