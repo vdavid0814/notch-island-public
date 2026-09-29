@@ -41,6 +41,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
     case assistant
     /// A diagnostics report now (`diagnostics/send`); only while the user has diagnostics on.
     case sendDiagnostics
+    /// The hourly report now (light unless a full one is due): for measuring its cost.
+    case sendPeriodicDiagnostics
     /// The developer's Mac writes its numbers as the reference (`diagnostics/baseline`).
     case publishBaseline
     case demo(DemoCommand)
@@ -97,6 +99,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "customize": return .customize
         case "assistant", "siri": return .assistant
         case "diagnostics/send": return .sendDiagnostics
+        case "diagnostics/periodic": return .sendPeriodicDiagnostics
         case "diagnostics/baseline": return .publishBaseline
 
         case "media/play": return .media(.play)

@@ -32,7 +32,12 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     /// ~1.7 s after the last change, having shrunk to 90 % in its last half second, measured), so
     /// it neither leaves the card bare nor stays after it.
     static let searchTime: TimeInterval = 1.0
-    static let pollInterval: Duration = .milliseconds(20)
+    /// Quick while the card is due to come up (and may have to be followed elsewhere), slower
+    /// after: the way out is timed from the last change, not from seeing the card go. The window
+    /// list is read off the main thread (it was a third of the main thread's work per change).
+    static let quickPoll: Duration = .milliseconds(25)
+    static let slowPoll: Duration = .milliseconds(60)
+    static let quickPollTime: TimeInterval = 0.6
     /// The liquid turning into the surface as it lands, and back before it leaves.
     static let toSurface: TimeInterval = 0.3
     static let toLiquid: TimeInterval = 0.1
@@ -221,9 +226,10 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         var left = false
         watch = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: Self.pollInterval)
+                let quick = Date().timeIntervalSince(started) < Self.quickPollTime
+                try? await Task.sleep(for: quick ? Self.quickPoll : Self.slowPoll, tolerance: .milliseconds(5))
+                let card = await SystemVolumeCard.findOffMain()
                 guard !Task.isCancelled, let self, let metrics = self.model.metrics else { return }
-                let card = SystemVolumeCard.find()
                 let now = Date()
                 let exitAt = self.lastChange.addingTimeInterval((self.lifetimes[cardKind] ?? 1.72) - Self.exitLead)
                 let isKept = self.state.isHeld || self.model.banners.isHeld || self.model.island.isInteracting

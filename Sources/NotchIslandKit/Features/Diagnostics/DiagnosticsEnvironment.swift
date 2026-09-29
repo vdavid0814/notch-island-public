@@ -283,6 +283,51 @@ nonisolated enum DiagnosticsEnvironment {
         return section
     }
 
+    /// This run's log since `since`, read in-process in one pass: NotchIsland's own lines and every
+    /// error or fault in the process, as `log show --style compact` writes them (so the same parsing
+    /// applies), and the trail of NotchIsland's lines. For the light hourly report: `log show` cost
+    /// ~0.6–1.8 s of CPU and the log daemon's work besides.
+    static func ownLog(since: Date, limit: Int, trailLimit: Int = 400) -> (DiagnosticsReport.Attachment, DiagnosticsReport.Section) {
+        var trail = DiagnosticsReport.Section(trailTitle)
+        var lines: [String] = []
+        var trailLines: [String] = []
+        let pid = ProcessInfo.processInfo.processIdentifier
+        do {
+            let store = try OSLogStore(scope: .currentProcessIdentifier)
+            let entries = try store.getEntries(at: store.position(date: since))
+            let stamp = DateFormatter()
+            stamp.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+            let short = Date.ISO8601FormatStyle(includingFractionalSeconds: true).time(includingFractionalSeconds: true)
+            var size = 0
+            for case let entry as OSLogEntryLog in entries {
+                let own = entry.subsystem == Log.subsystem
+                let isError = entry.level == .error || entry.level == .fault
+                guard own || isError else { continue }
+                let type = switch entry.level {
+                case .error: "E "
+                case .fault: "Fa"
+                case .info: "I "
+                case .debug: "Db"
+                default: "Df"
+                }
+                let line = "\(stamp.string(from: entry.date)) \(type) NotchIsland[\(pid):0] [\(entry.subsystem):\(entry.category)] \(entry.composedMessage)"
+                lines.append(line)
+                size += line.utf8.count + 1
+                if size > limit * 2 { size -= (lines.first?.utf8.count ?? 0) + 1; lines.removeFirst() }
+                if own, entry.level != .debug {
+                    trailLines.append("\(entry.date.formatted(short)) \(level(entry.level)) [\(entry.category)] \(entry.composedMessage)")
+                    if trailLines.count > trailLimit * 2 { trailLines.removeFirst(trailLines.count - trailLimit) }
+                }
+            }
+            trail.add("Lines", trailLines.count > trailLimit ? "last \(trailLimit)" : "\(trailLines.count)")
+            trail.add("Log", trailLines.suffix(trailLimit).joined(separator: "\n"))
+        } catch {
+            trail.add("Log", "unavailable: \(error.localizedDescription)")
+        }
+        let text = "Timestamp               Ty Process[PID:TID]\n" + lines.joined(separator: "\n")
+        return (DiagnosticsReport.Attachment(name: "log.txt", text: DiagnosticsFormat.tail(text, limit: limit)), trail)
+    }
+
     private static func level(_ level: OSLogEntryLog.Level) -> String {
         switch level {
         case .debug: "D"

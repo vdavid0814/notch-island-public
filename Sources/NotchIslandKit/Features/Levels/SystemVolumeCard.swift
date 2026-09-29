@@ -56,6 +56,8 @@ nonisolated enum SystemVolumeCard {
         return nil
     }
 
+    @concurrent static func findOffMain() async -> CGRect? { find() }
+
     /// A window-list rect (top-left origin on the primary display) in AppKit's coordinates.
     static func appKit(_ rect: CGRect) -> CGRect {
         let primary = CGDisplayBounds(CGMainDisplayID()).height

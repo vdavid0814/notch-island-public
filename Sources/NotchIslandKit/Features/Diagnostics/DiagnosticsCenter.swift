@@ -30,6 +30,14 @@ import Observation
     /// Hours of log in an automatic report, in the hourly one, and in a bug report.
     static let reportLogHours = 6
     static let periodicLogHours = 1
+    /// The hourly report is light (what changes by the hour: energy, the app's state, the user's
+    /// flow, this run's log read in-process); a full one (the Mac's setup, installed apps, Spotlight,
+    /// hardware, `log show` over earlier runs) goes at most this often, and at launch, after an
+    /// update or a crash, by hand, with a bug report or an anomaly. A full report and its tools
+    /// cost ~21 J (measured, coalition): hourly that was ten times the app's own energy.
+    static let fullReportInterval: TimeInterval = 6 * 3600
+    nonisolated static let lastFullKey = "ni2.diagnostics.lastFull"
+
     static let bugLogHours = 24
     /// A second Send Report Now this soon after a report sends nothing (four in six seconds were
     /// seen, v0.4.5).
@@ -284,7 +292,10 @@ import Observation
         // By hand: the newest version and reference, not an hour-old answer.
         await references.refresh(force: reason == .manual)
         let hours = reason == .periodic ? Self.periodicLogHours : Self.reportLogHours
-        let report = await makeReport(logHours: hours, crashesSince: crashesSince)
+        let lastFull = defaults.object(forKey: Self.lastFullKey) as? Date ?? .distantPast
+        let light = reason == .periodic && Date().timeIntervalSince(lastFull) < Self.fullReportInterval
+        let report = await makeReport(logHours: hours, crashesSince: crashesSince, light: light)
+        if !light { defaults.set(Date(), forKey: Self.lastFullKey) }
         let crashes = report.attachments.count { $0.name != "log.txt" }
         let kind: DiagnosticsEnvelope.Kind = crashes > 0 ? .crash : reason == .anomaly ? .anomaly : .report
         let delivered = await deliver(envelope(kind: kind, reason: reason, report: report, feedback: nil))
@@ -537,7 +548,7 @@ import Observation
     // MARK: The report
 
     /// The whole report: the app's state and energy here, everything else off the main actor.
-    func makeReport(logHours: Int, crashesSince: Date?, basicOnly: Bool = false) async -> DiagnosticsReport {
+    func makeReport(logHours: Int, crashesSince: Date?, basicOnly: Bool = false, light: Bool = false) async -> DiagnosticsReport {
         var appSections: [DiagnosticsReport.Section] = []
         var metrics: [DiagnosticsMetric: Double] = [:]
         if !basicOnly {
@@ -548,7 +559,8 @@ import Observation
         }
         // The tools the collection starts count as NotchIsland's helpers: that stretch is not judged.
         energy.beginCollecting()
-        let background = await Self.collect(launchedAt: launchedAt, logHours: logHours, crashesSince: crashesSince, basicOnly: basicOnly)
+        let background = await Self.collect(launchedAt: launchedAt, logHours: logHours, crashesSince: crashesSince, basicOnly: basicOnly,
+                                            light: light)
         energy.endCollecting()
         metrics.merge(background.metrics) { $1 }
         var report = DiagnosticsReport()
@@ -556,7 +568,7 @@ import Observation
         report.attachments = background.attachments
         if !basicOnly {
             report.sections.insert(referenceSection(metrics), at: min(3, report.sections.count))
-            report.sections.insert(differencesSection(report.settings), at: min(4, report.sections.count))
+            if !light { report.sections.insert(differencesSection(report.settings), at: min(4, report.sections.count)) }
             var causes = DiagnosticsReport.Section("Likely causes")
             let found = DiagnosticsInsights.causes(report, metrics: metrics)
             causes.add("Causes", found.isEmpty ? "nothing stands out" : found.map { "• \($0)" }.joined(separator: "\n"))
@@ -657,12 +669,27 @@ import Observation
     }
 
     @concurrent nonisolated private static func collect(launchedAt: Date, logHours: Int, crashesSince: Date?,
-                                                         basicOnly: Bool) async -> DiagnosticsReport {
+                                                         basicOnly: Bool, light: Bool = false) async -> DiagnosticsReport {
         var report = DiagnosticsReport()
         var app = DiagnosticsProbes.bundle(launchedAt: launchedAt)
         app.add("Crash reports kept", DiagnosticsProbes.crashSummary())
+        app.add("Report depth", light ? "light (hourly: the Mac's setup, apps and Spotlight are in the full report every 6 h)" : "full")
         report.sections = [app, DiagnosticsProbes.system(), DiagnosticsProbes.permissions()]
         guard !basicOnly else { return report }
+        if light {
+            report.sections.append(BatteryProbe.section())
+            report.metrics[.crashes] = Double(DiagnosticsProbes.crashCount(days: 7))
+            // No log: reading it (`log show`, or even this process's own through OSLogStore) waits on
+            // the log daemon, whose work is billed to the app (~1.3 s a read, measured). The user's
+            // flow and the app's state say what happened; the full report brings the log.
+            var section = DiagnosticsReport.Section("Log")
+            section.add("Log", "in the full report (every 6 hours, at launch, by hand and with a bug report)")
+            report.sections.append(section)
+            if let crashesSince {
+                report.attachments += DiagnosticsProbes.crashReports(since: crashesSince, limit: 4, perFile: 600_000)
+            }
+            return report
+        }
         report.sections += [BatteryProbe.section(), BatteryProbe.topUsers()]
         let spotlight = await DiagnosticsProbes.spotlight()
         report.sections += spotlight.sections

@@ -237,6 +237,9 @@ import Observation
                 return
             }
             Task { await diagnostics.sendReport(.manual) }
+        case .sendPeriodicDiagnostics:
+            guard diagnostics.isEnabled else { return }
+            Task { await diagnostics.sendReport(.periodic) }
         case .publishBaseline:
             Task { await diagnostics.publishBaseline() }
         case .demo(let demoCommand):
