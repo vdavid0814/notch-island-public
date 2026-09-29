@@ -22,8 +22,8 @@ import Foundation
     }
 }
 
-/// The deeper reading of a report: crash reports taken apart, the log's errors by where they come
-/// from, and the likely cause of each finding with what fixes it.
+/// The deeper reading of a report: crash reports taken apart and the log's errors by where they
+/// come from (the likely causes are `DiagnosticsVerdict`'s).
 nonisolated enum DiagnosticsInsights {
     // MARK: Crashes
 
@@ -92,39 +92,5 @@ nonisolated enum DiagnosticsInsights {
             section.add("\(value.count)× \(source)", String(value.example.suffix(220)))
         }
         return section
-    }
-
-    // MARK: Likely causes
-
-    /// For each thing that looks wrong, what most likely causes it and what fixes it, read from the
-    /// report's own lines.
-    static func causes(_ report: DiagnosticsReport, metrics: [DiagnosticsMetric: Double]) -> [String] {
-        var causes: [String] = []
-        let spotlight = DiagnosticsProbes.spotlightTitle
-        if let missing = report.value(DiagnosticsProbes.missingKey, in: spotlight).flatMap(Int.init), missing > 0 {
-            causes.append("\(missing) app(s) missing from Spotlight → the index is incomplete (usually after a migration or restore). Siri reads the app folders itself, so apps still show; macOS's Spotlight re-indexes with `sudo mdutil -E /`.")
-        }
-        if let copies = report.value("Copies", in: DiagnosticsAppStateKeys.copies), copies.contains("/Volumes/") {
-            causes.append("Copies of NotchIsland on mounted disk images → an old DMG is still mounted; eject it in Finder (harmless, but Launch Services may pick the wrong copy).")
-        }
-        if metrics[.uncleanExits] == 1, (metrics[.crashes] ?? 0) == 0 {
-            causes.append("The last run ended without quitting and without a crash report → force quit, a kill (an update or rebuild replacing the app), or the Mac shutting down; a hang would leave a .hang report.")
-        }
-        if let login = report.value("Launch at login", in: DiagnosticsAppStateKeys.features), login.contains("not found") {
-            causes.append("Launch at login is not registered → turn it on in Settings ▸ General (the app must run from /Applications).")
-        }
-        if let keys = report.value("Key interception", in: DiagnosticsAppStateKeys.features), keys.hasPrefix("failed") {
-            causes.append("The volume/brightness keys are not intercepted → Accessibility or Input Monitoring was withdrawn; allow NotchIsland again in System Settings ▸ Privacy & Security.")
-        }
-        if let power = metrics[.powerMW], let helpers = metrics[.helpersPowerMW], helpers > power * 0.5, helpers > 5 {
-            causes.append("Most of the energy is the helper processes (the MediaRemote adapter for browser media) → a browser tab kept reporting playback.")
-        }
-        if let interfering = report.value(DiagnosticsEnvironment.interferingKey, in: DiagnosticsEnvironment.appsTitle), interfering != "none" {
-            causes.append("Installed apps that may take the notch, the HUD or the keys: \(interfering) → if one runs, it can hide or duplicate the island's banners.")
-        }
-        if report.value("Accessibility", in: "Permissions") == "false" {
-            causes.append("Accessibility is off → ⌘Space for Siri and the volume/brightness keys cannot work; allow it in System Settings ▸ Privacy & Security ▸ Accessibility.")
-        }
-        return causes
     }
 }

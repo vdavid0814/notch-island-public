@@ -92,7 +92,8 @@ nonisolated struct DiagnosticsReport: Sendable, Equatable {
 
     /// The whole report as JSON (`report.json`), for scripts: the same sections as the text, plus
     /// the numbers, what stood out and the comparison with the reference.
-    func json(meta: [String: String], findings: [String], comparisons: [DiagnosticsComparison]) -> String {
+    func json(meta: [String: String], findings: [String], comparisons: [DiagnosticsComparison],
+              verdict: DiagnosticsVerdict? = nil) -> String {
         struct Compared: Encodable {
             var metric: String, title: String, value: Double, reference: Double?, unusual: Bool
         }
@@ -103,13 +104,14 @@ nonisolated struct DiagnosticsReport: Sendable, Equatable {
             var comparisons: [Compared]
             var sections: [Section]
             var attachments: [String]
+            var verdict: DiagnosticsVerdict?
         }
         let document = Document(
             meta: meta, findings: findings,
             metrics: Dictionary(uniqueKeysWithValues: metrics.map { ($0.key.rawValue, $0.value) }),
             comparisons: comparisons.map { .init(metric: $0.metric.rawValue, title: $0.metric.title, value: $0.value,
                                                  reference: $0.reference, unusual: $0.isUnusual) },
-            sections: sections, attachments: attachments.map(\.name))
+            sections: sections, attachments: attachments.map(\.name), verdict: verdict)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return (try? encoder.encode(document)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"

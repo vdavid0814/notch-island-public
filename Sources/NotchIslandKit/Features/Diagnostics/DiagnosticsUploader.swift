@@ -99,6 +99,8 @@ nonisolated struct DiagnosticsEnvelope: Sendable, Codable, Equatable {
     var reference: String? = nil
     /// Screenshots and recordings the user attached (bug reports), sent after the report itself.
     var media: [DiagnosticsMediaFile]? = nil
+    /// The report read in one place (`DiagnosticsVerdict`): the embed's first field.
+    var verdict: DiagnosticsVerdict? = nil
 
     /// Worth a line in the alerts channel.
     var isAlert: Bool { kind != .report || !findings.isEmpty }
@@ -221,6 +223,12 @@ nonisolated enum DiagnosticsUploader {
 
     // MARK: The messages
 
+    /// A report is orange with an issue and yellow with only warnings; the rest by kind.
+    static func color(_ envelope: DiagnosticsEnvelope) -> Int {
+        guard envelope.kind == .report, let verdict = envelope.verdict else { return color(envelope.kind) }
+        return verdict.issues > 0 ? 0xFF9F0A : verdict.warnings > 0 ? 0xFFD60A : color(envelope.kind)
+    }
+
     static func color(_ kind: DiagnosticsEnvelope.Kind) -> Int {
         switch kind {
         case .bug: 0xFF453A
@@ -286,6 +294,7 @@ nonisolated enum DiagnosticsUploader {
             guard !value.isEmpty, fields.count < 25 else { return }
             fields.append(["name": clipped(name, titleLimit), "value": clipped(value, fieldLimit), "inline": inline])
         }
+        if let verdict = envelope.verdict { field("🧭 Verdict", verdict.embedText, inline: false) }
         field("From", envelope.sender, inline: true)
         if envelope.kind == .bug, let feedback = envelope.feedback {
             field("How often", feedback.frequency.title, inline: true)
@@ -305,7 +314,7 @@ nonisolated enum DiagnosticsUploader {
 
         var embed: [String: Any] = [
             "title": clipped(title(envelope), titleLimit),
-            "color": color(envelope.kind),
+            "color": color(envelope),
             "fields": fields,
             "footer": ["text": "Install \(envelope.installID.prefix(8)) · \(envelope.id.uuidString.prefix(8))"],
             "timestamp": envelope.created.formatted(.iso8601),

@@ -33,7 +33,7 @@ BROWSER = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 
 # Sections that change on every report: left out of "what changed since the previous report".
 VOLATILE = {"Energy", "Event trail (this run)", "Log", "Top energy users", "Battery", "Compared with the reference",
             "History", "Windows", "Island internals", "Differs from the reference Mac", "Errors by source", "User flow",
-            "Likely causes", "Crash analysis", "System diagnostics (MetricKit)"}
+            "Likely causes", "Crash analysis", "System diagnostics (MetricKit)", "Summary"}
 VOLATILE_KEYS = {"PID", "Running for", "Launched", "Uptime", "Disk free", "Memory footprint", "CPU time",
                  "Clipboard items", "Revision", "Written"}
 
@@ -234,10 +234,11 @@ def parse_text(text):
 def load(folder):
     """One downloaded report: meta, findings, metrics, sections."""
     message = json.loads((folder / "message.json").read_text())
-    report = {"folder": folder, "message": message, "meta": {}, "findings": [], "metrics": {}, "comparisons": [], "sections": []}
+    report = {"folder": folder, "message": message, "meta": {}, "findings": [], "metrics": {}, "comparisons": [], "sections": [],
+              "verdict": None}
     if (folder / "report.json").exists():
         document = json.loads((folder / "report.json").read_text())
-        report.update({key: document.get(key, report[key]) for key in ("meta", "findings", "metrics", "comparisons", "sections")})
+        report.update({key: document.get(key, report[key]) for key in ("meta", "findings", "metrics", "comparisons", "sections", "verdict")})
     elif (folder / "report.txt").exists():
         report["findings"], report["sections"] = parse_text((folder / "report.txt").read_text(errors="replace"))
     fields = {f["name"]: f["value"] for e in message.get("embeds", []) for f in e.get("fields", [])}
@@ -297,11 +298,49 @@ def list_installs():
             continue
         latest = load(found[0])
         rows.append((str(folder.relative_to(OUT)), len(found), latest["message"]["timestamp"][:16].replace("T", " "),
-                     latest["version"], len(latest["findings"])))
+                     latest["version"], verdict_counts(latest) or f"{len(latest['findings'])} findings"))
     width = max([len(r[0]) for r in rows] + [7])
-    print(f"{'install':{width}}  reports  last (UTC)        version      findings")
+    print(f"{'install':{width}}  reports  last (UTC)        version      verdict")
     for name, count, last, version, findings in rows:
         print(f"{name:{width}}  {count:7}  {last}  {version:11}  {findings}")
+
+
+SEVERITY = {"issue": "🟠", "warning": "🟡", "healthy": "🟢"}
+
+
+def verdict_counts(report):
+    verdict = report.get("verdict")
+    if not verdict:
+        return None
+    count = lambda s: sum(1 for c in verdict["checks"] if c["severity"] == s)
+    return f"🟠 {count('issue')} · 🟡 {count('warning')} · 🟢 {count('healthy')}"
+
+
+def show_verdict(report):
+    """The report's own summary (DiagnosticsVerdict): counts, the likely cause and what to do."""
+    verdict = report.get("verdict")
+    if not verdict:
+        return
+    problems = [c for c in verdict["checks"] if c["severity"] != "healthy"]
+    focus = verdict.get("focus")
+    top = next((c for c in problems if focus and c["feature"] == focus), problems[0] if problems else None)
+    print(f"\nVerdict: {verdict_counts(report)}" + (f"  (complaint → {focus})" if focus else ""))
+    if top:
+        print(f"  Most likely: [{top['feature']}] {top['title']}" + (f" — {top['cause']}" if top["cause"] else "")
+              + f" ({top['confidence']})")
+        if top["action"]:
+            print(f"  Do: {top['action']}")
+    else:
+        print("  Nothing wrong found")
+    affected = list(dict.fromkeys(c["feature"] for c in problems))
+    if affected:
+        print(f"  Affected: {', '.join(affected)}")
+    print(f"  NotchIsland-owned errors: {verdict['ownErrors']}")
+    for label, key in (("New", "new"), ("Resolved", "resolved")):
+        if verdict.get(key):
+            print(f"  {label}: " + "; ".join(verdict[key]))
+    for c in problems[1:]:
+        print(f"  {SEVERITY[c['severity']]} [{c['feature']}] {c['title']}" + (f" — {c['cause']}" if c["cause"] else ""))
 
 
 def show(query, n):
@@ -316,6 +355,7 @@ def show(query, n):
     for name in ("macOS", "Mac", "Chip", "Runs from", "Accessibility", "Energy", "Latest on GitHub"):
         if name in report["fields"]:
             print(f"  {name}: {report['fields'][name]}")
+    show_verdict(report)
     print("\nFindings:" if report["findings"] else "\nFindings: none")
     for finding in report["findings"]:
         print(f"  ⚠ {finding}")

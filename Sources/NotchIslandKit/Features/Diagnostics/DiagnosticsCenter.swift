@@ -334,8 +334,10 @@ import Observation
         if !light { defaults.set(Date(), forKey: Self.lastFullKey) }
         let crashes = report.attachments.count(where: \.isCrashReport)
         let kind: DiagnosticsEnvelope.Kind = crashes > 0 ? .crash : reason == .anomaly ? .anomaly : .report
-        let delivered = await deliver(envelope(kind: kind, reason: reason, report: report, feedback: nil))
+        let sent = envelope(kind: kind, reason: reason, report: report, feedback: nil)
+        let delivered = await deliver(sent)
         if delivered {
+            remember(sent.verdict)
             defaults.set(Date(), forKey: Self.crashesSeenKey)
             Self.markSystemReportsSent(report)
         }
@@ -356,7 +358,15 @@ import Observation
         let kind: DiagnosticsEnvelope.Kind = feedback.kind == .bug ? .bug : .feature
         var envelope = envelope(kind: kind, reason: nil, report: report, feedback: feedback)
         if !media.isEmpty { envelope.media = media }
-        return await deliver(envelope)
+        let delivered = await deliver(envelope)
+        if delivered, attachDiagnostics { remember(envelope.verdict) }
+        return delivered
+    }
+
+    /// The problems a delivered report found: the next one tells what is new and what is gone.
+    private func remember(_ verdict: DiagnosticsVerdict?) {
+        guard let verdict else { return }
+        defaults.set(verdict.remembered, forKey: DiagnosticsVerdict.rememberedKey)
     }
 
     /// The report a bug report or request carries, started as the form opens
@@ -399,22 +409,37 @@ import Observation
 
     private func envelope(kind: DiagnosticsEnvelope.Kind, reason: DiagnosticsReason?, report: DiagnosticsReport,
                           feedback: DiagnosticsFeedback?) -> DiagnosticsEnvelope {
+        var report = report
         let crashCount = report.attachments.count(where: \.isCrashReport)
         let comparisons = DiagnosticsComparison.compare(report.metrics, with: references.baseline)
         var findings = liveTrigger.map { "Live: \($0)" }
         findings += DiagnosticsFindings.findings(report, crashes: crashCount)
         findings += DiagnosticsFindings.anomalies(comparisons, metrics: report.metrics, crashes: crashCount)
+        var outdated: String?
         if let latest = references.latestVersion, DiagnosticsVersions.isOlder(version, than: latest) {
-            findings.append("Outdated: runs \(version), \(latest) is on GitHub")
+            outdated = "Outdated: runs \(version), \(latest) is on GitHub"
+            findings.append(outdated!)
+        }
+        // The verdict: at the end of the report, its line at the top, the embed's first field.
+        let verdict: DiagnosticsVerdict? = report.sections.isEmpty ? nil : DiagnosticsVerdict.make(
+            report: report, metrics: report.metrics, comparisons: comparisons, crashes: crashCount,
+            complaint: feedback.map { [$0.title, $0.details, $0.expected, $0.steps].joined(separator: " ") },
+            outdated: outdated, previous: defaults.dictionary(forKey: DiagnosticsVerdict.rememberedKey) as? [String: String])
+        if let verdict {
+            if let index = report.sections.firstIndex(where: { $0.title == "Likely causes" }) {
+                report.sections[index] = verdict.causesSection
+            }
+            report.sections.append(verdict.section)
         }
         var files: [DiagnosticsEnvelope.File] = []
         if !report.sections.isEmpty {
-            files.append(.init(name: "report.txt", text: header(kind: kind, reason: reason, findings: findings) + report.text))
+            files.append(.init(name: "report.txt", text: header(kind: kind, reason: reason, findings: findings, verdict: verdict) + report.text))
             let meta = ["kind": kind.rawValue, "reason": reason?.rawValue ?? "", "sender": sender, "install": installID,
                         "written": DiagnosticsFormat.date(Date()), "version": version, "build": build,
                         "reference": references.baseline.map { "v\($0.version) (\($0.build)) on \($0.machine)" } ?? "",
                         "latestOnGitHub": references.latestVersion ?? ""]
-            files.append(.init(name: "report.json", text: report.json(meta: meta, findings: findings, comparisons: comparisons)))
+            files.append(.init(name: "report.json", text: report.json(meta: meta, findings: findings, comparisons: comparisons,
+                                                                      verdict: verdict)))
         }
         files += report.attachments.map { .init(name: $0.name, text: $0.text) }
         var facts = DiagnosticsFindings.facts(report)
@@ -429,14 +454,17 @@ import Observation
             kind: kind, reason: reason, sender: sender, installID: installID,
             facts: facts, findings: findings, feedback: feedback, files: files,
             comparison: DiagnosticsFindings.comparisonLines(comparisons),
-            reference: references.baseline.map { "v\($0.version) on \($0.machine)" }
+            reference: references.baseline.map { "v\($0.version) on \($0.machine)" },
+            verdict: verdict
         )
     }
 
-    private func header(kind: DiagnosticsEnvelope.Kind, reason: DiagnosticsReason?, findings: [String]) -> String {
+    private func header(kind: DiagnosticsEnvelope.Kind, reason: DiagnosticsReason?, findings: [String],
+                        verdict: DiagnosticsVerdict?) -> String {
         let diagnosis = findings.isEmpty ? "  nothing stands out" : findings.map { "  ⚠︎ \($0)" }.joined(separator: "\n")
         return "NotchIsland diagnostics · \(kind.rawValue)\(reason.map { " · \($0.title)" } ?? "")\n"
             + "From: \(sender) · install \(installID)\nWritten: \(DiagnosticsFormat.date(Date()))\n\n"
+            + (verdict.map { "\($0.headline)\n(the Summary at the end has the cause, the affected features and what to do)\n\n" } ?? "")
             + "Quick diagnosis:\n\(diagnosis)\n\n"
     }
 
@@ -634,9 +662,10 @@ import Observation
         if !basicOnly {
             report.sections.insert(referenceSection(metrics), at: min(3, report.sections.count))
             if !light { report.sections.insert(differencesSection(report.settings), at: min(4, report.sections.count)) }
-            var causes = DiagnosticsReport.Section("Likely causes")
-            let found = DiagnosticsInsights.causes(report, metrics: metrics)
-            causes.add("Causes", found.isEmpty ? "nothing stands out" : found.map { "• \($0)" }.joined(separator: "\n"))
+            // Filled again when the report is sent, with the user's complaint (`envelope`).
+            let causes = DiagnosticsVerdict.make(report: report, metrics: metrics,
+                                                 comparisons: DiagnosticsComparison.compare(metrics, with: references.baseline),
+                                                 crashes: report.attachments.count(where: \.isCrashReport)).causesSection
             report.sections.insert(causes, at: min(3, report.sections.count))
             var extra: [DiagnosticsReport.Section] = [DiagnosticsFlow.section()]
             // macOS's own reports (hangs, exceptions) next to the crash analysis.

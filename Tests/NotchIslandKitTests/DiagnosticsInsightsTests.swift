@@ -30,19 +30,6 @@ import Testing
         #expect(section.entries.contains { $0.key == "2× [com.apple.network:connection]" })
     }
 
-    @Test func causesAreReadFromTheReport() {
-        var report = DiagnosticsReport()
-        report.sections = [
-            .init("Permissions", [.init(key: "Accessibility", value: "false")]),
-            .init(DiagnosticsAppStateKeys.copies, [.init(key: "Copies", value: "/Applications/NotchIsland.app\n/Volumes/NotchIsland/NotchIsland.app")]),
-        ]
-        let causes = DiagnosticsInsights.causes(report, metrics: [.uncleanExits: 1, .crashes: 0])
-        #expect(causes.contains { $0.hasPrefix("Accessibility is off") })
-        #expect(causes.contains { $0.contains("DMG is still mounted") })
-        #expect(causes.contains { $0.hasPrefix("The last run ended without quitting") })
-        #expect(DiagnosticsInsights.causes(DiagnosticsReport(), metrics: [:]).isEmpty)
-    }
-
     @Test @MainActor func flowKeepsTheLastSteps() {
         for index in 0..<(DiagnosticsFlow.capacity + 5) { DiagnosticsFlow.record("step \(index)") }
         #expect(DiagnosticsFlow.steps.count == DiagnosticsFlow.capacity)
@@ -171,5 +158,96 @@ import Testing
 
     @Test func everyProcessIncludesThisOne() {
         #expect(BatteryProbe.everyProcess()[getpid()] != nil)
+    }
+}
+
+@Suite struct DiagnosticsVerdictTests {
+    static func health(_ entries: [(String, String)]) -> DiagnosticsReport.Section {
+        .init("Feature health", entries.map { .init(key: $0.0, value: $0.1) })
+    }
+
+    @Test func aHealthyReportCountsWhatWorks() {
+        var report = DiagnosticsReport()
+        report.sections = [Self.health([("Now Playing", "✅ running — on"), ("AirPods", "✅ running"), ("Timers", "off (by the user)")])]
+        let verdict = DiagnosticsVerdict.make(report: report, metrics: [:], comparisons: [], crashes: 0)
+        #expect(verdict.issues == 0 && verdict.warnings == 0 && verdict.healthy == 2)
+        #expect(verdict.mostLikely == nil)
+        #expect(verdict.section.entries.first { $0.key == DiagnosticsVerdict.causeKey }?.value == "nothing wrong found")
+    }
+
+    @Test func accessibilityOffIsAnIssueWithItsFix() {
+        var report = DiagnosticsReport()
+        report.sections = [Self.health([("Accessibility", "⚠︎ wanted but not running"), ("Now Playing", "✅ running")])]
+        let verdict = DiagnosticsVerdict.make(report: report, metrics: [:], comparisons: [], crashes: 0)
+        #expect(verdict.issues == 1)
+        #expect(verdict.mostLikely?.feature == DiagnosticsVerdict.Feature.keys)
+        #expect(verdict.mostLikely?.action.contains("Accessibility") == true)
+    }
+
+    @Test func searchesWithoutAppsPointAtTheAppOutsideTheFolders() {
+        var report = DiagnosticsReport()
+        report.sections = [
+            .init("User flow", [.init(key: "Flow", value: """
+                10:00:00.000 siri: "xc" in root → 0 apps, 1 files (anywhere)
+                10:00:00.100 siri: "xco" in root → 0 apps, 2 files (anywhere)
+                10:00:00.200 siri: "xcode" in root → 0 apps, 3 files (anywhere)
+                10:00:01.000 siri: "safari" in root → 1 apps, 0 files (anywhere)
+                """)]),
+            .init(DiagnosticsProbes.spotlightTitle, [.init(key: DiagnosticsProbes.elsewhereKey, value: "1: ~/Downloads/Xcode.app")]),
+        ]
+        #expect(DiagnosticsVerdict.searchesWithoutApps(report) == ["xcode"])
+        let verdict = DiagnosticsVerdict.make(report: report, metrics: [:], comparisons: [], crashes: 0)
+        #expect(verdict.mostLikely?.id == "siri.appOutsideFolders")
+        #expect(verdict.mostLikely?.cause.contains("Downloads/Xcode.app") == true)
+    }
+
+    @Test func aCrashNamesItsFeature() {
+        var report = DiagnosticsReport()
+        report.sections = [.init("Crash analysis", [.init(key: "NotchIsland.ips", value: """
+            type 309, app 0.4.9 (19), 2026-09-29
+            exception: EXC_BREAKPOINT SIGTRAP
+            crashed thread 0 (com.apple.main-thread):
+              0 NotchIsland  LiquidCard.hide()
+            """)])]
+        let verdict = DiagnosticsVerdict.make(report: report, metrics: [:], comparisons: [], crashes: 1)
+        #expect(verdict.mostLikely?.feature == DiagnosticsVerdict.Feature.liquid)
+        #expect(verdict.mostLikely?.cause.contains("EXC_BREAKPOINT") == true)
+    }
+
+    @Test func newAndResolvedSinceThePreviousReport() {
+        var report = DiagnosticsReport()
+        report.sections = [Self.health([("Now Playing", "⚠︎ wanted but not running")])]
+        let verdict = DiagnosticsVerdict.make(report: report, metrics: [:], comparisons: [], crashes: 0,
+                                              previous: ["install.outdated": "Outdated: runs 0.4.8"])
+        #expect(verdict.new == ["[Now Playing] Now Playing is on but not running"])
+        #expect(verdict.resolved == ["Outdated: runs 0.4.8"])
+        #expect(verdict.remembered.keys.sorted() == ["feature.Now Playing"])
+    }
+
+    @Test func theComplaintChoosesTheCause() {
+        var report = DiagnosticsReport()
+        report.sections = [
+            Self.health([("Now Playing", "⚠︎ wanted but not running"), ("⌘Space for Siri", "⚠︎ wanted but not running")]),
+        ]
+        let plain = DiagnosticsVerdict.make(report: report, metrics: [:], comparisons: [], crashes: 0)
+        let complaint = DiagnosticsVerdict.make(report: report, metrics: [:], comparisons: [], crashes: 0,
+                                                complaint: "A spotlight nem hozza be az alkalmazásokat")
+        #expect(complaint.focus == DiagnosticsVerdict.Feature.siri)
+        #expect(complaint.mostLikely?.feature == DiagnosticsVerdict.Feature.siri)
+        #expect(plain.focus == nil)
+        #expect(DiagnosticsVerdict.focus("a zene borítója nem jelenik meg") == DiagnosticsVerdict.Feature.nowPlaying)
+        #expect(DiagnosticsVerdict.focus("hello") == nil)
+    }
+
+    @Test func ownErrorsAreCountedByFeature() {
+        var report = DiagnosticsReport()
+        report.sections = [.init("Errors by source", [.init(key: "NotchIsland's own",
+                                                            value: "[com.davidvarga.notchisland:levels] 3×, [com.davidvarga.notchisland:media] 1×")])]
+        let verdict = DiagnosticsVerdict.make(report: report, metrics: [:], comparisons: [], crashes: 0)
+        #expect(verdict.ownErrors == "4 (levels 3, media 1)")
+        #expect(verdict.affectedFeatures == [DiagnosticsVerdict.Feature.keys, DiagnosticsVerdict.Feature.nowPlaying])
+        var light = DiagnosticsReport()
+        light.sections = [.init("App", [.init(key: "Report depth", value: "light (hourly…)")])]
+        #expect(DiagnosticsVerdict.make(report: light, metrics: [:], comparisons: [], crashes: 0).ownErrors.hasPrefix("not read"))
     }
 }

@@ -203,7 +203,7 @@ nonisolated enum DiagnosticsProbes {
                 AssistantSearch.isListedApp(path) && !path.hasPrefix("/System/")
                     && !AssistantSearch.appScopes.contains { path.hasPrefix($0 + "/") }
             }
-        section.add("Apps elsewhere (Spotlight)", elsewhere.isEmpty ? "none"
+        section.add(elsewhereKey, elsewhere.isEmpty ? "none"
             : "\(elsewhere.count): " + elsewhere.prefix(40).map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: ", "))
         section.add(missingKey, missing.count)
         if onDiskTotal > 0 {
@@ -237,6 +237,7 @@ nonisolated enum DiagnosticsProbes {
     static let spotlightTitle = "Spotlight and Siri's app search"
     static let missingKey = "Apps missing from Spotlight"
     static let galleryKey = "allApps() (the gallery)"
+    static let elsewhereKey = "Apps elsewhere (Spotlight)"
 
     private static func normalized(_ path: String) -> String {
         URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path.lowercased()
