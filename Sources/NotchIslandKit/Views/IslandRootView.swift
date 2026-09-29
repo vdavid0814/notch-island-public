@@ -69,15 +69,9 @@ struct IslandRootView: View {
             // window colour hides; its faint see-through look comes from the system's window
             // vibrancy instead (`SettingsBackdrop`), which the window server draws.
             let isOpaquePage = surfaceOf.isSettings
-            // The AirPods card lies over macOS's own card to hide it: glass would let it show through.
-            let coversSystemCard: Bool = switch surfaceOf {
-            case .banner(.airPods): AirPodsSystemCard.current == .cover
-            // The volume card lies under the banner's upper part, which the fade keeps opaque; the
-            // user wanted the same see-through fade as every other banner here.
-            case .banner(.levelCovering): false
-            default: false
-            }
-            let glassStyle = isOpaquePage || coversSystemCard ? IslandGlassStyle.black : model.effectiveGlassStyle
+            // Over macOS's own cards (volume, AirPods, noise control) the fade's glass as well: their
+            // lines lie on macOS's own, so nothing doubles where it clears (asked for).
+            let glassStyle = isOpaquePage ? IslandGlassStyle.black : model.effectiveGlassStyle
             let wantsGlass = glassStyle != .fade || outline.size.height > layout.notch.height + 0.5
             let reducesWork = model.activity.prefersReducedWork
             // On battery the content swaps with a plain cross-fade: the blur-replace costs about a

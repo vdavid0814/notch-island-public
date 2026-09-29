@@ -77,6 +77,11 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     /// The cover's own way out starts this long before macOS's card goes, so both end together
     /// (the card has shrunk to 90 % under it by then).
     static let exitLead: TimeInterval = 0.32
+    /// The volume card leaves a little earlier still, as asked: the liquid on the desktop or beside a
+    /// tiled window by 0.05 s, the island's cover under the notch (an AirPods stem swipe over a
+    /// full-screen app) by 0.1 s.
+    static let volumeLiquidExtraLead: TimeInterval = 0.05
+    static let volumeNotchExtraLead: TimeInterval = 0.1
     private var landing: Task<Void, Never>?
 
     init(model: AppModel) {
@@ -288,7 +293,10 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
                 let card = await SystemVolumeCard.findOffMain()
                 guard !Task.isCancelled, let self, let metrics = self.model.metrics else { return }
                 let now = Date()
-                let exitAt = self.lastChange.addingTimeInterval((self.lifetimes[lifetimeKey] ?? 1.72) - Self.exitLead)
+                let cardGoes = self.lastChange.addingTimeInterval(self.lifetimes[lifetimeKey] ?? 1.72)
+                let isVolume = cardKind == .volume
+                let exitAt = cardGoes.addingTimeInterval(-Self.exitLead - (isVolume ? Self.volumeLiquidExtraLead : 0))
+                let notchExitAt = cardGoes.addingTimeInterval(-Self.exitLead - (isVolume ? Self.volumeNotchExtraLead : 0))
                 let isKept = self.state.isHeld || self.model.banners.isHeld || self.model.island.isInteracting
                 if card == nil, self.cardSeen, !learnt {
                     // Gone: learn how long it stayed after the last change (once).
@@ -342,7 +350,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
                         // Under the notch: the island's cover lasts as long as the card.
                         guard SystemVolumeCard.isUnderNotch(card, notch: metrics.notchRect),
                               let current = self.model.banners.current, Self.isCover(current, like: islandBanner) else { return }
-                        if now >= exitAt, !isKept {
+                        if now >= notchExitAt, !isKept {
                             self.model.banners.dismiss(current)
                             left = true
                         } else {
