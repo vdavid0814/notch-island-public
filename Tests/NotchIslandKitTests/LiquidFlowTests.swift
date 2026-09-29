@@ -125,3 +125,13 @@ import Testing
         #expect(AppCommand.parse(URL(string: "notchisland://demo/airpodsmode?mode=transparency")!) == .demo(.airPodsMode(.transparency)))
     }
 }
+
+@Suite struct LiquidCardExitTests {
+    @Test @MainActor func eachCardLeavesWithItsOwnLead() {
+        #expect(LiquidCard.exitLead(for: "volume", underNotch: true) == 0.37)
+        #expect(LiquidCard.exitLead(for: "volume", underNotch: false) == 0.35)
+        #expect(LiquidCard.exitLead(for: "airPodsMode", underNotch: true) == 0.27)
+        #expect(LiquidCard.exitLead(for: "airPodsMode", underNotch: false) == 0.25)
+        #expect(LiquidCard.exitLead(for: "airPods", underNotch: false) == LiquidCard.exitLead)
+    }
+}

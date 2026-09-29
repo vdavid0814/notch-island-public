@@ -77,11 +77,19 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     /// The cover's own way out starts this long before macOS's card goes, so both end together
     /// (the card has shrunk to 90 % under it by then).
     static let exitLead: TimeInterval = 0.32
-    /// The volume card leaves a little earlier still, as asked: the liquid on the desktop or beside a
-    /// tiled window by 0.05 s, the island's cover under the notch (an AirPods stem swipe over a
-    /// full-screen app) by 0.1 s.
-    static let volumeLiquidExtraLead: TimeInterval = 0.05
-    static let volumeNotchExtraLead: TimeInterval = 0.1
+
+    /// The lead by card and place, tuned by eye with the user: the volume card under the notch
+    /// (an AirPods stem swipe over a full-screen app) and on the desktop or beside a tiled window,
+    /// the noise-control card in both; the connection card keeps `exitLead`.
+    static func exitLead(for lifetimeKey: String, underNotch: Bool) -> TimeInterval {
+        switch (lifetimeKey, underNotch) {
+        case ("volume", true): 0.37
+        case ("volume", false): 0.35
+        case ("airPodsMode", true): 0.27
+        case ("airPodsMode", false): 0.25
+        default: exitLead
+        }
+    }
     private var landing: Task<Void, Never>?
 
     init(model: AppModel) {
@@ -294,9 +302,8 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
                 guard !Task.isCancelled, let self, let metrics = self.model.metrics else { return }
                 let now = Date()
                 let cardGoes = self.lastChange.addingTimeInterval(self.lifetimes[lifetimeKey] ?? 1.72)
-                let isVolume = cardKind == .volume
-                let exitAt = cardGoes.addingTimeInterval(-Self.exitLead - (isVolume ? Self.volumeLiquidExtraLead : 0))
-                let notchExitAt = cardGoes.addingTimeInterval(-Self.exitLead - (isVolume ? Self.volumeNotchExtraLead : 0))
+                let exitAt = cardGoes.addingTimeInterval(-Self.exitLead(for: lifetimeKey, underNotch: false))
+                let notchExitAt = cardGoes.addingTimeInterval(-Self.exitLead(for: lifetimeKey, underNotch: true))
                 let isKept = self.state.isHeld || self.model.banners.isHeld || self.model.island.isInteracting
                 if card == nil, self.cardSeen, !learnt {
                     // Gone: learn how long it stayed after the last change (once).
