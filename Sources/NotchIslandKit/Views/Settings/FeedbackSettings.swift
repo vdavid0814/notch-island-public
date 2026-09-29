@@ -319,7 +319,7 @@ struct DiagnosticsSection: View {
                 how much energy, CPU and memory NotchIsland uses (a reading every 10 minutes), and the apps \
                 using the most energy; every NotchIsland setting and its full state, including what is \
                 playing, what you typed into Siri and the files on the Shelf; whether Spotlight finds your \
-                apps; NotchIsland's log and crash reports. The numbers and settings are compared with the \
+                apps; NotchIsland's log, crash reports and the hangs or exceptions macOS itself reports. The numbers and settings are compared with the \
                 developer's Mac, and anything unusual is reported at once. \
                 Never sent: what is on your clipboard, or your passwords.
                 """)

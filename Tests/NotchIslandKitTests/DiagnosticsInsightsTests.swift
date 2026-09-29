@@ -70,3 +70,33 @@ import Testing
         #expect(!center.shouldAlertForTests(envelope([])))
     }
 }
+
+@Suite struct DiagnosticsSystemReportsTests {
+    @Test func systemReportsAreNotCrashReports() {
+        #expect(DiagnosticsReport.Attachment(name: "NotchIsland-2026-09-29.ips", text: "").isCrashReport)
+        #expect(!DiagnosticsReport.Attachment(name: "log.txt", text: "").isCrashReport)
+        #expect(!DiagnosticsReport.Attachment(name: "system-20260929T010000-hang-AB12.json", text: "").isCrashReport)
+    }
+
+    @Test func sentReportsGoAndOthersStay() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("system-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        for name in ["system-b-hang.json", "system-a-cpu.json", "other.json", "system-c.txt"] {
+            try Data("{}".utf8).write(to: folder.appendingPathComponent(name))
+        }
+        #expect(DiagnosticsSystemReports.pending(in: folder).map(\.lastPathComponent) == ["system-a-cpu.json", "system-b-hang.json"])
+        DiagnosticsSystemReports.markSent(["system-a-cpu.json", "other.json"], in: folder)
+        #expect(DiagnosticsSystemReports.pending(in: folder).map(\.lastPathComponent) == ["system-b-hang.json"])
+        #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("other.json").path))
+    }
+}
+
+@Suite struct DiagnosticsLogWindowTests {
+    @Test func aFullReportReadsBackToThePreviousOne() {
+        #expect(DiagnosticsCenter.logHours(sinceFull: 6 * 3600 + 30) == 6)
+        #expect(DiagnosticsCenter.logHours(sinceFull: 2.5 * 3600) == 3)
+        #expect(DiagnosticsCenter.logHours(sinceFull: 60) == 1)
+        #expect(DiagnosticsCenter.logHours(sinceFull: .infinity) == 6)
+    }
+}

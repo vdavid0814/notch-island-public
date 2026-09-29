@@ -953,7 +953,9 @@ nonisolated enum AssistantMatch {
         guard let source = icon.cgImage(forProposedRect: &rect, context: nil, hints: nil),
               let context = CGContext(data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: 0,
                                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+                                      // Core Animation's own layout (BGRA), as the wallpapers: it
+                                      // copies an RGBA picture into one before drawing it.
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
         context.interpolationQuality = .high
         context.draw(source, in: CGRect(x: 0, y: 0, width: pixels, height: pixels))
         return context.makeImage()

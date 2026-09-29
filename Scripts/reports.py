@@ -33,7 +33,7 @@ BROWSER = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 
 # Sections that change on every report: left out of "what changed since the previous report".
 VOLATILE = {"Energy", "Event trail (this run)", "Log", "Top energy users", "Battery", "Compared with the reference",
             "History", "Windows", "Island internals", "Differs from the reference Mac", "Errors by source", "User flow",
-            "Likely causes", "Crash analysis"}
+            "Likely causes", "Crash analysis", "System diagnostics (MetricKit)"}
 VOLATILE_KEYS = {"PID", "Running for", "Launched", "Uptime", "Disk free", "Memory footprint", "CPU time",
                  "Clipboard items", "Revision", "Written"}
 
@@ -342,6 +342,11 @@ def show(query, n):
     if crash:
         print("\nCrash analysis:")
         for entry in crash["entries"]:
+            print(f"  {entry['key']}:\n    " + entry["value"].replace("\n", "\n    "))
+    system = next((sec for sec in report["sections"] if sec["title"] == "System diagnostics (MetricKit)"), None)
+    if system and len(system["entries"]) > 1:
+        print("\nmacOS's own reports (MetricKit):")
+        for entry in system["entries"]:
             print(f"  {entry['key']}:\n    " + entry["value"].replace("\n", "\n    "))
     own = value(report, "Errors by source", "NotchIsland's own")
     if own:

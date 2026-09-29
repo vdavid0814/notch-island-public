@@ -30,7 +30,7 @@ nonisolated enum DiagnosticsInsights {
     /// Each crash, hang or resource report attached: what happened and where (the crashed thread's
     /// top frames), read from the `.ips` JSON.
     static func crashSection(_ attachments: [DiagnosticsReport.Attachment]) -> DiagnosticsReport.Section? {
-        let reports = attachments.filter { $0.name != "log.txt" }
+        let reports = attachments.filter(\.isCrashReport)
         guard !reports.isEmpty else { return nil }
         var section = DiagnosticsReport.Section("Crash analysis")
         for report in reports {

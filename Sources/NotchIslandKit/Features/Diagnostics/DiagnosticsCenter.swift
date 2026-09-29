@@ -29,7 +29,11 @@ import Observation
     static let periodicInterval: Duration = .seconds(3600)
     /// Hours of log in an automatic report, in the hourly one, and in a bug report.
     static let reportLogHours = 6
-    static let periodicLogHours = 1
+
+    /// The log a full report reads: back to the previous full report, at most `reportLogHours`.
+    static func logHours(sinceFull seconds: TimeInterval) -> Int {
+        Int(min(Double(reportLogHours), max(1, (seconds / 3600).rounded(.up))))
+    }
     /// The hourly report is light (what changes by the hour: energy, the app's state, the user's
     /// flow, this run's log read in-process); a full one (the Mac's setup, installed apps, Spotlight,
     /// hardware, `log show` over earlier runs) goes at most this often, and at launch, after an
@@ -107,6 +111,8 @@ import Observation
     /// Problems seen on the last check, and when each was last reported.
     @ObservationIgnored private var problems: Set<String> = []
     @ObservationIgnored private var problemsReported: [String: Date] = [:]
+    /// Waits for macOS's own reports on the app (`DiagnosticsSystemReports`).
+    @ObservationIgnored private var systemWatch: Task<Void, Never>?
 
     init(defaults: UserDefaults = .standard,
          destinations: DiagnosticsDestinations = .from(info: Bundle.main.infoDictionary),
@@ -151,6 +157,9 @@ import Observation
         if history == nil { history = DiagnosticsHistory(defaults: defaults, version: "\(version) (\(build))") }
         installCounter(model)
         if isEnabled { energy.start() }
+        if systemWatch == nil {
+            systemWatch = DiagnosticsSystemReports.watch { [weak self] line in self?.systemReportArrived(line) }
+        }
         let first = Self.firstReport(history: history, newCrash: DiagnosticsProbes.crashCount(since: crashesSince) > 0)
         reschedule(firstDelay: first.delay, firstReason: first.reason)
     }
@@ -271,6 +280,28 @@ import Observation
         Task { await self.sendReport(.problem) }
     }
 
+    /// macOS handed over a report of its own (a hang, a crash, a CPU or disk-write exception): a
+    /// report goes at once, one per `problemGap` (the system may hand several over together).
+    private func systemReportArrived(_ line: String) {
+        Log.app.notice("diagnostics: system report \(line, privacy: .public)")
+        DiagnosticsFlow.record("system report: \(line)")
+        guard isEnabled, isConfigured else { return }
+        if let last = problemsReported["system"], Date().timeIntervalSince(last) < Self.problemGap { return }
+        problemsReported["system"] = Date()
+        liveTrigger.append("macOS reported: \(line)")
+        Task {
+            // Others of the same delivery arrive together: wait a moment and send them in one.
+            try? await Task.sleep(for: .seconds(5))
+            await self.sendReport(.problem)
+        }
+    }
+
+    /// The system reports a delivered report carried (listed in its section) go.
+    nonisolated static func markSystemReportsSent(_ report: DiagnosticsReport) {
+        let names = report.sections.first { $0.title == DiagnosticsSystemReports.title }?.entries.map(\.key) ?? []
+        DiagnosticsSystemReports.markSent(names)
+    }
+
     /// For About: fresh numbers for the energy and version lines.
     func refreshStatus() async {
         await references.refresh()
@@ -291,15 +322,20 @@ import Observation
         }
         // By hand: the newest version and reference, not an hour-old answer.
         await references.refresh(force: reason == .manual)
-        let hours = reason == .periodic ? Self.periodicLogHours : Self.reportLogHours
         let lastFull = defaults.object(forKey: Self.lastFullKey) as? Date ?? .distantPast
         let light = reason == .periodic && Date().timeIntervalSince(lastFull) < Self.fullReportInterval
+        // The 6-hourly full report reads the log back to the previous full one (the hourly ones
+        // bring none): 1 hour of it left five hours of errors unseen.
+        let hours = reason == .periodic ? Self.logHours(sinceFull: Date().timeIntervalSince(lastFull)) : Self.reportLogHours
         let report = await makeReport(logHours: hours, crashesSince: crashesSince, light: light)
         if !light { defaults.set(Date(), forKey: Self.lastFullKey) }
-        let crashes = report.attachments.count { $0.name != "log.txt" }
+        let crashes = report.attachments.count(where: \.isCrashReport)
         let kind: DiagnosticsEnvelope.Kind = crashes > 0 ? .crash : reason == .anomaly ? .anomaly : .report
         let delivered = await deliver(envelope(kind: kind, reason: reason, report: report, feedback: nil))
-        if delivered { defaults.set(Date(), forKey: Self.crashesSeenKey) }
+        if delivered {
+            defaults.set(Date(), forKey: Self.crashesSeenKey)
+            Self.markSystemReportsSent(report)
+        }
         liveTrigger = []
         return delivered
     }
@@ -360,7 +396,7 @@ import Observation
 
     private func envelope(kind: DiagnosticsEnvelope.Kind, reason: DiagnosticsReason?, report: DiagnosticsReport,
                           feedback: DiagnosticsFeedback?) -> DiagnosticsEnvelope {
-        let crashCount = report.attachments.count { $0.name != "log.txt" }
+        let crashCount = report.attachments.count(where: \.isCrashReport)
         let comparisons = DiagnosticsComparison.compare(report.metrics, with: references.baseline)
         var findings = liveTrigger.map { "Live: \($0)" }
         findings += DiagnosticsFindings.findings(report, crashes: crashCount)
@@ -598,6 +634,10 @@ import Observation
             causes.add("Causes", found.isEmpty ? "nothing stands out" : found.map { "• \($0)" }.joined(separator: "\n"))
             report.sections.insert(causes, at: min(3, report.sections.count))
             var extra: [DiagnosticsReport.Section] = [DiagnosticsFlow.section()]
+            // macOS's own reports (hangs, exceptions) next to the crash analysis.
+            if let index = report.sections.firstIndex(where: { $0.title == DiagnosticsSystemReports.title }) {
+                extra.insert(report.sections.remove(at: index), at: 0)
+            }
             if let crash = DiagnosticsInsights.crashSection(report.attachments) { extra.insert(crash, at: 0) }
             if let log = report.attachments.first(where: { $0.name == "log.txt" }) {
                 extra.append(DiagnosticsInsights.errorSection(log.text))
@@ -712,6 +752,7 @@ import Observation
             if let crashesSince {
                 report.attachments += DiagnosticsProbes.crashReports(since: crashesSince, limit: 4, perFile: 600_000)
             }
+            addSystemReports(to: &report)
             return report
         }
         report.sections += [BatteryProbe.section(), BatteryProbe.topUsers()]
@@ -736,7 +777,14 @@ import Observation
         if let crashesSince {
             report.attachments += DiagnosticsProbes.crashReports(since: crashesSince, limit: 4, perFile: 600_000)
         }
+        addSystemReports(to: &report)
         return report
+    }
+
+    nonisolated private static func addSystemReports(to report: inout DiagnosticsReport) {
+        let system = DiagnosticsSystemReports.collect()
+        report.sections.append(system.section)
+        report.attachments += system.attachments
     }
 
     // MARK: Reference and preview
@@ -884,6 +932,9 @@ nonisolated enum DiagnosticsFindings {
             found.append("Volume/brightness key interception failed: \(keys)")
         }
         if report.value("Low Power Mode", in: "Mac") == "true" { found.append("Low Power Mode is on") }
+        if let kinds = report.value(DiagnosticsSystemReports.kindsKey, in: DiagnosticsSystemReports.title) {
+            found.append("macOS itself reported: \(kinds) (\(DiagnosticsSystemReports.title))")
+        }
         // Features the user wants on that are not running (Feature health).
         for entry in report.sections.first(where: { $0.title == "Feature health" })?.entries ?? []
         where entry.value.contains("wanted but not running") && entry.key != "Launch at login" {
