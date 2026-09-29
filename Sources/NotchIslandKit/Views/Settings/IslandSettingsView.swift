@@ -345,6 +345,10 @@ private struct SettingsDetail: View {
             .scrollContentBackground(.hidden)
             // Switches and sliders in the theme's colour, where the system's blue was.
             .toggleStyle(.islandSwitch)
+            // Every button the system's own, in its capsule (as the pickers are): the square-ish
+            // push button and flat tiles stood out (asked for).
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
             .frame(maxWidth: pane == .widgets ? .infinity : 720)
             .frame(maxWidth: .infinity)
         }

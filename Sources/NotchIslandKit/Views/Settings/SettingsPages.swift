@@ -889,6 +889,7 @@ private struct UpdateSection: View {
             case .available(let release):
                 LabeledContent {
                     Button("Download Update") { Task { await updater.download(release) } }
+                        .buttonStyle(.borderedProminent)
                         .keyboardShortcut(.defaultAction)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
@@ -921,6 +922,7 @@ private struct UpdateSection: View {
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
                     Spacer()
                     Button("Quit NotchIsland") { NSApp.terminate(nil) }
+                        .buttonStyle(.borderedProminent)
                         .keyboardShortcut(.defaultAction)
                 }
             case .failed(let message):
