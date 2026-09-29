@@ -275,6 +275,9 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         /// The card came up under the notch while the liquid ran elsewhere: the island covers it now.
         var handedOver = false
         var learnt = false
+        /// Sent out from here: shown from now on, even before its frames are worked out and it
+        /// starts to move (it was sent out again on every look meanwhile, 25 times, seen).
+        var sentOut = flowing
         /// The AirPods cards leave with macOS's, whatever the banner's time (5.5 s against a card
         /// of 4.5, seen); the volume card keeps its tuned timing.
         let followsCardOnly = cardKind == .airPods
@@ -307,8 +310,9 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
                         self.needsPrewarm = true
                         Log.levels.notice("macOS's card at \(card.logDescription, privacy: .public) (\(now.timeIntervalSince(started) * 1000, format: .fixed(precision: 0), privacy: .public) ms)")
                     }
-                    let cover = LiquidFlow.cover(overCardWindow: card, kind: self.isShown ? self.state.kind.card : cardKind)
-                    if self.isShown, !handedOver, flows, SystemVolumeCard.isUnderNotch(card, notch: metrics.notchRect) {
+                    let shown = (self.isShown || sentOut) && !handedOver
+                    let cover = LiquidFlow.cover(overCardWindow: card, kind: shown ? self.state.kind.card : cardKind)
+                    if shown, flows, SystemVolumeCard.isUnderNotch(card, notch: metrics.notchRect) {
                         // Ran out to where it came up before, came up under the notch (the situation
                         // was read wrong): the liquid goes home, the island covers the card.
                         handedOver = true
@@ -318,7 +322,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
                         Log.levels.notice("macOS's card came up under the notch: the island covers it")
                         continue
                     }
-                    if self.isShown, !handedOver {
+                    if shown {
                         if let current = target, current.rect.distance(to: cover.rect) > 2 {
                             self.move(to: card)
                         }
@@ -332,6 +336,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
                         // liquid runs there.
                         self.model.banners.dismiss(islandBanner)
                         self.show(kind, towards: card, metrics: metrics, duration: duration)
+                        sentOut = true
                         target = cover
                     } else {
                         // Under the notch: the island's cover lasts as long as the card.
@@ -348,7 +353,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
                 }
                 // No card now.
                 if self.cardSeen {
-                    if self.isShown, !handedOver {
+                    if (self.isShown || sentOut), !handedOver {
                         if (followsCardOnly || now >= self.hideAfter), !isKept { self.hide() } else { continue }
                     } else if let current = self.model.banners.current, Self.isCover(current, like: islandBanner), !isKept {
                         self.model.banners.dismiss(current)
@@ -357,7 +362,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
                 }
                 guard now.timeIntervalSince(started) > Self.searchTime else { continue }
                 // It never came (a change made by an app): the cover keeps its own time.
-                if !self.isShown { return }
+                if !(self.isShown || sentOut) { return }
                 if now >= self.hideAfter, !isKept {
                     self.hide()
                     return
