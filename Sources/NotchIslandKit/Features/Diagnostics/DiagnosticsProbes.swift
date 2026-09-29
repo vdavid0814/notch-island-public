@@ -269,10 +269,24 @@ nonisolated enum DiagnosticsProbes {
     /// The app's own log for the last `hours` (earlier launches included, so what led up to a crash
     /// is there), plus errors and faults the frameworks logged in the process.
     static func log(hours: Int, limit: Int) -> DiagnosticsReport.Attachment {
+        log(since: Date().addingTimeInterval(-Double(hours) * 3600), limit: limit)
+    }
+
+    /// From `start` on: reading the log costs ~0.5 s of CPU an hour of it (plus the log daemon's
+    /// work, billed to the app), so an automatic report reads only what the one before did not.
+    static func log(since start: Date, limit: Int) -> DiagnosticsReport.Attachment {
         let predicate = #"process == "NotchIsland" AND (subsystem == "\#(Log.subsystem)" OR messageType >= error)"#
-        let output = run("/usr/bin/log", ["show", "--last", "\(hours)h", "--info", "--style", "compact", "--predicate", predicate],
+        let output = run("/usr/bin/log", ["show", "--start", logDate(start), "--info", "--style", "compact", "--predicate", predicate],
                          timeout: 40, outputLimit: limit * 3) ?? "log show failed"
         return DiagnosticsReport.Attachment(name: "log.txt", text: DiagnosticsFormat.tail(output, limit: limit))
+    }
+
+    /// `log show --start`'s format, in local time.
+    static func logDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: date)
     }
 
     /// The user's reports, and the system's (hang and resource reports land there).

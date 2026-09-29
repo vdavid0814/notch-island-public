@@ -93,11 +93,13 @@ import Testing
 }
 
 @Suite struct DiagnosticsLogWindowTests {
-    @Test func aFullReportReadsBackToThePreviousOne() {
-        #expect(DiagnosticsCenter.logHours(sinceFull: 6 * 3600 + 30) == 6)
-        #expect(DiagnosticsCenter.logHours(sinceFull: 2.5 * 3600) == 3)
-        #expect(DiagnosticsCenter.logHours(sinceFull: 60) == 1)
-        #expect(DiagnosticsCenter.logHours(sinceFull: .infinity) == 6)
+    @Test func anAutomaticReportReadsTheLogBackToThePreviousFullOne() {
+        let now = Date()
+        let hourAgo = now.addingTimeInterval(-3600)
+        #expect(DiagnosticsCenter.logStart(for: .periodic, lastFull: hourAgo, now: now) == hourAgo.addingTimeInterval(-60))
+        #expect(DiagnosticsCenter.logStart(for: .launch, lastFull: hourAgo, now: now) == hourAgo.addingTimeInterval(-60))
+        #expect(DiagnosticsCenter.logStart(for: .launch, lastFull: .distantPast, now: now) == now.addingTimeInterval(-6 * 3600))
+        #expect(DiagnosticsCenter.logStart(for: .manual, lastFull: hourAgo, now: now) == now.addingTimeInterval(-6 * 3600))
     }
 }
 

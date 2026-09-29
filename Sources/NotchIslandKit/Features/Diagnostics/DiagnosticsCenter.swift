@@ -30,9 +30,12 @@ import Observation
     /// Hours of log in an automatic report, in the hourly one, and in a bug report.
     static let reportLogHours = 6
 
-    /// The log a full report reads: back to the previous full report, at most `reportLogHours`.
-    static func logHours(sinceFull seconds: TimeInterval) -> Int {
-        Int(min(Double(reportLogHours), max(1, (seconds / 3600).rounded(.up))))
+    /// Where an automatic report's log starts: at the previous full report (a minute before, to
+    /// overlap), at most `reportLogHours` back — what came before was sent. By hand: all of it.
+    static func logStart(for reason: DiagnosticsReason, lastFull: Date, now: Date = Date()) -> Date {
+        let earliest = now.addingTimeInterval(-Double(reportLogHours) * 3600)
+        guard reason != .manual else { return earliest }
+        return max(earliest, lastFull.addingTimeInterval(-60))
     }
     /// The hourly report is light (what changes by the hour: energy, the app's state, the user's
     /// flow, this run's log read in-process); a full one (the Mac's setup, installed apps, Spotlight,
@@ -326,8 +329,8 @@ import Observation
         let light = reason == .periodic && Date().timeIntervalSince(lastFull) < Self.fullReportInterval
         // The 6-hourly full report reads the log back to the previous full one (the hourly ones
         // bring none): 1 hour of it left five hours of errors unseen.
-        let hours = reason == .periodic ? Self.logHours(sinceFull: Date().timeIntervalSince(lastFull)) : Self.reportLogHours
-        let report = await makeReport(logHours: hours, crashesSince: crashesSince, light: light)
+        let report = await makeReport(logHours: Self.reportLogHours, crashesSince: crashesSince, light: light,
+                                      logSince: Self.logStart(for: reason, lastFull: lastFull))
         if !light { defaults.set(Date(), forKey: Self.lastFullKey) }
         let crashes = report.attachments.count(where: \.isCrashReport)
         let kind: DiagnosticsEnvelope.Kind = crashes > 0 ? .crash : reason == .anomaly ? .anomaly : .report
@@ -608,7 +611,8 @@ import Observation
     // MARK: The report
 
     /// The whole report: the app's state and energy here, everything else off the main actor.
-    func makeReport(logHours: Int, crashesSince: Date?, basicOnly: Bool = false, light: Bool = false) async -> DiagnosticsReport {
+    func makeReport(logHours: Int, crashesSince: Date?, basicOnly: Bool = false, light: Bool = false,
+                    logSince: Date? = nil) async -> DiagnosticsReport {
         var appSections: [DiagnosticsReport.Section] = []
         var metrics: [DiagnosticsMetric: Double] = [:]
         if !basicOnly {
@@ -619,7 +623,8 @@ import Observation
         }
         // The tools the collection starts count as NotchIsland's helpers: that stretch is not judged.
         energy.beginCollecting()
-        let background = await Self.collect(launchedAt: launchedAt, logHours: logHours, crashesSince: crashesSince, basicOnly: basicOnly,
+        let background = await Self.collect(launchedAt: launchedAt, logHours: logHours, logSince: logSince,
+                                            crashesSince: crashesSince, basicOnly: basicOnly,
                                             light: light)
         energy.endCollecting()
         metrics.merge(background.metrics) { $1 }
@@ -732,7 +737,7 @@ import Observation
         return section
     }
 
-    @concurrent nonisolated private static func collect(launchedAt: Date, logHours: Int, crashesSince: Date?,
+    @concurrent nonisolated private static func collect(launchedAt: Date, logHours: Int, logSince: Date? = nil, crashesSince: Date?,
                                                          basicOnly: Bool, light: Bool = false) async -> DiagnosticsReport {
         var report = DiagnosticsReport()
         var app = DiagnosticsProbes.bundle(launchedAt: launchedAt)
@@ -764,12 +769,15 @@ import Observation
         report.sections.append(DiagnosticsEnvironment.trail())
         report.metrics[.crashes] = Double(DiagnosticsProbes.crashCount(days: 7))
         if logHours > 0 {
-            let log = DiagnosticsProbes.log(hours: logHours, limit: logLimit)
+            let start = logSince ?? Date().addingTimeInterval(-Double(logHours) * 3600)
+            let log = DiagnosticsProbes.log(since: start, limit: logLimit)
             let errors = DiagnosticsProbes.errorLines(in: log.text)
-            // The log spans earlier runs too, so the rate is over its whole window.
-            report.metrics[.logErrorsPerHour] = Double(errors.count) / Double(logHours)
+            // The log spans earlier runs too, so the rate is over its whole window (an hour at
+            // least: a launch's one or two errors over ten minutes are not ten an hour).
+            let hours = max(1, Date().timeIntervalSince(start) / 3600)
+            report.metrics[.logErrorsPerHour] = Double(errors.count) / hours
             var section = DiagnosticsReport.Section("Log")
-            section.add("Errors and faults (\(logHours) h)", errors.count)
+            section.add("Errors and faults", "\(errors.count) since \(DiagnosticsFormat.date(start))")
             section.add("Last errors", errors.suffix(15).joined(separator: "\n"))
             report.sections.append(section)
             report.attachments.append(log)
