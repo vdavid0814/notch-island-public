@@ -13,8 +13,8 @@ struct AirPodsBanner: View {
         BannerLayout(kind: .airPods(info)) {
             EmptyView()
         } headerTrailing: {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+            Image(systemName: info.listeningMode?.symbol ?? "checkmark.circle.fill")
+                .foregroundStyle(info.listeningMode == nil ? AnyShapeStyle(.green) : AnyShapeStyle(Color.islandAccent))
                 .font(.subheadline.weight(.semibold))
                 .accessibilityHidden(true)
         } row: {
@@ -32,7 +32,7 @@ struct AirPodsBanner: View {
                     .font(.headline)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
-                Text("Connected")
+                Text(info.listeningMode?.title ?? String(localized: "Connected"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

@@ -87,6 +87,10 @@ enum DiagnosticsAppState {
         section.add("Widgets", model.widgets.board.widgets.map { String(describing: $0.kind) }.joined(separator: ", "))
         section.add("Bluetooth outputs now", model.airPods.connectedOutputs.sorted().joined(separator: ", "))
         section.add("AirPods events", model.airPods.recent.isEmpty ? "none since launch" : model.airPods.recent.joined(separator: "\n"))
+        section.add("AirPods noise control", model.listeningModes.diagnosticsSummary)
+        if !model.listeningModes.recent.isEmpty {
+            section.add("Noise control events", model.listeningModes.recent.joined(separator: "\n"))
+        }
         section.add("Siri reads files", UserDefaults.standard.bool(forKey: AssistantModel.filesKey))
         return section
     }

@@ -104,3 +104,24 @@ import Testing
         }
     }
 }
+
+@Suite struct AirPodsListeningModeTests {
+    @Test func modesAreTheDevicesNumbers() {
+        #expect(AirPodsListeningMode(rawValue: 2) == .noiseCancellation)
+        #expect(AirPodsListeningMode(rawValue: 3) == .transparency)
+        #expect(AirPodsListeningMode(rawValue: 0) == nil)
+        #expect(AirPodsListeningModeWatch.fourCC("lstm") == 0x6C73_746D)
+    }
+
+    @Test func theModeCardLearnsItsOwnLifetime() {
+        var info = AirPodsInfo.demo
+        #expect(LiquidCardKind.airPods(info).lifetimeKey == "airPods")
+        info.listeningMode = .noiseCancellation
+        #expect(LiquidCardKind.airPods(info).lifetimeKey == "airPodsMode")
+        #expect(LiquidCardKind.airPods(info).card == .airPods)
+    }
+
+    @Test func theDemoCommandParses() {
+        #expect(AppCommand.parse(URL(string: "notchisland://demo/airpodsmode?mode=transparency")!) == .demo(.airPodsMode(.transparency)))
+    }
+}

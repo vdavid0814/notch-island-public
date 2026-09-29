@@ -54,6 +54,8 @@ import SwiftUI
             model.logIslandState()
         case .airPods:
             model.airPodsConnected(.demo)
+        case .airPodsMode(let mode):
+            model.airPodsModeChanged(name: AirPodsInfo.demo.name, to: mode)
         case .siriApps:
             model.controller.openAssistant()
             model.assistant.open(.applications)

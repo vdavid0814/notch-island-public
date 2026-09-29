@@ -12,6 +12,9 @@ nonisolated struct AirPodsInfo: Sendable, Equatable {
     var right: Int?
     var chargingCase: Int?
     var single: Int?
+    /// Set when the card is for a change of noise control (a long press on the stem), not a
+    /// connection: the card shows the mode instead of the batteries.
+    var listeningMode: AirPodsListeningMode? = nil
 
     nonisolated enum Model: Sendable, Equatable {
         case airPods, airPodsPro, airPods3, airPods4, airPodsMax, beats, headphones
@@ -63,6 +66,33 @@ nonisolated struct AirPodsInfo: Sendable, Equatable {
     static let demo = AirPodsInfo(name: "AirPods Pro", model: .airPodsPro, left: 80, right: 82, chargingCase: 86)
 }
 
+/// The AirPods' noise control, as the Bluetooth framework reports it (`listeningMode`).
+nonisolated enum AirPodsListeningMode: UInt8, Sendable, Equatable, CaseIterable {
+    case off = 1
+    case noiseCancellation = 2
+    case transparency = 3
+    case adaptive = 4
+
+    var title: String {
+        switch self {
+        case .off: String(localized: "Off")
+        case .noiseCancellation: String(localized: "Noise Cancellation")
+        case .transparency: String(localized: "Transparency")
+        case .adaptive: String(localized: "Adaptive")
+        }
+    }
+
+    /// Control Center's symbols for the modes.
+    var symbol: String {
+        switch self {
+        case .off: "person.fill"
+        case .noiseCancellation: "person.and.background.striped.horizontal"
+        case .transparency: "person.and.background.dotted"
+        case .adaptive: "person.and.background.dotted"
+        }
+    }
+}
+
 /// Notices headphones connecting — a new Bluetooth output in CoreAudio's device list (no
 /// permission needed) — and reads their name and batteries from `system_profiler`, which reports
 /// AirPods' left, right and case levels (also without a Bluetooth permission prompt, since the
@@ -90,6 +120,17 @@ nonisolated struct AirPodsInfo: Sendable, Equatable {
     private(set) var recent: [String] = []
     /// The Bluetooth audio outputs connected now.
     var connectedOutputs: Set<String> { known }
+    /// The Bluetooth outputs changed (the listening-mode watch follows the headphones connected).
+    var onOutputsChanged: ((Set<String>) -> Void)?
+    /// The last batteries read for each set of headphones: a change of noise control shows them at
+    /// once, as macOS's card does, while fresher ones are read.
+    private(set) var lastInfo: [String: AirPodsInfo] = [:]
+
+    func remember(_ info: AirPodsInfo) {
+        var info = info
+        info.listeningMode = nil
+        lastInfo[info.name] = info
+    }
 
     private func note(_ event: String) {
         recent.append("\(Date().formatted(date: .omitted, time: .standard)) \(event)")
@@ -100,6 +141,7 @@ nonisolated struct AirPodsInfo: Sendable, Equatable {
     func start() {
         guard listener == nil else { return }
         known = Self.bluetoothOutputs()
+        onOutputsChanged?(known)
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             MainActor.assumeIsolated { self?.devicesChanged() }
         }
@@ -125,7 +167,9 @@ nonisolated struct AirPodsInfo: Sendable, Equatable {
     private func devicesChanged() {
         let current = Self.bluetoothOutputs()
         let arrived = current.subtracting(known)
+        let changed = current != known
         known = current
+        if changed { onOutputsChanged?(current) }
         guard let name = arrived.first else { return }
         // What was already at the top of the screen: anything new there is macOS's own card.
         let before = TopEdgeOverlays.current()
@@ -139,12 +183,14 @@ nonisolated struct AirPodsInfo: Sendable, Equatable {
                 if let info = await Self.readInfo(named: name), info.hasBattery || info.model != .headphones {
                     guard !Task.isCancelled else { return }
                     self?.note("shown at once (cover): \(info)")
+                    self?.remember(info)
                     self?.onConnect?(info)
                 } else {
                     self?.note("no headphone info yet for \(name)")
                 }
                 try? await Task.sleep(for: Self.settleDelay)
                 guard !Task.isCancelled, let fresh = await Self.readInfo(named: name), !Task.isCancelled else { return }
+                self?.remember(fresh)
                 self?.onUpdate?(fresh)
                 return
             }
@@ -175,6 +221,7 @@ nonisolated struct AirPodsInfo: Sendable, Equatable {
                 guard !Task.isCancelled else { return }
             }
             self.note("shown: \(info)")
+            self.remember(info)
             self.onConnect?(info)
         }
     }

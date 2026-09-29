@@ -10,6 +10,8 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case state
     /// The AirPods-connected banner with sample batteries.
     case airPods
+    /// The card for the AirPods' noise control changing (`demo/airpodsmode?mode=anc|transparency|adaptive|off`).
+    case airPodsMode(AirPodsListeningMode)
     /// The timer widget's ruler moves on to its next unit (hours → minutes → seconds).
     case timerUnit
     /// Siri opened on its app gallery (as ⌘Space then ⌘1).
@@ -137,6 +139,10 @@ nonisolated enum AppCommand: Sendable, Equatable {
             }
         case "demo/state": return .demo(.state)
         case "demo/airpods": return .demo(.airPods)
+        case "demo/airpodsmode":
+            let modes: [String: AirPodsListeningMode] = ["anc": .noiseCancellation, "transparency": .transparency,
+                                                         "adaptive": .adaptive, "off": .off]
+            return modes[query["mode"]?.lowercased() ?? "anc"].map { .demo(.airPodsMode($0)) }
         case "demo/timerunit": return .demo(.timerUnit)
         case "demo/siriapps": return .demo(.siriApps)
         case "demo/siriclipboard": return .demo(.siriClipboard)

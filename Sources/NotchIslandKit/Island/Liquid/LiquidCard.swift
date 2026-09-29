@@ -15,6 +15,15 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         case .airPods: .airPods
         }
     }
+
+    /// How long macOS's card stays is learnt per kind: the noise-control card is the connection
+    /// card's window but stays longer.
+    var lifetimeKey: String {
+        switch self {
+        case .volume: "volume"
+        case .airPods(let info): info.listeningMode == nil ? "airPods" : "airPodsMode"
+        }
+    }
 }
 
 /// The island's card over macOS's own volume or AirPods card when that one comes up away from the
@@ -62,7 +71,9 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     /// How long macOS's card stays after the last change, by kind: measured each time (it went
     /// 1.70–1.74 s after a volume key, its last half second shrinking), so the cover can leave with
     /// it rather than after it.
-    private var lifetimes: [SystemVolumeCard.Kind: TimeInterval] = [.volume: 1.72, .airPods: 3.0]
+    /// By `LiquidCardKind.lifetimeKey`: the noise-control card stays longer than the connection
+    /// card in the same window (4.5 s against 3, seen).
+    private var lifetimes: [String: TimeInterval] = ["volume": 1.72, "airPods": 3.0, "airPodsMode": 4.5]
     /// The cover's own way out starts this long before macOS's card goes, so both end together
     /// (the card has shrunk to 90 % under it by then).
     static let exitLead: TimeInterval = 0.32
@@ -108,7 +119,8 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
 
     /// Fresher batteries for the headphones on the card. True when they are on it.
     func airPodsUpdated(_ info: AirPodsInfo) -> Bool {
-        guard isShown, case .airPods(let shown) = state.kind, shown.name == info.name else { return false }
+        guard isShown, case .airPods(let shown) = state.kind, shown.name == info.name,
+              shown.listeningMode == info.listeningMode else { return false }
         state.kind = .airPods(info)
         return true
     }
@@ -257,6 +269,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         cardSeen = false
         let started = Date()
         let cardKind = kind.card
+        let lifetimeKey = kind.lifetimeKey
         var target = flowing ? state.target : nil
         var left = false
         watch = Task { [weak self] in
@@ -266,13 +279,13 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
                 let card = await SystemVolumeCard.findOffMain()
                 guard !Task.isCancelled, let self, let metrics = self.model.metrics else { return }
                 let now = Date()
-                let exitAt = self.lastChange.addingTimeInterval((self.lifetimes[cardKind] ?? 1.72) - Self.exitLead)
+                let exitAt = self.lastChange.addingTimeInterval((self.lifetimes[lifetimeKey] ?? 1.72) - Self.exitLead)
                 let isKept = self.state.isHeld || self.model.banners.isHeld || self.model.island.isInteracting
                 if card == nil, self.cardSeen {
                     // Gone: learn how long it stayed after the last change.
                     let stayed = now.timeIntervalSince(self.lastChange)
                     if (0.8...6).contains(stayed) {
-                        self.lifetimes[cardKind] = ((self.lifetimes[cardKind] ?? stayed) + stayed) / 2
+                        self.lifetimes[lifetimeKey] = ((self.lifetimes[lifetimeKey] ?? stayed) + stayed) / 2
                     }
                     Log.levels.notice("macOS's card went \(stayed, format: .fixed(precision: 2), privacy: .public) s after the last change")
                 }
@@ -752,10 +765,12 @@ struct LiquidAirPodsContent: View {
                 .minimumScaleFactor(0.8)
                 .frame(width: 150)
                 .position(x: Self.textCenterX, y: Self.center(baseline: Self.nameBaseline, size: 11.5, weight: .semibold))
-            Text("Connected")
+            // A change of noise control says the mode where a connection says "Connected".
+            Text(info.listeningMode?.title ?? String(localized: "Connected"))
                 .font(Self.statusFont)
                 .foregroundStyle(.secondary)
                 .position(x: Self.textCenterX, y: Self.center(baseline: Self.statusBaseline, size: 11.5, weight: .regular))
+            // The battery ring in both: macOS's noise-control card keeps it (seen).
             if let level {
                 ZStack {
                     Circle().stroke(Color.white.opacity(0.16), lineWidth: Self.ringWidth)

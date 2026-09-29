@@ -20,6 +20,7 @@ import Observation
     let media = MediaController()
     let power = PowerMonitor()
     let airPods = AirPodsMonitor()
+    let listeningModes = AirPodsListeningModeWatch()
     let stats = SystemStatsMonitor()
     let levels = LevelsController()
     let shelf = ShelfStore()
@@ -190,6 +191,7 @@ import Observation
         clipboard.setWatching(false)
         power.stop()
         airPods.stop()
+        listeningModes.stop()
         activity.stop()
         permissions.stop()
         windowController?.stop()
@@ -340,12 +342,10 @@ import Observation
     private func wireFeatureEvents() {
         power.onEvent = { [weak self] event in self?.powerEvent(event) }
         airPods.onConnect = { [weak self] info in self?.airPodsConnected(info) }
+        airPods.onOutputsChanged = { [weak self] outputs in self?.listeningModes.follow(outputs) }
+        listeningModes.onChange = { [weak self] name, mode in self?.airPodsModeChanged(name: name, to: mode) }
         airPods.systemCard = { [weak self] in self?.preferences.airPodsSystemCard ?? .cover }
-        airPods.onUpdate = { [weak self] info in
-            // Only into the card still up for these headphones.
-            guard let self, !self.liquidCard.airPodsUpdated(info), case .airPods(let shown)? = self.banners.current, shown.name == info.name, shown != info else { return }
-            self.banners.post(.airPods(info), duration: self.preferences.airPodsDuration)
-        }
+        airPods.onUpdate = { [weak self] info in self?.airPodsUpdated(info) }
         levels.onChange = { [weak self] kind, source in self?.levelChanged(kind, source: source) }
         timers.onFinished = { [weak self] in self?.timerFinished() }
         dragMonitor.onDragBegan = { [weak self] in self?.externalDragBegan() }
@@ -361,7 +361,7 @@ import Observation
     }
 
     func airPodsConnected(_ info: AirPodsInfo) {
-        DiagnosticsFlow.record("airpods connected: \(info)")
+        DiagnosticsFlow.record(info.listeningMode.map { "airpods mode: \(info.name) → \($0)" } ?? "airpods connected: \(info)")
         // Passive, like a power notice: nothing appears by itself over a full-screen video.
         guard preferences.showAirPods, appliedFeatures?.hidden != true else { return }
         // Covering macOS's card away from the notch: the liquid runs to it.
@@ -372,6 +372,28 @@ import Observation
         }
         banners.post(.airPods(info), duration: preferences.airPodsDuration)
         haptics.play(.alert)
+    }
+
+    /// The AirPods' noise control changed: macOS shows its card, the island covers it as it does the
+    /// connection card (the same settings: shown or not, over macOS's card, flowing out, how long).
+    func airPodsModeChanged(name: String, to mode: AirPodsListeningMode) {
+        // The batteries last read at once (macOS's card shows them too), fresher ones after.
+        var info = airPods.lastInfo[name] ?? AirPodsInfo(name: name, model: .init(name: name, productID: nil))
+        info.listeningMode = mode
+        airPodsConnected(info)
+        Task { [weak self] in
+            guard var fresh = await AirPodsMonitor.readInfo(named: name), let self else { return }
+            self.airPods.remember(fresh)
+            fresh.listeningMode = mode
+            self.airPodsUpdated(fresh)
+        }
+    }
+
+    /// Fresher batteries: only into the card still up for these headphones.
+    private func airPodsUpdated(_ info: AirPodsInfo) {
+        guard !liquidCard.airPodsUpdated(info), case .airPods(let shown)? = banners.current, shown.name == info.name,
+              shown.listeningMode == info.listeningMode, shown != info else { return }
+        banners.post(.airPods(info), duration: preferences.airPodsDuration)
     }
 
     /// How much longer a banner over macOS's volume card stays (asked for, v0.4.7).
