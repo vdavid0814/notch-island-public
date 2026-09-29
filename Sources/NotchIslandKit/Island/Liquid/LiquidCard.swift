@@ -307,6 +307,18 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         }
     }
 
+    /// For the report: where macOS's card is expected now, what was learnt of its lifetime, and the
+    /// frames worked out.
+    var diagnosticsSummary: String {
+        let situation = model.fullscreen.fullscreenApps.count
+        let expected = model.metrics.map {
+            memory.expected(fullscreenApps: situation, notch: $0.notchRect, screen: $0.screenFrame).logDescription
+        } ?? "no screen"
+        let lifetimes = lifetimes.map { "\($0.key) \(String(format: "%.2f", $0.value)) s" }.sorted().joined(separator: ", ")
+        return "\(isShown ? "showing \(state.kind)" : "idle"); card expected at \(expected) (situation \(situation)); "
+            + "card lasts \(lifetimes); \(framesCache.count) moves worked out"
+    }
+
     /// The island banner covering macOS's card of the same kind (the AirPods one changes as their
     /// batteries come in).
     static func isCover(_ banner: BannerKind, like cover: BannerKind) -> Bool {

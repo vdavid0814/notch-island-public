@@ -328,6 +328,11 @@ def show(query, n):
         for k, v in report["fields"].items():
             if k.startswith("📈"):
                 print("  " + v.replace("\n", "\n  "))
+    health = next((sec for sec in report["sections"] if sec["title"] == "Feature health"), None)
+    if health:
+        print("\nFeature health:")
+        for entry in health["entries"]:
+            print(f"  {entry['key']}: {entry['value'][:160]}")
     causes = value(report, "Likely causes", "Causes")
     if causes and causes != "nothing stands out":
         print("\nLikely causes:")

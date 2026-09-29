@@ -860,6 +860,11 @@ nonisolated enum DiagnosticsFindings {
             found.append("Volume/brightness key interception failed: \(keys)")
         }
         if report.value("Low Power Mode", in: "Mac") == "true" { found.append("Low Power Mode is on") }
+        // Features the user wants on that are not running (Feature health).
+        for entry in report.sections.first(where: { $0.title == "Feature health" })?.entries ?? []
+        where entry.value.contains("wanted but not running") && entry.key != "Launch at login" {
+            found.append("\(entry.key) is on but not running\(entry.value.components(separatedBy: " — ").dropFirst().first.map { ": \($0)" } ?? "")")
+        }
         return found
     }
 

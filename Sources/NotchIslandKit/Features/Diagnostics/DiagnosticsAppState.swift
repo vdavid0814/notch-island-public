@@ -12,7 +12,7 @@ enum DiagnosticsAppState {
     static let otherNotchAppsKey = DiagnosticsAppStateKeys.otherNotchApps
 
     static func sections(_ model: AppModel) -> [DiagnosticsReport.Section] {
-        [island(model), internals(model), screens(), windows(), features(model), effectiveSettings(model), copies(),
+        [health(model), island(model), internals(model), screens(), windows(), features(model), effectiveSettings(model), copies(),
          preferences(), runningApps()]
     }
 
@@ -99,6 +99,34 @@ enum DiagnosticsAppState {
         case .notFound: "off (not found)"
         @unknown default: "unknown (\(status.rawValue))"
         }
+    }
+
+    /// Each feature in one line: on or off by the user, running or not, and what is wrong if it
+    /// should run and does not.
+    private static func health(_ model: AppModel) -> DiagnosticsReport.Section {
+        var section = DiagnosticsReport.Section("Feature health")
+        let preferences = model.preferences
+        func line(_ name: String, wanted: Bool, running: Bool, _ detail: String = "") {
+            let state = !wanted ? "off (by the user)" : running ? "✅ running" : "⚠︎ wanted but not running"
+            section.add(name, state + (detail.isEmpty ? "" : " — \(detail)"))
+        }
+        let media = String(describing: model.media.status)
+        line("Now Playing", wanted: preferences.showNowPlaying, running: !media.hasPrefix("off"), media)
+        let keys = String(describing: model.levels.interception)
+        line("Volume/brightness keys", wanted: preferences.showLevelHUD && preferences.replaceSystemHUD,
+             running: keys.hasPrefix("active"), keys)
+        line("⌘Space for Siri", wanted: model.diagnosticsCommandSpaceWanted, running: model.diagnosticsCommandSpaceTapRunning)
+        line("Full-screen watch", wanted: preferences.hideInFullscreen, running: model.fullscreen.isRunning,
+             "full-screen apps: \(model.fullscreen.fullscreenApps.count)")
+        line("Battery notices", wanted: preferences.showPowerAlerts && model.power.state.hasBattery, running: model.power.isRunning)
+        line("AirPods", wanted: preferences.showAirPods, running: true,
+             "card: \(preferences.airPodsSystemCard), flows out: \(preferences.liquidAirPods), outputs now: \(model.airPods.connectedOutputs.count)")
+        line("Liquid volume card", wanted: preferences.liquidVolume, running: true, model.liquidCard.diagnosticsSummary)
+        line("Siri's files", wanted: preferences.siri.showsFiles, running: UserDefaults.standard.bool(forKey: AssistantModel.filesKey),
+             "folders: \(preferences.siri.folders.count)")
+        line("Launch at login", wanted: true, running: model.launchAtLogin.status == .enabled, launchAtLogin(model.launchAtLogin.status))
+        line("Accessibility", wanted: true, running: model.permissions.accessibilityTrusted)
+        return section
     }
 
     /// The island's policy flags, the banner up now and why the app is (not) suspended.

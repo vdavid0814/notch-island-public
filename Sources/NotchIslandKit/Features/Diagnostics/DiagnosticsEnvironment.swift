@@ -212,8 +212,7 @@ nonisolated enum DiagnosticsEnvironment {
     /// Apps known to take the notch, the volume/brightness HUD, the media keys, ⌘Space or the menu
     /// bar's space, matched in the name or bundle id (lowercased).
     static let interfering = ["notch", "alcove", "mediamate", "bartender", "jordanbaird.ice", "hiddenbar", "vanilla", "dozer",
-                              "soundsource", "backgroundmusic", "eqmac", "bettertouchtool", "karabiner", "scroll-reverser",
-                              "scroll reverser", "monitorcontrol", "lunar", "betterdisplay", "raycast", "alfred", "launchbar",
+                              "soundsource", "backgroundmusic", "eqmac", "bettertouchtool", "karabiner", "monitorcontrol", "lunar", "betterdisplay", "raycast", "alfred", "launchbar",
                               "sketchybar", "hud", "boring"]
 
     static func installedApps() -> DiagnosticsReport.Section {
