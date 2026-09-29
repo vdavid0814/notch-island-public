@@ -52,6 +52,8 @@ import SwiftUI
             model.controller.simulatePointer(inside: inside)
         case .state:
             model.logIslandState()
+        case .segments:
+            Self.logSegments()
         case .airPods:
             model.airPodsConnected(.demo)
         case .airPodsMode(let mode):
@@ -187,4 +189,23 @@ private extension PowerState {
 extension Notification.Name {
     /// `demo/timerunit`: the timer widget switches its ruler's unit, as a tap on the marker does.
     static let demoNextTimerUnit = Notification.Name("com.davidvarga.notchisland.demo.nextTimerUnit")
+}
+
+extension DemoDirector {
+    /// Each segmented control in the app's windows as AppKit has it: its frame against the width
+    /// it wants (how the bars' first-click widening was found).
+    static func logSegments() {
+        func walk(_ view: NSView) {
+            if let control = view as? NSSegmentedControl {
+                let widths = (0..<control.segmentCount).map { String(format: "%.1f", control.width(forSegment: $0)) }
+                let line = "\(type(of: control)) frame \(control.frame.width) intrinsic \(control.intrinsicContentSize.width) "
+                    + "distribution \(control.segmentDistribution.rawValue) style \(control.segmentStyle.rawValue) "
+                    + "size \(control.controlSize.rawValue) selected \(control.selectedSegment) widths [\(widths.joined(separator: ","))] "
+                    + "labels [\((0..<control.segmentCount).map { control.label(forSegment: $0) ?? "?" }.joined(separator: ","))]"
+                Log.window.notice("SEGMENTS \(line, privacy: .public)")
+            }
+            view.subviews.forEach(walk)
+        }
+        for window in NSApp.windows where window.isVisible { window.contentView.map(walk) }
+    }
 }

@@ -8,6 +8,8 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case hover(Bool)
     /// Logs presentation, stage and where SwiftUI actually placed the island.
     case state
+    /// Logs every segmented control on screen: its frame and the width it wants.
+    case segments
     /// The AirPods-connected banner with sample batteries.
     case airPods
     /// The card for the AirPods' noise control changing (`demo/airpodsmode?mode=anc|transparency|adaptive|off`).
@@ -138,6 +140,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
             default: return nil
             }
         case "demo/state": return .demo(.state)
+        case "demo/segments": return .demo(.segments)
         case "demo/airpods": return .demo(.airPods)
         case "demo/airpodsmode":
             let modes: [String: AirPodsListeningMode] = ["anc": .noiseCancellation, "transparency": .transparency,

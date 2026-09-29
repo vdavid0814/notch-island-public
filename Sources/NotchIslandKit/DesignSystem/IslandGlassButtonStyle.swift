@@ -68,40 +68,57 @@ extension View {
     /// Every row of mutually exclusive choices (pages, sizes, backgrounds, categories): the
     /// system's tab bar — a segmented control in the tabs role — with the capsule corners of the
     /// system's buttons.
+    ///
+    /// Measured again once shown (`SegmentedControlRemeasure`): SwiftUI sized the system's bar to
+    /// its segments' own widths while the bar spreads them equally, and it widened on the first
+    /// click (every bar in Settings, seen on video).
     func choiceBar() -> some View {
         pickerStyle(.tabs)
             .buttonBorderShape(.capsule)
+            .background(SegmentedControlRemeasure())
     }
 }
 
-/// A choice bar that measures itself right from the start. Some of the system's bars (the Spotlight
-/// shortcut's) are sized short until their selection changes — 213 pt for 246 of segments, read
-/// through accessibility, the segments reaching past the row until clicked; built again, or at its
-/// own fixed width, it stayed short. So it starts with nothing selected and takes the value a
-/// moment after it appears: the same change a click makes, without touching the setting.
-struct SettledChoiceBar<Value: Hashable, Label: View>: View {
-    @Binding var selection: Value
-    let options: [Value]
-    let title: (Value) -> String
-    @ViewBuilder let label: () -> Label
 
-    @State private var shown: Value?
+/// Tells the system's segmented bar next to it to measure itself again once it is in a window.
+/// SwiftUI gives the bar the sum of its segments' own widths (81 + 81 + 99 pt); the bar spreads its
+/// segments equally and wants three times the widest (297 pt, read from the control), and only
+/// after a click did SwiftUI ask it again. Asked here a turn after it appears — outside any layout
+/// pass (resizing it inside one stopped the app) — and only when it is short.
+private struct SegmentedControlRemeasure: NSViewRepresentable {
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ view: Probe, context: Context) {}
 
-    var body: some View {
-        Picker(selection: Binding(get: { shown }, set: { value in
-            shown = value
-            if let value { selection = value }
-        })) {
-            ForEach(options, id: \.self) { Text(title($0)).tag(Optional($0)) }
-        } label: {
-            label()
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil else { return }
+            DispatchQueue.main.async { [weak self] in self?.remeasure() }
         }
-        .choiceBar()
-        .task {
-            // After its first layout: set in the same turn, the change merged into it.
-            try? await Task.sleep(for: .milliseconds(60))
-            shown = selection
+
+        /// The segmented control lying under this probe (the bar it is the background of).
+        private func remeasure() {
+            guard window != nil else { return }
+            let area = convert(bounds, to: nil)
+            func find(_ view: NSView) -> NSSegmentedControl? {
+                if let control = view as? NSSegmentedControl, control.convert(control.bounds, to: nil).intersects(area) {
+                    return control
+                }
+                for sub in view.subviews { if let found = find(sub) { return found } }
+                return nil
+            }
+            // From the nearest common ancestor outwards, not the whole window.
+            var ancestor = superview
+            for _ in 0..<6 {
+                guard let current = ancestor else { break }
+                if let control = find(current) {
+                    if control.frame.width + 0.5 < control.intrinsicContentSize.width {
+                        control.invalidateIntrinsicContentSize()
+                    }
+                    return
+                }
+                ancestor = current.superview
+            }
         }
-        .onChange(of: selection) { _, value in shown = value }
     }
 }
