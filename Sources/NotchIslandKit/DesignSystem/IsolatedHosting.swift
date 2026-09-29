@@ -57,14 +57,6 @@ struct IsolatedFillHosting<Content: View>: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSHostingView<Content>, context: Context) -> CGSize? {
-        let size = proposal.replacingUnspecifiedDimensions()
-        // Laid out first at the size it is shown at: made at zero, its content was laid out at
-        // zero width first, and the system's segmented bars kept that layout, reaching past their
-        // row's end until clicked (seen in Settings).
-        if nsView.frame.size == .zero, size.width > 0, size.height > 0 {
-            nsView.setFrameSize(size)
-            nsView.layoutSubtreeIfNeeded()
-        }
-        return size
+        proposal.replacingUnspecifiedDimensions()
     }
 }
