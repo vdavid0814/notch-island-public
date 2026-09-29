@@ -21,6 +21,8 @@ import Observation
     let power = PowerMonitor()
     let airPods = AirPodsMonitor()
     let listeningModes = AirPodsListeningModeWatch()
+    /// The newest version from GitHub, downloaded from About.
+    let updater = AppUpdater()
     let stats = SystemStatsMonitor()
     let levels = LevelsController()
     let shelf = ShelfStore()

@@ -303,3 +303,17 @@ import Testing
         #expect(verdict.warnings == 0 && verdict.healthy == 1)
     }
 }
+
+@Suite struct AppUpdaterTests {
+    @Test func theReleaseComesFromItsDiskImage() throws {
+        let json: [String: Any] = [
+            "tag_name": "v0.4.11", "body": "## New\n- **Faster**",
+            "assets": [["name": "Other.zip", "browser_download_url": "https://example.com/o.zip"],
+                       ["name": "NotchIsland.dmg", "browser_download_url": "https://example.com/NotchIsland.dmg"]],
+        ]
+        let release = try AppUpdater.release(from: json, tag: "v0.4.11")
+        #expect(release.version == "0.4.11")
+        #expect(release.diskImage.absoluteString == "https://example.com/NotchIsland.dmg")
+        #expect((try? AppUpdater.release(from: ["assets": []], tag: "v1")) == nil)
+    }
+}

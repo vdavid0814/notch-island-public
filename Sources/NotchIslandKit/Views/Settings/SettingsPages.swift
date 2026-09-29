@@ -865,6 +865,92 @@ struct SiriSettingsPage: View {
 // MARK: - About
 
 /// The app, what it may access (and why), and its data.
+/// The newest version: looked up when About opens, downloaded into Downloads and opened with a
+/// click; the user drags it onto Applications (`AppUpdater`).
+private struct UpdateSection: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let updater = model.updater
+        Section {
+            switch updater.state {
+            case .idle, .checking:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Looking for a new version…").foregroundStyle(SettingsPalette.secondary)
+                }
+            case .upToDate:
+                LabeledContent {
+                    Button("Check Again") { Task { await updater.check() } }
+                } label: {
+                    Label("NotchIsland \(updater.current) is the newest version", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.primary)
+                }
+            case .available(let release):
+                LabeledContent {
+                    Button("Download Update") { Task { await updater.download(release) } }
+                        .keyboardShortcut(.defaultAction)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Version \(release.version) is available").font(.headline)
+                        Text("You have \(updater.current).").foregroundStyle(SettingsPalette.secondary)
+                    }
+                }
+                if !release.notes.isEmpty {
+                    DisclosureGroup("What's New") {
+                        Text(Self.notes(release.notes))
+                            .font(.callout)
+                            .foregroundStyle(SettingsPalette.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                }
+            case .downloading(let release):
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Downloading version \(release.version)…").foregroundStyle(SettingsPalette.secondary)
+                }
+            case .ready(let release, let file):
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Version \(release.version) is downloaded and open in Finder.").font(.headline)
+                    Text("1. Quit NotchIsland.\n2. In the Finder window, drag NotchIsland onto Applications and choose Replace.\n3. Open NotchIsland from Applications.")
+                        .foregroundStyle(SettingsPalette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
+                    Spacer()
+                    Button("Quit NotchIsland") { NSApp.terminate(nil) }
+                        .keyboardShortcut(.defaultAction)
+                }
+            case .failed(let message):
+                LabeledContent {
+                    Button("Try Again") { Task { await updater.check() } }
+                } label: {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.primary)
+                }
+            }
+        } header: {
+            Text("Updates")
+        } footer: {
+            Text("The update is downloaded from NotchIsland's GitHub releases into your Downloads folder. macOS checks it as any download.")
+        }
+        .task { if updater.state == .idle { await updater.check() } }
+    }
+
+    /// The release notes, Markdown as far as a text view shows it (bold, links), headings as bold
+    /// lines; at most the first 40 lines.
+    static func notes(_ markdown: String) -> AttributedString {
+        let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).prefix(40).map { line -> String in
+            line.hasPrefix("## ") ? "**\(line.dropFirst(3))**" : String(line)
+        }
+        let text = lines.joined(separator: "\n")
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+    }
+}
+
 struct AboutSettingsPage: View {
     @Environment(AppModel.self) private var model
     @State private var isConfirmingClear = false
@@ -894,6 +980,8 @@ struct AboutSettingsPage: View {
                 }
                 .padding(.vertical, 6)
             }
+
+            UpdateSection()
 
             FeedbackSection()
 
