@@ -322,10 +322,9 @@ nonisolated extension DiagnosticsVerdict {
                                 action: "Re-index Spotlight (`sudo mdutil -E /`) and check the app folders are readable", weight: 80))
         }
         if let missing = report.value(DiagnosticsProbes.missingKey, in: spotlight).flatMap(Int.init), missing > 0 {
-            checks.append(Check(id: "siri.missingFromSpotlight", severity: .warning, feature: Feature.siri,
-                                title: "\(missing) app\(missing == 1 ? " is" : "s are") missing from Spotlight's index",
-                                cause: "the index is incomplete (usually after a migration or restore); Siri reads the app folders itself",
-                                action: "macOS's Spotlight re-indexes with `sudo mdutil -E /`", weight: 5))
+            // Not a problem for Siri: it reads the app folders too (only macOS's Spotlight misses them).
+            checks.append(Check(id: "siri.findsWhatSpotlightMisses", severity: .healthy, feature: Feature.siri,
+                                title: "finds the \(missing) app\(missing == 1 ? "" : "s") Spotlight's index misses"))
         }
         let elsewhere = report.value(DiagnosticsProbes.elsewhereKey, in: spotlight).flatMap { $0 == "none" ? nil : $0 }
         let misses = searchesWithoutApps(report)

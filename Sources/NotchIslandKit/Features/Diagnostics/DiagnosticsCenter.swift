@@ -411,7 +411,14 @@ import Observation
                           feedback: DiagnosticsFeedback?) -> DiagnosticsEnvelope {
         var report = report
         let crashCount = report.attachments.count(where: \.isCrashReport)
-        let comparisons = DiagnosticsComparison.compare(report.metrics, with: references.baseline)
+        // Crash reports of the last week are a count, not a finding: only new ones (attached, never
+        // sent before) are unusual — nine old ones were flagged in every report (seen).
+        let comparisons = DiagnosticsComparison.compare(report.metrics, with: references.baseline).map { comparison in
+            guard comparison.metric == .crashes else { return comparison }
+            var adjusted = comparison
+            adjusted.isUnusual = crashCount > 0
+            return adjusted
+        }
         var findings = liveTrigger.map { "Live: \($0)" }
         findings += DiagnosticsFindings.findings(report, crashes: crashCount)
         findings += DiagnosticsFindings.anomalies(comparisons, metrics: report.metrics, crashes: crashCount)
@@ -693,6 +700,8 @@ import Observation
         return report
     }
 
+    static let batteryJudgedAfter: TimeInterval = 30 * 60
+
     /// How long a stretch must be before its energy is set against the reference.
     static let energyJudgedAfter: TimeInterval = 5 * 60
 
@@ -724,7 +733,9 @@ import Observation
         }
         if let battery = EnergySummary(intervals.filter(\.onBattery)) {
             section.add("On battery", battery.line)
-            metrics[.powerOnBatteryMW] = battery.ownMW
+            // Judged over half an hour on battery at least: a few minutes of use (Settings, Siri)
+            // read as a hundred times an idle reference (seen: 70 mW against 0.2).
+            if battery.seconds >= Self.batteryJudgedAfter { metrics[.powerOnBatteryMW] = battery.ownMW }
         }
         if let charger = EnergySummary(intervals.filter { !$0.onBattery }) {
             section.add("On the charger", charger.line)
@@ -959,9 +970,8 @@ nonisolated enum DiagnosticsFindings {
             found.append("The code signature is invalid")
         }
         let spotlight = DiagnosticsProbes.spotlightTitle
-        if let missing = report.value(DiagnosticsProbes.missingKey, in: spotlight).flatMap(Int.init), missing > 0 {
-            found.append("\(missing) app\(missing == 1 ? " is" : "s are") on disk but missing from Spotlight (Siri cannot find them)")
-        }
+        // Apps missing from Spotlight's index are not a finding: Siri reads the app folders too and
+        // finds them (the verdict says so); only macOS's own Spotlight misses them.
         if let gallery = report.value(DiagnosticsProbes.galleryKey, in: spotlight), gallery.hasPrefix("0 apps") {
             found.append("Siri's app gallery gets no apps from Spotlight")
         }

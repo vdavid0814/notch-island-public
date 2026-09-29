@@ -276,3 +276,30 @@ import Testing
         #expect(!DiagnosticsCenter.isOffline(URLError(.badServerResponse)))
     }
 }
+
+@Suite struct DiagnosticsHonestFindingsTests {
+    @Test func aReplacedBuildIsNotAnUncleanExit() {
+        let defaults = UserDefaults(suiteName: "history-\(UUID().uuidString)")!
+        _ = DiagnosticsHistory(defaults: defaults, version: "1", identity: "a@1")
+        let rebuilt = DiagnosticsHistory(defaults: defaults, version: "1", identity: "a@2")
+        #expect(rebuilt.previousWasReplaced && !rebuilt.previousEndedUncleanly)
+        let crashed = DiagnosticsHistory(defaults: defaults, version: "1", identity: "a@2")
+        #expect(!crashed.previousWasReplaced && crashed.previousEndedUncleanly)
+    }
+
+    @Test func littleBatteryUseIsNotUnusual() {
+        let reference = DiagnosticsBaseline(version: "0.4.7", build: "17", created: Date(timeIntervalSince1970: 0), machine: "Mac",
+                                            uptimeHours: 9, metrics: ["powerOnBatteryMW": 0.2],
+                                            rules: ["powerOnBatteryMW": .init(factor: 2, minimum: 5)])
+        let comparisons = DiagnosticsComparison.compare([.powerOnBatteryMW: 45], with: reference)
+        #expect(comparisons.first?.isUnusual == false)
+        #expect(DiagnosticsComparison.compare([.powerOnBatteryMW: 120], with: reference).first?.isUnusual == true)
+    }
+
+    @Test func missingFromSpotlightIsHealthyForSiri() {
+        var report = DiagnosticsReport()
+        report.sections = [.init(DiagnosticsProbes.spotlightTitle, [.init(key: DiagnosticsProbes.missingKey, value: "2")])]
+        let verdict = DiagnosticsVerdict.make(report: report, metrics: [:], comparisons: [], crashes: 0)
+        #expect(verdict.warnings == 0 && verdict.healthy == 1)
+    }
+}

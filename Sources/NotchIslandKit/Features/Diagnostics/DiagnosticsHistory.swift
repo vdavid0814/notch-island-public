@@ -8,6 +8,7 @@ final class DiagnosticsHistory {
     nonisolated static let uncleanKey = "ni2.diagnostics.uncleanExits"
     nonisolated static let versionsKey = "ni2.diagnostics.versions"
     nonisolated static let firstLaunchKey = "ni2.diagnostics.firstLaunch"
+    nonisolated static let identityKey = "ni2.diagnostics.buildIdentity"
 
     nonisolated struct VersionSeen: Codable, Sendable, Equatable {
         var version: String
@@ -17,6 +18,9 @@ final class DiagnosticsHistory {
     /// The previous run ended without `applicationWillTerminate`: a crash, a hang the user
     /// force-quit, a kill, or the Mac losing power.
     let previousEndedUncleanly: Bool
+    /// The previous run did not quit, but the app on disk is another build now: an update or a
+    /// rebuild replaced it (and stopped it) — not an unclean exit.
+    let previousWasReplaced: Bool
     let launches: Int
     let uncleanExits: Int
     let versions: [VersionSeen]
@@ -29,10 +33,21 @@ final class DiagnosticsHistory {
 
     private let defaults: UserDefaults
 
+    /// This build: the executable's path and when it was written (an update or a rebuild changes it).
+    nonisolated static var currentIdentity: String {
+        guard let url = Bundle.main.executableURL else { return "unknown" }
+        let written = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        return "\(url.path)@\(written.map { String(Int($0.timeIntervalSince1970)) } ?? "?")"
+    }
+
     /// Records this launch. Call once, when the app starts.
-    init(defaults: UserDefaults = .standard, version: String) {
+    init(defaults: UserDefaults = .standard, version: String, identity: String = DiagnosticsHistory.currentIdentity) {
         self.defaults = defaults
-        previousEndedUncleanly = defaults.bool(forKey: Self.runningKey)
+        let didNotQuit = defaults.bool(forKey: Self.runningKey)
+        let previousIdentity = defaults.string(forKey: Self.identityKey)
+        previousWasReplaced = didNotQuit && previousIdentity != nil && previousIdentity != identity
+        previousEndedUncleanly = didNotQuit && !previousWasReplaced
+        defaults.set(identity, forKey: Self.identityKey)
         launches = defaults.integer(forKey: Self.launchesKey) + 1
         uncleanExits = defaults.integer(forKey: Self.uncleanKey) + (previousEndedUncleanly ? 1 : 0)
         firstLaunch = defaults.object(forKey: Self.firstLaunchKey) as? Date ?? Date()
@@ -69,7 +84,8 @@ final class DiagnosticsHistory {
         var section = DiagnosticsReport.Section("History")
         section.add("Launches", launches)
         section.add("First launch", DiagnosticsFormat.date(firstLaunch))
-        section.add("Previous run ended normally", !previousEndedUncleanly)
+        section.add("Previous run ended normally", previousWasReplaced ? "stopped by an update or a new build (not a failure)"
+                    : "\(!previousEndedUncleanly)")
         section.add("Runs that did not end normally", uncleanExits)
         section.add("Versions", versions.map { "\($0.version) since \(DiagnosticsFormat.date($0.firstSeen))" }.joined(separator: "\n"))
         section.add("Since this launch", counters.isEmpty ? "nothing yet"

@@ -128,7 +128,10 @@ nonisolated struct DiagnosticsComparison: Sendable, Equatable {
         DiagnosticsMetric.allCases.compactMap { metric in
             guard let value = metrics[metric] else { return nil }
             let reference = baseline?.value(metric)
-            let rule = baseline?.rule(metric) ?? metric.defaultRule
+            var rule = baseline?.rule(metric) ?? metric.defaultRule
+            // On battery the app is in use as much as idle: below 60 mW is ordinary use, whatever
+            // the published rule says (a reference from an idle night is 0.2 mW).
+            if metric == .powerOnBatteryMW { rule.minimum = max(rule.minimum, 60) }
             return DiagnosticsComparison(metric: metric, value: value, reference: reference,
                                          isUnusual: isUnusual(value, reference: reference, rule: rule))
         }

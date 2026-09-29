@@ -145,9 +145,10 @@ import Testing
             ("Copies", "Instances running", "2"),
         ])
         let found = DiagnosticsFindings.findings(broken, crashes: 1)
-        #expect(found.count == 7)
+        #expect(found.count == 6)
         #expect(found.contains { $0.hasPrefix("1 new crash report attached") })
-        #expect(found.contains { $0.hasPrefix("37 apps are on disk but missing from Spotlight") })
+        // Siri finds apps Spotlight's index misses: not a finding any more.
+        #expect(!found.contains { $0.contains("missing from Spotlight") })
         #expect(found.contains("Spotlight indexing is disabled"))
         #expect(found.contains("2 copies of NotchIsland are running at once"))
         #expect(DiagnosticsFindings.runsFrom(broken) == "The disk image")
