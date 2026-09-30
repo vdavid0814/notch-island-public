@@ -131,10 +131,14 @@ nonisolated enum AirPodsListeningMode: UInt8, Sendable, Equatable, CaseIterable 
     /// once, as macOS's card does, while fresher ones are read.
     private(set) var lastInfo: [String: AirPodsInfo] = [:]
 
+    /// Every reading as it is remembered (the AirPods widget keeps the last).
+    var onRemember: ((AirPodsInfo) -> Void)?
+
     func remember(_ info: AirPodsInfo) {
         var info = info
         info.listeningMode = nil
         lastInfo[info.name] = info
+        onRemember?(info)
     }
 
     private func note(_ event: String) {

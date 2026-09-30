@@ -19,7 +19,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.6</string>
+	<string>0.7</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -34,7 +34,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>23</string>
+	<string>24</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSEnvironment</key>
@@ -54,6 +54,10 @@
 	<string>The equalizer beside the notch follows the music that is playing: bass on the left, treble on the right. The sound is only measured, never recorded or kept.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>The Controls widget shows whether Bluetooth is on and switches it, like Control Center.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>The Up Next widget and Spotlight show your coming events. They are read on this Mac only and never leave it.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Spotlight's People &amp; Calendar finds your contacts by name so you can call, message or email them. They are read on this Mac only and never leave it.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>

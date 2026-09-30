@@ -202,14 +202,26 @@ nonisolated struct ElementFrame: Codable, Hashable, Sendable {
     /// Not moved by a drag or a nudge.
     var locked: Bool
     var keepsAspect: Bool
+    /// For an element drawn at a size of its own (a button, a line, a chart): that size where it was
+    /// unlocked, in authored points. It is drawn at it, scaled as its rectangle grows or shrinks
+    /// from it (`FittedElement`); nil for one placed later, which is measured instead.
+    var natural: CGSize?
+    /// The type (or symbol) size it was drawn at where it was unlocked, kept while its rectangle is
+    /// that tall so it draws exactly as there (several sizes share a frame's height); resized, it
+    /// takes its size from its rectangle. Not the style's: a fixed size there held it, and every
+    /// size laid out by the kind, at that size.
+    var points: Double?
 
-    init(id: ElementID, rect: UnitRect, pinX: Pin = .scale, pinY: Pin = .scale, locked: Bool = false, keepsAspect: Bool = false) {
+    init(id: ElementID, rect: UnitRect, pinX: Pin = .scale, pinY: Pin = .scale, locked: Bool = false, keepsAspect: Bool = false,
+         natural: CGSize? = nil, points: Double? = nil) {
         self.id = id
         self.rect = rect
         self.pinX = pinX
         self.pinY = pinY
         self.locked = locked
         self.keepsAspect = keepsAspect
+        self.natural = natural
+        self.points = points
     }
 
     init(from decoder: any Decoder) throws {
@@ -220,6 +232,8 @@ nonisolated struct ElementFrame: Codable, Hashable, Sendable {
         pinY = c.lossy(Pin.self, .pinY) ?? .scale
         locked = c.lossy(Bool.self, .locked) ?? false
         keepsAspect = c.lossy(Bool.self, .keepsAspect) ?? false
+        natural = c.lossy(CGSize.self, .natural).flatMap { $0.width > 0 && $0.height > 0 ? $0 : nil }
+        points = c.lossy(Double.self, .points).flatMap { $0 > 0 ? $0 : nil }
     }
 }
 
@@ -261,4 +275,69 @@ nonisolated enum Decoration: Codable, Hashable, Sendable {
 
 nonisolated enum DecorationShape: String, Codable, Hashable, Sendable, CaseIterable {
     case rectangle, roundedRectangle, circle, capsule
+}
+
+nonisolated extension ElementArrangement {
+    /// A decoration of any size's layout.
+    func decoration(_ id: ElementID) -> Decoration? {
+        guard case .custom(let layouts) = self else { return nil }
+        for variant in layouts.variants.values {
+            if case .custom(let layout) = variant, let decoration = layout.decorations[id] { return decoration }
+        }
+        return nil
+    }
+}
+
+nonisolated extension Decoration {
+    var title: String {
+        switch self {
+        case .label: "Label"
+        case .symbol: "Symbol"
+        case .divider: "Divider"
+        case .shape(let shape): shape.title
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .label: "textformat"
+        case .symbol(let name): name
+        case .divider(let axis): axis == .horizontal ? "minus" : "line.3.horizontal.decrease"
+        case .shape(let shape): shape.systemImage
+        }
+    }
+
+    /// What it is styled as.
+    var role: ElementRole {
+        switch self {
+        case .label: .text
+        case .symbol: .symbol
+        case .divider: .line
+        case .shape: .image
+        }
+    }
+
+    var text: String? {
+        if case .label(let text) = self { text } else { nil }
+    }
+}
+
+nonisolated extension DecorationShape {
+    var title: String {
+        switch self {
+        case .rectangle: "Rectangle"
+        case .roundedRectangle: "Rounded Rectangle"
+        case .circle: "Circle"
+        case .capsule: "Capsule"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .rectangle: "rectangle"
+        case .roundedRectangle: "app"
+        case .circle: "circle"
+        case .capsule: "capsule"
+        }
+    }
 }

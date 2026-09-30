@@ -75,4 +75,12 @@ nonisolated struct ElementID: RawRepresentable, Hashable, Codable, CodingKeyRepr
     static let symbol = ElementID(rawValue: "symbol")
     /// A chart of the reading over time.
     static let chart = ElementID(rawValue: "chart")
+    /// An analog clock's face, a month's grid of days, a list of events.
+    static let face = ElementID(rawValue: "face")
+    static let monthGrid = ElementID(rawValue: "monthGrid")
+    static let eventList = ElementID(rawValue: "eventList")
+    // Tools.
+    static let appIcons = ElementID(rawValue: "appIcons")
+    static let clipList = ElementID(rawValue: "clipList")
+    static let photo = ElementID(rawValue: "photo")
 }

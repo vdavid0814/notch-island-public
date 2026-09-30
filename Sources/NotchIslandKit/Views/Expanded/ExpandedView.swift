@@ -43,10 +43,9 @@ struct ExpandedView: View {
 
     @ViewBuilder private func pageView(scale: CGFloat) -> some View {
         switch page {
-        case .home: HomePage(thumbnails: thumbnails)
         case .shelf: ShelfPage(scale: scale, thumbnails: thumbnails)
-        case .timer: TimerPage()
-        case .battery: BatteryPage()
+        // Home, the timer's, the battery's and the user's: each a board of widgets.
+        default: HomePage(page: page, thumbnails: thumbnails)
         }
     }
 }

@@ -28,6 +28,16 @@ nonisolated struct FeatureState: Sendable, Equatable {
     /// The liquid runs out to macOS's volume card, to its AirPods card.
     var liquidVolume = false
     var liquidAirPods = false
+    /// Window Anchor runs: the preference is on and Accessibility is trusted. Off, it has no
+    /// monitors or observers at all.
+    var anchor = false
+    /// A window dragged to the notch is anchored.
+    var anchorDrag = false
+    /// The anchored window is left alone: asleep or locked, a full-screen space, no notch screen.
+    var anchorPaused = false
+    /// The anchored window is copied live while covered (the preference; Screen Recording is
+    /// checked where the stream starts).
+    var anchorMirror = false
 
     /// Everything stopped: the state before `start()` and after `stop()`.
     static let off = FeatureState()
@@ -48,7 +58,11 @@ nonisolated struct FeatureState: Sendable, Equatable {
         fullscreenPresent: Bool = false,
         commandSpaceOpensSiri: Bool = false,
         liquidVolume: Bool = false,
-        liquidAirPods: Bool = false
+        liquidAirPods: Bool = false,
+        anchorEnabled: Bool = false,
+        anchorByDrag: Bool = false,
+        anchorMirror: Bool = false,
+        anchorPaused: Bool = false
     ) {
         nowPlaying = showNowPlaying
         webMedia = showNowPlaying && showWebMedia
@@ -70,6 +84,10 @@ nonisolated struct FeatureState: Sendable, Equatable {
         self.suspended = suspended
         self.liquidVolume = liquidVolume
         self.liquidAirPods = liquidAirPods
+        anchor = anchorEnabled && accessibilityTrusted
+        anchorDrag = anchor && anchorByDrag
+        self.anchorMirror = anchor && anchorMirror
+        self.anchorPaused = anchor && (anchorPaused || suspended)
     }
 
     /// The side effects that move the features from `applied` (nil = never) to `new`, in the
@@ -128,6 +146,12 @@ nonisolated struct FeatureState: Sendable, Equatable {
         if applied != nil, (new.liquidVolume && !old.liquidVolume) || (new.liquidAirPods && !old.liquidAirPods) {
             actions.append(.prewarmLiquid)
         }
+        // The anchor starts before its parts are set and stops after they are cleared.
+        if new.anchor && !old.anchor { actions.append(.setAnchor(true)) }
+        if new.anchorPaused != old.anchorPaused { actions.append(.setAnchorPaused(new.anchorPaused)) }
+        if new.anchorDrag != old.anchorDrag { actions.append(.setAnchorDrag(new.anchorDrag)) }
+        if new.anchorMirror != old.anchorMirror { actions.append(.setAnchorMirror(new.anchorMirror)) }
+        if !new.anchor && old.anchor { actions.append(.setAnchor(false)) }
         return actions
     }
 }
@@ -145,4 +169,8 @@ nonisolated enum FeatureAction: Sendable, Equatable {
     case setFullscreenPresent(Bool)
     case setCommandSpace(Bool)
     case prewarmLiquid
+    case setAnchor(Bool)
+    case setAnchorDrag(Bool)
+    case setAnchorPaused(Bool)
+    case setAnchorMirror(Bool)
 }

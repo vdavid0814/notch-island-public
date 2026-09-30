@@ -127,7 +127,7 @@ struct IslandSettingsView: View {
                 // The sidebar floats as far from the island's side as from its bottom, its lower
                 // outer corner concentric with the island's (radius = the island's minus the gap).
                 let gap = Self.sidebarGap
-                let placement = SettingsPages.Placement(
+                let placement = SettingsPlacement(
                     outerRadius: max(16, layout.bottomRadius(for: .settings) - gap),
                     leading: layout.shoulderRadius(for: .settings) + gap,
                     gap: gap
@@ -135,14 +135,10 @@ struct IslandSettingsView: View {
                 // In a view graph of its own, dropped with it when Settings closes: in the island's
                 // graph, the pages' caches outlived them (measured: ~70 MB kept after one visit).
                 // Faded in by the render server: faded by SwiftUI, every frame of the fade updated
-                // the island's graph around it.
-                IsolatedFillHosting(input: placement, fadeIn: Self.pagesFadeIn) {
-                    SettingsPages(placement: placement)
-                        .environment(model)
-                        .environment(\.colorScheme, .dark)
-                        .environment(\.appearsActive, true)
-                }
-                .opacity(model.island.presentation.isSettings ? 1 : 0)
+                // the island's graph around it. A widget's Customize editor takes the pages' place
+                // there, the widget flying between them (`SettingsSurface`).
+                SettingsSurface(placement: placement, model: model)
+                    .opacity(model.island.presentation.isSettings ? 1 : 0)
             } else {
                 Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -169,19 +165,23 @@ struct IslandSettingsView: View {
     }
 }
 
-/// The sidebar and the page beside it.
-private struct SettingsPages: View {
-    /// Where the sidebar floats: all the pages take from outside their graph.
-    nonisolated struct Placement: Equatable {
-        /// The sidebar's lower outer corner.
-        var outerRadius: CGFloat
-        /// From the island's side to the sidebar.
-        var leading: CGFloat
-        /// Under the sidebar.
-        var gap: CGFloat
-    }
+/// Where Settings' sidebar floats (and the Customize editor's outline, in its place): all the pages
+/// take from outside their graph.
+nonisolated struct SettingsPlacement: Equatable, Sendable {
+    /// The sidebar's lower outer corner.
+    var outerRadius: CGFloat
+    /// From the island's side to the sidebar.
+    var leading: CGFloat
+    /// Under the sidebar.
+    var gap: CGFloat
 
-    let placement: Placement
+    /// The sidebar's (and the outline's) width.
+    static let sidebarWidth: CGFloat = 236
+}
+
+/// The sidebar and the page beside it.
+struct SettingsPages: View {
+    let placement: SettingsPlacement
 
     @Environment(AppModel.self) private var model
 
@@ -195,7 +195,7 @@ private struct SettingsPages: View {
         )
         HStack(spacing: 0) {
             SettingsSidebar(selection: Binding(get: { model.settingsPane }, set: { model.settingsPane = $0 }))
-                .frame(width: 236)
+                .frame(width: SettingsPlacement.sidebarWidth)
                 // Liquid Glass, smoked towards the black of the island.
                 .glassEffect(Glass.regular.tint(Color.black.opacity(0.45)), in: sidebarShape)
                 .padding(.leading, placement.leading)

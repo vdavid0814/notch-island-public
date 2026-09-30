@@ -33,7 +33,8 @@ struct SizeBadge: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(tint, in: Capsule())
-            .foregroundStyle(.white)
+            // On the accent, the colour that reads on it (black on the white theme's).
+            .foregroundStyle(tint == Color.islandAccent ? Color.onIslandAccent : .white)
             .fixedSize()
     }
 }

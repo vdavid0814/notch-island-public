@@ -4,7 +4,8 @@
 # The widget snapshots (WidgetSnapshotTests) are exact only in a process of their own: suites that
 # draw before them shift a few values by 1 in 255. They run only with NI_SNAPSHOTS set (verify, or
 # record to write them). Without a --filter, the suite runs without them, then they run alone as a
-# second step; the run fails if either does. A --filter that selects them does the same two steps.
+# second step (with the render matrix); the run fails if either does. A --filter that selects them
+# does the same two steps.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,11 +24,19 @@ for argument in ${@+"$@"}; do
     previous="$argument"
 done
 
-if $filtered && ! grep -Eq -- "$filter" <<< "NotchIslandKitTests.WidgetSnapshotTests/matchesItsSnapshot(_:)"; then
+# The canvas and render matrices (WidgetCanvasTests, WidgetRenderMatrixTests: seconds of drawing on
+# the main actor) run apart too, so the suites that time things on the main actor never wait behind them.
+drawing=(WidgetSnapshotTests WidgetCanvasTests WidgetRenderMatrixTests)
+if $filtered && ! grep -Eq -- "$filter" <<< "$(printf 'NotchIslandKitTests.%s/\n' "${drawing[@]}")"; then
     exec xcrun swift test ${@+"$@"}
 fi
 
 status=0
 env -u NI_SNAPSHOTS xcrun swift test ${@+"$@"} || status=$?
-NI_SNAPSHOTS="${NI_SNAPSHOTS:-verify}" xcrun swift test ${unfiltered[@]+"${unfiltered[@]}"} --filter WidgetSnapshotTests || status=$?
+# Each in a process of its own: the matrix's drawing shifts the snapshots' values by 1 in 255 too.
+for suite in "${drawing[@]}"; do
+    if ! $filtered || grep -Eq -- "$filter" <<< "NotchIslandKitTests.$suite/"; then
+        NI_SNAPSHOTS="${NI_SNAPSHOTS:-verify}" xcrun swift test ${unfiltered[@]+"${unfiltered[@]}"} --filter "$suite" || status=$?
+    fi
+done
 exit "$status"

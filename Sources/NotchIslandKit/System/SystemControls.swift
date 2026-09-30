@@ -69,7 +69,7 @@ nonisolated enum SystemControl: String, Sendable, Codable, CaseIterable, Identif
         case .screenshot: String(localized: "Capture")
         case .lockScreen: String(localized: "Lock")
         case .microphone: on ? String(localized: "On") : String(localized: "Muted")
-        default: on ? String(localized: "On") : String(localized: "Off")
+        default: ExtendedControls.status(of: self, on: on) ?? (on ? String(localized: "On") : String(localized: "Off"))
         }
     }
 

@@ -10,7 +10,7 @@ import SwiftUI
 ///
 /// Keys: typing goes to the field; ↑/↓ move the selection (←/→ too in the gallery), Return runs
 /// it, ⌘Return asks Apple Intelligence, ⌘1–⌘7 open a suggestion, ⌘C copies a clip or an emoji,
-/// ⌘H and ⌘Q hide or quit a running app, Delete in an empty field leaves it, Esc steps back (answer → empty field → suggestions → closed). The whole view keeps one
+/// ⌘H and ⌘Q hide or quit a running app, ⌘↩ anchors its window under the notch, Delete in an empty field leaves it, Esc steps back (answer → empty field → suggestions → closed). The whole view keeps one
 /// identity while it is open (`surfaceKey` "assistant"): a new one would recreate the field and
 /// drop its keyboard focus.
 struct AssistantView: View {
@@ -98,6 +98,8 @@ struct AssistantView: View {
         .onKeyPress(.return, phases: .down) { press in
             // Plain Return is left to the field (IME commit, then onSubmit).
             guard press.modifiers.contains(.command) else { return .ignored }
+            // On a window the user picked, ⌘↩ anchors it under the notch.
+            if assistant.anchorSelectedWindow() { return .handled }
             assistant.ask()
             return .handled
         }
@@ -110,6 +112,20 @@ struct AssistantView: View {
         .onKeyPress(KeyEquivalent("c"), phases: .down) { press in
             guard press.modifiers == .command else { return .ignored }
             return assistant.copySelection() ? .handled : .ignored
+        }
+        // Quick Look on a file the selection was moved to (Space there, ⌘Y anywhere), and ⌘R to
+        // show a file or an app in Finder.
+        .onKeyPress(.space, phases: .down) { press in
+            guard press.modifiers.isEmpty else { return .ignored }
+            return assistant.quickLookSelection() ? .handled : .ignored
+        }
+        .onKeyPress(KeyEquivalent("y"), phases: .down) { press in
+            guard press.modifiers == .command else { return .ignored }
+            return assistant.quickLookSelection() ? .handled : .ignored
+        }
+        .onKeyPress(KeyEquivalent("r"), phases: .down) { press in
+            guard press.modifiers == .command else { return .ignored }
+            return assistant.revealSelection() ? .handled : .ignored
         }
         .onKeyPress(KeyEquivalent("h"), phases: .down) { press in
             guard press.modifiers == .command else { return .ignored }
@@ -218,10 +234,11 @@ extension AssistantCategory {
         case .system: String(localized: "System")
         case .windows: String(localized: "Windows")
         case .emoji: String(localized: "Emoji")
+        case .people: String(localized: "People & Calendar")
         }
     }
 
-    /// ⌘1–⌘7.
+    /// ⌘1–⌘8.
     var key: KeyEquivalent { KeyEquivalent(Character(String(rawValue))) }
 
     var tile: some View {
@@ -233,6 +250,7 @@ extension AssistantCategory {
         case .system: AssistantTile(symbol: "switch.2", color: .indigo)
         case .windows: AssistantTile(symbol: "macwindow.on.rectangle", color: .purple)
         case .emoji: AssistantTile(symbol: "face.smiling.inverse", color: .yellow)
+        case .people: AssistantTile(symbol: "person.2.fill", color: .green)
         }
     }
 }
@@ -402,7 +420,7 @@ private struct SelectionPlate: View {
 }
 
 /// An icon and a name, nothing else (a suggestion also shows its shortcut, as the system does).
-private struct RowView: View {
+struct RowView: View {
     let row: AssistantRow
     /// The keys moved the selection here (`AssistantModel.marksSelection`).
     var isMarked = false
@@ -474,6 +492,18 @@ private struct RowView: View {
             Text(emoji.character).font(.system(size: 17))
         case .calculation:
             AssistantTile(symbol: "equal", color: .orange)
+        case .definition:
+            AssistantTile(symbol: "character.book.closed.fill", color: .brown)
+        case .contact:
+            AssistantTile(symbol: "person.fill", color: .green)
+        case .contactAction(let action):
+            AssistantTile(symbol: action.symbol, color: action.kind == .copy ? .gray : .green)
+        case .event(let event):
+            AssistantTile(symbol: "calendar", color: Color(red: event.red, green: event.green, blue: event.blue))
+        case .bookmark:
+            AssistantTile(symbol: "bookmark.fill", color: .blue)
+        case .permission(let permission):
+            AssistantTile(symbol: permission.symbol, color: .gray)
         case .openURL:
             AssistantTile(symbol: "globe", color: .blue)
         case .askIntelligence:
@@ -490,6 +520,10 @@ private struct RowView: View {
         switch row {
         case .settingsPane: String(localized: "System Settings")
         case .window(let window) where window.title != nil: window.appName
+        case .definition: String(localized: "Dictionary")
+        case .contact(let contact): contact.detail
+        case .event(let event): Self.when(event)
+        case .bookmark(let bookmark): bookmark.url.host() ?? bookmark.browser
         default: nil
         }
     }
@@ -507,11 +541,30 @@ private struct RowView: View {
         case .window(let window): window.name
         case .emoji(let emoji): emoji.title
         case .calculation(let calculation): "\(calculation.expression) = \(calculation.result)"
+        case .definition(let definition): "\(definition.word) — \(definition.summary)"
+        case .contact(let contact): contact.name
+        case .contactAction(let action): action.title
+        case .event(let event): event.title.isEmpty ? String(localized: "Event") : event.title
+        case .bookmark(let bookmark): bookmark.title
+        case .permission(let permission): permission.title
         case .openURL(let url): String(localized: "Open \(AssistantURL.display(url))")
         case .askIntelligence: String(localized: "Ask Apple Intelligence")
         case .searchWeb: String(localized: "Search the Web")
         case .askChatGPT: String(localized: "Ask ChatGPT")
         }
+    }
+}
+
+extension RowView {
+    /// "Today 14:30", "Tomorrow", "Fri 9:00": when an event starts.
+    static func when(_ event: CalendarEvent, now: Date = Date()) -> String {
+        let calendar = Calendar.current
+        let time = event.isAllDay ? String(localized: "All Day") : event.start.formatted(date: .omitted, time: .shortened)
+        if event.start <= now, event.end > now { return String(localized: "Now") }
+        if calendar.isDateInToday(event.start) { return event.isAllDay ? String(localized: "Today") : String(localized: "Today \(time)") }
+        if calendar.isDateInTomorrow(event.start) { return event.isAllDay ? String(localized: "Tomorrow") : String(localized: "Tomorrow \(time)") }
+        let day = event.start.formatted(.dateTime.weekday(.abbreviated).day())
+        return event.isAllDay ? day : "\(day) \(time)"
     }
 }
 
@@ -550,12 +603,22 @@ private struct AnswerPane: View {
                     }
                     .help("Copy")
                     .disabled(answer.text.isEmpty)
-                    Button {
-                        assistant.perform(.askChatGPT)
-                    } label: {
-                        Label("Ask ChatGPT", systemImage: "bubble.left.and.text.bubble.right")
+                    if let word = answer.definedWord {
+                        // A dictionary's entry: the whole of it in Dictionary.
+                        Button {
+                            assistant.openInDictionary(word)
+                        } label: {
+                            Label("Open in Dictionary", systemImage: "character.book.closed")
+                        }
+                        .help("Open in Dictionary")
+                    } else {
+                        Button {
+                            assistant.perform(.askChatGPT)
+                        } label: {
+                            Label("Ask ChatGPT", systemImage: "bubble.left.and.text.bubble.right")
+                        }
+                        .help("Ask ChatGPT")
                     }
-                    .help("Ask ChatGPT")
                 }
                 .islandButton(.circle)
                 .controlSize(.small)

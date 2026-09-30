@@ -132,7 +132,7 @@ import Testing
         #expect(LiquidCard.exitLead(for: "volume", at: .splitView) == 0.33)
         #expect(LiquidCard.exitLead(for: "volume", at: .desktop) == 0.35)
         #expect(LiquidCard.exitLead(for: "airPodsMode", at: .notch) == 0.27)
-        #expect(LiquidCard.exitLead(for: "airPodsMode", at: .splitView) == 0.25)
+        #expect(LiquidCard.exitLead(for: "airPodsMode", at: .splitView) == 0.20)
         #expect(LiquidCard.exitLead(for: "airPods", at: .desktop) == LiquidCard.exitLead)
     }
 }

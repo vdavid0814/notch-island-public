@@ -34,6 +34,14 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
     /// Windows (⌘6): the running apps and their windows.
     var showsWindows = true
     var showsEmoji = true
+    /// People & Calendar (⌘8): the user's contacts and coming events, each once allowed.
+    var showsPeople = true
+    /// A word typed alone is looked up in the system's dictionaries.
+    var showsDefinitions = true
+    /// The browsers' bookmarks in search results (read from their files while Spotlight is open).
+    var showsBookmarks = false
+    /// Currencies in the calculator: the ECB's daily rates, fetched at most once a day.
+    var convertsCurrency = false
 
     // MARK: App gallery
 
@@ -43,6 +51,8 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
     // MARK: Files
 
     var folders: Set<SiriFolder> = Set(SiriFolder.allCases)
+    /// Files are found by what they say too, not only by their names.
+    var searchesFileContents = false
     /// How far back "recent" files go.
     var recentDays = 30
 
@@ -99,9 +109,15 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
         showsSystem = value(.showsSystem, d.showsSystem)
         showsWindows = value(.showsWindows, d.showsWindows)
         showsEmoji = value(.showsEmoji, d.showsEmoji)
+        showsPeople = value(.showsPeople, d.showsPeople)
+        showsDefinitions = value(.showsDefinitions, d.showsDefinitions)
+        showsBookmarks = value(.showsBookmarks, d.showsBookmarks)
+        convertsCurrency = value(.convertsCurrency, d.convertsCurrency)
+        searchesFileContents = value(.searchesFileContents, d.searchesFileContents)
         galleryColumns = min(max(value(.galleryColumns, d.galleryColumns), Self.galleryColumnsRange.lowerBound), Self.galleryColumnsRange.upperBound)
         gallerySort = value(.gallerySort, d.gallerySort)
-        folders = value(.folders, d.folders)
+        // The folders chosen before the home folder could be: it stays off until it is chosen.
+        folders = value(.folders, d.folders.subtracting([.home]))
         recentDays = max(1, value(.recentDays, d.recentDays))
         includesIslandActions = value(.includesIslandActions, d.includesIslandActions)
         includesShortcuts = value(.includesShortcuts, d.includesShortcuts)
@@ -130,6 +146,7 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
             case .system: showsSystem
             case .windows: showsWindows
             case .emoji: showsEmoji
+            case .people: showsPeople
             }
         }
     }
@@ -195,6 +212,9 @@ nonisolated enum SiriGallerySort: String, Sendable, Codable, CaseIterable, Ident
 
 nonisolated enum SiriFolder: String, Sendable, Codable, CaseIterable, Identifiable {
     case desktop, documents, downloads, iCloudDrive
+    /// The rest of the home folder (Movies, Music, Pictures, your own folders): its Library and
+    /// everything buried in packages or hidden folders is left out.
+    case home
 
     var id: String { rawValue }
 
@@ -204,6 +224,7 @@ nonisolated enum SiriFolder: String, Sendable, Codable, CaseIterable, Identifiab
         case .documents: "Documents"
         case .downloads: "Downloads"
         case .iCloudDrive: "iCloud Drive"
+        case .home: "Home Folder"
         }
     }
 
@@ -213,6 +234,7 @@ nonisolated enum SiriFolder: String, Sendable, Codable, CaseIterable, Identifiab
         case .documents: "doc.fill"
         case .downloads: "arrow.down.circle.fill"
         case .iCloudDrive: "icloud.fill"
+        case .home: "house.fill"
         }
     }
 
@@ -222,6 +244,7 @@ nonisolated enum SiriFolder: String, Sendable, Codable, CaseIterable, Identifiab
         case .documents: NSHomeDirectory() + "/Documents"
         case .downloads: NSHomeDirectory() + "/Downloads"
         case .iCloudDrive: AssistantSearch.iCloudDrive
+        case .home: NSHomeDirectory()
         }
     }
 }

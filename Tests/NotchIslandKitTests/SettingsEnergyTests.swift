@@ -147,7 +147,8 @@ private func largestDifference(_ a: [UInt8], _ b: [UInt8]) -> Int {
             defer { window.contentView = nil }
             host.frame = CGRect(origin: .zero, size: size)
             // The pages join most of an opening after it starts: looked for as soon as they are in.
-            let deadline = Date.now.addingTimeInterval(model.preferences.animationDuration + 10)
+            // Long enough for a main actor busy with every other suite's drawing.
+            let deadline = Date.now.addingTimeInterval(model.preferences.animationDuration + 40)
             var pages: NSView?
             while pages == nil, Date.now < deadline {
                 try await Task.sleep(for: .milliseconds(5))

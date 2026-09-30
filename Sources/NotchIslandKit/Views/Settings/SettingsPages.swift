@@ -395,6 +395,22 @@ struct ReservedWidthText: View {
 struct ActivitiesSettingsPage: View {
     @Environment(AppModel.self) private var model
 
+    /// The stage is told at once, while a window is up.
+    private var anchorBar: Binding<AnchorBarPlacement> {
+        Binding(get: { model.preferences.anchorBar }, set: { placement in
+            model.preferences.anchorBar = placement
+            model.anchorMirror.setBar(placement)
+        })
+    }
+
+    /// Turning the live copy on is what asks for Screen Recording.
+    private var anchorMirror: Binding<Bool> {
+        Binding(get: { model.preferences.anchorMirror }, set: { on in
+            model.preferences.anchorMirror = on
+            if on { model.anchorMirror.requestAccess() }
+        })
+    }
+
     var body: some View {
         @Bindable var preferences = model.preferences
         Form {
@@ -480,6 +496,47 @@ struct ActivitiesSettingsPage: View {
                 }
                 Toggle(isOn: $preferences.timerSound) {
                     InfoLabel("Play a sound when a timer ends", "The timer's alert sound plays with the notice in the island.")
+                }
+            }
+
+            Section("Window Anchor") {
+                Toggle(isOn: $preferences.anchorEnabled) {
+                    InfoLabel("Anchor a window under the notch", "Holds another app's window centred under the notch: moved, it goes back; resized, it stays centred at its new size; dragged well away, zoomed or closed, it is let go. From the menu bar item, Spotlight (\u{201C}Anchor Front Window\u{201D}) or by dragging. Needs Accessibility.")
+                }
+                Toggle(isOn: $preferences.anchorByDrag) {
+                    InfoLabel("Drag a window to the notch", "While you drag a window by its title bar, letting it go just under the notch anchors it. The island shows where it will land.")
+                }
+                .disabled(!preferences.anchorEnabled)
+                Toggle(isOn: anchorMirror) {
+                    InfoLabel("Up to the top of the screen", "The window reaches the screen's top edge, in line with the menu bar and the notch, on a stage that grows out of the notch. macOS keeps other apps' windows under the menu bar, so what you see there is a live copy, and your clicks, scrolls and typing go through to the real window behind it. Needs Screen Recording (macOS shows its screen-sharing indicator meanwhile). Off: the window itself, right under the menu bar.")
+                }
+                .disabled(!preferences.anchorEnabled)
+                Picker(selection: anchorBar) {
+                    Text("Beside the Notch").tag(AnchorBarPlacement.menuBar)
+                    Text("Under the Window").tag(AnchorBarPlacement.belowWindow)
+                } label: {
+                    InfoLabel("App name and Release", "Where the anchored app's name and the Release button sit while the window is up at the top: in the menu bar on both sides of the notch, or in a bar under the window.")
+                }
+                .choiceBar()
+                .fixedSize()
+                .disabled(!preferences.anchorEnabled || !preferences.anchorMirror)
+                AnchorSizeEditor(size: $preferences.anchorSize, screen: model.anchorScreenForSettings, onTop: preferences.anchorMirror,
+                                 bar: preferences.anchorBar)
+                    .disabled(!preferences.anchorEnabled)
+                    .opacity(preferences.anchorEnabled ? 1 : 0.5)
+                if preferences.anchorEnabled, !model.permissions.accessibilityTrusted {
+                    LabeledContent {
+                        Button("Open System Settings…") { model.permissions.promptOrOpenAccessibilitySettings() }
+                    } label: {
+                        StatusLabel(title: "Accessibility access needed", tone: .attention)
+                    }
+                }
+                if preferences.anchorEnabled, preferences.anchorMirror, !model.anchorMirror.isAllowed {
+                    LabeledContent {
+                        Button("Open System Settings…") { AnchorMirror.openSettings() }
+                    } label: {
+                        StatusLabel(title: "Screen Recording access needed", tone: .attention)
+                    }
                 }
             }
         }
@@ -639,6 +696,18 @@ struct SiriSettingsPage: View {
                 Toggle(isOn: $preferences.siri.showsEmoji) {
                     InfoLabel("Emoji  ⌘7", "Emoji by name (\u{201C}thumbs up\u{201D}, \u{201C}fire\u{201D}): Return pastes one where you were typing, ⌘C copies it.")
                 }
+                Toggle(isOn: $preferences.siri.showsPeople) {
+                    InfoLabel("People & Calendar  ⌘8", "Your contacts (call, message, email, copy) and your coming events. Each is read only after you allow it from its own row there, only while Spotlight is open, and never leaves this Mac.")
+                }
+                Toggle(isOn: $preferences.siri.showsDefinitions) {
+                    InfoLabel("Dictionary", "A word typed alone is looked up in your Mac's dictionaries: Return shows the whole entry.")
+                }
+                Toggle(isOn: $preferences.siri.showsBookmarks) {
+                    InfoLabel("Bookmarks", "Your browsers' bookmarks in search results: Chrome's, Arc's and Brave's, and Safari's where macOS lets NotchIsland read them. Read from their files while Spotlight is open; history is never read.")
+                }
+                Toggle(isOn: $preferences.siri.convertsCurrency) {
+                    InfoLabel("Currencies", "\u{201C}100 usd in eur\u{201D}: the European Central Bank's daily rates, fetched at most once a day and only when you type a currency. What you type is never sent.")
+                }
             } header: {
                 InfoLabel("Suggestions", "What Spotlight lists and searches. A suggestion that is off does not open with its shortcut either.")
             }
@@ -654,6 +723,9 @@ struct SiriSettingsPage: View {
                         Label(folder.title, systemImage: folder.systemImage)
                     }
                 }
+                Toggle(isOn: $preferences.siri.searchesFileContents) {
+                    InfoLabel("Search Inside Files", "Also find files by what they say, from three letters on. Files named after the word come first.")
+                }
                 Picker(selection: $preferences.siri.recentDays) {
                     ForEach(SiriSettings.recentDayChoices, id: \.self) { days in
                         Text(days == 7 ? "Last Week" : days == 30 ? "Last Month" : "Last 3 Months").tag(days)
@@ -663,7 +735,7 @@ struct SiriSettingsPage: View {
                 }
                 .choiceBar()
             } header: {
-                InfoLabel("Files", "The folders Spotlight searches for files. macOS asks for access to each of them the first time.")
+                InfoLabel("Files", "The folders Spotlight searches for files. macOS asks for access to Desktop, Documents, Downloads and iCloud Drive the first time. On a file, Space or ⌘Y previews it and ⌘R shows it in Finder.")
             }
             .disabled(!siri.showsFiles)
 

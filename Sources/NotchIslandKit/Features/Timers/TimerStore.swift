@@ -31,6 +31,10 @@ import Observation
         }
     }
     private var storedDraft: TimeInterval = 5 * 60
+    /// The unit the ruler sets while Hours or Seconds are on (tap a part of the time to move on):
+    /// shared by the ruler and the time, wherever each is drawn (a widget laid out freely draws
+    /// them apart).
+    var draftUnit: TimerUnit = .minutes
 
     /// The draft in minutes, clamped to `draftRange` (the minutes-only ruler).
     var draftMinutes: Double {

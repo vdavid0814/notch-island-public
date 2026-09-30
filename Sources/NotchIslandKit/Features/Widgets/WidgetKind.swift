@@ -96,10 +96,10 @@ nonisolated enum IslandWidgetKind: String, Sendable, Codable, CaseIterable, Iden
     var minimumSize: GridSize { spec.minimumSize }
     var maximumSize: GridSize { spec.maximumSize }
     var defaultSize: GridSize { spec.defaultSize }
-    /// The widget's elements — the parts the user may switch on or off and size — in the order
-    /// they are drawn.
-    var options: [ElementID] { spec.elements.map(\.id) }
-    var defaultOptions: Set<ElementID> { Set(spec.elements.filter(\.defaultVisible).map(\.id)) }
+    /// The widget's elements the user may switch on or off, in the order they are drawn. The ones
+    /// always drawn (`ElementSpec.isRequired`) are not among them.
+    var options: [ElementID] { spec.elements.filter { !$0.isRequired }.map(\.id) }
+    var defaultOptions: Set<ElementID> { Set(spec.elements.filter { $0.defaultVisible && !$0.isRequired }.map(\.id)) }
     /// The arrangements the widget can be drawn in; empty when it has only one.
     var layouts: [WidgetLayout] { spec.layouts }
     /// The backgrounds it offers (the artwork only where there is one).

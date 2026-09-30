@@ -38,7 +38,7 @@ nonisolated struct NotchSplit: Sendable, Equatable {
 }
 
 extension NotchSplit {
-    init(layout: IslandLayout, presentation: IslandPresentation, outerInset: CGFloat, clearance: CGFloat) {
+    nonisolated init(layout: IslandLayout, presentation: IslandPresentation, outerInset: CGFloat, clearance: CGFloat) {
         self.init(
             islandWidth: layout.size(for: presentation).width,
             notchWidth: layout.notch.width,

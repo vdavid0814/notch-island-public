@@ -7,6 +7,8 @@ nonisolated struct AutoCloseInputs: Sendable, Equatable {
     var isExpanded = false
     var isPinned = false
     var isInteracting = false
+    /// A menu of the app's is open (the top bar's "⋯", a widget's context menu).
+    var isMenuOpen = false
     var isDropTargeted = false
     var isLingeringAfterDrop = false
     var isPointerInside = false
@@ -24,7 +26,7 @@ nonisolated enum AutoCloseDecision: Sendable, Equatable {
 
     static func decide(_ i: AutoCloseInputs) -> AutoCloseDecision {
         guard i.isExpanded else { return .notApplicable }
-        if i.isPinned || i.isInteracting || i.isDropTargeted || i.isLingeringAfterDrop || i.isPointerInside {
+        if i.isPinned || i.isInteracting || i.isMenuOpen || i.isDropTargeted || i.isLingeringAfterDrop || i.isPointerInside {
             return .keepOpen
         }
         return i.pointerHasVisited ? .closeAfterGrace : .closeIfNeverVisited
@@ -49,7 +51,7 @@ nonisolated extension BannerKind {
     var isInteractive: Bool {
         switch self {
         case .level, .levelPill, .levelCovering, .timerFinished: true
-        case .power, .dropTarget, .airPods: false
+        case .power, .dropTarget, .anchorTarget, .airPods: false
         }
     }
 
@@ -59,7 +61,7 @@ nonisolated extension BannerKind {
     var showsWhileHidden: Bool {
         switch self {
         case .level, .levelPill: true
-        case .levelCovering, .power, .timerFinished, .dropTarget, .airPods: false
+        case .levelCovering, .power, .timerFinished, .dropTarget, .anchorTarget, .airPods: false
         }
     }
 }
@@ -103,6 +105,8 @@ nonisolated extension BannerKind {
 
     private var wantsExpanded = false
     private var isDragInProgress = false
+    /// A window is dragged where letting go anchors it (see `setAnchorTargeted`).
+    private var isAnchorTargeted = false
     private var openWasUserInitiated = false
     private var pointerHasVisited = false
     /// Set when the island closes under a resting pointer: hovering must not
@@ -117,6 +121,7 @@ nonisolated extension BannerKind {
     /// Settings is open in the island (see `openSettings`).
     private var wantsSettings = false
     private let bandGuard = NotchBandGuard()
+    private var menuObservers: [any NSObjectProtocol] = []
 
     /// Tracking-area state from the hosting view (exact island rect).
     private var trackingInside = false
@@ -162,6 +167,17 @@ nonisolated extension BannerKind {
         observationGeneration += 1
         observeInputs()
         inputsChanged()
+        // A menu open over the panel (the top bar's "⋯", a context menu) keeps it open: the pointer
+        // leaves the island to reach the menu's items.
+        let center = NotificationCenter.default
+        menuObservers = [
+            center.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.model.island.isMenuOpen = true }
+            },
+            center.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.model.island.isMenuOpen = false }
+            },
+        ]
     }
 
     func stop() {
@@ -173,6 +189,9 @@ nonisolated extension BannerKind {
         pointerMonitor.stop()
         monitorInside = nil
         setReleaseMonitor(installed: false)
+        menuObservers.forEach(NotificationCenter.default.removeObserver)
+        menuObservers = []
+        model.island.isMenuOpen = false
     }
 
     // MARK: Full screen
@@ -214,6 +233,11 @@ nonisolated extension BannerKind {
         hoverDwell.cancel()
         if let page, model.island.page != page, model.availablePages.contains(page) { model.island.page = page }
         if pinned, !model.island.isPinned { model.island.isPinned = true }
+        // Opened without a page asked for, on one the user has since hidden from the picker: the
+        // first page it offers.
+        if page == nil, !wantsExpanded, !model.pickerPages.contains(model.island.page), let first = model.pickerPages.first {
+            model.island.page = first
+        }
         if !wantsExpanded {
             wantsExpanded = true
             openWasUserInitiated = userInitiated
@@ -418,6 +442,13 @@ nonisolated extension BannerKind {
         }
     }
 
+    /// Window Anchor: a dragged window's pointer came into, or left, the zone under the notch.
+    func setAnchorTargeted(_ targeted: Bool) {
+        guard targeted != isAnchorTargeted else { return }
+        isAnchorTargeted = targeted
+        inputsChanged()
+    }
+
     // MARK: Resolution
 
     /// Recomputes the presentation from the current inputs and applies it.
@@ -460,6 +491,7 @@ nonisolated extension BannerKind {
             page: model.panelPage,
             banner: model.banners.current,
             isDragInProgress: isDragInProgress,
+            isAnchorTargeted: isAnchorTargeted,
             countdownActive: model.timers.isCountdownActive,
             stopwatchActive: model.timers.isStopwatchActive,
             nowPlayingActive: model.preferences.showNowPlaying && model.media.isActive
@@ -476,6 +508,7 @@ nonisolated extension BannerKind {
             _ = resolverInputs()
             _ = model.island.isPinned
             _ = model.island.isInteracting
+            _ = model.island.isMenuOpen
             _ = model.island.isDropTargeted
             // Only reconcile writes it; any other write is undone on the next turn.
             _ = model.banners.isHeld
@@ -558,6 +591,7 @@ nonisolated extension BannerKind {
             isExpanded: model.island.presentation.isExpanded,
             isPinned: model.island.isPinned,
             isInteracting: model.island.isInteracting,
+            isMenuOpen: model.island.isMenuOpen,
             isDropTargeted: model.island.isDropTargeted,
             isLingeringAfterDrop: dropLingerTimer.isPending,
             isPointerInside: pointerInside,

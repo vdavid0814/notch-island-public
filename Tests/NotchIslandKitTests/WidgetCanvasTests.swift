@@ -6,11 +6,16 @@ import Testing
 /// The editor's canvas (`WidgetRenderMode.canvas`): every element it tags lies inside its widget,
 /// and it lays out exactly as the island, so what the editor measures there is where the elements
 /// are on the island.
-@MainActor @Suite struct WidgetCanvasTests {
+///
+/// Seconds of drawing on the main actor: in a process of their own (`Scripts/test.sh`), with the
+/// snapshots, not beside the suites that time things on the main actor.
+@MainActor @Suite(.enabled(if: ProcessInfo.processInfo.environment["NI_SNAPSHOTS"] != nil,
+                           "run alone: Scripts/test.sh, or NI_SNAPSHOTS=verify"))
+struct WidgetCanvasTests {
     /// Each element's frame in the widget, in `style`, as `mode` lays the widget out: live as a
     /// picture (`preview`, Settings' gallery) or as the island draws it.
     static func frames(_ item: WidgetSnapshotTests.Case, mode: WidgetRenderMode, preview: Bool = true, style: WidgetStyle = WidgetStyle(),
-                       model: AppModel = AppModel()) -> (frames: [ElementID: CGRect], size: CGSize) {
+                       model: AppModel = AppModel(), readsLive: Bool = false) -> (frames: [ElementID: CGRect], size: CGSize) {
         let layout = IslandLayout(notch: CGSize(width: 185, height: 32), scale: .standard)
         let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(layout), grid: .standard)
         let rect = GridRect(column: 0, row: 0, width: item.size.width, height: item.size.height)
@@ -29,6 +34,8 @@ import Testing
             .environment(\.isWidgetPreview, preview)
             .environment(\.isIslandPanelHidden, !preview)
             .environment(\.widgetFrameProbe, probe)
+            // The editor's canvas reads what the island reads (the gallery's picture shows samples).
+            .environment(\.widgetReadsLive, readsLive)
             .environment(\.widgetDate, WidgetSnapshotTests.date)
             .environment(\.colorScheme, .dark)
         let renderer = ImageRenderer(content: view)
@@ -77,7 +84,7 @@ import Testing
         let model = AppModel()
         model.controls.refresh()
         let island = Self.frames(item, mode: .live, preview: false, model: model).frames
-        Self.expectSameFrames(Self.frames(item, mode: .canvas, model: model).frames, island, item)
+        Self.expectSameFrames(Self.frames(item, mode: .canvas, model: model, readsLive: true).frames, island, item)
     }
 
     static func expectSameFrames(_ canvas: [ElementID: CGRect], _ island: [ElementID: CGRect], _ item: WidgetSnapshotTests.Case) {
@@ -127,7 +134,7 @@ import Testing
             #expect(glass == picture, "\(description): \(glass) vs \(picture)")
         }
         for controlSize in [ControlSize.mini, .small, .regular, .large] {
-            for look in [ButtonLookChoice.glass, .prominent] {
+            for look in [ButtonLookChoice.glass, .prominent, .bordered] {
                 for shape in ButtonShapeChoice.allCases {
                     var style = WidgetStyle()
                     style.elements[.playbackButtons, default: ElementStyle()].button.look = look
@@ -142,7 +149,7 @@ import Testing
             }
             expectSameRoom({ mode in
                 Button {} label: { Label("Next", systemImage: "forward.fill").imageScale(.small) }
-                    .transportGlass(ButtonLook(), on: mode)
+                    .transportGlass(ButtonLook())
                     .islandButton(.circle)
                     .controlSize(controlSize)
                     .fixedSize()

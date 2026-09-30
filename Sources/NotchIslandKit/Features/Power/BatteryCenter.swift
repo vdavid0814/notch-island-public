@@ -18,6 +18,9 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
 @Observable final class BatteryCenter {
     nonisolated enum Lease: Sendable {
         case details, history
+        /// The details, read again every `powerInterval` while held: the watts flowing change
+        /// without any power event (the Power widget, only while it is shown).
+        case power
     }
 
     /// Nil until a `.details` lease has been served, and on a desktop Mac.
@@ -28,6 +31,9 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
     private(set) var lastCharge: BatteryLastCharge?
 
     static let detailsInterval: TimeInterval = 30
+    static let powerInterval: TimeInterval = 5
+    @ObservationIgnored private var powerHolders = 0
+    @ObservationIgnored private var powerTask: Task<Void, Never>?
 
     @ObservationIgnored let recorder: BatteryRecorder
     @ObservationIgnored private let detailsSource: @Sendable (PowerState) -> BatteryDetails?
@@ -70,6 +76,8 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
     func stop() {
         detailsTask?.cancel()
         detailsTask = nil
+        powerTask?.cancel()
+        powerTask = nil
         recorder.stop()
     }
 
@@ -80,6 +88,17 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
             if detailHolders == 1, detailsAreStale { readDetails() }
         case .history:
             if history == nil { loadHistory() }
+        case .power:
+            acquire(.details)
+            powerHolders += 1
+            guard powerTask == nil else { return }
+            powerTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(Self.powerInterval), tolerance: .seconds(1))
+                    guard !Task.isCancelled, let self, self.powerHolders > 0 else { return }
+                    self.readDetails()
+                }
+            }
         }
     }
 
@@ -93,6 +112,13 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
             }
         case .history:
             break   // The history stays loaded (see the type's comment).
+        case .power:
+            powerHolders = max(powerHolders - 1, 0)
+            if powerHolders == 0 {
+                powerTask?.cancel()
+                powerTask = nil
+            }
+            release(.details)
         }
     }
 

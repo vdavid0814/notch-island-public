@@ -14,6 +14,7 @@ struct BannerView: View {
         case .power(let event): PowerBanner(event: event)
         case .timerFinished: TimerDoneBanner()
         case .dropTarget: DropBanner()
+        case .anchorTarget: AnchorBanner()
         case .airPods(let info):
             if AirPodsSystemCard.current == .cover { SystemAirPodsCovering(info: info) } else { AirPodsBanner(info: info) }
         }

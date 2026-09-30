@@ -1,15 +1,20 @@
 import SwiftUI
 
-/// The user's widget board (Customize Island).
+/// A page of widgets: home's board, the timer's, the battery's or one the user added (`WidgetPages`),
+/// arranged in Settings ▸ Widgets.
 struct HomePage: View {
+    var page: ExpandedPage = .home
     let thumbnails: ThumbnailCache
 
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        WidgetBoardView(board: model.widgets.board, thumbnails: thumbnails)
+        WidgetBoardView(board: model.boards.store(for: page).board, thumbnails: thumbnails)
             .contextMenu {
-                Button("Customize Island…", systemImage: "square.grid.3x2") { model.showCustomize() }
+                Button("Customize Island…", systemImage: "square.grid.3x2") {
+                    model.studio.page = page
+                    model.showCustomize()
+                }
             }
     }
 }

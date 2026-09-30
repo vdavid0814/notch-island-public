@@ -29,6 +29,21 @@ enum ResizeHandle: CaseIterable {
     var movesLeading: Bool { horizontal < 0 }
     var movesTop: Bool { vertical < 0 }
 
+    /// The pointer over it: the system's resize arrows for its edge or corner.
+    var pointer: PointerStyle {
+        let position: FrameResizePosition = switch self {
+        case .topLeading: .topLeading
+        case .top: .top
+        case .topTrailing: .topTrailing
+        case .leading: .leading
+        case .trailing: .trailing
+        case .bottomLeading: .bottomLeading
+        case .bottom: .bottom
+        case .bottomTrailing: .bottomTrailing
+        }
+        return .frameResize(position: position)
+    }
+
     /// Where it sits on `frame`.
     func position(on frame: CGRect) -> CGPoint {
         CGPoint(x: horizontal < 0 ? frame.minX : horizontal > 0 ? frame.maxX : frame.midX,

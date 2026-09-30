@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 /// The suggestions shown before anything is typed, as in the system's Search window: each one
 /// lists everything of its kind (⌘1–⌘7) and the field then filters that list.
 nonisolated enum AssistantCategory: Int, CaseIterable, Hashable, Sendable {
-    case applications = 1, files, actions, clipboard, system, windows, emoji
+    case applications = 1, files, actions, clipboard, system, windows, emoji, people
 
     /// What the user may type to find the suggestion itself: its title, and its English names in
     /// any language (the title is localized).
@@ -20,6 +20,7 @@ nonisolated enum AssistantCategory: Int, CaseIterable, Hashable, Sendable {
         case .system: ["System", "Commands", "Control Center"]
         case .windows: ["Windows", "Running Apps", "Switch Apps"]
         case .emoji: ["Emoji", "Emojis", "Smileys"]
+        case .people: ["People & Calendar", "People", "Contacts", "Calendar", "Events"]
         }
         let title = switch self {
         case .applications: String(localized: "Applications")
@@ -29,6 +30,7 @@ nonisolated enum AssistantCategory: Int, CaseIterable, Hashable, Sendable {
         case .system: String(localized: "System")
         case .windows: String(localized: "Windows")
         case .emoji: String(localized: "Emoji")
+        case .people: String(localized: "People & Calendar")
         }
         return [title] + english.filter { $0 != title }
     }
@@ -51,6 +53,16 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
     case emoji(AssistantEmoji)
     /// A sum or a unit conversion worked out from the query (Return copies the result).
     case calculation(AssistantCalculation)
+    /// The query's word in the dictionary (Return shows the whole entry).
+    case definition(AssistantDefinition)
+    /// One of the user's contacts (People & Calendar, ⌘8): Return lists the ways to reach them.
+    case contact(AssistantContact)
+    case contactAction(ContactAction)
+    /// A coming event (⌘8): Return opens Calendar on its day.
+    case event(CalendarEvent)
+    case bookmark(AssistantBookmark)
+    /// Asks macOS for the contacts or the calendar: only ever from this row.
+    case permission(AssistantPermission)
     /// The query is a web address: Return opens it.
     case openURL(URL)
     case askIntelligence
@@ -68,6 +80,12 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
         case .window(let window): "window:\(window.id)"
         case .emoji(let emoji): "emoji:\(emoji.id)"
         case .calculation: "calculation"
+        case .definition(let definition): "define:\(definition.word)"
+        case .contact(let contact): "contact:\(contact.id)"
+        case .contactAction(let action): "contactAction:\(action.id)"
+        case .event(let event): "event:\(event.id):\(event.start.timeIntervalSinceReferenceDate)"
+        case .bookmark(let bookmark): "bookmark:\(bookmark.id)"
+        case .permission(let permission): "permission:\(permission.rawValue)"
         case .openURL: "url"
         case .askIntelligence: "ask"
         case .searchWeb: "web"
@@ -148,6 +166,8 @@ nonisolated struct AssistantAnswer: Sendable, Equatable {
     var text = ""
     var isResponding = true
     var failure: String?
+    /// A dictionary's entry rather than Apple Intelligence's answer: the word it defines.
+    var definedWord: String?
 }
 
 /// Where the assistant's lists come from. Tests use fixed lists: the live ones read Spotlight, which
@@ -163,6 +183,13 @@ nonisolated struct AssistantSources: Sendable {
     /// The running apps; with `titles`, as their windows (Accessibility, off the main thread).
     var windows: @Sendable (_ titles: Bool) async -> [AssistantWindow]
     var emoji: @Sendable () async -> [AssistantEmoji]
+    var define: @Sendable (String) async -> AssistantDefinition? = { _ in nil }
+    var contacts: @Sendable (_ query: String, _ limit: Int) async -> [AssistantContact] = { _, _ in [] }
+    var contactsAccess: @Sendable () -> AccessState = { .denied }
+    var requestContacts: @Sendable () async -> AccessState = { .denied }
+    var bookmarks: @Sendable () async -> [AssistantBookmark] = { [] }
+    /// The currencies' rates per euro (fetched at most once a day); nil when they cannot be had.
+    var rates: @Sendable () async -> [String: Double]? = { nil }
 
     static let live = AssistantSources(
         apps: { await AssistantSearch.apps(matching: $0, limit: $1) },
@@ -173,7 +200,13 @@ nonisolated struct AssistantSources: Sendable {
         isUnsupportedLanguage: { AssistantModel.isUnsupportedLanguage($0) },
         settingsPanes: { await SystemSettingsPane.table() },
         windows: { await RunningWindows.list(titles: $0) },
-        emoji: { await EmojiTable.build() }
+        emoji: { await EmojiTable.build() },
+        define: { await DictionaryLookup.define($0) },
+        contacts: { await ContactsLookup.search($0, limit: $1) },
+        contactsAccess: { ContactsLookup.access() },
+        requestContacts: { await ContactsLookup.request() },
+        bookmarks: { await BrowserBookmarks.all() },
+        rates: { await CurrencyRates.shared.rates() }
     )
 }
 
@@ -184,16 +217,19 @@ nonisolated struct FileScope: Sendable, Equatable {
     var anywhere: Bool
     /// How far back the recent files go.
     var days: Int
+    /// What the files say is searched too, not only their names.
+    var contents = false
 
-    init(paths: [String] = SiriFolder.allCases.map(\.path), anywhere: Bool = false, days: Int = 30) {
+    init(paths: [String] = SiriFolder.allCases.filter { $0 != .home }.map(\.path), anywhere: Bool = false, days: Int = 30, contents: Bool = false) {
         self.paths = paths
         self.anywhere = anywhere
         self.days = days
+        self.contents = contents
     }
 
     init(_ settings: SiriSettings) {
         self.init(paths: SiriFolder.allCases.filter { settings.folders.contains($0) }.map(\.path),
-                  anywhere: settings.matching != .wordStart, days: settings.recentDays)
+                  anywhere: settings.matching != .wordStart, days: settings.recentDays, contents: settings.searchesFileContents)
     }
 }
 
@@ -251,6 +287,34 @@ nonisolated struct FileScope: Sendable, Equatable {
     @ObservationIgnored var clock: any Clock<Duration> = ContinuousClock()
     /// Frees the kept lists `keepDuration` after a close; nil while Siri is open or once they are gone.
     @ObservationIgnored private var releaseTask: Task<Void, Never>?
+    /// The query's word as the dictionary has it (root, a single word).
+    private(set) var definition: AssistantDefinition? { didSet { if definition != oldValue { listsVersion &+= 1 } } }
+    /// The contacts the query found (root and ⌘8), read only once the user allowed them.
+    private(set) var contacts: [AssistantContact] = [] { didSet { if contacts != oldValue { listsVersion &+= 1 } } }
+    /// The contact whose ways to reach them ⌘8 lists (Return on a contact); Esc goes back.
+    private(set) var openedContact: AssistantContact? { didSet { if openedContact != oldValue { listsVersion &+= 1 } } }
+    private(set) var contactsAccess = AccessState.denied { didSet { if contactsAccess != oldValue { listsVersion &+= 1 } } }
+    /// The browsers' bookmarks, read once per opening where they are switched on.
+    private(set) var bookmarks: [AssistantBookmark]? { didSet { if bookmarks != oldValue { listsVersion &+= 1 } } }
+    /// The currencies' rates, once a currency was typed and they arrived.
+    private(set) var currencyRates: [String: Double]? {
+        didSet {
+            guard currencyRates != oldValue else { return }
+            calculated = nil
+            listsVersion &+= 1
+        }
+    }
+    @ObservationIgnored private var ratesTask: Task<Void, Never>?
+    /// The coming events matching a query (all of them for an empty one): the app's calendar, read
+    /// only while ⌘8 is open or once the user allowed it.
+    @ObservationIgnored var calendarEvents: (_ query: String) -> [CalendarEvent] = { _ in [] }
+    @ObservationIgnored var calendarAccess: () -> AccessState = { .denied }
+    @ObservationIgnored var requestCalendar: () -> Void = {}
+    /// Spotlight starts (true) or stops reading the calendar.
+    @ObservationIgnored var onCalendarLease: (Bool) -> Void = { _ in }
+    @ObservationIgnored private var holdsCalendar = false
+    /// A file is shown in Quick Look: the assistant stays while its panel has the keyboard.
+    @ObservationIgnored private(set) var isPreviewing = false
     /// The switches' states as read this opening (their rows show "On" or "Off").
     private(set) var commandStates: [AssistantCommand: Bool] = [:]
     /// The row waiting for a second Return (Empty Trash); another selection or `confirmWindow` cancels it.
@@ -300,6 +364,10 @@ nonisolated struct FileScope: Sendable, Equatable {
     @ObservationIgnored var timerIsActive: () -> Bool = { false }
     /// The kinds of widget on the board ("Edit Timer Widget").
     @ObservationIgnored var widgetKinds: () -> [IslandWidgetKind] = { [] }
+    /// Window Anchor as Spotlight lists it: nil while it cannot run, else whether a window is held.
+    @ObservationIgnored var anchorIsHolding: () -> Bool? = { nil }
+    /// ⌘↩ on a window: it comes to the front and goes under the notch.
+    @ObservationIgnored var onAnchorWindow: ((AssistantWindow) -> Void)?
     /// The panel's pages this Mac has ("Open Battery" only with a battery).
     @ObservationIgnored var pages: () -> [ExpandedPage] = { ExpandedPage.allCases }
 
@@ -385,7 +453,8 @@ nonisolated struct FileScope: Sendable, Equatable {
     private var hoverReveals: Bool { isPointerOver && settings().hoverRevealsSuggestions }
 
     /// A folder-access prompt may have the keyboard: the assistant must not close when it loses it.
-    var isAwaitingFileAccess: Bool { fileAccessReads > 0 }
+    var isAwaitingFileAccess: Bool { fileAccessReads > 0 || isPreviewing || permissionRequests > 0 }
+    @ObservationIgnored private var permissionRequests = 0
 
     /// The rows can be seen and chosen (the field alone shows none).
     private var rowsAreShowing: Bool { needsList || revealsSuggestions || hoverReveals }
@@ -401,21 +470,31 @@ nonisolated struct FileScope: Sendable, Equatable {
         var timerIsActive: Bool
         var widgetKinds: [IslandWidgetKind]
         var clips: [ClipboardItem]
+        /// The calendar as People & Calendar (and a root query) lists it.
+        var calendar: AccessState
+        var events: [CalendarEvent]
+        /// Window Anchor's Anchor / Release row (nil: it cannot run).
+        var anchor: Bool?
     }
 
     @ObservationIgnored private var composed: (key: RowsKey, rows: [AssistantRow])?
 
     var rows: [AssistantRow] {
-        let key = RowsKey(query: trimmedQuery, category: category, lists: listsVersion, settings: settings(),
+        let text = trimmedQuery
+        let listsEvents = category == .people || (category == nil && text.count >= 3 && settings().showsPeople)
+        let key = RowsKey(query: text, category: category, lists: listsVersion, settings: settings(),
                           media: mediaState(), timerIsActive: timerIsActive(), widgetKinds: widgetKinds(),
-                          clips: category == .clipboard ? clipboard() : [])
+                          clips: category == .clipboard ? clipboard() : [],
+                          calendar: listsEvents ? calendarAccess() : .denied, events: listsEvents ? calendarEvents(text) : [],
+                          anchor: anchorIsHolding())
         if let composed, composed.key == key { return composed.rows }
-        let rows = compose(key.query, key.settings, clips: key.clips)
+        let rows = compose(key.query, key.settings, clips: key.clips, calendar: key.calendar, events: key.events)
         composed = (key, rows)
         return rows
     }
 
-    private func compose(_ text: String, _ settings: SiriSettings, clips: [ClipboardItem]) -> [AssistantRow] {
+    private func compose(_ text: String, _ settings: SiriSettings, clips: [ClipboardItem], calendar: AccessState,
+                         events: [CalendarEvent]) -> [AssistantRow] {
         switch category {
         case .applications:
             let gallery = settings.gallerySort == .name
@@ -438,6 +517,15 @@ nonisolated struct FileScope: Sendable, Equatable {
             return windows(matching: text).map(AssistantRow.window)
         case .emoji:
             return emoji(matching: text).map(AssistantRow.emoji)
+        case .people:
+            if let openedContact { return openedContact.actions.map(AssistantRow.contactAction) }
+            // What is not allowed yet is one row that asks; then the people found, then the events.
+            var rows: [AssistantRow] = []
+            if contactsAccess != .granted { rows.append(.permission(.contacts)) }
+            if calendar != .granted { rows.append(.permission(.calendar)) }
+            rows += contacts.map(AssistantRow.contact)
+            if calendar == .granted { rows += events.map(AssistantRow.event) }
+            return rows
         case nil:
             guard !text.isEmpty else { return settings.categories.map(AssistantRow.category) }
             // A sum or a conversion is worked out at once and comes first, above everything, as in
@@ -447,6 +535,8 @@ nonisolated struct FileScope: Sendable, Equatable {
             let calculation = (AssistantURL.url(from: text).map { [AssistantRow.openURL($0)] } ?? [])
                 + (calculation(for: text).map { [AssistantRow.calculation($0)] } ?? [])
                 + (settings.showsSystem ? typedTimer(text) : [])
+                + (settings.showsDefinitions && definition?.word.caseInsensitiveCompare(text) == .orderedSame
+                   ? [AssistantRow.definition(definition!)] : [])
             // The other kinds' best few: commands and panes by name after the apps, emoji last
             // (and only from two letters: one matches hundreds).
             let few = min(settings.resultsPerKind, Self.rootActionLimit)
@@ -458,6 +548,9 @@ nonisolated struct FileScope: Sendable, Equatable {
                 + (settings.showsFiles ? files.map(AssistantRow.hit) : [])
                 + (settings.showsWindows ? windows(matching: text).prefix(few).map(AssistantRow.window) : [])
                 + (settings.showsActions ? actions(matching: text).prefix(Self.rootActionLimit).map(AssistantRow.action) : [])
+                + (settings.showsPeople ? contacts.prefix(few).map(AssistantRow.contact)
+                   + (calendar == .granted ? events.prefix(few).map(AssistantRow.event) : []) : [])
+                + (settings.showsBookmarks ? bookmarks(matching: text).prefix(few).map(AssistantRow.bookmark) : [])
                 + (settings.showsEmoji && text.count >= 2 ? emoji(matching: text).prefix(few).map(AssistantRow.emoji) : [])
             let intelligence = answersWithIntelligence
             // A question is answered on Return: the answer comes first, above any hits (Apple
@@ -488,9 +581,17 @@ nonisolated struct FileScope: Sendable, Equatable {
 
     private func calculation(for text: String) -> AssistantCalculation? {
         if let calculated, calculated.query == text { return calculated.result }
-        let result = AssistantCalculator.calculate(text)
+        let result = AssistantCalculator.calculate(text, context: .init(rates: settings().convertsCurrency ? currencyRates : nil))
         calculated = (text, result)
         return result
+    }
+
+    /// The bookmarks whose title or address has the query, titles that start with it first.
+    private func bookmarks(matching text: String) -> [AssistantBookmark] {
+        guard let bookmarks, text.count >= 2 else { return [] }
+        let matching = settings().matching
+        let found = bookmarks.filter { AssistantMatch.matches($0.title, text, matching) || ($0.url.host() ?? "").localizedCaseInsensitiveContains(text) }
+        return found.filter { AssistantMatch.startsName($0.title, text) } + found.filter { !AssistantMatch.startsName($0.title, text) }
     }
 
     /// The suggestions whose name the query spells out (three letters or more, so "a" does not
@@ -532,6 +633,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         var timerIsActive: Bool
         var widgetKinds: [IslandWidgetKind]
         var pages: [ExpandedPage]
+        var anchor: Bool?
     }
 
     @ObservationIgnored private var matchedCommands: (key: CommandsKey, commands: [AssistantCommand])?
@@ -541,13 +643,15 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// The island's commands (pages the actions do not open, Settings tabs, keep open, the
     /// board's widgets' editors), Control Center's switches, then the Mac's own.
     func commands(matching text: String) -> [AssistantCommand] {
-        let key = CommandsKey(text: text, matching: settings().matching, timerIsActive: timerIsActive(), widgetKinds: widgetKinds(), pages: pages())
+        let key = CommandsKey(text: text, matching: settings().matching, timerIsActive: timerIsActive(), widgetKinds: widgetKinds(), pages: pages(),
+                              anchor: anchorIsHolding())
         if let matchedCommands, matchedCommands.key == key { return matchedCommands.commands }
         let actionPages = IslandAction.allCases.map(\.command)
         var all = key.pages.filter { !actionPages.contains(.open($0)) }.map(AssistantCommand.page)
         all += IslandSettingsPane.allCases.map(AssistantCommand.settings)
         all.append(.keepOpen)
         if key.timerIsActive { all.append(.cancelTimer) }
+        if let holding = key.anchor { all.append(holding ? .releaseWindow : .anchorWindow) }
         var seen = Set<IslandWidgetKind>()
         all += key.widgetKinds.filter { seen.insert($0).inserted }.map(AssistantCommand.editWidget)
         all += AssistantCommand.controls.map(AssistantCommand.control)
@@ -606,6 +710,9 @@ nonisolated struct FileScope: Sendable, Equatable {
         switch selectedRow {
         case .clip(let item) where category == .clipboard: text = item.text
         case .emoji(let emoji): text = emoji.character
+        case .contactAction(let action) where action.kind != .openCard: text = action.value
+        case .contact(let contact) where contact.detail != nil: text = contact.detail ?? ""
+        case .bookmark(let bookmark): text = bookmark.url.absoluteString
         default: return false
         }
         let pasteboard = NSPasteboard.general
@@ -619,6 +726,15 @@ nonisolated struct FileScope: Sendable, Equatable {
     func hideSelectedApp() -> Bool {
         guard selectionIsUsers || marksSelection, case .window(let window) = selectedRow else { return false }
         system.hide(window)
+        return true
+    }
+
+    /// ⌘↩ on a running app or its window: it comes to the front and is anchored under the notch.
+    /// False on any other row, and while Window Anchor cannot run.
+    func anchorSelectedWindow() -> Bool {
+        guard anchorIsHolding() != nil, selectionIsUsers || marksSelection, case .window(let window) = selectedRow,
+              let onAnchorWindow else { return false }
+        onAnchorWindow(window)
         return true
     }
 
@@ -718,6 +834,16 @@ nonisolated struct FileScope: Sendable, Equatable {
         query = ""
         apps = []
         files = []
+        definition = nil
+        contacts = []
+        openedContact = nil
+        ratesTask?.cancel()
+        ratesTask = nil
+        isPreviewing = false
+        if holdsCalendar {
+            holdsCalendar = false
+            onCalendarLease(false)
+        }
         // Read live at every opening.
         windows = nil
         windowsHaveTitles = false
@@ -744,6 +870,7 @@ nonisolated struct FileScope: Sendable, Equatable {
             self.shortcuts = nil
             self.settingsPanes = nil
             self.emoji = nil
+            self.bookmarks = nil
             AssistantMatch.forget()
         }
     }
@@ -825,6 +952,9 @@ nonisolated struct FileScope: Sendable, Equatable {
         if answer != nil {
             askTask?.cancel()
             answer = nil
+        } else if openedContact != nil {
+            openedContact = nil
+            selection = 0
         } else if !query.isEmpty {
             query = ""
         } else if category != nil {
@@ -841,7 +971,12 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// the key goes on to the field.
     func deleteBackwardInEmptyField() -> Bool {
         guard query.isEmpty, answer == nil, category != nil else { return false }
-        open(nil)
+        if openedContact != nil {
+            openedContact = nil
+            selection = 0
+        } else {
+            open(nil)
+        }
         return true
     }
 
@@ -862,6 +997,14 @@ nonisolated struct FileScope: Sendable, Equatable {
         }
         guard category != self.category else { return }
         self.category = category
+        openedContact = nil
+        // ⌘8 reads the calendar while it is open (nothing is, until the user allowed it).
+        let wantsCalendar = category == .people
+        if wantsCalendar != holdsCalendar {
+            holdsCalendar = wantsCalendar
+            onCalendarLease(wantsCalendar)
+        }
+        if category == .people { contactsAccess = sources.contactsAccess() }
         cancelConfirmation()
         cancelDeferredReturn()
         // Back at the root the suggestions stay down: the user was just in one.
@@ -918,6 +1061,50 @@ nonisolated struct FileScope: Sendable, Equatable {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(calculation.result, forType: .string)
             onClose?()
+        case .definition(let definition):
+            // The whole entry where answers are shown.
+            askTask?.cancel()
+            answer = AssistantAnswer(question: definition.word, text: definition.text, isResponding: false, definedWord: definition.word)
+        case .contact(let contact):
+            // Its ways to reach them, in People & Calendar.
+            if category != .people {
+                query = ""
+                open(.people)
+            }
+            openedContact = contact
+            selection = 0
+            selectionIsUsers = false
+        case .contactAction(let action):
+            if let url = action.url {
+                onClose?()
+                system.open(url)
+            } else {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(action.value, forType: .string)
+                onClose?()
+            }
+        case .event(let event):
+            // Calendar on the event's day.
+            guard let url = URL(string: "calshow:\(Int(event.start.timeIntervalSinceReferenceDate))") else { return }
+            onClose?()
+            system.open(url)
+        case .bookmark(let bookmark):
+            onClose?()
+            system.open(bookmark.url)
+        case .permission(.contacts):
+            // macOS's prompt takes the keyboard: Spotlight stays meanwhile.
+            permissionRequests += 1
+            let sources = sources
+            Task { [weak self] in
+                let access = await sources.requestContacts()
+                guard let self else { return }
+                self.permissionRequests -= 1
+                self.contactsAccess = access
+                self.onFileAccessSettled?()
+                self.search(now: true)
+            }
+        case .permission(.calendar):
+            requestCalendar()
         case .askIntelligence:
             ask()
         case .searchWeb:
@@ -933,7 +1120,7 @@ nonisolated struct FileScope: Sendable, Equatable {
 
     private func run(_ command: AssistantCommand, row: AssistantRow, byKey: Bool) {
         switch command {
-        case .page, .settings, .keepOpen, .timer, .cancelTimer, .editWidget:
+        case .page, .settings, .keepOpen, .timer, .cancelTimer, .editWidget, .anchorWindow, .releaseWindow:
             if let appCommand = command.appCommand { onCommand?(appCommand) }
         case .control(let control):
             // `refresh` reads only the switches a widget shows: this one is read now, so the
@@ -1001,6 +1188,40 @@ nonisolated struct FileScope: Sendable, Equatable {
         }
     }
 
+    // MARK: Files
+
+    /// The file the selection is on (a hit that is not an app).
+    private var selectedFile: URL? {
+        guard case .hit(let hit) = selectedRow, hit.kind != .app else { return nil }
+        return hit.url
+    }
+
+    /// Space or ⌘Y on a file the user moved to: Quick Look, Spotlight staying under it. False on
+    /// any other row (the key goes on to the field).
+    func quickLookSelection() -> Bool {
+        guard selectionIsUsers || marksSelection, let url = selectedFile else { return false }
+        isPreviewing = true
+        system.quickLook(url) { [weak self] in
+            self?.isPreviewing = false
+            self?.onFileAccessSettled?()
+        }
+        return true
+    }
+
+    /// ⌘R on a file or an app: shown in Finder.
+    func revealSelection() -> Bool {
+        guard case .hit(let hit) = selectedRow else { return false }
+        onClose?()
+        system.reveal(hit.url)
+        return true
+    }
+
+    func openInDictionary(_ word: String) {
+        guard let url = DictionaryLookup.url(for: word) else { return }
+        onClose?()
+        system.open(url)
+    }
+
     func copyAnswer() {
         guard let text = answer?.text, !text.isEmpty else { return }
         NSPasteboard.general.clearContents()
@@ -1048,12 +1269,49 @@ nonisolated struct FileScope: Sendable, Equatable {
             return
         case .files:
             break
+        case .people:
+            // The people come from Contacts for the query; the events are filtered in memory.
+            contactsAccess = sources.contactsAccess()
+            let sources = sources
+            let delay = settings().searchDelay
+            guard contactsAccess == .granted, !text.isEmpty else {
+                contacts = []
+                return
+            }
+            searchPending = true
+            searchTask = Task { [weak self] in
+                if !now, delay > 0 {
+                    try? await Task.sleep(for: .seconds(delay), tolerance: .milliseconds(20))
+                    guard !Task.isCancelled else { return }
+                }
+                let found = await sources.contacts(text, 30)
+                guard !Task.isCancelled, let self, self.generation == generation else { return }
+                self.replaceLists { self.contacts = found }
+                self.searchPending = false
+                if self.deferredReturn != nil {
+                    self.cancelDeferredReturn()
+                    self.runSelection()
+                }
+            }
+            return
         case nil:
             guard !text.isEmpty else {
                 apps = []
                 files = []
+                definition = nil
+                contacts = []
                 languageUnsupported = false
                 return
+            }
+            // A currency typed for the first time today: the rates are fetched, the query is not sent.
+            if settings().convertsCurrency, currencyRates == nil, ratesTask == nil, AssistantCalculator.currencyQuery(text) != nil {
+                let sources = sources
+                ratesTask = Task { [weak self] in
+                    let rates = await sources.rates()
+                    guard !Task.isCancelled, let self else { return }
+                    self.ratesTask = nil
+                    if let rates { self.replaceLists { self.currencyRates = rates } }
+                }
             }
         }
         let settings = settings()
@@ -1079,13 +1337,19 @@ nonisolated struct FileScope: Sendable, Equatable {
             if asksAccess { self?.fileAccessReads += 1 }
             var foundApps: [AssistantHit] = []
             var foundFiles: [AssistantHit] = []
+            var foundDefinition: AssistantDefinition?
+            var foundContacts: [AssistantContact] = []
             var unsupported = false
             if category == .files {
                 foundFiles = text.isEmpty ? await sources.recentFiles(scope) : await sources.files(text, 30, scope)
             } else {
                 async let apps = Self.apps(text, hitLimit, inMemory: inMemoryApps, sources: sources)
                 async let files = withFiles ? sources.files(text, hitLimit, scope) : []
-                (foundApps, foundFiles) = await (apps, files)
+                // A word alone is looked up; the people only once they were allowed.
+                async let definition = settings.showsDefinitions && DictionaryLookup.isWord(text) ? sources.define(text) : nil
+                async let contacts = settings.showsPeople && text.count >= 2 && sources.contactsAccess() == .granted
+                    ? sources.contacts(text, hitLimit) : []
+                (foundApps, foundFiles, foundDefinition, foundContacts) = await (apps, files, definition, contacts)
                 // Once per pause, not per keystroke: the recogniser is not free.
                 unsupported = sources.isUnsupportedLanguage(text)
             }
@@ -1107,6 +1371,8 @@ nonisolated struct FileScope: Sendable, Equatable {
             self.replaceLists {
                 self.apps = foundApps
                 self.files = foundFiles
+                self.definition = foundDefinition
+                self.contacts = foundContacts
                 self.languageUnsupported = unsupported
             }
             self.searchPending = false
@@ -1138,14 +1404,16 @@ nonisolated struct FileScope: Sendable, Equatable {
         let needsPanes = settingsPanes == nil && settings.showsSystem && (category == .system || rootQuery)
         // Built once per opening, at its first use, and dropped `keepDuration` after `end()`.
         let needsEmoji = emoji == nil && settings.showsEmoji && (category == .emoji || rootQuery)
-        guard needsApps || needsShortcuts || needsPanes || needsEmoji, loadTask == nil else { return }
+        let needsBookmarks = bookmarks == nil && settings.showsBookmarks && rootQuery
+        guard needsApps || needsShortcuts || needsPanes || needsEmoji || needsBookmarks, loadTask == nil else { return }
         let sources = sources
         loadTask = Task { [weak self] in
             async let apps = needsApps ? sources.allApps() : []
             async let shortcuts = needsShortcuts ? sources.shortcuts() : nil
             async let panes = needsPanes ? sources.settingsPanes() : nil
             async let emoji = needsEmoji ? EmojiIndex.build(sources.emoji) : nil
-            let (foundApps, foundShortcuts, foundPanes, foundEmoji) = await (apps, shortcuts, panes, emoji)
+            async let bookmarks = needsBookmarks ? sources.bookmarks() : nil
+            let (foundApps, foundShortcuts, foundPanes, foundEmoji, foundBookmarks) = await (apps, shortcuts, panes, emoji, bookmarks)
             // The rows come with their icons, drawn off the main thread.
             var icons = Set<AssistantIcons.Source>()
             if foundShortcuts?.isEmpty == false { icons.insert(AssistantIcons.shortcutsSource) }
@@ -1161,6 +1429,7 @@ nonisolated struct FileScope: Sendable, Equatable {
                 if needsShortcuts { self.shortcuts = foundShortcuts ?? [] }
                 if needsPanes { self.settingsPanes = foundPanes ?? [] }
                 if needsEmoji { self.emoji = foundEmoji ?? EmojiIndex([]) }
+                if needsBookmarks { self.bookmarks = foundBookmarks ?? [] }
             }
             // Asked for something else while this ran (the task is single-flight).
             self.loadLists(for: self.category, query: self.trimmedQuery)

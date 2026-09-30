@@ -82,7 +82,10 @@ nonisolated struct IslandWidget: Sendable, Codable, Hashable, Identifiable {
         config = kind.spec.defaultConfig
     }
 
-    func shows(_ element: ElementID) -> Bool { options.contains(element) }
+    /// Switched on, or always drawn (`ElementSpec.isRequired`).
+    func shows(_ element: ElementID) -> Bool {
+        options.contains(element) || kind.spec.element(element)?.isRequired == true
+    }
 
     func size(of element: ElementID) -> ElementSize { sizes[element] ?? .medium }
 

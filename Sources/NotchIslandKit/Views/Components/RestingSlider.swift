@@ -18,6 +18,8 @@ struct RestingSlider: View {
     @Environment(\.controlSize) private var controlSize
     /// On the editor's canvas always the picture, as tall as the native control of its size.
     @Environment(\.widgetRenderMode) private var renderMode
+    /// A widget style's colour for the filled part (`ResolvedLine`); nil is the accent.
+    @Environment(\.sliderFill) private var sliderFill
     @State private var isHovered = false
     @State private var isEditing = false
 
@@ -33,6 +35,7 @@ struct RestingSlider: View {
                     onEditingChanged(editing)
                 }
                 .labelsHidden()
+                .modifier(OptionalTint(color: sliderFill))
             } else {
                 SliderPicture(value: value, height: renderMode == .canvas ? SliderPicture.nativeHeight(controlSize) : SliderPicture.height,
                               set: set, onEditingChanged: { editing in
@@ -59,6 +62,7 @@ struct SliderPicture: View {
     let onEditingChanged: (Bool) -> Void
 
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.sliderFill) private var sliderFill
     @State private var isDragging = false
 
     static let height: CGFloat = 20
@@ -79,7 +83,7 @@ struct SliderPicture: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Self.trackColor)
                     .frame(height: trackHeight)
-                Capsule().fill(Self.fillColor)
+                Capsule().fill(sliderFill ?? Self.fillColor)
                     .frame(width: max(centre, trackHeight), height: trackHeight)
                 Capsule().fill(Self.knobColor)
                     .frame(width: knob.width, height: knob.height)
@@ -113,4 +117,9 @@ struct SliderPicture: View {
     }
 
     private static var nativeHeights: [ControlSize: CGFloat] = [:]
+}
+
+extension EnvironmentValues {
+    /// The filled part of a slider (a widget's line style); nil is the accent.
+    @Entry var sliderFill: Color?
 }

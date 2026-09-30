@@ -91,7 +91,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         case ("volume", .splitView): 0.33
         case ("volume", .desktop): 0.35
         case ("airPodsMode", .notch): 0.27
-        case ("airPodsMode", _): 0.25
+        case ("airPodsMode", _): 0.20
         default: exitLead
         }
     }

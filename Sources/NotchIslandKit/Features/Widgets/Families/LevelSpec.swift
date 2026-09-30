@@ -1,5 +1,10 @@
 import Foundation
 
+nonisolated extension ElementID {
+    /// A level's slider, or its ring.
+    static let levelSlider = ElementID(rawValue: "levelSlider")
+}
+
 /// Volume, display and keyboard brightness (`LevelWidget`, `KeyboardWidget`).
 nonisolated enum LevelSpecs {
     static let all: [IslandWidgetKind: WidgetKindSpec] = [
@@ -23,6 +28,8 @@ nonisolated enum LevelSpecs {
                 ElementSpec(.levelIcon, "Symbol", symbol: "speaker.wave.2", role: .symbol, priority: 60, minRoom: MinRoom(width: 90)),
                 ElementSpec(.levelValue, "Value", symbol: "number", role: .text, samples: ["100%"], priority: 40,
                             minRoom: MinRoom(width: 150)),
+                ElementSpec(.levelSlider, "Slider", symbol: "slider.horizontal.3", role: .line, priority: 100,
+                            isSizable: false, isRequired: true),
             ],
             layouts: [.automatic, .slider, .ring],
             canMirror: true

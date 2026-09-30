@@ -5,9 +5,10 @@ import IOKit.ps
 /// show beyond the level. Read from the gauge (`BatteryProbe`) and the adapter, off the main
 /// thread; `BatteryCenter` decides when.
 ///
-/// On macOS 27 an app sees fewer of the gauge's keys than root does: temperature, the permanent
-/// failure status and the top-level capacities are absent on Apple silicon, so those fields are
-/// optional and the capacities come from `BatteryData`.
+/// On macOS 27 an app sees fewer of the gauge's keys than root does: the permanent failure status
+/// and the top-level capacities are absent on Apple silicon, so those fields are optional and the
+/// capacities come from `BatteryData`. The temperature is on the pack below the gauge
+/// (`AppleSmartBatteryPack`), where a MacBook Air M5 shows it and older Macs may not.
 nonisolated struct BatteryDetails: Sendable, Equatable {
     nonisolated enum Condition: Sendable, Equatable {
         case normal
@@ -25,7 +26,8 @@ nonisolated struct BatteryDetails: Sendable, Equatable {
     var fullChargeCapacity: Int?
     /// mAh the cells hold at full charge now: the figure macOS rates health by.
     var nominalChargeCapacity: Int?
-    /// System Settings' "Maximum Capacity": nominal over design capacity, at most 100.
+    /// System Settings' "Maximum Capacity": macOS's own figure (`SystemBatteryHealth`), else nominal
+    /// over design capacity, at most 100.
     var maximumCapacityPercent: Int?
     var condition: Condition
     /// Volts.
@@ -44,19 +46,24 @@ nonisolated struct BatteryDetails: Sendable, Equatable {
     /// °C, when the system shows it to apps.
     var temperature: Double?
 
-    /// Both IOKit reads; nil without a battery.
+    /// The IOKit reads, and macOS's maximum capacity (cached for a day); nil without a battery.
     static func read(power: PowerState) -> BatteryDetails? {
         guard let properties = BatteryProbe.properties() else { return nil }
         let adapter = IOPSCopyExternalPowerAdapterDetails()?.takeRetainedValue() as? [String: Any]
-        return BatteryDetails(properties: properties, adapter: adapter, power: power)
+        let cycles = BatteryProbe.signed(properties["CycleCount"])
+        return BatteryDetails(properties: properties, pack: BatteryProbe.packData(), adapter: adapter, power: power,
+                              systemMaximumCapacity: SystemBatteryHealth.maximumCapacity(cycleCount: cycles))
     }
 
     /// - Parameters:
     ///   - properties: `AppleSmartBattery`'s registry properties.
+    ///   - pack: `AppleSmartBatteryPack`'s `BatteryData` (the temperature).
     ///   - adapter: `IOPSCopyExternalPowerAdapterDetails`.
     ///   - power: the monitor's state; its estimate is the one the menu bar shows, the gauge's
     ///     averages stand in while it has none.
-    init(properties: [String: Any], adapter: [String: Any]?, power: PowerState) {
+    ///   - systemMaximumCapacity: the percentage System Settings shows, when macOS gave it.
+    init(properties: [String: Any], pack: [String: Any]? = nil, adapter: [String: Any]?, power: PowerState,
+         systemMaximumCapacity: Int? = nil) {
         let data = properties["BatteryData"] as? [String: Any] ?? [:]
         func value(_ key: String) -> Int? { BatteryProbe.signed(data[key] ?? properties[key]) }
 
@@ -65,11 +72,14 @@ nonisolated struct BatteryDetails: Sendable, Equatable {
         designCapacity = value("DesignCapacity")
         fullChargeCapacity = BatteryProbe.signed(data["FullChargeCapacity"] ?? properties["AppleRawMaxCapacity"])
         nominalChargeCapacity = value("NominalChargeCapacity")
-        // Apple silicon pins `MaxCapacity` at 100 and rates health by the nominal capacity. On the
-        // development Mac (bq40z651, 38 cycles) nominal 6460 over design 6249 mAh is what
-        // `system_profiler SPPowerDataType` shows as "Maximum Capacity: 100%" (full charge, 6308,
-        // would say the same while new; the nominal figure is the one macOS follows as it wears).
-        if let design = designCapacity, design > 0, let held = nominalChargeCapacity ?? fullChargeCapacity {
+        // Apple silicon pins `MaxCapacity` at 100, and no key an app can read gives System
+        // Settings' figure on every Mac: on a MacBook Air M5 (bq40z651, 58 cycles) it says 98 %
+        // while nominal over design is 4591 / 4629 mAh (99 %) and full charge over design 4464 /
+        // 4629 (96 %). So macOS's own figure is taken where it gives one, and nominal over design
+        // (the one that matched on a MacBook Pro at 38 cycles) stands in otherwise.
+        if let systemMaximumCapacity {
+            maximumCapacityPercent = min(max(systemMaximumCapacity, 0), 100)
+        } else if let design = designCapacity, design > 0, let held = nominalChargeCapacity ?? fullChargeCapacity {
             maximumCapacityPercent = min(100, Int((Double(held) / Double(design) * 100).rounded()))
         }
         let failure = BatteryProbe.signed(properties["PermanentFailureStatus"]) ?? 0
@@ -91,8 +101,7 @@ nonisolated struct BatteryDetails: Sendable, Equatable {
         minutesToEmpty = power.isOnBattery
             ? power.minutesRemaining ?? Self.estimate(properties["AvgTimeToEmpty"] ?? data["AvgTimeToEmpty"]) : nil
 
-        temperature = BatteryProbe.signed(properties["Temperature"] ?? properties["VirtualTemperature"])
-            .map { Double($0) / 100 }
+        temperature = BatteryProbe.temperature(properties: properties, pack: pack)
     }
 
     /// `demo/batteryhistory`'s: a battery a year and a half old, on a 96 W adapter while plugged in.

@@ -30,8 +30,8 @@ nonisolated enum BatterySpecs {
                                symbol: "arrow.triangle.2.circlepath", samples: ["8888"]),
         .batteryPower: figure("Power", "What the Mac draws, or what the charger gives it.", symbol: "bolt.fill",
                               samples: ["-88.8 W"]),
-        .batteryTemperature: figure("Battery Temperature", "How warm the battery is.", symbol: "thermometer.medium",
-                                    samples: ["88 °C"]),
+        .batteryTemperature: figure("Temperature", "How warm the battery is.", symbol: "thermometer.medium",
+                                    samples: ["88 °C"], isAvailable: { BatteryAvailability.hasTemperature }),
         .charger: figure("Charger", "The charger's power and whether it is charging.", symbol: "powerplug.fill",
                          samples: ["888 W", "Not Charging"]),
         .batteryChart: WidgetKindSpec(
@@ -40,20 +40,31 @@ nonisolated enum BatterySpecs {
             minimumSize: GridSize(width: 3, height: 1), defaultSize: GridSize(width: 4, height: 2),
             maximumSize: GridSize(width: 12, height: 3),
             elements: [ElementSpec(.chart, "Chart", symbol: "chart.bar", role: .chart, priority: 100, isBlock: true)]
-                + ElementSpec.reading(["100%"], caption: "Today"),
-            isImplemented: false
+                + ElementSpec.reading(["100%"], caption: "Today").filter { $0.id != .symbol },
+            isAvailable: { BatteryAvailability.hasBattery }
         ),
     ]
 
     private static let green: [IslandTheme.RGB] = [.rgb(0.4, 0.9, 0.45), .rgb(0.16, 0.7, 0.3)]
 
-    private static func figure(_ title: String, _ summary: String, symbol: String, samples: [String]) -> WidgetKindSpec {
+    private static func figure(_ title: String, _ summary: String, symbol: String, samples: [String],
+                               isAvailable: @escaping @Sendable () -> Bool = { BatteryAvailability.hasBattery }) -> WidgetKindSpec {
         WidgetKindSpec(
             title: title, summary: summary, symbol: symbol, iconColors: green, category: .battery, family: .battery,
             minimumSize: GridSize(width: 1, height: 1), defaultSize: GridSize(width: 2, height: 1),
             maximumSize: GridSize(width: 4, height: 2),
             elements: ElementSpec.reading(samples, caption: title),
-            isImplemented: false
+            isAvailable: isAvailable,
+            stacksElements: true
         )
     }
+}
+
+/// What this Mac's battery offers, read once (the gallery asks for every kind): a desktop Mac has
+/// no battery widgets, and the temperature's only where the system shows the sensor to apps.
+nonisolated enum BatteryAvailability {
+    private static let details: BatteryDetails? = BatteryDetails.read(power: PowerMonitor.readIOKit())
+
+    static var hasBattery: Bool { details != nil }
+    static var hasTemperature: Bool { details?.temperature != nil }
 }

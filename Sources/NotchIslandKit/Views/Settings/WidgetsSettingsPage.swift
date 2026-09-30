@@ -28,34 +28,63 @@ struct WidgetsSettingsPage: View {
                     StudioStage(selection: $selection, group: $group, thumbnails: thumbnails, backdrop: $backdrop, notice: notice)
                         .id(StudioAnchor.stage)
                     Group {
-                        let picked = group.filter { model.widgets.board.contains($0) }
-                        if picked.count >= 2 {
+                        let picked = group.filter { model.editedWidgets.board.contains($0) }
+                        if model.studio.mode == .topBar {
+                            TopBarInspector()
+                                .transition(.opacity)
+                        } else if model.studio.mode == .size {
+                            VStack(alignment: .leading, spacing: 16) {
+                                SizeInspector()
+                                ParkedTray()
+                            }
+                            .transition(.opacity)
+                        } else if picked.count >= 2 {
                             GroupInspector(ids: picked, selection: $selection, group: $group)
                                 .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
                                                         removal: .opacity))
-                        } else if let id = selection, model.widgets.board.contains(id) {
+                        } else if let id = selection, model.editedWidgets.board.contains(id) {
                             WidgetInspector(id: id, selection: $selection, notice: $notice)
                                 .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
                                                         removal: .opacity))
                         } else {
-                            WidgetStoreView(add: { add($0, scroller: scroller) },
-                                        open: { kind in
-                                            if let id = model.widgets.board.first(of: kind)?.id { select(id, scroller: scroller) }
-                                        })
-                                .transition(.opacity)
+                            VStack(alignment: .leading, spacing: 22) {
+                                ParkedTray()
+                                WidgetStoreView(add: { add($0, scroller: scroller) },
+                                                open: { kind in
+                                                    if let id = model.editedWidgets.board.first(of: kind)?.id { select(id, scroller: scroller) }
+                                                })
+                            }
+                            .transition(.opacity)
                         }
                     }
                     .animation(.spring(duration: 0.35, bounce: 0.12), value: selection)
                     .animation(.spring(duration: 0.35, bounce: 0.12), value: group.count >= 2)
+                    .animation(.spring(duration: 0.35, bounce: 0.12), value: model.studio.mode)
                 }
                 .padding(.horizontal, 28)
                 .padding(.top, 10)
                 .padding(.bottom, 28)
             }
             .scrollIndicators(.automatic)
+            .onChange(of: model.studio.stageScrollRequest) {
+                withAnimation(.easeInOut(duration: SettingsSurfaceView.stageScroll)) { scroller.scrollTo(StudioAnchor.stage, anchor: .top) }
+            }
         }
         .onAppear(perform: takeRequestedEdit)
         .onChange(of: model.editingWidget) { takeRequestedEdit() }
+        .onChange(of: model.studio.mode) { _, mode in
+            // Each mode's own picks and drafts end with it.
+            if mode != .widgets {
+                selection = nil
+                group = []
+            }
+            if mode != .topBar { model.studio.headerSelection = nil }
+            if mode != .size { model.studio.draft = nil }
+        }
+        .onDisappear {
+            model.studio.draft = nil
+            model.studio.headerSelection = nil
+        }
         .task(id: notice) {
             guard notice != nil else { return }
             try? await Task.sleep(for: .seconds(4))
@@ -64,22 +93,14 @@ struct WidgetsSettingsPage: View {
     }
 
     /// Exactly the area the home page gives its board.
-    static func boardSize(_ layout: IslandLayout) -> CGSize {
-        let presentation = IslandPresentation.expanded(.home)
-        let island = layout.size(for: presentation)
-        let split = NotchSplit(layout: layout, presentation: presentation,
-                               outerInset: Metrics.Expanded.horizontalInset, clearance: Metrics.notchClearance)
-        return CGSize(
-            width: island.width - 2 * split.contentInset,
-            height: island.height - layout.notch.height - Metrics.Expanded.pageTopInset - Metrics.Expanded.pageBottomInset
-        )
-    }
+    static func boardSize(_ layout: IslandLayout) -> CGSize { BoardSizing.board(layout) }
 
     /// "Edit …" from a widget's context menu in the island.
     private func takeRequestedEdit() {
         guard let id = model.editingWidget else { return }
         model.editingWidget = nil
-        guard model.widgets.board.contains(id) else { return }
+        guard model.editedWidgets.board.contains(id) else { return }
+        model.studio.mode = .widgets
         selection = id
     }
 
@@ -90,7 +111,7 @@ struct WidgetsSettingsPage: View {
 
     private func add(_ kind: IslandWidgetKind, scroller: ScrollViewProxy) {
         var added: WidgetID?
-        withAnimation(.spring(duration: 0.35, bounce: 0.2)) { added = model.widgets.add(kind) }
+        withAnimation(.spring(duration: 0.35, bounce: 0.2)) { added = model.editedWidgets.add(kind) }
         if let added {
             select(added, scroller: scroller)
         } else {
@@ -103,10 +124,16 @@ struct WidgetsSettingsPage: View {
 
 private enum StudioAnchor: Hashable { case stage }
 
-/// What the stage's island takes from Settings around it: the widgets picked.
+/// What the stage's island takes from Settings around it: the widgets picked, and what the stage
+/// edits.
 private struct StagePick: Equatable {
     let selection: WidgetID?
     let group: Set<WidgetID>
+    let mode: WidgetStudio.Mode
+    /// The room the island is drawn in (in Size mode, the largest it may get).
+    let room: CGSize
+    /// How much smaller the room is shown (an island wider than the stage).
+    let fit: CGFloat
 }
 
 // MARK: - Stage
@@ -123,13 +150,35 @@ private struct StudioStage: View {
     /// The round Stage button's height: the hint's capsule is made as tall, and the stage's lower
     /// corners concentric with both.
     @State private var controlHeight: CGFloat = 28
+    /// The stage's own width: an island wider than it is shown smaller, whole.
+    @State private var stageWidth: CGFloat = 0
 
     /// Between the hint and the button and the stage's edges.
     static let controlInset: CGFloat = 12
+    /// Beside an island shown smaller to fit.
+    static let sideInset: CGFloat = 16
+
+    /// Size mode's room: the panel as it is, with room to drag its edges out a good way — no more
+    /// than the largest it may be made on this screen. Only as large as that, so the stage stays
+    /// short and the controls under it in sight; it is the stored panel's (not the one being
+    /// dragged), so a drag lays out nothing around the stage, and the room grows after it.
+    static func sizeRoom(_ layout: IslandLayout) -> CGSize {
+        let island = layout.size(for: .expanded(.home))
+        let largest = layout.replacing(panel: PanelLayout(widthFactor: PanelSettings.widthRange.upperBound,
+                                                          boardHeightFactor: PanelSettings.boardHeightRange.upperBound))
+            .size(for: .expanded(.home))
+        return CGSize(width: min(largest.width, (island.width * 1.3).rounded()),
+                      height: min(largest.height, island.height + max(64, (island.height * 0.35).rounded())))
+    }
 
     var body: some View {
         let layout = model.layout
         let island = layout.size(for: .expanded(.home))
+        let mode = model.studio.mode
+        // In Size mode the island's room is the largest it may get, fixed: dragging its edges
+        // lays out nothing around the stage.
+        let room = mode == .size ? Self.sizeRoom(layout) : island
+        let fit = stageWidth > 0 ? min(1, (stageWidth - 2 * Self.sideInset) / room.width) : 1
         let shape = UnevenRoundedRectangle(
             topLeadingRadius: 18,
             bottomLeadingRadius: controlHeight / 2 + Self.controlInset,
@@ -151,33 +200,53 @@ private struct StudioStage: View {
             // each tick would otherwise update all of Settings (`IsolatedHosting`). Handed over
             // again only when the picked widgets change: the model (the board, the layout) is
             // observed inside, and the thumbnails' cache is the same object throughout.
-            IsolatedHosting(size: island, input: StagePick(selection: selection, group: group)) {
-                StageIsland(selection: $selection, group: $group, thumbnails: thumbnails)
+            // Shown smaller inside its own graph, not by scaling the host: AppKit hit-tests a
+            // scaled view where it was laid out, and clicks near the island's edges missed.
+            IsolatedHosting(size: CGSize(width: (room.width * fit).rounded(), height: (room.height * fit).rounded()),
+                            input: StagePick(selection: selection, group: group, mode: mode, room: room, fit: fit)) {
+                StageIsland(selection: $selection, group: $group, thumbnails: thumbnails, room: room, fit: fit)
                     .environment(model)
                     .environment(\.appearsActive, true)
             }
         }
-        .frame(height: layout.notch.height + island.height + 70)
+        .frame(height: (layout.notch.height + room.height * fit + (mode == .size ? 86 : 70)).rounded())
         .frame(maxWidth: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { stageWidth = $0 }
         .clipShape(shape)
         .overlay {
             shape.strokeBorder(.white.opacity(0.1))
         }
         .overlay(alignment: .bottom) {
             HStack(spacing: 10) {
-                Label(notice ?? (group.count >= 2
-                                 ? "\(group.count) widgets picked: change their look together. ⌘-click to add or remove."
-                                 : selection == nil
-                                 ? "Click a widget to customize it, ⌘-click to pick several. Drag to move, drag a corner to resize."
-                                 : "Arrow keys move it one cell. Delete removes it. ⌘-click another to edit both."),
-                      systemImage: notice == nil ? "hand.tap.fill" : "exclamationmark.triangle.fill")
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(notice == nil ? AnyShapeStyle(.white) : AnyShapeStyle(.orange))
-                    .lineLimit(1)
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: controlHeight)
-                    .glassEffect(.regular, in: .capsule)
-                Spacer()
+                // Which page's board the stage edits (the top bar is every page's).
+                if mode != .topBar {
+                    StudioPageBar {
+                        selection = nil
+                        group = []
+                    }
+                }
+                // What went wrong, for a moment (no room, a widget set aside): nothing otherwise.
+                if let notice {
+                    Label(notice, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: controlHeight)
+                        .glassEffect(.regular, in: .capsule)
+                        .layoutPriority(-1)
+                }
+                Spacer(minLength: 0)
+                // What the stage edits: the widgets, the top bar, or the panel's size and grid.
+                Picker("Edit", selection: Binding(get: { model.studio.mode }, set: { mode in
+                    withAnimation(.spring(duration: 0.35, bounce: 0.12)) { model.studio.mode = mode }
+                })) {
+                    ForEach(WidgetStudio.Mode.allCases) { Text($0.title).tag($0) }
+                }
+                .choiceBar()
+                .labelsHidden()
+                .fixedSize()
+                .help("What the stage edits")
                 Menu {
                     Picker("Wallpaper", selection: $backdrop) {
                         ForEach(DesktopBackdropStyle.allCases) { Text($0.title).tag($0) }
@@ -186,7 +255,7 @@ private struct StudioStage: View {
                     Divider()
                     Button("Reset to Default Widgets", role: .destructive) {
                         selection = nil
-                        withAnimation(.spring(duration: 0.35)) { model.widgets.reset() }
+                        withAnimation(.spring(duration: 0.35)) { model.editedWidgets.reset() }
                     }
                 } label: {
                     Label("Stage", systemImage: "ellipsis")
@@ -211,11 +280,19 @@ private struct StageIsland: View {
     @Binding var selection: WidgetID?
     @Binding var group: Set<WidgetID>
     let thumbnails: ThumbnailCache
+    /// The room it is drawn in, hanging from its top: its own size, or in Size mode the largest it
+    /// may get.
+    let room: CGSize
+    /// How much smaller the stage shows the room.
+    let fit: CGFloat
 
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let layout = model.layout
+        let mode = model.studio.mode
+        let base = model.layout
+        // Size mode: as the edge being dragged makes it, before that is stored.
+        let layout = mode == .size ? (model.studio.draft.map { base.replacing(panel: $0.panel.layout) } ?? base) : base
         let presentation = IslandPresentation.expanded(.home)
         let size = layout.size(for: presentation)
         let split = NotchSplit(layout: layout, presentation: presentation,
@@ -225,18 +302,28 @@ private struct StageIsland: View {
         let style = model.effectiveGlassStyle
         GlassEffectContainer {
             VStack(spacing: 0) {
-                ExpandedHeader(split: split, height: layout.notch.height)
-                    .allowsHitTesting(false)
-                    // A picture of the header: its controls' tooltips ("Home"…) must not pop up
-                    // over the widgets being arranged under it.
-                    .environment(\.showsControlHelp, false)
+                Group {
+                    if mode == .topBar {
+                        HeaderStageEditor(split: split, height: layout.notch.height)
+                    } else {
+                        ExpandedHeader(split: split, height: layout.notch.height)
+                            .allowsHitTesting(false)
+                            // A picture of the header: its controls' tooltips ("Home"…) must not pop
+                            // up over the widgets being arranged under it.
+                            .environment(\.showsControlHelp, false)
+                            .environment(\.isHeaderPicture, true)
+                    }
+                }
                     .overlay {
                         // The camera housing.
                         UnevenRoundedRectangle(bottomLeadingRadius: 8, bottomTrailingRadius: 8)
                             .fill(.black)
                             .frame(width: layout.notch.width, height: layout.notch.height)
                     }
-                BoardEditor(selection: $selection, thumbnails: thumbnails, group: $group)
+                BoardEditor(selection: $selection, thumbnails: thumbnails, group: $group, showsGrid: mode == .size)
+                    // Only the Widgets mode arranges them.
+                    .allowsHitTesting(mode == .widgets)
+                    .opacity(mode == .topBar ? 0.4 : 1)
                     .padding(.top, Metrics.Expanded.pageTopInset)
                     .padding(.bottom, Metrics.Expanded.pageBottomInset)
                     .padding(.horizontal, split.contentInset)
@@ -249,6 +336,13 @@ private struct StageIsland: View {
         .environment(\.islandGlassStyle, style)
         .environment(\.colorScheme, .dark)
         .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
+        .frame(width: room.width, height: room.height, alignment: .top)
+        .background { StageRoomAnchor(probe: model.studio.probe, scale: fit) }
+        .overlay {
+            if mode == .size { SizeStageOverlay(island: size, room: room, base: base) }
+        }
+        .scaleEffect(fit, anchor: .top)
+        .frame(width: (room.width * fit).rounded(), height: (room.height * fit).rounded(), alignment: .top)
     }
 }
 
@@ -265,7 +359,7 @@ private struct GroupInspector: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let widgets = model.widgets.board.widgets.filter { ids.contains($0.id) }
+        let widgets = model.editedWidgets.board.widgets.filter { ids.contains($0.id) }
         let tints = Set(widgets.map(\.tint))
         let backgrounds = Set(widgets.map(\.background))
         // Only backgrounds every picked widget offers (Artwork is Now Playing's own); one chosen in
@@ -294,7 +388,7 @@ private struct GroupInspector: View {
                     let doomed = ids
                     group = []
                     selection = nil
-                    withAnimation(.spring(duration: 0.3)) { doomed.forEach { model.widgets.remove($0) } }
+                    withAnimation(.spring(duration: 0.3)) { doomed.forEach { model.editedWidgets.remove($0) } }
                 }
                 .controlSize(.large)
                 Button("Done") {
@@ -307,8 +401,8 @@ private struct GroupInspector: View {
             }
             StudioCard("Look", subtitle: "Applies to every picked widget.") {
                 VStack(alignment: .leading, spacing: 14) {
-                    LabeledSetting("Colour") {
-                        TintSwatches(selection: tints.count == 1 ? tints.first : nil, automaticHint: "Each widget's own") { tint in
+                    LabeledSetting("Accent Colour") {
+                        TintWell(selection: tints.count == 1 ? tints.first : nil, automaticHint: "each widget's own") { tint in
                             apply { $0.tint = tint }
                         }
                     }
@@ -346,7 +440,7 @@ private struct GroupInspector: View {
 
     private func apply(_ change: (inout IslandWidget) -> Void) {
         withAnimation(Motion.content) {
-            for id in ids { model.widgets.update(id, change) }
+            for id in ids { model.editedWidgets.update(id, change) }
         }
     }
 }
@@ -362,7 +456,7 @@ private struct WidgetInspector: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let widget = model.widgets.board.widget(id) {
+        if let widget = model.editedWidgets.board.widget(id) {
             let kind = widget.kind
             VStack(alignment: .leading, spacing: 16) {
                 header(widget)
@@ -376,7 +470,7 @@ private struct WidgetInspector: View {
                                 ForEach(Array(kind.spec.elements.enumerated()), id: \.element.id) { index, element in
                                     if index > 0 { Divider().opacity(0.5) }
                                     ElementRow(element: element, widget: widget) { change in
-                                        withAnimation(Motion.content) { model.widgets.update(id, change) }
+                                        withAnimation(Motion.content) { model.editedWidgets.update(id, change) }
                                     }
                                 }
                             }
@@ -401,9 +495,12 @@ private struct WidgetInspector: View {
             Spacer()
             Button("Remove", systemImage: "minus.circle", role: .destructive) {
                 selection = nil
-                withAnimation(.spring(duration: 0.3)) { model.widgets.remove(id) }
+                withAnimation(.spring(duration: 0.3)) { model.editedWidgets.remove(id) }
             }
             .controlSize(.large)
+            Button("Customize…", systemImage: "paintbrush") { model.studio.probe.driver?.open(id, animated: true) }
+                .controlSize(.large)
+                .help("Every look of the widget and of each element in it")
             Button("Done") { selection = nil }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
@@ -421,22 +518,22 @@ private struct WidgetInspector: View {
                     HStack(spacing: 8) {
                         ForEach(kind.layouts) { layout in
                             LayoutOption(layout: layout, isSelected: widget.layout == layout) {
-                                withAnimation(Motion.content) { model.widgets.update(id) { $0.layout = layout } }
+                                withAnimation(Motion.content) { model.editedWidgets.update(id) { $0.layout = layout } }
                             }
                         }
                     }
                 }
             }
-            LabeledSetting("Colour") {
-                TintSwatches(selection: widget.tint, automaticHint: kind == .nowPlaying ? "From the artwork" : "Accent colour") { tint in
-                    withAnimation(Motion.content) { model.widgets.update(id) { $0.tint = tint } }
+            LabeledSetting("Accent Colour") {
+                TintWell(selection: widget.tint, automaticHint: kind == .nowPlaying ? "from the artwork" : "the system's accent") { tint in
+                    withAnimation(Motion.content) { model.editedWidgets.update(id) { $0.tint = tint } }
                 }
             }
             LabeledSetting("Background") {
                 VStack(alignment: .leading, spacing: 10) {
                     Picker("Background", selection: Binding(get: { widget.background }, set: { background in
                         withAnimation(.spring(duration: 0.4, bounce: 0.18)) {
-                            model.widgets.update(id) {
+                            model.editedWidgets.update(id) {
                                 $0.background = background
                                 $0.backgroundOpacity = nil
                             }
@@ -450,7 +547,7 @@ private struct WidgetInspector: View {
                     // Plate, Colour and Artwork have a strength; it slides out under the picker.
                     if widget.background.hasOpacity {
                         BackgroundOpacitySlider(value: widget.effectiveBackgroundOpacity) { value in
-                            model.widgets.update(id) { $0.backgroundOpacity = value }
+                            model.editedWidgets.update(id) { $0.backgroundOpacity = value }
                         }
                         .transition(.asymmetric(
                             insertion: .opacity.combined(with: .offset(y: -8)).combined(with: .scale(scale: 0.97, anchor: .topLeading)),
@@ -464,7 +561,7 @@ private struct WidgetInspector: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Toggle(isOn: Binding(get: { widget.plainButtons }, set: { on in
                             withAnimation(.spring(duration: 0.4, bounce: 0.18)) {
-                                model.widgets.update(id) { $0.plainButtons = on }
+                                model.editedWidgets.update(id) { $0.plainButtons = on }
                             }
                         })) {
                             Text("Colourless buttons")
@@ -477,7 +574,7 @@ private struct WidgetInspector: View {
                             VStack(alignment: .leading, spacing: 12) {
                                 ForEach(TransportButton.allCases) { button in
                                     ButtonLookRow(button: button, look: widget.look(of: button)) { look in
-                                        model.widgets.update(id) { $0.buttonLooks[button.rawValue] = look }
+                                        model.editedWidgets.update(id) { $0.buttonLooks[button.rawValue] = look }
                                     }
                                 }
                             }
@@ -491,7 +588,7 @@ private struct WidgetInspector: View {
             }
             if kind.canMirror {
                 Toggle(isOn: Binding(get: { widget.mirrored }, set: { on in
-                    withAnimation(Motion.content) { model.widgets.update(id) { $0.mirrored = on } }
+                    withAnimation(Motion.content) { model.editedWidgets.update(id) { $0.mirrored = on } }
                 })) {
                     Text("Swap sides")
                     Text(kind == .nowPlaying ? "Artwork on the right." : "The two halves change places.")
@@ -525,7 +622,12 @@ private struct ElementRow: View {
             Spacer(minLength: 8)
             if element.isSizable, on {
                 Picker("Size", selection: Binding(get: { widget.size(of: option) }, set: { size in
-                    change { $0.sizes[option] = size }
+                    change { widget in
+                        // Laid out freely, its size is its rectangle: that grows or shrinks.
+                        let factor = Double(size.factor / widget.size(of: option).factor)
+                        LayoutEdit.scale(option, by: factor, in: &widget.style.layout.arrangement)
+                        widget.sizes[option] = size
+                    }
                 })) {
                     ForEach(ElementSize.allCases) { size in
                         Text(size.title).tag(size).help(size.accessibilityTitle)
@@ -540,6 +642,8 @@ private struct ElementRow: View {
             Toggle(element.title, isOn: Binding(get: { on }, set: { new in
                 change { widget in
                     if new { widget.options.insert(option) } else { widget.options.remove(option) }
+                    // Laid out freely: on the widget or in its tray with it.
+                    LayoutEdit.setShown(option, new, role: element.role, in: &widget.style.layout.arrangement)
                 }
             }))
             .toggleStyle(.switch)
@@ -564,6 +668,15 @@ private struct WidgetStoreView: View {
     @State private var category: WidgetCategory?
     @State private var search = ""
 
+    /// The search field's width, at the row's right end.
+    static let searchWidth: CGFloat = 220
+    /// Between the categories and the search.
+    static let barGap: CGFloat = 24
+    /// The categories' widest: beyond it the segments would only grow apart.
+    static let categoryBarMaximum: CGFloat = 760
+    /// The row's width: the categories take what the search leaves them.
+    @State private var rowWidth: CGFloat = 0
+
     var body: some View {
         let offered = IslandWidgetKind.allCases.filter(\.isOffered)
         let kinds = offered.filter { kind in
@@ -571,27 +684,30 @@ private struct WidgetStoreView: View {
                 && (search.isEmpty || kind.title.localizedStandardContains(search) || kind.summary.localizedStandardContains(search))
         }
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("All Widgets").font(.title3.weight(.semibold))
-                    Text("Built in · \(offered.filter { model.widgets.board.contains($0) }.count) of \(offered.count) on your island")
-                        .font(.callout)
-                        .foregroundStyle(SettingsPalette.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("All Widgets").font(.title3.weight(.semibold))
+                Text("Built in · \(offered.filter { model.editedWidgets.board.contains($0) }.count) of \(offered.count) on your island")
+                    .font(.callout)
+                    .foregroundStyle(SettingsPalette.secondary)
+            }
+            // The categories and the search in one line, each as near its side of the panel: the
+            // categories from the left edge up to the search, the search at the right end.
+            HStack(alignment: .center, spacing: 0) {
+                Picker("Category", selection: $category) {
+                    Text("All").tag(WidgetCategory?.none)
+                    // Only groups with something to offer: kinds still being built stay out of the bar.
+                    ForEach(WidgetCategory.allCases.filter { group in offered.contains { $0.category == group } }) {
+                        Text($0.title).tag(Optional($0))
+                    }
                 }
-                Spacer(minLength: 0)
+                .choiceBar(width: rowWidth > 0 ? min(rowWidth - Self.searchWidth - Self.barGap, Self.categoryBarMaximum) : nil)
+                .labelsHidden()
+                .fixedSize()
+                Spacer(minLength: Self.barGap)
                 NativeSearchField(text: $search, prompt: "Search Widgets")
-                    .frame(width: 200)
+                    .frame(minWidth: 160, maxWidth: Self.searchWidth)
             }
-            Picker("Category", selection: $category) {
-                Text("All").tag(WidgetCategory?.none)
-                // Only groups with something to offer: kinds still being built stay out of the bar.
-                ForEach(WidgetCategory.allCases.filter { group in offered.contains { $0.category == group } }) {
-                    Text($0.title).tag(Optional($0))
-                }
-            }
-            .choiceBar()
-            .labelsHidden()
-            .fixedSize()
+            .onGeometryChange(for: CGFloat.self) { $0.size.width.rounded() } action: { rowWidth = $0 }
 
             if kinds.isEmpty {
                 ContentUnavailableView.search(text: search)
@@ -616,9 +732,9 @@ private struct WidgetStoreView: View {
     private func grid(_ kinds: [IslandWidgetKind]) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 300), spacing: 12)], spacing: 12) {
             ForEach(kinds) { kind in
-                GalleryCard(kind: kind, grid: model.widgets.board.grid,
+                GalleryCard(kind: kind, grid: model.editedWidgets.board.grid,
                             order: IslandWidgetKind.allCases.firstIndex(of: kind) ?? 0,
-                            isAdded: model.widgets.board.contains(kind),
+                            isAdded: model.editedWidgets.board.contains(kind),
                             add: { add(kind) }, open: { open(kind) })
             }
         }
@@ -672,6 +788,8 @@ private struct GalleryCard: View {
                 Text(kind.title)
                     .font(.system(size: 12.5, weight: .semibold))
                     .lineLimit(1)
+                    // A long name (Screen Mirroring, Battery Health) a little smaller rather than cut.
+                    .minimumScaleFactor(0.72)
                 Spacer(minLength: 4)
                 AddWidgetButton(isAdded: isAdded, add: add, open: open)
             }
@@ -833,5 +951,29 @@ struct NativeSearchField: NSViewRepresentable {
             guard let field = notification.object as? NSSearchField else { return }
             text.wrappedValue = field.stringValue
         }
+    }
+}
+
+/// A view filling the stage's room (top-left origin): the room's place in AppKit, and the scale
+/// the stage shows it at (about its top centre), for the Customize transition.
+private struct StageRoomAnchor: NSViewRepresentable {
+    let probe: StudioProbe
+    let scale: CGFloat
+
+    func makeNSView(context: Context) -> RoomView {
+        let view = RoomView()
+        probe.roomView = view
+        probe.roomScale = scale
+        return view
+    }
+
+    func updateNSView(_ view: RoomView, context: Context) {
+        probe.roomView = view
+        probe.roomScale = scale
+    }
+
+    final class RoomView: NSView {
+        override var isFlipped: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }

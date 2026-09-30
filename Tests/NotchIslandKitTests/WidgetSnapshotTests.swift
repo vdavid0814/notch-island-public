@@ -69,6 +69,9 @@ struct WidgetSnapshotTests {
             .environment(\.isWidgetPreview, true)
             .environment(\.widgetBoard, WidgetBoardShape(grid: .standard, cornerRadius: ConcentricGeometry.boardCornerRadius(layout)))
             .environment(\.widgetDate, date)
+            // The same on every Mac: English with a 24-hour clock, in Budapest (where 9:41 is 07:41 UTC).
+            .environment(\.locale, Locale(identifier: "en_US@hours=h23"))
+            .environment(\.timeZone, TimeZone(identifier: "Europe/Budapest")!)
             .environment(\.colorScheme, .dark)
         let renderer = ImageRenderer(content: view)
         renderer.scale = 2

@@ -31,33 +31,44 @@ nonisolated enum ToolSpecs {
             maximumSize: GridSize(width: 6, height: 3),
             elements: [
                 ElementSpec(.assistantLabel, "Name", symbol: "textformat", role: .text, samples: ["Siri"], priority: 50,
-                            minRoom: MinRoom(width: 70)),
+                            minRoom: MinRoom(width: 70), acceptsLabel: true),
             ],
             supportsCustomLayout: false
         ),
         .shortcut: tool("Shortcut", "Run one of your shortcuts.", symbol: "square.stack.3d.up.fill",
+                        elements: [ElementSpec(.symbol, "Symbol", symbol: "star", role: .symbol, priority: 100, isRequired: true),
+                                   ElementSpec(.label, "Name", symbol: "textformat", role: .text, samples: ["My Shortcut"], priority: 60,
+                                               acceptsLabel: true)],
                         sizes: (GridSize(width: 1, height: 1), GridSize(width: 2, height: 1), GridSize(width: 4, height: 2))),
         .appLauncher: tool("App Launcher", "Up to eight apps, a click away.", symbol: "square.grid.2x2.fill",
-                           sizes: (GridSize(width: 1, height: 1), GridSize(width: 3, height: 1), GridSize(width: 12, height: 2))),
-        .clipboard: tool("Clipboard", "The last things you copied.", symbol: "doc.on.clipboard.fill",
+                           elements: [ElementSpec(.appIcons, "Apps", symbol: "square.grid.2x2", role: .feature, priority: 100, isBlock: true,
+                                                  isRequired: true)],
+                           sizes: (GridSize(width: 1, height: 1), GridSize(width: 3, height: 1), GridSize(width: 12, height: 2)),
+                           customLayout: false),
+        .clipboard: tool("Clipboard", "The last things you copied; a click copies one again.", symbol: "doc.on.clipboard.fill",
+                         elements: [ElementSpec(.clipList, "Copies", symbol: "list.bullet", role: .feature, priority: 100, isBlock: true,
+                                                isRequired: true)],
                          sizes: (GridSize(width: 3, height: 1), GridSize(width: 4, height: 2), GridSize(width: 12, height: 3)),
-                         config: { $0.count = 3 }),
+                         config: { $0.count = 3 }, customLayout: false),
         .photoFrame: tool("Photo", "A picture of your choosing.", symbol: "photo.fill",
-                          sizes: (GridSize(width: 1, height: 1), GridSize(width: 3, height: 2), GridSize(width: 12, height: 3))),
+                          elements: [ElementSpec(.photo, "Photo", symbol: "photo", role: .image, priority: 100, isBlock: true,
+                                                 isRequired: true)],
+                          sizes: (GridSize(width: 1, height: 1), GridSize(width: 3, height: 2), GridSize(width: 12, height: 3)),
+                          customLayout: false),
     ]
 
-    private static func tool(_ title: String, _ summary: String, symbol: String,
+    private static func tool(_ title: String, _ summary: String, symbol: String, elements: [ElementSpec],
                              sizes: (minimum: GridSize, standard: GridSize, maximum: GridSize),
-                             config: (inout WidgetConfig) -> Void = { _ in }) -> WidgetKindSpec {
+                             config: (inout WidgetConfig) -> Void = { _ in }, customLayout: Bool = true) -> WidgetKindSpec {
         var defaults = WidgetConfig()
         config(&defaults)
         return WidgetKindSpec(
             title: title, summary: summary, symbol: symbol, iconColors: [.rgb(0.62, 0.64, 0.7), .rgb(0.38, 0.4, 0.47)],
             category: .tools, family: .tools,
             minimumSize: sizes.minimum, defaultSize: sizes.standard, maximumSize: sizes.maximum,
-            elements: ElementSpec.reading(["Sample"], caption: title),
+            elements: elements,
             defaultConfig: defaults,
-            isImplemented: false
+            supportsCustomLayout: customLayout
         )
     }
 }

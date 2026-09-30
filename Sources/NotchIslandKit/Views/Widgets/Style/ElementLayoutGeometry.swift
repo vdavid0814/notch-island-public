@@ -18,10 +18,8 @@ nonisolated enum ElementLayoutGeometry {
         let authoredPadding = layout.authoredPadding ?? padding
         let x = Axis(authored: authored.width, size: size.width, authoredPadding: authoredPadding, padding: padding)
         let y = Axis(authored: authored.height, size: size.height, authoredPadding: authoredPadding, padding: padding)
-        var u = min(x.ratio, y.ratio)
-        if !u.isFinite { u = 1 }
         let contentScale = min(max(contentScale, 0), 1)
-        u *= contentScale
+        let u = uniformScale(layout, to: size, padding: padding, contentScale: contentScale)
         return layout.items.map { item in
             let rect = item.rect
             let (minX, maxX) = x.place(rect.x * authored.width, (rect.x + rect.width) * authored.width, pin: item.pinX, u: u,
@@ -32,6 +30,16 @@ nonisolated enum ElementLayoutGeometry {
             if item.keepsAspect { frame = aspectFitted(frame, aspect: rect.width * authored.width / (rect.height * authored.height), item) }
             return (item.id, frame)
         }
+    }
+
+    /// The scale the whole layout is drawn at in a widget of `size`: its authored points to these.
+    /// What an element draws at a size of its own (`ElementFrame.natural`) is drawn this much larger.
+    static func uniformScale(_ layout: CustomLayout, to size: CGSize, padding: CGFloat = 0, contentScale: CGFloat = 1) -> CGFloat {
+        let authoredPadding = layout.authoredPadding ?? padding
+        let x = Axis(authored: layout.authoredSize.width, size: size.width, authoredPadding: authoredPadding, padding: padding)
+        let y = Axis(authored: layout.authoredSize.height, size: size.height, authoredPadding: authoredPadding, padding: padding)
+        let u = min(x.ratio, y.ratio)
+        return (u.isFinite ? u : 1) * min(max(contentScale, 0), 1)
     }
 
     /// The part of a widget where text, symbols and buttons stay: inside the padding.
@@ -135,7 +143,8 @@ nonisolated enum LayoutResolution: Equatable, Sendable {
 
 nonisolated extension CustomLayouts {
     /// The class's own variant; for a class without one, the nearest class's custom layout reflowed
-    /// (the one it was first laid out in on a tie, then the nearer aspect); automatic when there is none.
+    /// (the one it was first laid out in on a tie, then the nearer aspect) when it is one step away;
+    /// automatic when there is none that near.
     func resolve(_ target: LayoutClass) -> LayoutResolution {
         if let variant = variants[target] {
             guard case .custom(let layout) = variant else { return .automatic }
@@ -150,7 +159,9 @@ nonisolated extension CustomLayouts {
              abs(LayoutClass.Aspect.allCases.firstIndex(of: size.aspect)! - LayoutClass.Aspect.allCases.firstIndex(of: target.aspect)!),
              LayoutClass.Height.allCases.firstIndex(of: size.height)! * 3 + LayoutClass.Aspect.allCases.firstIndex(of: size.aspect)!)
         }
-        guard let nearest = custom.min(by: { rank($0.0) < rank($1.0) }) else { return .automatic }
+        // Only from a neighbouring shape: squeezed into a far one (three rows into one) a layout
+        // reads as a jumble; the kind's own stacks are laid out for it.
+        guard let nearest = custom.min(by: { rank($0.0) < rank($1.0) }), nearest.0.distance(to: target) <= 1 else { return .automatic }
         return .custom(nearest.1, source: nearest.0)
     }
 }

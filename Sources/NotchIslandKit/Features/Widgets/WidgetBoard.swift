@@ -162,6 +162,22 @@ nonisolated struct WidgetBoard: Sendable, Codable, Equatable {
         parked.removeAll { $0.id == id }
     }
 
+    /// Puts a parked widget back on the board: where it was when that is free, else as near as
+    /// there is room, shrinking down to its minimum. False (still parked) when nothing is free.
+    @discardableResult
+    mutating func restore(_ id: WidgetID) -> Bool {
+        guard let index = parked.firstIndex(where: { $0.id == id }) else { return false }
+        var widget = parked[index]
+        let size = GridSize(width: min(widget.frame.width, grid.columns), height: min(widget.frame.height, grid.rows))
+        let anchor = GridRect(column: min(max(widget.frame.column, 0), grid.columns - size.width),
+                              row: min(max(widget.frame.row, 0), grid.rows - size.height), width: size.width, height: size.height)
+        guard let rect = isFree(anchor, for: widget.kind) ? anchor : placement(for: widget.kind, shrinkingFrom: anchor) else { return false }
+        widget.frame = rect
+        parked.remove(at: index)
+        widgets.append(widget)
+        return true
+    }
+
     /// Moves or resizes; refused (false) when the new frame is not free.
     @discardableResult
     mutating func setFrame(_ rect: GridRect, for id: WidgetID) -> Bool {
@@ -233,6 +249,54 @@ nonisolated struct WidgetBoard: Sendable, Codable, Equatable {
         parked = parked.map { widget in
             var widget = widget
             widget.frame = scaled(widget.frame, widget.kind)
+            return widget
+        } + left
+    }
+
+    /// More or fewer cells, each widget on as many as before (Settings ▸ Widgets ▸ Size): columns
+    /// come and go in pairs, one at each side, so everything stays where it is about the notch;
+    /// rows at the bottom. A widget the smaller grid cuts through is moved in as near as there is
+    /// room, shrinking down to its minimum; what still does not fit is parked.
+    mutating func setGridKeepingCells(_ new: BoardGrid) {
+        guard new != grid else { return }
+        let shift = (new.columns - grid.columns) / 2
+        grid = new
+        let placedBefore = widgets
+        widgets = []
+        var landed: [WidgetID: GridRect] = [:]
+        var left: [IslandWidget] = []
+        // The ones still whole on the new grid first: they keep their places.
+        let moved = placedBefore.map { widget in
+            var widget = widget
+            widget.frame.column += shift
+            return widget
+        }
+        let order = moved.sorted { a, b in
+            (isInBounds(a.frame) ? 0 : 1, a.frame.row, a.frame.column) < (isInBounds(b.frame) ? 0 : 1, b.frame.row, b.frame.column)
+        }
+        for var widget in order {
+            let size = GridSize(width: min(widget.frame.width, new.columns), height: min(widget.frame.height, new.rows))
+            let anchor = GridRect(column: min(max(widget.frame.column, 0), new.columns - size.width),
+                                  row: min(max(widget.frame.row, 0), new.rows - size.height), width: size.width, height: size.height)
+            if let rect = isFree(anchor, for: widget.kind) ? anchor : placement(for: widget.kind, shrinkingFrom: anchor) {
+                widget.frame = rect
+                landed[widget.id] = rect
+                widgets.append(widget)
+            } else {
+                left.append(widget)
+            }
+        }
+        // The board keeps its order (it is the drawing order), only the frames change.
+        widgets = placedBefore.compactMap { widget in
+            landed[widget.id].map { rect in
+                var widget = widget
+                widget.frame = rect
+                return widget
+            }
+        }
+        parked = parked.map { widget in
+            var widget = widget
+            widget.frame.column += shift
             return widget
         } + left
     }

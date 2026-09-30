@@ -31,6 +31,10 @@ let package = Package(
                 .linkedFramework("QuartzCore"),
                 .linkedFramework("QuickLookThumbnailing"),
                 .linkedFramework("ApplicationServices"),
+                .linkedFramework("EventKit"),
+                .linkedFramework("Contacts"),
+                .linkedFramework("Quartz"),
+                .linkedFramework("ScreenCaptureKit"),
             ]
         ),
         .executableTarget(

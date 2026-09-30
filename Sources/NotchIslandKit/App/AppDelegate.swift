@@ -36,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         // A board change still waiting for its write (`WidgetStore.persistDelay`).
-        AppModel.shared.widgets.flush()
+        AppModel.shared.boards.flush()
         AppModel.shared.stop()
     }
 }

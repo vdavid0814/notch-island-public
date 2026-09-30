@@ -81,6 +81,12 @@ import SwiftUI
             withAnimation(.spring(duration: 0.25)) { model.preferences.glassStyle = style }
         case .freeze(let time):
             LeanSpring.frozenTime = time
+        case .flyIn(let kind):
+            if let id = model.widgets.board.first(of: kind)?.id { model.studio.probe.driver?.open(id, animated: true) }
+        case .select(let element):
+            model.studio.session?.selection = element.map { [$0] } ?? []
+        case .anchorTarget(let on):
+            model.anchor.demoTarget(on)
         }
     }
 

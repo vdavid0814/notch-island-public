@@ -15,6 +15,8 @@ nonisolated enum AssistantCommand: Hashable, Sendable {
     case cancelTimer
     /// A widget's editor (Settings ▸ Widgets), for a widget on the board.
     case editWidget(IslandWidgetKind)
+    /// Window Anchor: the window in front goes under the notch; the one held there is let go.
+    case anchorWindow, releaseWindow
     case control(SystemControl)
     case mac(MacCommand)
 
@@ -30,6 +32,8 @@ nonisolated enum AssistantCommand: Hashable, Sendable {
         case .timer(let minutes): "timer:\(minutes)"
         case .cancelTimer: "cancelTimer"
         case .editWidget(let kind): "widget:\(kind.rawValue)"
+        case .anchorWindow: "anchorWindow"
+        case .releaseWindow: "releaseWindow"
         case .control(let control): "control:\(control.rawValue)"
         case .mac(let command): "mac:\(command.rawValue)"
         }
@@ -43,6 +47,8 @@ nonisolated enum AssistantCommand: Hashable, Sendable {
         case .timer(let minutes): String(localized: "Start Timer for \(Self.duration(minutes))")
         case .cancelTimer: String(localized: "Cancel Timer")
         case .editWidget(let kind): String(localized: "Edit \(kind.title) Widget")
+        case .anchorWindow: String(localized: "Anchor Front Window")
+        case .releaseWindow: String(localized: "Release Window")
         case .control(let control): control.title
         case .mac(let command): command.title
         }
@@ -57,6 +63,8 @@ nonisolated enum AssistantCommand: Hashable, Sendable {
         case .timer: [title]
         case .cancelTimer: [title, "Stop Timer"]
         case .editWidget(let kind): [title, "Customize \(kind.title)", "\(kind.title) Widget"]
+        case .anchorWindow: [title, "Anchor Window", "Window Under Notch", "Hold Window"]
+        case .releaseWindow: [title, "Release Anchored Window", "Unanchor Window", "Anchor Window"]
         case .control(let control): [control.title] + Self.synonyms(of: control)
         case .mac(let command): [command.title] + command.synonyms
         }
@@ -70,6 +78,7 @@ nonisolated enum AssistantCommand: Hashable, Sendable {
         case .timer: "timer"
         case .cancelTimer: "stop.circle.fill"
         case .editWidget(let kind): kind.systemImage
+        case .anchorWindow, .releaseWindow: "rectangle.topthird.inset.filled"
         case .control(let control): control.symbol(on: true)
         case .mac(let command): command.symbol
         }
@@ -84,6 +93,8 @@ nonisolated enum AssistantCommand: Hashable, Sendable {
         case .timer(let minutes): .startTimer(minutes: minutes)
         case .cancelTimer: .cancelTimer
         case .editWidget(let kind): .editWidget(.kind(kind))
+        case .anchorWindow: .anchorFrontWindow
+        case .releaseWindow: .releaseAnchoredWindow
         case .control, .mac: nil
         }
     }
@@ -224,6 +235,10 @@ struct AssistantSystem {
     var hide: (AssistantWindow) -> Void = { _ in }
     /// Quits the app; macOS asks about unsaved documents itself.
     var quit: (AssistantWindow) -> Void = { _ in }
+    /// Shows a file in Quick Look; `closed` when its panel goes.
+    var quickLook: (URL, _ closed: @escaping () -> Void) -> Void = { _, closed in closed() }
+    /// Shows a file or an app in Finder.
+    var reveal: (URL) -> Void = { _ in }
 
     static func live(controls: SystemControls, isPinned: @escaping () -> Bool) -> AssistantSystem {
         AssistantSystem(
@@ -245,7 +260,9 @@ struct AssistantSystem {
             open: { NSWorkspace.shared.open($0) },
             switchTo: RunningWindows.switchTo,
             hide: { NSRunningApplication(processIdentifier: $0.pid)?.hide() },
-            quit: { NSRunningApplication(processIdentifier: $0.pid)?.terminate() }
+            quit: { NSRunningApplication(processIdentifier: $0.pid)?.terminate() },
+            quickLook: { QuickLookPreview.shared.show($0, closed: $1) },
+            reveal: { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
         )
     }
 }

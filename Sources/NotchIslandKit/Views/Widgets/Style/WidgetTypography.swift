@@ -87,6 +87,21 @@ nonisolated enum WidgetTypography {
             + (metrics.leading * spec.points).rounded(.up)
     }
 
+    /// Where a text's letters are in its frame `box`, laid out in `spec`: from the capitals' tops to
+    /// the last line's baseline, as SwiftUI places lines (each metric rounded up to the point), the
+    /// lines in the middle of a frame taller than them. Across the frame.
+    static func letters(inBox box: CGRect, _ spec: TypeSpec) -> CGRect {
+        let line = lineHeight(spec)
+        guard line > 0, box.height > 0 else { return box }
+        let ascent = (lineMetrics(spec).ascent * spec.points).rounded(.up)
+        let cap = nsFont(spec).capHeight
+        let lines = max(1, (box.height / line).rounded())
+        let top = box.minY + max(0, (box.height - lines * line) / 2)
+        let capTop = top + ascent - cap
+        let baseline = top + (lines - 1) * line + ascent
+        return CGRect(x: box.minX, y: capTop, width: box.width, height: max(baseline - capTop, 1))
+    }
+
     /// A line's height per point of type, unrounded (the metrics grow in proportion with the size).
     static func lineHeightPerPoint(_ spec: TypeSpec) -> CGFloat {
         let metrics = lineMetrics(spec)

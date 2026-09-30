@@ -16,6 +16,8 @@ nonisolated enum Log {
     static let levels = Logger(subsystem: subsystem, category: "levels")
     static let shelf = Logger(subsystem: subsystem, category: "shelf")
     static let timers = Logger(subsystem: subsystem, category: "timers")
+    /// Window Anchor: what was held, put back and let go.
+    static let anchor = Logger(subsystem: subsystem, category: "anchor")
     /// Permissions, sleep/wake, power and thermal state, launch at login.
     static let system = Logger(subsystem: subsystem, category: "system")
 }

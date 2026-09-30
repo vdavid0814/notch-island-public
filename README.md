@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.6 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.7 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -23,6 +23,52 @@ How much energy each animation and the idle state take, measured before and afte
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.7
+
+Every widget is editable down to its parts, the top bar is yours to arrange, a window can be held
+under the notch, and Spotlight reaches people, events and words.
+
+- **Customize a widget**: Settings ▸ Widgets ▸ Customize (or right-click a widget ▸ Customize). The
+  widget grows out of its place on the stage into a one-widget editor: an outline of its parts, an
+  inspector for the widget and for each part (show or hide, size, weight, colour, alignment,
+  corner), and the widget itself on a canvas. Unlock the layout and every part becomes a frame you
+  move and resize on a grid, with guides, align and distribute, spacing, flip, duplicate, decorations
+  and a density control; what no longer fits waits in a "Didn't fit" tray. Everything is undoable
+  and a widget without changes looks exactly as before.
+- **57 widget kinds** (26 new): readings of the battery (time, health, cycles, power, temperature,
+  charger, a chart), controls (sound output, mute, True Tone, Stage Manager, Low Power Mode, Screen
+  Mirroring, Mission Control, Show Desktop, Apps, Character Viewer, Display Sleep), time (world
+  clocks, an analog clock, a month calendar, Up Next from Calendar, a countdown), system (network
+  speed, disk space, uptime, AirPods battery) and tools (a Shortcut, an app launcher, the clipboard,
+  a photo frame).
+- **Top bar and size**: Settings ▸ Widgets ▸ Top Bar arranges the bar beside the pages: which items
+  (clock, now playing, toggles, screenshot, lock, release window…), on which side, in which order;
+  items that do not fit go into an overflow menu. Size changes the panel's size and the widget grid
+  by dragging its handles, and widgets that no longer fit park safely.
+- **Size by cells**: Settings ▸ Widgets ▸ Size now works in cells. Add columns (one at each side at
+  once) or rows (at the bottom) and every widget keeps its cells and its place about the notch, so
+  more cells are simply more room. The cells keep their size and the panel grows with them, or
+  turn on Keep Panel Size and the cells and the gap get smaller instead. Cell width, height and gap
+  have their own sliders; the most used controls sit right under the stage.
+- **Moving and resizing parts** of a customized widget lands exactly where the outline showed and
+  comes back exactly when dragged back (checked on ten widgets, every part, every handle). A
+  part's S, M, L size in Settings ▸ Widgets now works in a customized layout too: it scales the
+  part's frame about its middle.
+- **Window Anchor**: hold another app's window centred under the notch. "Anchor Front Window" in the
+  menu bar item or Spotlight (⌘5, or ⌘↩ on a window in ⌘6), `notchisland://anchor/front`, or drag a
+  window to the notch: the island shows where it will land. It stays put (moved, it goes back;
+  resized, it stays centred at its new size), is let go when you drag it away, zoom it or close it,
+  and remembers its size per app. With "Live copy when covered" a live picture floats above the
+  windows that cover it (asks for Screen Recording the first time; click it to bring the real
+  window forward). Needs Accessibility; each part can be switched off under Settings ▸ Live Activities ▸
+  Window Anchor.
+- **Spotlight**: ⌘8 People & Calendar (contacts: call, message, email, copy; your coming events), a
+  word's definition from the system dictionaries, bookmarks from Safari, Chrome, Arc and Brave,
+  content search and more folders for files, Quick Look with Space or ⌘Y, Reveal in Finder with ⌘R,
+  time zones ("time in Tokyo", "15:00 London in Budapest"), date maths ("30 days from now"), more
+  units and, if you turn it on, currencies (the European Central Bank's daily rates; what you type
+  is never sent).
 
 ## What's new in v0.6
 

@@ -100,7 +100,7 @@ struct FeedbackSection: View {
             Picker("How often?", selection: field(\.frequency)) {
                 ForEach(DiagnosticsFeedback.Frequency.allCases) { Text($0.title).tag($0) }
             }
-            .pickerStyle(.segmented)
+            .choiceBar()
         } else {
             SettingsTextField("Why would it help?", text: field(\.why), prompt: Text("Optional"), axis: .vertical)
                 .lineLimit(2...5)

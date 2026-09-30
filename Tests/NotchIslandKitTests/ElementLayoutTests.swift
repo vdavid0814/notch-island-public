@@ -180,6 +180,8 @@ import Testing
         #expect(layouts.resolve(LayoutClass(height: .short, aspect: .wide)) == .custom(a, source: authored))
         #expect(layouts.resolve(LayoutClass(height: .short, aspect: .narrow)) == .custom(b, source: other))
         #expect(CustomLayouts(authored: authored, variants: [:]).resolve(authored) == .automatic)
+        // Two steps from every layout (tall and square): the kind's own stacks, not a squeezed reflow.
+        #expect(layouts.resolve(LayoutClass(height: .tall, aspect: .balanced)) == .automatic)
     }
 
     // MARK: - The editing grid

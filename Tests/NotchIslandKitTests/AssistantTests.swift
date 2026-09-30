@@ -630,9 +630,17 @@ import Testing
             open: { self.calls.append("open \($0.absoluteString)") },
             switchTo: { self.calls.append("switch \($0.id)") },
             hide: { self.calls.append("hide \($0.pid)") },
-            quit: { self.calls.append("quit \($0.pid)") }
+            quit: { self.calls.append("quit \($0.pid)") },
+            quickLook: { url, closed in
+                self.calls.append("quicklook \(url.path)")
+                self.closePreview = closed
+            },
+            reveal: { self.calls.append("reveal \($0.path)") }
         )
     }
+
+    /// Closes the Quick Look the model opened last.
+    var closePreview: (() -> Void)?
 }
 
 @MainActor @Suite struct AssistantReachTests {
@@ -654,7 +662,7 @@ import Testing
         // Settings saved before these existed turn them on.
         let old = try JSONDecoder().decode(SiriSettings.self, from: Data(#"{"showsClipboard": false}"#.utf8))
         #expect(old.showsSystem && old.showsWindows && old.showsEmoji)
-        #expect(old.categories == [.applications, .files, .actions, .system, .windows, .emoji])
+        #expect(old.categories == [.applications, .files, .actions, .system, .windows, .emoji, .people])
         var settings = SiriSettings()
         settings.showsEmoji = false
         let model = model()
@@ -681,6 +689,32 @@ import Testing
         model.widgetKinds = { [.timer, .timer] }
         #expect(model.rows.contains(.command(.cancelTimer)))
         #expect(model.rows.filter { $0 == .command(.editWidget(.timer)) }.count == 1)
+    }
+
+    @Test func windowAnchorRowsFollowWhetherItCanRunAndHoldsAWindow() async {
+        let model = model()
+        var commands: [AppCommand] = []
+        model.onCommand = { commands.append($0) }
+        // Not running (off, or no Accessibility): nothing to anchor with.
+        model.query = "anchor window"
+        await model.settle()
+        #expect(!model.rows.contains(.command(.anchorWindow)) && !model.rows.contains(.command(.releaseWindow)))
+        model.anchorIsHolding = { false }
+        #expect(model.rows.contains(.command(.anchorWindow)) && !model.rows.contains(.command(.releaseWindow)))
+        model.select(.command(.anchorWindow))
+        model.activateSelection()
+        model.anchorIsHolding = { true }
+        #expect(model.rows.contains(.command(.releaseWindow)) && !model.rows.contains(.command(.anchorWindow)))
+        model.select(.command(.releaseWindow))
+        model.activateSelection()
+        #expect(commands == [.anchorFrontWindow, .releaseAnchoredWindow])
+        // ⌘↩ on a window only when the anchor runs, and only on a row the user picked.
+        let window = AssistantWindow(pid: 1, appName: "Notes", appPath: "/System/Applications/Notes.app", title: "Note", index: 0)
+        var anchored: [AssistantWindow] = []
+        model.onAnchorWindow = { anchored.append($0) }
+        model.anchorIsHolding = { nil }
+        model.select(.window(window))
+        #expect(!model.anchorSelectedWindow() && anchored.isEmpty)
     }
 
     @Test func togglesReadTheLiveStateBeforeSwitching() async {

@@ -1,3 +1,4 @@
+import Synchronization
 import Foundation
 
 // The island's vocabulary.
@@ -36,6 +37,8 @@ nonisolated enum BannerKind: Sendable, Equatable {
     case timerFinished
     /// A file drag is in progress somewhere on screen.
     case dropTarget
+    /// A window is being dragged to the notch: letting go there anchors it.
+    case anchorTarget
     /// Headphones connected: their picture, name and batteries.
     case airPods(AirPodsInfo)
 }
@@ -61,14 +64,57 @@ nonisolated enum CompactActivity: Sendable, Equatable {
     case nowPlaying
 }
 
-nonisolated enum ExpandedPage: String, Sendable, Equatable, CaseIterable, Identifiable {
-    case home
-    case shelf
-    case timer
+/// A page of the panel: one of the island's own (home, the shelf, the timer, the battery) or one
+/// the user added (`CustomPage`, a board of widgets). Named by a string, stored as it: an own page by
+/// its name, an added one as `page.<UUID>`.
+nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, CaseIterable, Identifiable {
+    let rawValue: String
+
+    init?(rawValue: String) {
+        guard Self.allCases.contains(where: { $0.rawValue == rawValue }) || Self.isCustom(rawValue) else { return nil }
+        self.rawValue = rawValue
+    }
+
+    private init(own name: String) { rawValue = name }
+
+    static let home = ExpandedPage(own: "home")
+    static let shelf = ExpandedPage(own: "shelf")
+    static let timer = ExpandedPage(own: "timer")
     /// The battery's charge over the day, its health and the adapter (only on a Mac with a battery).
-    case battery
+    static let battery = ExpandedPage(own: "battery")
+
+    /// The island's own pages, in the panel's order; the user's follow them (`HeaderLayout.customPages`).
+    static let allCases: [ExpandedPage] = [.home, .shelf, .timer, .battery]
+
+    /// A new page of the user's.
+    static func newCustom() -> ExpandedPage { ExpandedPage(own: customPrefix + UUID().uuidString) }
+
+    private static let customPrefix = "page."
+    private static func isCustom(_ name: String) -> Bool {
+        name.hasPrefix(customPrefix) && UUID(uuidString: String(name.dropFirst(customPrefix.count))) != nil
+    }
+
+    /// One the user added.
+    var isCustom: Bool { Self.isCustom(rawValue) }
+
+    /// Drawn as a board of widgets the user arranges: home, the timer's and the battery's, and the
+    /// user's own (the shelf is its own).
+    var isBoard: Bool { self != .shelf }
 
     var id: String { rawValue }
+
+    init(from decoder: any Decoder) throws {
+        let name = try decoder.singleValueContainer().decode(String.self)
+        guard let page = ExpandedPage(rawValue: name) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown page \(name)"))
+        }
+        self = page
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
 
     var title: String {
         switch self {
@@ -76,6 +122,7 @@ nonisolated enum ExpandedPage: String, Sendable, Equatable, CaseIterable, Identi
         case .shelf: "Shelf"
         case .timer: "Timer"
         case .battery: "Battery"
+        default: CustomPage.catalog.withLock { $0[self]?.title } ?? "Page"
         }
     }
 
@@ -85,8 +132,31 @@ nonisolated enum ExpandedPage: String, Sendable, Equatable, CaseIterable, Identi
         case .shelf: "tray"
         case .timer: "timer"
         case .battery: "battery.100percent"
+        default: CustomPage.catalog.withLock { $0[self]?.symbol } ?? CustomPage.defaultSymbol
         }
     }
+}
+
+/// A page the user added to the panel: its name and symbol in the picker; its widgets are its own
+/// board (`WidgetPages`).
+nonisolated struct CustomPage: Sendable, Hashable, Codable, Identifiable {
+    var page: ExpandedPage
+    var title: String
+    var symbol: String
+
+    var id: ExpandedPage { page }
+
+    static let defaultSymbol = "square.grid.2x2"
+    /// At most this many: the picker stays beside the notch.
+    static let limit = 3
+    /// Symbols offered for one.
+    static let symbols = ["square.grid.2x2", "star", "heart", "bolt", "house", "briefcase", "book", "gamecontroller",
+                          "music.note", "film", "camera", "paintpalette", "leaf", "flame", "cloud.sun", "moon",
+                          "globe", "cart", "chart.bar", "cpu", "keyboard", "headphones", "airplane", "sparkles"]
+
+    /// Every page's name and symbol, for `ExpandedPage.title` wherever it is read: kept by
+    /// `HeaderLayout`'s owner (`Preferences`) as the pages change.
+    static let catalog = Mutex<[ExpandedPage: CustomPage]>([:])
 }
 
 /// How much of the assistant shows, as in the system's Search window: only the field until the
@@ -197,6 +267,8 @@ nonisolated enum IslandPresentation: Sendable, Equatable {
             "banner.timerFinished"
         case .banner(.dropTarget):
             "banner.dropTarget"
+        case .banner(.anchorTarget):
+            "banner.anchorTarget"
         case .banner(.airPods):
             "banner.airPods"
         case .expanded(let page):

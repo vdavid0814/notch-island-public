@@ -358,7 +358,9 @@ private let t0: UInt32 = 1_790_000_000
         let demo = BatteryHistory.demoRecords(now: Date(), calendar: .autoupdatingCurrent)
         center.injectDemo((demo, BatteryDetails.demo(power: reading(64))))
         #expect(center.history?.records == demo)
-        #expect(center.lastCharge?.level == 100)
+        // The demo's last charge (today's, or yesterday's to 100 % before today's first one).
+        #expect(center.lastCharge != nil)
+        #expect(center.lastCharge == BatteryHistory.lastCharge(in: demo))
         // The real readings go on being recorded under the demo, and only they.
         state = reading(75)
         power.refresh()
@@ -571,6 +573,65 @@ private let t0: UInt32 = 1_790_000_000
         #expect(details.maximumCapacityPercent == 82, "5100 / 6249, not 5300 / 6249 (85)")
         #expect(details.condition == .serviceRecommended(4))
         #expect(details.adapterWatts == nil)
+    }
+
+    /// A MacBook Air M5 on 30 September 2026 (bq40z651, 58 cycles, charging on a 65 W charger):
+    /// `system_profiler SPPowerDataType` said "Maximum Capacity: 98%", which neither candidate gives
+    /// (nominal 4591 / 4629 is 99 %, full charge 4464 / 4629 is 96 %), so macOS's figure is taken.
+    /// The gauge shows no temperature here; the pack below it does (2969: 29.69 °C).
+    private let macBookAirM5: [String: Any] = [
+        "CycleCount": 58,
+        "DesignCycleCount9C": 1000,
+        "Voltage": 12520,
+        "Amperage": 3537,
+        "AvgTimeToEmpty": 65535,
+        "CurrentCapacity": 61,
+        "MaxCapacity": 100,
+        "BatteryData": [
+            "DesignCapacity": 4629, "NominalChargeCapacity": 4591, "FullChargeCapacity": 4464,
+            "AvgTimeToEmpty": 65535, "MaxCapacity": 100, "CurrentCapacity": 61,
+        ] as [String: Any],
+    ]
+    private let macBookAirM5Pack: [String: Any] = ["Temperature": 2969, "VirtualTemperature": 2969, "DesignCapacity": 4629]
+
+    @Test func theMacBookAirTakesSystemSettingsFigureAndThePacksTemperature() {
+        let details = BatteryDetails(properties: macBookAirM5, pack: macBookAirM5Pack, adapter: ["Watts": 65],
+                                     power: reading(61, plugged: true), systemMaximumCapacity: 98)
+        #expect(details.maximumCapacityPercent == 98)
+        #expect(details.temperature == 29.69)
+        #expect(details.cycleCount == 58)
+        #expect(details.adapterWatts == 65)
+        // Without macOS's figure: nominal over design.
+        let fallback = BatteryDetails(properties: macBookAirM5, adapter: nil, power: reading(61))
+        #expect(fallback.maximumCapacityPercent == 99)
+        #expect(fallback.temperature == nil)
+        // A pack reading zero has not measured yet.
+        let unread = BatteryDetails(properties: macBookAirM5, pack: ["Temperature": 0], adapter: nil, power: reading(61))
+        #expect(unread.temperature == nil)
+    }
+
+    @Test func systemInformationsFigureIsParsedAndKeptForADay() throws {
+        let json = #"{"SPPowerDataType":[{"_name":"spbattery_information","sppower_battery_health_info":{"sppower_battery_cycle_count":58,"sppower_battery_health":"Good","sppower_battery_health_maximum_capacity":"98%"}}]}"#
+        #expect(SystemBatteryHealth.parse(json) == 98)
+        #expect(SystemBatteryHealth.parse(#"{"SPPowerDataType":[{"_name":"spbattery_information"}]}"#) == nil)
+        #expect(SystemBatteryHealth.parse("not json") == nil)
+
+        let defaults = try #require(UserDefaults(suiteName: "SystemBatteryHealthTests-\(UUID().uuidString)"))
+        var reads = 0
+        let start = Date(timeIntervalSince1970: 1_790_000_000)
+        func read(_ cycles: Int, at date: Date) -> Int? {
+            SystemBatteryHealth.maximumCapacity(cycleCount: cycles, defaults: defaults, now: date) {
+                reads += 1
+                return 98
+            }
+        }
+        #expect(read(58, at: start) == 98)
+        #expect(read(58, at: start.addingTimeInterval(3600)) == 98)
+        #expect(reads == 1, "kept within the day")
+        #expect(read(59, at: start.addingTimeInterval(7200)) == 98)
+        #expect(reads == 2, "read again after a cycle")
+        #expect(read(59, at: start.addingTimeInterval(7200 + 25 * 3600)) == 98)
+        #expect(reads == 3, "read again after a day")
     }
 
     @Test func unknownEstimatesAreNil() {

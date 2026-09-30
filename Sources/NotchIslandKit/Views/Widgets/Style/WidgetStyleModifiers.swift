@@ -5,15 +5,21 @@ import SwiftUI
 // sets nothing on, it is exactly the kind's own modifier (the same `.font`, nothing else — no
 // modifier of ours and no environment read on the island), so an empty style draws today's pixels
 // (`WidgetSnapshotTests`). Everything here is resolved once per body evaluation: nothing ticks.
+//
+// Sizes are the kind's to decide: it asks the style for an element's size (`textPoints`,
+// `symbolPoints`) — its fixed size where it sets one, never more than the room takes — and hands
+// that size in. The modifiers draw it as given.
 
 extension View {
-    /// Text in the element's type. `type` is the kind's own, its size already fitted to the room;
-    /// the style's fixed size replaces that size and is drawn exactly (no shrinking to fit).
+    /// Text in the element's type. `type` is the kind's own at the size it is drawn at
+    /// (`ResolvedWidgetStyle.textPoints`); a fixed size is drawn exactly (no shrinking to fit).
     @ViewBuilder func widgetText(_ id: ElementID, _ type: TypeSpec, in style: ResolvedWidgetStyle) -> some View {
         if let element = style.element(id) {
             modifier(WidgetText(element: element, type: type))
+                .modifier(TextInk(id: id, type: type.applying(element.text)))
         } else {
             font(type.systemFont)
+                .modifier(TextInk(id: id, type: type))
         }
     }
 
@@ -58,7 +64,7 @@ extension Text {
             let run = Text(string).font(type.systemFont)
             return color.map { run.foregroundStyle($0) } ?? run
         }
-        let spec = type.styled(element.text)
+        let spec = type.applying(element.text)
         var run = Text(spec.cased(string)).font(spec.font)
         if let tracking = element.text.tracking { run = run.tracking(CGFloat(tracking)) }
         let paint = element.colors[.primary]?.shapeStyle(artwork: artwork) ?? color
@@ -81,8 +87,25 @@ nonisolated extension TypeSpec {
     /// Its font: the system font where that can name the type, so a size alone draws as the kind's type.
     var font: Font { width == .standard && !italic ? systemFont : WidgetTypography.font(self) }
 
-    /// The kind's type with the element's text style on it: the style's fixed size replaces the fitted one.
-    func styled(_ text: TextStyle) -> TypeSpec { applying(text).at(text.points.map { CGFloat($0) } ?? points) }
+
+}
+
+extension ResolvedWidgetStyle {
+    /// The size a text element is drawn at: the style's fixed size, as large as the room lets it
+    /// be (`fit`, the most the kind's layout gives it); else the kind's own `auto` size.
+    func textPoints(_ id: ElementID, auto: CGFloat, fit: CGFloat) -> CGFloat {
+        guard let fixed = element(id)?.text.points else { return auto }
+        return max(min(CGFloat(fixed), fit), TextFit.minimumPoints)
+    }
+
+    /// The same for a symbol.
+    func symbolPoints(_ id: ElementID, auto: CGFloat, fit: CGFloat) -> CGFloat {
+        guard let fixed = element(id)?.symbol.points else { return auto }
+        return max(min(CGFloat(fixed), fit), TextFit.minimumPoints)
+    }
+
+    /// Whether the style sets its own size on the element (text or symbol).
+    func isFixed(_ id: ElementID) -> Bool { element(id).map { $0.text.points != nil || $0.symbol.points != nil } ?? false }
 }
 
 private struct WidgetText: ViewModifier {
@@ -90,18 +113,22 @@ private struct WidgetText: ViewModifier {
     let type: TypeSpec
 
     @Environment(\.widgetArtworkColor) private var artwork
+    /// In a custom layout (the grid inside the widget) its frame was measured around the text as
+    /// the stacks drew it, squeezed a hair where they let it: the same squeeze is let there, rather
+    /// than a "…" at a fraction of a point.
+    @Environment(\.widgetPlan) private var plan
 
     func body(content: Content) -> some View {
         let text = element.text
         content
-            .font(type.styled(text).font)
+            .font(type.applying(text).font)
             .modifier(OptionalTracking(tracking: text.tracking.map { CGFloat($0) }))
             .transformEnvironment(\.textCase) { if let textCase = text.textCase { $0 = textCase.textCase } }
             .transformEnvironment(\.multilineTextAlignment) { if let alignment = text.alignment { $0 = alignment.textAlignment } }
             .transformEnvironment(\.lineLimit) { if let limit = text.lineLimit { $0 = limit } }
             .transformEnvironment(\.truncationMode) { if let mode = text.truncation?.truncationMode { $0 = mode } }
             .transformEnvironment(\.minimumScaleFactor) { factor in
-                if text.points != nil { factor = 1 } else if text.truncation == .shrink { factor = 0.6 }
+                if text.truncation == .shrink { factor = 0.6 } else if text.points != nil, plan == nil { factor = 1 }
             }
             .modifier(OptionalForeground(primary: element.colors[.primary]?.shapeStyle(artwork: artwork)))
             .opacity(text.opacity ?? 1)
@@ -117,7 +144,7 @@ private struct WidgetSymbol: ViewModifier {
 
     func body(content: Content) -> some View {
         let symbol = element.symbol
-        let size = symbol.points.map { CGFloat($0) } ?? points
+        let size = points
         content
             .font(.system(size: size, weight: (symbol.weight ?? weight).fontWeight))
             .modifier(OptionalSymbolLook(rendering: symbol.rendering, filled: symbol.filled))
@@ -188,39 +215,28 @@ private struct WidgetButton: ViewModifier {
     let element: ElementStyle
 
     @Environment(\.widgetArtworkColor) private var artwork
-    @Environment(\.isWidgetPreview) private var isPreview
-    @Environment(\.widgetRenderMode) private var renderMode
+    @Environment(\.elementFill) private var fill
 
     func body(content: Content) -> some View {
         let button = element.button
         let tint = element.colors[.tint]?.color(artwork: artwork).map { $0.opacity(button.tintStrength ?? 1) }
-        styled(content, look: button.look, shape: button.shape)
+        // Its title shown: a capsule, whatever shape it had (a circle holds a symbol alone).
+        let shape = button.iconOnly == false && button.shape != .roundedRectangle ? ButtonShapeChoice.capsule : button.shape
+        styled(content, look: button.look, shape: shape)
+            // Said nearest the button: over a Now Playing button's colour and the island's look.
+            .buttonAppearance(look: button.look, shape: shape, tint: tint)
             .modifier(OptionalTint(color: tint))
             .modifier(OptionalLabelStyle(iconOnly: button.iconOnly))
+            .transformEnvironment(\.controlSize) { if let size = button.size { $0 = size.controlSize } }
     }
 
-    /// Glass as the island draws it: a drawing on the canvas, the bordered button in a picture.
+    /// Drawn as said (`WidgetButtonStyle`) where the style picks a look or a shape: a button the
+    /// island does not style itself takes it too. Otherwise the button's own style, in its colour.
     @ViewBuilder private func styled(_ content: Content, look: ButtonLookChoice?, shape: ButtonShapeChoice?) -> some View {
-        let shaped = Group {
-            switch look {
-            case nil: content
-            case .plain: content.buttonStyle(.plain)
-            case .bordered: content.buttonStyle(.bordered)
-            case .glass, .prominent:
-                let prominent = look == .prominent
-                if renderMode == .canvas {
-                    content.buttonStyle(GlassButtonPicture(prominent: prominent, shape: shape ?? .capsule))
-                } else if isPreview {
-                    if prominent { content.buttonStyle(.borderedProminent) } else { content.buttonStyle(.bordered) }
-                } else {
-                    if prominent { content.buttonStyle(.glassProminent) } else { content.buttonStyle(.glass) }
-                }
-            }
-        }
-        if let shape {
-            shaped.buttonBorderShape(shape.borderShape)
+        if look != nil || shape != nil || fill != nil {
+            content.buttonStyle(WidgetButtonStyle())
         } else {
-            shaped
+            content
         }
     }
 }
@@ -296,6 +312,21 @@ struct ResolvedLine: Equatable {
         track = element?.colors[.track]
         trackOpacity = line.trackOpacity
         mode = line.fill
+    }
+
+    /// A straight line's ends as a part of its thickness: round (the kinds' own capsule), square
+    /// (its corners just softened) or flat (cut straight).
+    var endRounding: CGFloat {
+        switch cap {
+        case .butt?: 0
+        case .square?: 0.2
+        default: 0.5
+        }
+    }
+
+    /// A straight line `height` thick with its ends: round, the capsule it always was.
+    func barShape(height: CGFloat) -> AnyShape {
+        endRounding == 0.5 ? AnyShape(Capsule()) : AnyShape(RoundedRectangle(cornerRadius: height * endRounding, style: .continuous))
     }
 
     /// The fill's one colour for `value` (0…1): the value's colour on a value scale, else the fill.
@@ -389,4 +420,84 @@ nonisolated extension SymbolRenderingChoice {
         case .multicolor: .multicolor
         }
     }
+}
+
+extension ControlSize {
+    /// The largest control size whose button is no taller than `height` (a custom layout's
+    /// rectangle): a button there is never cut, and grows with its rectangle.
+    static func fitting(height: CGFloat) -> ControlSize {
+        for size in [ControlSize.large, .regular, .small] where Metrics.Control.height(size) <= height + 0.5 {
+            return size
+        }
+        return .mini
+    }
+}
+
+nonisolated extension TextAlignmentChoice {
+    /// Where a line of this alignment sits in a frame wider than it.
+    var frameAlignment: Alignment {
+        switch self {
+        case .leading: .leading
+        case .center: .center
+        case .trailing: .trailing
+        }
+    }
+}
+
+nonisolated extension ControlSizeChoice {
+    var controlSize: ControlSize {
+        switch self {
+        case .mini: .mini
+        case .small: .small
+        case .regular: .regular
+        case .large: .large
+        }
+    }
+
+    init(_ size: ControlSize) {
+        switch size {
+        case .mini: self = .mini
+        case .small: self = .small
+        case .large, .extraLarge: self = .large
+        default: self = .regular
+        }
+    }
+}
+
+extension ResolvedWidgetStyle {
+    /// A button element's control size in a custom layout: the style's (set when it was unlocked from
+    /// the stacks), else the largest its rectangle takes.
+    func controlSize(_ id: ElementID, height: CGFloat) -> ControlSize {
+        element(id)?.button.size?.controlSize ?? .fitting(height: height)
+    }
+}
+
+/// A text's letters (`ink`: the capitals' tops to the last baseline, across the line), its own
+/// frame (`box`), in the widget, and the type it is drawn in there.
+nonisolated struct TextLetters: Equatable, Sendable {
+    var box: CGRect
+    var ink: CGRect
+    var type: TypeSpec
+}
+
+/// On the editor's canvas: where the text's letters are, for the editor to outline and align it by
+/// (`WidgetFrameProbe.inks`) — from the capitals' tops to the last line's baseline, across the line
+/// it lays out to. Nothing on the island (no probe).
+private struct TextInk: ViewModifier {
+    let id: ElementID
+    let type: TypeSpec
+
+    @Environment(\.widgetFrameProbe) private var probe
+
+    func body(content: Content) -> some View {
+        if let probe {
+            content.onGeometryChange(for: CGRect.self) { $0.frame(in: .named(WidgetFrameProbe.space)) } action: { box in
+                probe.recordInk(id, TextLetters(box: box, ink: Self.ink(of: box, type: type), type: type))
+            }
+        } else {
+            content
+        }
+    }
+    /// The letters in a text's frame `box`, laid out in `type` (`WidgetTypography.letters`).
+    nonisolated static func ink(of box: CGRect, type: TypeSpec) -> CGRect { WidgetTypography.letters(inBox: box, type) }
 }

@@ -26,10 +26,16 @@ import Observation
     /// The newest version from GitHub, downloaded from About.
     let updater = AppUpdater()
     let stats = SystemStatsMonitor()
+    let network = NetworkMonitor()
+    /// The AirPods' batteries as last reported (the AirPods Battery widget).
+    let airPodsBattery = AirPodsBatteryStore()
     let levels = LevelsController()
     let shelf = ShelfStore()
     let timers = TimerStore()
+    /// Home's board.
     let widgets = WidgetStore()
+    /// Every page's board, home's among them.
+    @ObservationIgnored private(set) var boards: WidgetPages!
     let studio = WidgetStudio()
     let fullscreen = FullscreenMonitor()
     let assistant = AssistantModel()
@@ -37,6 +43,8 @@ import Observation
     let clipboard = ClipboardHistory()
     /// Control Center switches for the Controls and Keyboard widgets.
     let controls = SystemControls()
+    /// The coming events, read only while a widget or Spotlight shows them.
+    let calendar = CalendarService()
     @ObservationIgnored private let commandSpaceTap = CommandSpaceTap()
     let permissions = PermissionCenter()
     let activity = SystemActivity()
@@ -61,12 +69,46 @@ import Observation
     var availablePages: [ExpandedPage] {
         ExpandedPage.allCases.filter { page in
             switch page {
-            case .home, .timer: true
             case .shelf: preferences.shelfEnabled
             case .battery: power.hasBattery
+            default: true
             }
-        }
+        } + preferences.header.customPages.map(\.page)
     }
+
+    /// The board the Widgets stage shows and edits: the studio's page's.
+    var editedWidgets: WidgetStore { boards.store(for: studio.page) }
+
+    /// A new page of the user's, an empty board, at the picker's end; nil at the limit.
+    @discardableResult
+    func addPage() -> ExpandedPage? {
+        var header = preferences.header
+        guard let page = header.addCustomPage(title: header.nextCustomTitle) else { return nil }
+        preferences.header = header
+        _ = boards.store(for: page)
+        return page
+    }
+
+    /// Takes a page of the user's away with its board and its widgets' data.
+    func removePage(_ page: ExpandedPage) {
+        guard page.isCustom else { return }
+        preferences.header.removeCustomPage(page)
+        if studio.page == page { studio.page = .home }
+        if island.page == page { island.page = .home }
+        boards.sync(preferences.header.orderedPages)
+        boards.home.purgeOrphanedInstanceData()
+    }
+
+    /// The pages the top bar's picker offers, in the user's order (`HeaderLayout`). A hidden page
+    /// is still there for what asks for it by name (the battery in the bar, `open?page=`).
+    var pickerPages: [ExpandedPage] { preferences.header.pages(among: availablePages) }
+
+    /// Window Anchor: another app's window held under the notch.
+    let anchor = WindowAnchor()
+    /// The anchored window up at the screen's top, as a live copy the clicks go through to.
+    let anchorMirror = AnchorMirror()
+    /// A window is held under the notch: the top bar shows its release button.
+    var isWindowAnchored: Bool { anchor.isAnchored }
 
     /// The page the panel shows: the one chosen, or home once that one is gone (the shelf switched
     /// off while it was the page).
@@ -102,6 +144,8 @@ import Observation
 
     init(preferences: Preferences = Preferences()) {
         self.preferences = preferences
+        boards = WidgetPages(home: widgets)
+        boards.sync(preferences.header.orderedPages)
         haptics = Haptics(preferences: preferences)
         controller = IslandController(model: self)
         assistant.onClose = { [weak self] in self?.controller.closeAssistant() }
@@ -126,8 +170,39 @@ import Observation
         assistant.clipboard = { [weak self] in self?.clipboard.items ?? [] }
         assistant.system = .live(controls: controls, isPinned: { [weak self] in self?.island.isPinned ?? false })
         assistant.timerIsActive = { [weak self] in self?.timers.isCountdownActive ?? false }
+        // People & Calendar (⌘8): the events the Up Next widget reads, leased while it is open.
+        assistant.calendarAccess = { [weak self] in
+            switch self?.calendar.access {
+            case .granted?: .granted
+            case .notDetermined?: .notDetermined
+            default: .denied
+            }
+        }
+        assistant.calendarEvents = { [weak self] query in
+            guard let self else { return [] }
+            let events = self.calendar.upcoming(calendars: nil, count: CalendarService.limit)
+            return query.isEmpty ? events : events.filter { $0.title.localizedCaseInsensitiveContains(query) }
+        }
+        assistant.requestCalendar = { [weak self] in self?.calendar.requestAccess() }
+        assistant.onCalendarLease = { [weak self] holds in
+            if holds { self?.calendar.acquire() } else { self?.calendar.release() }
+        }
         assistant.widgetKinds = { [weak self] in self?.widgets.board.widgets.map(\.kind) ?? [] }
         assistant.pages = { [weak self] in self?.availablePages ?? [] }
+        assistant.anchorIsHolding = { [weak self] in
+            guard let self, self.canAnchorWindows else { return nil }
+            return self.anchor.isAnchored
+        }
+        assistant.onAnchorWindow = { [weak self] window in
+            guard let self else { return }
+            // The keyboard goes back first; then the window comes forward, and is taken once it is there.
+            self.controller.closeAssistant()
+            RunningWindows.switchTo(window)
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(400))
+                self?.anchor.anchorFront()
+            }
+        }
         assistant.onPaste = { [weak self] item in
             guard let self else { return }
             // Siri gives the keyboard back to the app the user was typing in, then ⌘V lands there.
@@ -167,8 +242,11 @@ import Observation
         activity.start()
         launchAtLogin.refresh()
         power.start()
+        airPodsBattery.connectedOutputs = { [weak self] in self?.airPods.connectedOutputs ?? [] }
+        airPods.onRemember = { [weak self] in self?.airPodsBattery.note($0) }
         airPods.start()
         shelf.pruneMissingInBackground()
+        boards.attach(.standard)
 
         // The window controller must exist before the island controller applies its first
         // presentation, because it stages the panel in `willTransition`.
@@ -267,7 +345,13 @@ import Observation
         case .editWidget(.kind(let kind)):
             editWidget(widgets.board.first(of: kind)?.id)
         case .editWidget(.instance(let id)):
-            editWidget(widgets.board.contains(id) ? id : nil)
+            editWidget(boards.page(containing: id) != nil ? id : nil)
+        case .customizeWidget(.kind(let kind)):
+            if let id = widgets.board.first(of: kind)?.id { customizeWidget(id) }
+        case .customizeWidget(.instance(let id)):
+            if boards.page(containing: id) != nil { customizeWidget(id) }
+        case .closeCustomize:
+            studio.probe.driver?.close()
         case .customize:
             showCustomize()
         case .assistant:
@@ -283,6 +367,12 @@ import Observation
             Task { await diagnostics.sendReport(.periodic) }
         case .publishBaseline:
             Task { await diagnostics.publishBaseline() }
+        case .anchorFrontWindow:
+            // Asking for it says the user wants it: the permission it needs is asked for.
+            if preferences.anchorEnabled, !permissions.accessibilityTrusted { permissions.promptOrOpenAccessibilitySettings() }
+            anchor.anchorFront()
+        case .releaseAnchoredWindow:
+            anchor.release()
         case .demo(let demoCommand):
             demo.run(demoCommand, model: self)
         }
@@ -306,9 +396,48 @@ import Observation
 
     /// Settings ▸ Widgets, with the widget's editor open (nil: the page alone).
     func editWidget(_ id: WidgetID?) {
+        if let page = id.flatMap(boards.page(containing:)) { studio.page = page }
         editingWidget = id
         settingsPane = .widgets
         showSettings()
+    }
+
+    /// The widget's Customize editor: from the island's menu or a link, faded in over Settings
+    /// (flown in only from the stage, where the widget is seen).
+    func customizeWidget(_ id: WidgetID) {
+        if let page = boards.page(containing: id) { studio.page = page }
+        settingsPane = .widgets
+        if island.presentation.isSettings, let driver = studio.probe.driver {
+            driver.open(id, animated: false)
+        } else {
+            studio.customizing = id
+            showSettings()
+        }
+    }
+
+    /// Lets go of the window held under the notch.
+    func releaseAnchoredWindow() {
+        anchor.release()
+    }
+
+    /// Window Anchor can run: the preference is on and Accessibility is trusted.
+    var canAnchorWindows: Bool { appliedFeatures?.anchor ?? false }
+
+    /// The notch screen for Settings' size picture (a MacBook's own when there is none).
+    var anchorScreenForSettings: AnchorScreen {
+        anchorScreen ?? AnchorScreen(frame: CGRect(x: 0, y: 0, width: 1512, height: 982), band: 33, notch: CGSize(width: 185, height: 32))
+    }
+
+    /// The notch screen for the anchor, in the window server's coordinates (y down from the top of
+    /// the primary display).
+    private var anchorScreen: AnchorScreen? {
+        guard let metrics, let screen = notchScreen, let primary = NSScreen.screens.first else { return nil }
+        let frame = CGRect(x: metrics.screenFrame.minX, y: primary.frame.maxY - metrics.screenFrame.maxY,
+                           width: metrics.screenFrame.width, height: metrics.screenFrame.height)
+        // The menu bar (a pixel taller than the notch's safe area on this Mac); the safe area where
+        // the bar hides itself.
+        let band = max(screen.safeAreaInsets.top, screen.frame.maxY - screen.visibleFrame.maxY)
+        return AnchorScreen(frame: frame, band: band, notch: metrics.notchSize)
     }
 
     /// Settings grows out of the notch; without a notch screen (nothing to grow out of) it opens as
@@ -385,6 +514,19 @@ import Observation
         timers.onFinished = { [weak self] in self?.timerFinished() }
         dragMonitor.onDragBegan = { [weak self] in self?.externalDragBegan() }
         dragMonitor.onDragEnded = { [weak self] in self?.externalDragEnded() }
+        anchor.screen = { [weak self] in self?.anchorScreen }
+        anchor.onTargeted = { [weak self] targeted in self?.controller.setAnchorTargeted(targeted) }
+        anchor.size = { [weak self] screen in
+            (self?.preferences.anchorSize ?? AnchorSizePreference()).size(on: screen)
+        }
+        anchor.onHeldChanged = { [weak self] held in
+            guard let self else { return }
+            // Up at the screen's top as a live copy (the real window right under the menu bar).
+            self.anchorMirror.update(held: held, screen: self.anchorScreen)
+        }
+        anchor.onAppWindowsChanged = { [weak self] in self?.anchorMirror.appWindowsChanged() }
+        anchorMirror.onRelease = { [weak self] in self?.anchor.release(reason: "released from the stage") }
+        anchorMirror.setBar(preferences.anchorBar)
     }
 
     private func powerEvent(_ event: PowerEvent) {
@@ -508,7 +650,7 @@ import Observation
             showNowPlaying: preferences.showNowPlaying,
             showWebMedia: preferences.showWebMedia,
             showLevelHUD: preferences.showLevelHUD,
-            levelWidgets: widgets.needsLevels,
+            levelWidgets: boards.needsLevels,
             replaceSystemHUD: preferences.replaceSystemHUD,
             accessibilityTrusted: permissions.accessibilityTrusted,
             shelfEnabled: preferences.shelfEnabled,
@@ -518,7 +660,11 @@ import Observation
             fullscreenPresent: needsMenuBarGuard,
             commandSpaceOpensSiri: preferences.commandSpaceOpensSiri,
             liquidVolume: preferences.liquidVolume,
-            liquidAirPods: preferences.liquidAirPods
+            liquidAirPods: preferences.liquidAirPods,
+            anchorEnabled: preferences.anchorEnabled,
+            anchorByDrag: preferences.anchorByDrag,
+            anchorMirror: preferences.anchorMirror,
+            anchorPaused: metrics == nil || !fullscreen.fullscreenApps.isEmpty
         )
     }
 
@@ -606,6 +752,30 @@ import Observation
         case .setCommandSpace(let enabled):
             if enabled { commandSpaceTap.start() } else { commandSpaceTap.stop() }
         case .prewarmLiquid: liquidCard.prewarm()
+        case .setAnchor(let enabled):
+            anchor.setEnabled(enabled)
+            setAnchorQuitWatch(enabled)
+        case .setAnchorDrag(let enabled): anchor.setDragEnabled(enabled)
+        case .setAnchorPaused(let paused):
+            anchor.setPaused(paused)
+            anchorMirror.setPaused(paused)
+        case .setAnchorMirror(let enabled): anchorMirror.setEnabled(enabled)
+        }
+    }
+
+    @ObservationIgnored private var anchorQuitToken: (any NSObjectProtocol)?
+
+    /// An app quitting takes its anchored window with it (watched only while the anchor runs).
+    private func setAnchorQuitWatch(_ enabled: Bool) {
+        let center = NSWorkspace.shared.notificationCenter
+        if let anchorQuitToken { center.removeObserver(anchorQuitToken) }
+        anchorQuitToken = nil
+        guard enabled else { return }
+        anchorQuitToken = center.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            let pid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier
+            MainActor.assumeIsolated {
+                if let pid { self?.anchor.applicationTerminated(pid) }
+            }
         }
     }
 }

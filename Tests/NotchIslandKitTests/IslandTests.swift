@@ -332,7 +332,10 @@ import Testing
         center.onExpire = { expired.append($0) }
         center.post(.level(.volume), duration: 0.05)
         #expect(center.current == .level(.volume))
-        try await Task.sleep(for: .milliseconds(400))
+        // Waited for rather than slept on: with every suite drawing on the main actor at once, the
+        // deadline's turn may come late.
+        let deadline = Date.now.addingTimeInterval(10)
+        while center.current != nil, Date.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
         #expect(center.current == nil)
         #expect(expired == [.level(.volume)])
     }
@@ -532,7 +535,7 @@ import Testing
 
     @Test func anyReasonToStayKeepsItOpen() {
         let reasons: [WritableKeyPath<AutoCloseInputs, Bool>] = [
-            \.isPinned, \.isInteracting, \.isDropTargeted, \.isLingeringAfterDrop, \.isPointerInside,
+            \.isPinned, \.isInteracting, \.isMenuOpen, \.isDropTargeted, \.isLingeringAfterDrop, \.isPointerInside,
         ]
         for reason in reasons {
             var inputs = AutoCloseInputs(isExpanded: true, pointerHasVisited: true)
@@ -589,7 +592,10 @@ import Testing
         action.schedule(after: 0.02) { fired.append(1) }
         action.schedule(after: 0.04) { fired.append(2) }
         #expect(action.isPending)
-        try await Task.sleep(for: .milliseconds(300))
+        // Waited for rather than slept on (the main actor may be busy with other suites).
+        let deadline = Date.now.addingTimeInterval(10)
+        while action.isPending, Date.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try await Task.sleep(for: .milliseconds(100))
         #expect(fired == [2])
         #expect(!action.isPending)
         action.schedule(after: 0.02) { fired.append(3) }

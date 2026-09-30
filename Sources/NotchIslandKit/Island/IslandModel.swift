@@ -12,6 +12,8 @@ import SwiftUI
     private(set) var isHovering: Bool = false
     /// A slider drag or menu inside the island is in progress: never auto-close.
     var isInteracting: Bool = false
+    /// A menu of the app's is open (`IslandController` follows `NSMenu`'s tracking): never auto-close.
+    var isMenuOpen: Bool = false
     /// A file drag is currently over the island.
     var isDropTargeted: Bool = false
     /// While the render server moves the island's outline (`IslandOutlineMotion`), the surface is

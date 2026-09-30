@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Volume and brightness (`LevelSpecs`): each kind to its view, a kind not built yet to its placeholder.
-struct LevelFamily: View {
+struct LevelFamily: View, WidgetFamilyElements {
     let widget: IslandWidget
     let size: CGSize
 
@@ -13,6 +13,112 @@ struct LevelFamily: View {
         default: WidgetPlaceholder(kind: widget.kind, size: size)
         }
     }
+
+    func demands(_ input: PlanInput) -> [ElementDemand] {
+        input.demands(types: [.levelValue: LevelWidget.valueType.at(15)])
+    }
+
+    func element(_ id: ElementID) -> LevelElement { LevelElement(widget: widget, id: id) }
+}
+
+/// A level as the widget reads and sets it: volume, display or keyboard brightness.
+private struct LevelSource {
+    let value: Double?
+    let symbol: String
+    let isMuted: Bool
+    let isAvailable: Bool
+    let set: (Double) -> Void
+
+    @MainActor init(_ kind: IslandWidgetKind, model: AppModel, isPicture: Bool) {
+        switch kind {
+        case .volume, .brightness:
+            let level: LevelKind = kind == .volume ? .volume : .brightness
+            let reading = model.levels.reading(level)
+            value = reading.value
+            symbol = IslandFormat.levelSymbol(level, reading: reading)
+            isMuted = reading.isMuted
+            isAvailable = reading.isAvailable
+            set = { model.levels.set(level, to: $0) }
+        default:
+            let controls = model.controls
+            value = isPicture ? controls.keyboardBrightness ?? 0.5 : controls.keyboardBrightness
+            symbol = (value ?? 0) < 0.01 ? "light.min" : "light.max"
+            isMuted = false
+            isAvailable = value != nil
+            set = { controls.setKeyboardBrightness($0) }
+        }
+    }
+}
+
+/// One element of a level widget on its own (a custom layout), at the size the layout plans.
+struct LevelElement: View {
+    let widget: IslandWidget
+    let id: ElementID
+
+    @Environment(\.widgetPlan) private var plan
+    @Environment(\.widgetStyle) private var style
+    @Environment(\.widgetRenderMode) private var renderMode
+    @Environment(\.isWidgetPreview) private var isPreview
+    @Environment(\.widgetArtworkColor) private var artwork
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let source = LevelSource(widget.kind, model: model, isPicture: renderMode == .canvas || isPreview)
+        let planned = plan?.elements[id]
+        // The slider drawn as a ring (its rectangle about square): the symbol and value sit in it.
+        let isRing = plan?.elements[.levelSlider].map { $0.size.width < $0.size.height * 1.6 } ?? false
+        switch id {
+        case .levelIcon:
+            Image(systemName: source.symbol)
+                .widgetSymbol(.levelIcon, points: planned?.points ?? 16, weight: isRing ? .semibold : .regular, in: style)
+                // The keyboard's slider shows its symbol quietly; a muted level too.
+                .foregroundStyle(source.isMuted || (widget.kind == .keyboardBrightness && !isRing)
+                                 ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                .contentTransition(.symbolEffect(.replace))
+        case .levelValue:
+            // In a ring the number is rounded and bold, as the ring draws it.
+            let type = isRing ? TypeSpec(points: 13, design: .rounded, weight: .semibold, monospacedDigits: true) : LevelWidget.valueType
+            Text(source.isMuted && !isRing ? "Muted" : IslandFormat.percent(source.value ?? 0))
+                .widgetText(.levelValue, type.at(planned?.points ?? 13), in: style)
+                .foregroundStyle(.secondary)
+                .transaction { $0.animation = nil }
+                .frame(maxWidth: .infinity, alignment: style.element(.levelValue)?.text.alignment?.frameAlignment ?? .trailing)
+        case .levelSlider:
+            let size = planned?.size ?? CGSize(width: 120, height: 24)
+            if let value = source.value {
+                if size.width < size.height * 1.6 {
+                    LevelRing(value: value, symbol: source.symbol, showsValue: false, size: size, set: source.set,
+                              onInteraction: { model.island.isInteracting = $0 }, showsSymbol: false)
+                } else {
+                    LevelSliderElement(widget: widget, value: value, isAvailable: source.isAvailable, set: source.set)
+                        .environment(\.sliderFill, ResolvedLine(style.element(.levelSlider)).fillColor(value: value, artwork: artwork))
+                }
+            }
+        default:
+            EmptyView()
+        }
+    }
+}
+
+/// The slider of a level: the volume's and brightness's own, the keyboard's plain one.
+private struct LevelSliderElement: View {
+    let widget: IslandWidget
+    let value: Double
+    let isAvailable: Bool
+    let set: (Double) -> Void
+
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        switch widget.kind {
+        case .volume: LevelSlider(kind: .volume)
+        case .brightness: LevelSlider(kind: .brightness)
+        default:
+            RestingSlider(value: value, isEnabled: isAvailable, label: Text("Keyboard Brightness"), set: set) { editing in
+                model.island.isInteracting = editing
+            }
+        }
+    }
 }
 
 struct LevelWidget: View {
@@ -22,35 +128,44 @@ struct LevelWidget: View {
 
     @Environment(\.widgetFrameProbe) private var probe
     @Environment(\.widgetStyle) private var style
+    @Environment(\.widgetArtworkColor) private var artwork
     @Environment(AppModel.self) private var model
+
+    /// The value's type: digits of one width.
+    static let valueType = TypeSpec(points: 13, monospacedDigits: true)
 
     var body: some View {
         let reading = model.levels.reading(kind)
+        let symbol = IslandFormat.levelSymbol(kind, reading: reading)
         if widget.resolvedLevelLayout(size) == .ring {
-            LevelRing(value: reading.value, symbol: IslandFormat.levelSymbol(kind, reading: reading),
+            LevelRing(value: reading.value, symbol: symbol,
                       showsValue: widget.shows(.levelValue), size: size,
                       set: { model.levels.set(kind, to: $0) },
                       onInteraction: { model.island.isInteracting = $0 },
                       symbolSize: widget.size(of: .levelIcon), valueSize: widget.size(of: .levelValue))
                 .disabled(!reading.isAvailable)
         } else {
-            let iconSize = WidgetType.points(size.height, ratio: 0.42, min: 13, max: 22, widget.size(of: .levelIcon))
+            let autoIcon = WidgetType.points(size.height, ratio: 0.42, min: 13, max: 22, widget.size(of: .levelIcon))
+            let iconFit = WidgetType.size(fittingLines: 1, in: size.height)
+            let iconSize = style.symbolPoints(.levelIcon, auto: autoIcon, fit: iconFit)
+            let valueFit = WidgetType.size(fittingLines: 1, in: size.height)
+            let valuePoints = style.textPoints(.levelValue, auto: WidgetType.points(size.height, ratio: 0.3, min: 11, max: 15,
+                                                                                    widget.size(of: .levelValue)), fit: valueFit)
             HStack(spacing: Metrics.Spacing.medium) {
                 if widget.shows(.levelIcon), size.width >= 90 {
                     LevelSymbol(kind: kind, reading: reading)
-                        .widgetSymbol(.levelIcon, points: iconSize, in: style)
+                        .widgetSymbolElement(.levelIcon, symbol, points: iconSize, fit: iconFit, in: style, probe: probe)
                         .frame(width: iconSize * 1.3)
-                        .editorElement(.levelIcon, in: probe)
                 }
                 LevelSlider(kind: kind)
+                    .environment(\.sliderFill, ResolvedLine(style.element(.levelSlider)).fillColor(value: reading.value, artwork: artwork))
                     .ownDirection()
+                    .editorElement(.levelSlider, in: probe)
                 if widget.shows(.levelValue), size.width >= 150 {
                     LevelValue(reading: reading)
-                        .font(.system(size: WidgetType.points(size.height, ratio: 0.3, min: 11, max: 15,
-                                                              widget.size(of: .levelValue))).monospacedDigit())
+                        .widgetTextElement(.levelValue, Self.valueType.at(valuePoints), fit: valueFit, in: style, probe: probe)
                         .frame(minWidth: 34, alignment: .trailing)
                         .ownDirection()
-                        .editorElement(.levelValue, in: probe)
                 }
             }
             .mirroredSides(widget.mirrored)
@@ -81,42 +196,55 @@ struct LevelRing: View {
     /// The widget's Icon and Value elements.
     var symbolSize: ElementSize = .medium
     var valueSize: ElementSize = .medium
+    /// A custom layout places the symbol on its own.
+    var showsSymbol = true
 
     @State private var dragStart: Double?
 
     @Environment(\.widgetFrameProbe) private var probe
+    @Environment(\.widgetStyle) private var style
+    @Environment(\.widgetArtworkColor) private var artwork
 
     var body: some View {
         let diameter = min(size.width, size.height)
-        let line = max(3, diameter * 0.1)
+        let ring = ResolvedLine(style.element(.levelSlider))
+        let line = ring.thickness ?? max(3, diameter * 0.1)
         let showsNumber = showsValue && diameter >= 44
-        let valuePoints = WidgetType.ringText("100%", diameter: diameter, ratio: 0.18, valueSize)
         let inside = diameter - 2 * line * 1.4
-        let symbolPoints = WidgetType.fitted(diameter * (showsNumber ? 0.24 : 0.34),
-                                             fit: showsNumber ? max(6, inside * 0.75 - valuePoints * WidgetType.lineHeight) : inside * 0.8,
-                                             symbolSize, floor: 7)
+        let valueFit = min(WidgetType.size(fitting: "100%", in: max(0, inside), weight: .semibold, rounded: true, monospacedDigits: true),
+                           WidgetType.size(fittingLines: 2, in: max(0, inside)))
+        let valuePoints = style.textPoints(.levelValue, auto: WidgetType.ringText("100%", diameter: diameter, ratio: 0.18, valueSize),
+                                           fit: valueFit)
+        let symbolFit = showsNumber ? max(6, inside * 0.75 - valuePoints * WidgetType.lineHeight) : inside * 0.8
+        let symbolPoints = style.symbolPoints(.levelIcon, auto: WidgetType.fitted(diameter * (showsNumber ? 0.24 : 0.34),
+                                                                                    fit: symbolFit, symbolSize, floor: 7),
+                                              fit: symbolFit)
+        let valueType = TypeSpec(points: valuePoints, design: .rounded, weight: .semibold, monospacedDigits: true)
         ZStack {
-            Circle().stroke(.white.opacity(0.16), lineWidth: line)
+            Circle().stroke(ring.trackStyle(.white.opacity(0.16), artwork: artwork), lineWidth: line)
             Circle()
                 .trim(from: 0, to: value)
-                .stroke(.tint, style: StrokeStyle(lineWidth: line, lineCap: .round))
+                .stroke(ring.fillColor(value: value, artwork: artwork).map(AnyShapeStyle.init) ?? AnyShapeStyle(.tint),
+                        style: StrokeStyle(lineWidth: line, lineCap: ring.cap?.lineCap ?? .round))
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 0) {
-                Image(systemName: symbol)
-                    .font(.system(size: symbolPoints, weight: .semibold))
-                    .contentTransition(.symbolEffect(.replace))
-                    .editorElement(.levelIcon, in: probe)
+                if showsSymbol {
+                    Image(systemName: symbol)
+                        .widgetSymbolElement(.levelIcon, symbol, points: symbolPoints, weight: .semibold, fit: symbolFit,
+                                             in: style, probe: probe)
+                        .contentTransition(.symbolEffect(.replace))
+                }
                 if showsNumber {
                     Text(IslandFormat.percent(value))
-                        .font(.system(size: valuePoints, weight: .semibold, design: .rounded).monospacedDigit())
+                        .widgetTextElement(.levelValue, valueType, lines: 2, fit: valueFit, in: style, probe: probe)
                         .foregroundStyle(.secondary)
                         // The ring moves; the number just changes (a cross-fade per step smeared).
                         .transaction { $0.animation = nil }
-                        .editorElement(.levelValue, in: probe)
                 }
             }
         }
         .frame(width: diameter, height: diameter)
+        .editorElement(.levelSlider, in: probe)
         .frame(width: size.width, height: size.height)
         .contentShape(.rect)
         .gesture(
@@ -146,15 +274,19 @@ struct KeyboardWidget: View {
 
     @Environment(\.widgetFrameProbe) private var probe
     @Environment(\.widgetStyle) private var style
+    @Environment(\.widgetArtworkColor) private var artwork
     @Environment(AppModel.self) private var model
     @Environment(\.controlSize) private var controlSize
     /// On the editor's canvas nothing is read from the system: a backlight at half, as a picture.
     @Environment(\.widgetRenderMode) private var renderMode
+    /// A picture (the gallery, a snapshot): nothing is read from the system.
+    @Environment(\.isWidgetPreview) private var isPreview
 
     var body: some View {
         let controls = model.controls
+        let isPicture = renderMode == .canvas || isPreview
         Group {
-            if let level = renderMode == .canvas ? controls.keyboardBrightness ?? 0.5 : controls.keyboardBrightness {
+            if let level = isPicture ? controls.keyboardBrightness ?? 0.5 : controls.keyboardBrightness {
                 if widget.resolvedLevelLayout(size) == .ring {
                     LevelRing(value: level, symbol: level < 0.01 ? "light.min" : "light.max",
                               showsValue: widget.shows(.levelValue), size: size,
@@ -173,18 +305,24 @@ struct KeyboardWidget: View {
                     .frame(width: size.width, height: size.height)
             }
         }
-        .whileShown { if renderMode == .live { withoutAnimation { model.controls.refresh() } } }
+        .whileShown { if !isPicture { withoutAnimation { model.controls.refresh() } } }
     }
 
     private func slider(_ level: Double, _ controls: SystemControls) -> some View {
-        let iconSize = WidgetType.points(size.height, ratio: 0.42, min: 13, max: 22, widget.size(of: .levelIcon))
+        let symbol = level < 0.01 ? "light.min" : "light.max"
+        let iconFit = WidgetType.size(fittingLines: 1, in: size.height)
+        let iconSize = style.symbolPoints(.levelIcon, auto: WidgetType.points(size.height, ratio: 0.42, min: 13, max: 22,
+                                                                               widget.size(of: .levelIcon)), fit: iconFit)
+        let valueFit = WidgetType.size(fittingLines: 1, in: size.height)
+        let valuePoints = style.textPoints(.levelValue, auto: WidgetType.points(size.height, ratio: 0.3, min: 11, max: 15,
+                                                                                widget.size(of: .levelValue)), fit: valueFit)
+        let fill = ResolvedLine(style.element(.levelSlider)).fillColor(value: level, artwork: artwork)
         return HStack(spacing: Metrics.Spacing.medium) {
             if widget.shows(.levelIcon), size.width >= 90 {
-                Image(systemName: level < 0.01 ? "light.min" : "light.max")
-                    .widgetSymbol(.levelIcon, points: iconSize, in: style)
+                Image(systemName: symbol)
+                    .widgetSymbolElement(.levelIcon, symbol, points: iconSize, fit: iconFit, in: style, probe: probe)
                     .foregroundStyle(.secondary)
                     .frame(width: iconSize * 1.3)
-                    .editorElement(.levelIcon, in: probe)
             }
             Group {
                 if renderMode == .canvas {
@@ -196,22 +334,32 @@ struct KeyboardWidget: View {
                         model.island.isInteracting = editing
                     }
                     .labelsHidden()
-                    .tint(Color.islandAccent)
+                    .tint(fill ?? Color.islandAccent)
                 }
             }
+            .environment(\.sliderFill, fill)
             .ownDirection()
+            .editorElement(.levelSlider, in: probe)
             if widget.shows(.levelValue), size.width >= 150 {
                 Text(IslandFormat.percent(level))
-                    .font(.system(size: WidgetType.points(size.height, ratio: 0.3, min: 11, max: 15,
-                                                          widget.size(of: .levelValue))).monospacedDigit())
+                    .widgetTextElement(.levelValue, LevelWidget.valueType.at(valuePoints), fit: valueFit, in: style, probe: probe)
                     .foregroundStyle(.secondary)
                     .frame(minWidth: 34, alignment: .trailing)
                     .ownDirection()
-                    .editorElement(.levelValue, in: probe)
             }
         }
         .mirroredSides(widget.mirrored)
         .padding(.horizontal, Metrics.Spacing.xSmall)
         .frame(width: size.width, height: size.height)
+    }
+}
+
+nonisolated extension LineCapChoice {
+    var lineCap: CGLineCap {
+        switch self {
+        case .round: .round
+        case .butt: .butt
+        case .square: .square
+        }
     }
 }

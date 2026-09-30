@@ -41,6 +41,7 @@ import Foundation
         static let siri = prefix + "siri"
         static let panel = prefix + "panel"
         static let battery = prefix + "battery"
+        static let header = prefix + "header"
         static let levelDuration = prefix + "levelDuration"
         static let airPodsDuration = prefix + "airPodsDuration"
         static let powerDuration = prefix + "powerDuration"
@@ -50,6 +51,12 @@ import Foundation
         static let musicBarsContinuousOnPower = prefix + "musicBarsContinuousOnPower"
         static let liquidVolume = prefix + "liquidVolume"
         static let liquidAirPods = prefix + "liquidAirPods"
+        static let anchorEnabled = prefix + "anchor.enabled"
+        static let anchorByDrag = prefix + "anchor.byDrag"
+        /// The live copy up at the screen's top (0.6.1; "anchor.mirror" was the copy only while covered).
+        static let anchorMirror = prefix + "anchor.onTop"
+        static let anchorSize = prefix + "anchor.size"
+        static let anchorBar = prefix + "anchor.bar"
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -118,6 +125,19 @@ import Foundation
             defaults.set(data, forKey: Key.panel)
         }
     }
+    /// The panel's top bar: what stands left and right of the notch, and the picker's pages.
+    var header: HeaderLayout {
+        didSet {
+            guard header != oldValue, let data = try? JSONEncoder().encode(header) else { return }
+            if header.customPages != oldValue.customPages { Self.catalogue(header) }
+            defaults.set(data, forKey: Key.header)
+        }
+    }
+
+    /// The user's pages' names and symbols, for `ExpandedPage.title` wherever it is read.
+    private static func catalogue(_ header: HeaderLayout) {
+        CustomPage.catalog.withLock { $0 = Dictionary(header.customPages.map { ($0.page, $0) }) { first, _ in first } }
+    }
     /// The battery page's chart: its style, range, colours and what it marks.
     var battery: BatteryDisplaySettings {
         didSet {
@@ -134,6 +154,20 @@ import Foundation
     /// from the notch, and lies on it (`LiquidCard`).
     var liquidVolume: Bool { didSet { defaults.set(liquidVolume, forKey: Key.liquidVolume) } }
     var liquidAirPods: Bool { didSet { defaults.set(liquidAirPods, forKey: Key.liquidAirPods) } }
+    /// Window Anchor: another app's window can be held under the notch (needs Accessibility).
+    var anchorEnabled: Bool { didSet { defaults.set(anchorEnabled, forKey: Key.anchorEnabled) } }
+    /// A window dragged to the notch is anchored when let go there.
+    var anchorByDrag: Bool { didSet { defaults.set(anchorByDrag, forKey: Key.anchorByDrag) } }
+    /// The anchored window shown up to the screen's top edge, in line with the menu bar and the
+    /// notch, as a live copy the clicks go through to (needs Screen Recording; asked for the first
+    /// time a window is anchored). Off: the window itself, just under the menu bar.
+    var anchorMirror: Bool { didSet { defaults.set(anchorMirror, forKey: Key.anchorMirror) } }
+    /// The size every anchored window is given (nil on an axis: the screen's own, `AnchorGeometry.defaultSize`).
+    /// Where the live copy's stage shows the app's name and Release.
+    var anchorBar: AnchorBarPlacement { didSet { defaults.set(anchorBar.rawValue, forKey: Key.anchorBar) } }
+    var anchorSize: AnchorSizePreference {
+        didSet { if let data = try? JSONEncoder().encode(anchorSize) { defaults.set(data, forKey: Key.anchorSize) } }
+    }
     var musicBarsContinuousOnPower: Bool {
         didSet { defaults.set(musicBarsContinuousOnPower, forKey: Key.musicBarsContinuousOnPower) }
     }
@@ -182,8 +216,17 @@ import Foundation
         musicBarsContinuousOnPower = defaults.object(forKey: Key.musicBarsContinuousOnPower) as? Bool ?? true
         liquidVolume = defaults.object(forKey: Key.liquidVolume) as? Bool ?? true
         liquidAirPods = defaults.object(forKey: Key.liquidAirPods) as? Bool ?? true
+        anchorEnabled = defaults.object(forKey: Key.anchorEnabled) as? Bool ?? true
+        anchorByDrag = defaults.object(forKey: Key.anchorByDrag) as? Bool ?? true
+        anchorMirror = defaults.object(forKey: Key.anchorMirror) as? Bool ?? true
+        anchorSize = defaults.data(forKey: Key.anchorSize).flatMap { try? JSONDecoder().decode(AnchorSizePreference.self, from: $0) }
+            ?? AnchorSizePreference()
+        anchorBar = defaults.string(forKey: Key.anchorBar).flatMap(AnchorBarPlacement.init(rawValue:)) ?? .belowWindow
         siri = defaults.data(forKey: Key.siri).flatMap { try? JSONDecoder().decode(SiriSettings.self, from: $0) } ?? SiriSettings()
         panel = defaults.data(forKey: Key.panel).flatMap { try? JSONDecoder().decode(PanelSettings.self, from: $0) } ?? PanelSettings()
+        let header = defaults.data(forKey: Key.header).flatMap { try? JSONDecoder().decode(HeaderLayout.self, from: $0) } ?? .standard
+        Self.catalogue(header)
+        self.header = header
         battery = defaults.data(forKey: Key.battery).flatMap { try? JSONDecoder().decode(BatteryDisplaySettings.self, from: $0) }
             ?? BatteryDisplaySettings()
         let duration = defaults.object(forKey: Key.animationDuration) as? Double ?? Motion.defaultDuration

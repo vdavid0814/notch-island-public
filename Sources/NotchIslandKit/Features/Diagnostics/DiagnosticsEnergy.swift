@@ -257,6 +257,27 @@ nonisolated enum BatteryProbe {
         return dictionary
     }
 
+    /// The pack below the gauge (`AppleSmartBatteryPack`): its `BatteryData`, where the cells'
+    /// temperature is on Macs that show it to apps (a MacBook Air M5 does; the gauge above it
+    /// does not).
+    static func packData() -> [String: Any]? {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBatteryPack"))
+        guard service != 0 else { return nil }
+        defer { IOObjectRelease(service) }
+        let data = IORegistryEntryCreateCFProperty(service, "BatteryData" as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue()
+        return data as? [String: Any]
+    }
+
+    /// °C: the gauge's own reading where it gives one, else the pack's (hundredths of a degree).
+    static func temperature(properties: [String: Any], pack: [String: Any]?) -> Double? {
+        let data = properties["BatteryData"] as? [String: Any]
+        let candidates: [Any?] = [properties["Temperature"], properties["VirtualTemperature"], pack?["Temperature"],
+                                  pack?["VirtualTemperature"], data?["Temperature"], data?["VirtualTemperature"]]
+        // Zero is a gauge that has not read yet, not a frozen battery.
+        return candidates.lazy.compactMap { signed($0) }.first { $0 > 0 }.map { Double($0) / 100 }
+    }
+
     /// The gauge's amperage is a signed 64-bit value stored unsigned.
     static func signed(_ value: Any?) -> Int? {
         if let number = value as? NSNumber { return Int(truncatingIfNeeded: number.int64Value) }
@@ -286,8 +307,8 @@ nonisolated enum BatteryProbe {
         if let design, let full, design > 0 {
             section.add("Health", String(format: "%d of %d mAh (%.0f%%)", full, design, Double(full) / Double(design) * 100))
         }
-        if let temperature = signed(properties["Temperature"] ?? properties["VirtualTemperature"]) {
-            section.add("Temperature", String(format: "%.1f °C", Double(temperature) / 100))
+        if let temperature = temperature(properties: properties, pack: packData()) {
+            section.add("Temperature", String(format: "%.1f °C", temperature))
         }
         section.add("Voltage", signed(properties["Voltage"]).map { String(format: "%.2f V", Double($0) / 1000) })
         section.add("Current", signed(properties["InstantAmperage"] ?? properties["Amperage"]).map { "\($0) mA" })

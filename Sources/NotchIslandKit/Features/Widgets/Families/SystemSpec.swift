@@ -32,7 +32,7 @@ nonisolated enum SystemSpecs {
             minimumSize: GridSize(width: 2, height: 1), defaultSize: GridSize(width: 3, height: 1),
             maximumSize: GridSize(width: 6, height: 3),
             elements: ElementSpec.reading(samples, caption: title),
-            isImplemented: false
+            stacksElements: true
         )
     }
 }

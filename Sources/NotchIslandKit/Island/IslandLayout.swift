@@ -57,6 +57,31 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         return layout
     }
 
+    /// The widest the panel may be on this screen, and the tallest.
+    var maximumExpandedSize: CGSize {
+        let screen = screen == .zero ? Self.fallbackScreen : screen
+        return CGSize(width: screen.width - 2 * Self.settingsSideMargin,
+                      height: (Self.expandedMaximumScreenShare * screen.height).rounded(.down))
+    }
+
+    /// The panel's proportions that make it `size` (its edges dragged in Settings ▸ Widgets ▸
+    /// Size), each in steps of `step` and within its range — and no further than the screen lets
+    /// the panel grow, so a factor never runs on past the size it still changes.
+    func panel(forExpandedSize size: CGSize, step: Double = PanelSettings.step) -> PanelSettings {
+        let f = scale.factor
+        let base = max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f
+        let limit = maximumExpandedSize
+        // The nearest step; at the screen's limit the first step that reaches it.
+        func snapped(_ value: CGFloat, atLimit: Bool, in range: ClosedRange<Double>) -> Double {
+            let steps = Double(value) / step
+            return range.clamp((atLimit ? (steps - 1e-9).rounded(.up) : steps.rounded()) * step)
+        }
+        let width = snapped(min(size.width, limit.width) / base, atLimit: size.width >= limit.width, in: PanelSettings.widthRange)
+        let height = snapped((min(size.height, limit.height) - notch.height) / (Self.expandedPageHeight * f),
+                             atLimit: size.height >= limit.height, in: PanelSettings.boardHeightRange)
+        return PanelSettings(widthFactor: width, boardHeightFactor: height)
+    }
+
     /// Glass extends this far above the window top, where it is clipped, so its
     /// top edge never shows a rim against the bezel.
     static let overdraw: CGFloat = 24

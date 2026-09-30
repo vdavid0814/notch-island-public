@@ -26,3 +26,22 @@ struct DropBanner: View {
         .accessibilityElement(children: .combine)
     }
 }
+
+/// A window is being dragged under the notch: letting go there anchors it (the drop banner's look).
+struct AnchorBanner: View {
+    var body: some View {
+        BannerLayout(kind: .anchorTarget) {
+            Image(systemName: "rectangle.topthird.inset.filled")
+                .foregroundStyle(.tint)
+                .accessibilityHidden(true)
+        } headerTrailing: {
+            EmptyView()
+        } row: {
+            Text("Let Go to Anchor Under the Notch")
+                .font(.headline)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}

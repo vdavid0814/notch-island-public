@@ -14,10 +14,31 @@ nonisolated struct AssistantCalculation: Sendable, Hashable {
 /// A small parser of its own rather than `NSExpression`, which raises an Objective-C exception
 /// (a crash) on input it does not like, and Siri parses every keystroke.
 nonisolated enum AssistantCalculator {
-    static func calculate(_ text: String) -> AssistantCalculation? {
+    /// What the answers that depend on the moment and the place are worked out with.
+    nonisolated struct Context: Sendable {
+        var now = Date()
+        var timeZone = TimeZone.autoupdatingCurrent
+        var locale = Locale.autoupdatingCurrent
+        /// Units of each currency per euro (the ECB's daily reference rates); nil until the user
+        /// turned currencies on and they were fetched.
+        var rates: [String: Double]?
+
+        init(now: Date = Date(), timeZone: TimeZone = .autoupdatingCurrent, locale: Locale = .autoupdatingCurrent,
+             rates: [String: Double]? = nil) {
+            self.now = now
+            self.timeZone = timeZone
+            self.locale = locale
+            self.rates = rates
+        }
+    }
+
+    static func calculate(_ text: String, context: Context = Context()) -> AssistantCalculation? {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, text.count <= 200 else { return nil }
         if let conversion = convert(text) { return conversion }
+        if let currency = convertCurrency(text, rates: context.rates) { return currency }
+        if let time = worldTime(text, context: context) { return time }
+        if let date = dateMath(text, context: context) { return date }
         return evaluate(text)
     }
 
@@ -248,7 +269,7 @@ nonisolated enum AssistantCalculator {
     /// "10 km in mi", "70 kg to lb", "100 f to c", "5 gb in mb" (to, in, as, =, ->, →, ban/ben).
     static func convert(_ text: String) -> AssistantCalculation? {
         let lowered = text.lowercased()
-        let pattern = #"^\s*(-?[0-9]+(?:[.,][0-9]+)?)\s*([a-z°/µ²³ ]+?)\s+(?:in|to|as|into|=|->|→|ba|be|ban|ben)\s+([a-z°/µ²³ ]+?)\s*$"#
+        let pattern = #"^\s*(-?[0-9]+(?:[.,][0-9]+)?)\s*([a-záéíóöőúüű°/µ²³0-9 ]+?)\s+(?:in|to|as|into|=|->|→|ba|be|ban|ben)\s+([a-záéíóöőúüű°/µ²³0-9 ]+?)\s*$"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: lowered, range: NSRange(lowered.startIndex..., in: lowered)),
               let numberRange = Range(match.range(at: 1), in: lowered),
@@ -257,7 +278,9 @@ nonisolated enum AssistantCalculator {
               let value = Double(lowered[numberRange].replacingOccurrences(of: ",", with: ".")),
               let from = unit(String(lowered[fromRange])),
               let to = unit(String(lowered[toRange])),
-              type(of: from) == type(of: to), from != to else { return nil }
+              // The same kind of quantity (by its base unit: a unit of our own and the system's may
+              // be of different classes).
+              type(of: from).baseUnit() == type(of: to).baseUnit(), from != to else { return nil }
         let converted = Measurement(value: value, unit: from).converted(to: to).value
         guard converted.isFinite else { return nil }
         return AssistantCalculation(expression: text, result: "\(format(converted)) \(to.symbol)")
@@ -315,6 +338,47 @@ nonisolated enum AssistantCalculator {
         add(UnitArea.acres, "acre")
         add(UnitEnergy.kilocalories, "kcal", "calorie", "kalória")
         add(UnitEnergy.kilojoules, "kj", "kilojoule")
+        add(UnitEnergy.joules, "j", "joule")
+        add(UnitEnergy.kilowattHours, "kwh", "kilowatt hour")
+        add(UnitLength.micrometers, "µm", "micron", "micrometer")
+        add(UnitLength.nanometers, "nm", "nanometer")
+        add(UnitLength.lightyears, "ly", "light year", "lightyear", "fényév")
+        add(UnitLength.astronomicalUnits, "au")
+        add(UnitMass.micrograms, "µg", "mcg", "microgram")
+        add(UnitVolume.teaspoons, "tsp", "teaspoon", "teáskanál")
+        add(UnitVolume.tablespoons, "tbsp", "tablespoon", "evőkanál")
+        add(UnitVolume.pints, "pt", "pint")
+        add(UnitVolume.quarts, "qt", "quart")
+        add(UnitVolume.cubicMeters, "m3", "m³")
+        add(UnitVolume.centiliters, "cl", "centiliter")
+        add(UnitDuration.milliseconds, "ms", "millisecond")
+        add(UnitDuration(symbol: "d", converter: UnitConverterLinear(coefficient: 86_400)), "d", "day", "nap")
+        add(UnitDuration(symbol: "wk", converter: UnitConverterLinear(coefficient: 604_800)), "wk", "week", "hét")
+        add(UnitArea.squareMiles, "mi2", "mi²", "sqmi")
+        add(UnitArea.squareCentimeters, "cm2", "cm²")
+        add(UnitPressure.bars, "bar")
+        add(UnitPressure.millibars, "mbar", "millibar")
+        add(UnitPressure.hectopascals, "hpa", "hectopascal")
+        add(UnitPressure.kilopascals, "kpa", "kilopascal")
+        add(UnitPressure.poundsForcePerSquareInch, "psi")
+        add(UnitPressure.millimetersOfMercury, "mmhg")
+        add(UnitPressure(symbol: "atm", converter: UnitConverterLinear(coefficient: 101_325)), "atm", "atmosphere")
+        add(UnitPower.watts, "w", "watt")
+        add(UnitPower.kilowatts, "kw", "kilowatt")
+        add(UnitPower.horsepower, "hp", "horsepower", "lóerő", "le")
+        add(UnitAngle.degrees, "deg", "degree", "°", "fok")
+        add(UnitAngle.radians, "rad", "radian")
+        add(UnitFrequency.hertz, "hz", "hertz")
+        add(UnitFrequency.kilohertz, "khz")
+        add(UnitFrequency.megahertz, "mhz")
+        add(UnitFrequency.gigahertz, "ghz")
+        add(UnitFuelEfficiency.litersPer100Kilometers, "l/100km", "l/100 km")
+        add(UnitFuelEfficiency.milesPerGallon, "mpg")
+        add(UnitInformationStorage.petabytes, "pb", "petabyte")
+        add(UnitInformationStorage.bits, "bit")
+        add(UnitInformationStorage.megabits, "mbit", "megabit")
+        add(UnitInformationStorage.gibibytes, "gib", "gibibyte")
+        add(UnitInformationStorage.mebibytes, "mib", "mebibyte")
         return table
     }()
 }

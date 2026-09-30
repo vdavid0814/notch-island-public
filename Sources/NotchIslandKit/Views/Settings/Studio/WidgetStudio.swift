@@ -1,9 +1,20 @@
 import AppKit
 import Observation
+import SwiftUI
 
 /// Settings ▸ Widgets' shared state: what the stage edits, and the one widget open in Customize.
 @Observable final class WidgetStudio {
-    enum Mode: Hashable, CaseIterable {
+    enum Mode: Hashable, CaseIterable, Identifiable {
+        var id: Self { self }
+
+        var title: String {
+            switch self {
+            case .widgets: String(localized: "Widgets")
+            case .topBar: String(localized: "Top Bar")
+            case .size: String(localized: "Size")
+            }
+        }
+
         /// The board: widgets moved, resized, picked.
         case widgets
         /// The panel's header items.
@@ -18,25 +29,77 @@ import Observation
     }
 
     var mode: Mode = .widgets
+    /// The page whose board the stage shows and edits (`AppModel.editedWidgets`).
+    var page: ExpandedPage = .home
+    /// The open Customize editor's session (for `demo/select`).
+    @ObservationIgnored weak var session: EditorSession?
     /// The widget whose Customize editor is open or on its way (nil: the stage).
     var customizing: WidgetID?
     var phase: Phase = .idle
+    /// The panel as an edge or a slider dragged in Size mode makes it, until the drag ends and it
+    /// is stored: the stage draws it, the real panel is not staged again at every step.
+    var draft: StudioDraft?
+    /// The top bar's item picked in Top Bar mode.
+    var headerSelection: HeaderItem?
+    /// Raised to have the Widgets page scroll its stage into view (a widget about to fly from it).
+    var stageScrollRequest = 0
 
     /// Frames and views for the transition, written from layout callbacks.
     @ObservationIgnored let probe = StudioProbe()
 }
 
-/// Where the transition flies from and to, in the Settings surface's coordinates (top-left origin),
-/// and who flies it. Plain storage, not observed: writing it must never re-render anything.
+/// Where the transition flies from, and who flies it. Plain storage, not observed: writing it must
+/// never re-render anything.
 final class StudioProbe {
-    /// Each widget's frame on the stage.
-    var sourceFrames: [WidgetID: CGRect] = [:]
-    /// The editor's canvas, where the widget lands.
-    var canvasFrame: CGRect = .null
+    /// The stage's board: where each widget is drawn on it (`sourceFrame`).
+    var boardGeometry: WidgetBoardGeometry?
+    /// A view laid over the stage's board, top-left origin: the board's space in AppKit.
     weak var stageView: NSView?
-    weak var canvasView: NSView?
+    /// A view filling the stage's room, and the scale the stage shows the room at about its top
+    /// centre (an island wider than the stage is shown smaller): AppKit knows nothing of it.
+    weak var roomView: NSView?
+    var roomScale: CGFloat = 1
     /// nil (nothing happens) until the Settings surface installs its coordinator.
     weak var driver: (any CustomizeDriving)?
+    /// Called once, by the stage (the canvas), as it takes a change of `phase` in: the widget it
+    /// hides or shows with it and what is done here reach the screen in one frame, so the flier
+    /// and the widget it stands for are never both seen, nor neither.
+    var stageReport: (() -> Void)?
+    var canvasReport: (() -> Void)?
+
+    /// A widget's frame on the stage, in `stageView`.
+    func sourceFrame(_ frame: GridRect) -> CGRect? { boardGeometry?.frame(for: frame) }
+}
+
+/// Tells the transition that the stage or the canvas has taken the studio's phase in: its
+/// `updateNSView` runs in the update that hides or shows the widget there.
+struct StudioPhaseReporter: NSViewRepresentable {
+    let probe: StudioProbe
+    let phase: WidgetStudio.Phase
+    let report: ReferenceWritableKeyPath<StudioProbe, (() -> Void)?>
+
+    func makeNSView(context: Context) -> NSView {
+        context.coordinator.phase = phase
+        return PassiveView()
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        guard context.coordinator.phase != phase else { return }
+        context.coordinator.phase = phase
+        let work = probe[keyPath: report]
+        probe[keyPath: report] = nil
+        work?()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var phase: WidgetStudio.Phase?
+    }
+
+    private final class PassiveView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
 }
 
 /// Flies a widget from the stage into its Customize editor and back.

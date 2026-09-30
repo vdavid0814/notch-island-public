@@ -17,12 +17,15 @@ struct TransportControls: View {
         looks.map { $0[button.rawValue] ?? ButtonLook() }
     }
 
+    /// The style shows the button's title with its symbol (the first element that says, of `ids`).
+    private func titled(_ ids: ElementID...) -> Bool {
+        ids.lazy.compactMap { style.element($0)?.button.iconOnly }.first == false
+    }
+
     @Environment(\.widgetFrameProbe) private var probe
     @Environment(AppModel.self) private var model
     @Environment(\.controlSize) private var controlSize
     @Environment(\.widgetStyle) private var style
-    /// On the editor's canvas, a drawing of each button's own glass (`GlassButtonPicture`).
-    @Environment(\.widgetRenderMode) private var renderMode
 
     var body: some View {
         HStack(spacing: Metrics.Spacing.large) {
@@ -34,10 +37,11 @@ struct TransportControls: View {
                         // A little more room around the skip glyphs inside their circles.
                         .imageScale(.small)
                 }
+                .widgetButton(.skipButtons.part("previous"), in: style)
                 .widgetButton(.skipButtons, in: style)
-                .transportGlass(look(.previous), on: renderMode)
+                .transportGlass(look(.previous), titled: titled(.skipButtons.part("previous"), .skipButtons))
                 .help("Previous")
-                .editorElement(.skipButtons.part("previous"), in: probe)
+                .buttonElement(.skipButtons.part("previous"), in: probe)
             }
 
             if showsPlay {
@@ -48,10 +52,12 @@ struct TransportControls: View {
                         .contentTransition(.symbolEffect(.replace))
                 }
                 .widgetButton(.playbackButtons, in: style)
-                .transportGlass(look(.playPause), on: renderMode)
-                .controlSize(Metrics.Control.larger(controlSize))
+                .transportGlass(look(.playPause), titled: titled(.playbackButtons))
                 .help(isPlaying ? "Pause" : "Play")
-                .editorElement(.playbackButtons, in: probe)
+                // Tagged inside the size it is drawn at (a size up from its row): unlocked, it
+                // keeps that size.
+                .buttonElement(.playbackButtons, in: probe)
+                .controlSize(Metrics.Control.larger(controlSize))
             }
 
             if showsSkip {
@@ -61,10 +67,11 @@ struct TransportControls: View {
                     Label("Next", systemImage: "forward.fill")
                         .imageScale(.small)
                 }
+                .widgetButton(.skipButtons.part("next"), in: style)
                 .widgetButton(.skipButtons, in: style)
-                .transportGlass(look(.next), on: renderMode)
+                .transportGlass(look(.next), titled: titled(.skipButtons.part("next"), .skipButtons))
                 .help("Next")
-                .editorElement(.skipButtons.part("next"), in: probe)
+                .buttonElement(.skipButtons.part("next"), in: probe)
             }
         }
         .islandButton(.circle)
@@ -72,28 +79,55 @@ struct TransportControls: View {
     }
 }
 
+/// Previous or next alone (a custom layout places each on its own).
+struct TransportSkip: View {
+    let forward: Bool
+    var looks: [String: ButtonLook]?
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.widgetStyle) private var style
+
+    var body: some View {
+        let button: TransportButton = forward ? .next : .previous
+        Button {
+            model.media.send(forward ? .next : .previous)
+        } label: {
+            Label(forward ? "Next" : "Previous", systemImage: forward ? "forward.fill" : "backward.fill")
+                .imageScale(.small)
+        }
+        .widgetButton(.skipButtons.part(forward ? "next" : "previous"), in: style)
+        .widgetButton(.skipButtons, in: style)
+        .transportGlass(looks.map { $0[button.rawValue] ?? ButtonLook() })
+        .help(forward ? "Next" : "Previous")
+        .islandButton(.circle)
+    }
+}
+
 extension View {
     /// The system's glass button in a button's own look (the nearest button style wins over the
     /// island's plain one); on the editor's canvas, a drawing of that glass.
-    @ViewBuilder func transportGlass(_ look: ButtonLook?, on mode: WidgetRenderMode) -> some View {
-        if let look {
-            if mode == .canvas {
-                buttonStyle(GlassButtonPicture(prominent: false, shape: .circle, fill: look.pictureFill))
-            } else {
-                buttonStyle(.glass(look.glass))
-            }
-        } else {
-            self
-        }
+    /// `titled`: the button shows its title too, in a capsule (a circle holds a symbol alone).
+    func transportGlass(_ look: ButtonLook?, titled: Bool = false) -> some View {
+        modifier(TransportGlass(look: look, titled: titled))
+    }
+}
+
+/// The button's colour said for `WidgetButtonStyle` (under the element's style, over the island's
+/// plain glass), and a capsule where it shows its title.
+private struct TransportGlass: ViewModifier {
+    let look: ButtonLook?
+    let titled: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .buttonStyle(WidgetButtonStyle())
+            .buttonAppearance(shape: titled ? .capsule : nil, tint: look?.pictureFill)
     }
 }
 
 extension ButtonLook {
-    /// The glass a button wears: its colour at its strength, or — colourless — a white veil as
-    /// strong as the setting (0.5 is about the plain glass).
-    var glass: Glass { Glass.regular.tint(pictureFill).interactive() }
-
-    /// That tint, which the canvas's drawing of the button is filled with.
+    /// The colour a button wears: its tint at its strength, or — colourless — a white veil as strong
+    /// as the setting (0.5 is about the plain glass). The glass's tint, and the canvas's fill.
     var pictureFill: Color {
         if let color = tint.color { color.opacity(opacity) } else { Color.white.opacity(0.3 * opacity) }
     }
@@ -197,6 +231,7 @@ struct ScrubTrack: View {
     /// The widget's Progress element (`ResolvedLine`); on the Now Playing page, empty.
     @Environment(\.widgetStyle) private var style
     @Environment(\.widgetArtworkColor) private var artwork
+    @Environment(\.widgetRenderMode) private var renderMode
 
     var body: some View {
         let line = ResolvedLine(style.element(.progress))
@@ -205,10 +240,19 @@ struct ScrubTrack: View {
         GeometryReader { proxy in
             let fraction = duration > 0 ? min(max(position / duration, 0), 1) : 0
             ZStack(alignment: .leading) {
-                Capsule().fill(line.trackStyle(.white.opacity(0.22), artwork: artwork))
-                PlayedLine(fraction: fraction, rate: duration > 0 ? rate / duration : 0,
-                           opacity: isDragging ? 1 : 0.9,
-                           color: line.fillColor(value: fraction, artwork: artwork).map { NSColor($0).cgColor } ?? PlayedLineView.white)
+                line.barShape(height: height).fill(line.trackStyle(.white.opacity(0.22), artwork: artwork))
+                if renderMode == .canvas {
+                    // A picture of the line where it stands, as its layer draws it: drawn off
+                    // screen too (the Customize transition's snapshot), which a layer is not.
+                    line.barShape(height: height)
+                        .fill(line.fillColor(value: fraction, artwork: artwork) ?? .white)
+                        .opacity(0.9)
+                        .frame(width: PlayedLineView.width(fraction, in: proxy.size.width, height: height))
+                } else {
+                    PlayedLine(fraction: fraction, rate: duration > 0 ? rate / duration : 0,
+                               opacity: isDragging ? 1 : 0.9, rounding: line.endRounding,
+                               color: line.fillColor(value: fraction, artwork: artwork).map { NSColor($0).cgColor } ?? PlayedLineView.white)
+                }
             }
             .frame(height: height)
             .frame(maxHeight: .infinity)
@@ -253,6 +297,8 @@ struct PlayedLine: NSViewRepresentable {
     /// Fraction per second (0: still).
     let rate: Double
     let opacity: Double
+    /// Its ends' rounding, a part of its thickness (`ResolvedLine.endRounding`).
+    var rounding: CGFloat = 0.5
     /// Set on the layer when it changes, not per frame.
     let color: CGColor
 
@@ -263,6 +309,7 @@ struct PlayedLine: NSViewRepresentable {
     func makeNSView(context: Context) -> PlayedLineView { PlayedLineView() }
 
     func updateNSView(_ view: PlayedLineView, context: Context) {
+        view.rounding = rounding
         view.update(fraction: fraction, rate: rate, opacity: opacity, color: color, isPaused: isHidden)
     }
 }
@@ -270,6 +317,10 @@ struct PlayedLine: NSViewRepresentable {
 final class PlayedLineView: NSView {
     private let fill = CALayer()
     private var color: CGColor?
+    /// Its ends' rounding, a part of its height.
+    var rounding: CGFloat = 0.5 {
+        didSet { if rounding != oldValue { needsLayout = true } }
+    }
     private var fraction = 0.0
     private var rate = 0.0
     /// When `fraction` was true.
@@ -330,7 +381,7 @@ final class PlayedLineView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         fill.removeAnimation(forKey: Self.animationKey)
-        fill.cornerRadius = height / 2
+        fill.cornerRadius = height * rounding
         fill.position = CGPoint(x: 0, y: height / 2)
         fill.bounds = CGRect(x: 0, y: 0, width: Self.width(now, in: width, height: height), height: height)
         if rate > 0, now < 1, width > 0, !isPaused {

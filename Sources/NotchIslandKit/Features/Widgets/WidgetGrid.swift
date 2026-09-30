@@ -61,25 +61,28 @@ nonisolated struct BoardGrid: Sendable, Codable, Hashable {
                   gap: value(.gap, Self.standard.gap))
     }
 
-    /// A kind's smallest size on this grid (from its reference size, rounded up, at least a cell).
+    /// A kind's smallest size on this grid: its reference size in cells, whatever their number —
+    /// more cells are more room, not larger widgets (Settings ▸ Widgets ▸ Size) — never more than
+    /// the grid.
     func minimum(for kind: IslandWidgetKind) -> GridSize {
         let reference = kind.minimumSize
-        return GridSize(width: min(max(scaled(reference.width, of: .columns, .up), 1), columns),
-                        height: min(max(scaled(reference.height, of: .rows, .up), 1), rows))
+        return GridSize(width: min(max(reference.width, 1), columns), height: min(max(reference.height, 1), rows))
     }
 
-    /// A kind's largest size on this grid (rounded down, never below its minimum).
+    /// A kind's largest size on this grid: its reference size, and on a larger grid as much more
+    /// as the grid is larger (a widget as wide as the board stays able to be), never below its
+    /// minimum.
     func maximum(for kind: IslandWidgetKind) -> GridSize {
         let reference = kind.maximumSize, lower = minimum(for: kind)
-        return GridSize(width: min(max(scaled(reference.width, of: .columns, .down), lower.width), columns),
-                        height: min(max(scaled(reference.height, of: .rows, .down), lower.height), rows))
+        return GridSize(width: min(max(reference.width, scaled(reference.width, of: .columns, .down), lower.width), columns),
+                        height: min(max(reference.height, scaled(reference.height, of: .rows, .down), lower.height), rows))
     }
 
     /// The size a new widget of the kind takes.
     func defaultSize(for kind: IslandWidgetKind) -> GridSize {
         let reference = kind.defaultSize, lower = minimum(for: kind), upper = maximum(for: kind)
-        return GridSize(width: min(max(scaled(reference.width, of: .columns, .toNearestOrAwayFromZero), lower.width), upper.width),
-                        height: min(max(scaled(reference.height, of: .rows, .toNearestOrAwayFromZero), lower.height), upper.height))
+        return GridSize(width: min(max(reference.width, lower.width), upper.width),
+                        height: min(max(reference.height, lower.height), upper.height))
     }
 
     func fits(_ size: GridSize, _ kind: IslandWidgetKind) -> Bool {

@@ -24,31 +24,17 @@ private struct IslandButtonModifier: ViewModifier {
     let shape: IslandButtonShape
     let prominent: Bool
 
-    /// A widget drawn as a picture (Settings' gallery): each glass button there would keep its own
-    /// backdrop buffers (sixteen widgets of them cost ~130 MB of graphics memory, measured), so the
-    /// pictures use the system's plain bordered buttons in the same shape; on the editor's canvas,
-    /// a drawing of the glass button in its room (`GlassButtonPicture`).
-    @Environment(\.isWidgetPreview) private var isPreview
-    @Environment(\.widgetRenderMode) private var renderMode
+    // Drawn by `WidgetButtonStyle`: glass on the island, the system's bordered buttons in a picture
+    // (Settings' gallery: glass there keeps backdrop buffers, ~130 MB for sixteen widgets), a drawing
+    // of the glass on the editor's canvas, and filling its rectangle in a custom layout.
 
     func body(content: Content) -> some View {
-        Group {
-            if renderMode == .canvas {
-                content.buttonStyle(GlassButtonPicture(prominent: prominent, shape: shape == .circle ? .circle : .capsule))
-            } else if isPreview {
-                if prominent {
-                    content.buttonStyle(.borderedProminent)
-                } else {
-                    content.buttonStyle(.bordered)
-                }
-            } else if prominent {
-                content.buttonStyle(.glassProminent)
-            } else {
-                content.buttonStyle(.glass)
-            }
-        }
-        .buttonBorderShape(shape == .circle ? .circle : .capsule)
-        .labelStyle(IslandButtonLabelStyle(iconOnly: shape == .circle))
+        // The island's own look, said for every button in it: a colour or a look an element's style
+        // or a Now Playing button sets, nearer the button, wins (`WidgetButtonStyle`).
+        content
+            .buttonStyle(WidgetButtonStyle())
+            .buttonAppearance(look: prominent ? .prominent : .glass, shape: shape == .circle ? .circle : .capsule)
+            .labelStyle(IslandButtonLabelStyle(iconOnly: shape == .circle))
     }
 }
 
@@ -76,10 +62,13 @@ extension View {
     /// Measured again once shown (`SegmentedControlRemeasure`): SwiftUI sized the system's bar to
     /// its segments' own widths while the bar spreads them equally, and it widened on the first
     /// click (every bar in Settings, seen on video).
-    func choiceBar() -> some View {
+    ///
+    /// `width`: the bar made that wide, its segments spread equally across it (never narrower than
+    /// its own width).
+    func choiceBar(width: CGFloat? = nil) -> some View {
         pickerStyle(.tabs)
             .buttonBorderShape(.capsule)
-            .background(SegmentedControlRemeasure())
+            .background(SegmentedControlRemeasure(width: width))
     }
 }
 
@@ -89,11 +78,25 @@ extension View {
 /// segments equally and wants three times the widest (297 pt, read from the control), and only
 /// after a click did SwiftUI ask it again. Asked here a turn after it appears — outside any layout
 /// pass (resizing it inside one stopped the app) — and only when it is short.
+///
+/// Given a width, it sets the segments' widths so the bar is that wide: the bar reports it as its
+/// own, and SwiftUI lays it out so.
 private struct SegmentedControlRemeasure: NSViewRepresentable {
+    var width: CGFloat?
+
     func makeNSView(context: Context) -> Probe { Probe() }
-    func updateNSView(_ view: Probe, context: Context) {}
+
+    func updateNSView(_ view: Probe, context: Context) {
+        guard view.width != width else { return }
+        view.width = width
+        if view.window != nil { DispatchQueue.main.async { [weak view] in view?.remeasure() } }
+    }
 
     final class Probe: NSView {
+        var width: CGFloat?
+        /// The segments' widths as the bar measured them before any were set.
+        private var natural: CGFloat?
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             guard window != nil else { return }
@@ -101,7 +104,7 @@ private struct SegmentedControlRemeasure: NSViewRepresentable {
         }
 
         /// The segmented control lying under this probe (the bar it is the background of).
-        private func remeasure() {
+        fileprivate func remeasure() {
             guard window != nil else { return }
             let area = convert(bounds, to: nil)
             func find(_ view: NSView) -> NSSegmentedControl? {
@@ -116,6 +119,7 @@ private struct SegmentedControlRemeasure: NSViewRepresentable {
             for _ in 0..<6 {
                 guard let current = ancestor else { break }
                 if let control = find(current) {
+                    if width != nil || natural != nil { spread(control) }
                     if control.frame.width + 0.5 < control.intrinsicContentSize.width {
                         control.invalidateIntrinsicContentSize()
                     }
@@ -123,6 +127,24 @@ private struct SegmentedControlRemeasure: NSViewRepresentable {
                 }
                 ancestor = current.superview
             }
+        }
+
+        /// The segments spread across `width` (0 each: their own widths again).
+        private func spread(_ control: NSSegmentedControl) {
+            let count = control.segmentCount
+            guard count > 0 else { return }
+            if natural == nil { natural = control.intrinsicContentSize.width }
+            guard let width, let natural, width > natural + 0.5 else {
+                for index in 0..<count { control.setWidth(0, forSegment: index) }
+                control.invalidateIntrinsicContentSize()
+                return
+            }
+            // The borders between the segments are the bar's own: measured once with a width set.
+            var each = (width / CGFloat(count)).rounded(.down)
+            for index in 0..<count { control.setWidth(each, forSegment: index) }
+            each += ((width - control.intrinsicContentSize.width) / CGFloat(count)).rounded(.down)
+            for index in 0..<count { control.setWidth(each, forSegment: index) }
+            control.invalidateIntrinsicContentSize()
         }
     }
 }

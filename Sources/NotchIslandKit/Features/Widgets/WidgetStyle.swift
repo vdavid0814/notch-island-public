@@ -21,6 +21,13 @@ nonisolated struct WidgetStyle: Codable, Hashable, Sendable {
 
     var isEmpty: Bool { self == WidgetStyle() }
 
+    /// An element's style, its own look when it has none; set back to its own look, it is left out
+    /// (a key path the editor binds through: `\.[element: id].text.weight`).
+    subscript(element id: ElementID) -> ElementStyle {
+        get { elements[id] ?? ElementStyle() }
+        set { elements[id] = newValue == ElementStyle() ? nil : newValue }
+    }
+
     private enum CodingKeys: String, CodingKey { case elements, surface, layout, behaviour, format }
 
     init(from decoder: any Decoder) throws {
@@ -291,6 +298,8 @@ nonisolated struct ButtonSpec: Codable, Hashable, Sendable {
     var spacing: Double?
     /// The symbol alone, or the symbol with its title.
     var iconOnly: Bool?
+    /// The system's control size (nil: the one the widget's room gives it).
+    var size: ControlSizeChoice?
 
     static let spacingRange: ClosedRange<Double> = 0...24
 
@@ -303,6 +312,7 @@ nonisolated struct ButtonSpec: Codable, Hashable, Sendable {
         shape = c.lossy(ButtonShapeChoice.self, .shape)
         spacing = c.lossy(Double.self, .spacing)
         iconOnly = c.lossy(Bool.self, .iconOnly)
+        size = c.lossy(ControlSizeChoice.self, .size)
     }
 
     mutating func sanitize() {
@@ -537,6 +547,7 @@ nonisolated enum LineCapChoice: String, Codable, Hashable, Sendable, CaseIterabl
 nonisolated enum LineFill: String, Codable, Hashable, Sendable, CaseIterable { case solid, gradient, valueScale }
 nonisolated enum ButtonLookChoice: String, Codable, Hashable, Sendable, CaseIterable { case glass, prominent, plain, bordered }
 nonisolated enum ButtonShapeChoice: String, Codable, Hashable, Sendable, CaseIterable { case circle, capsule, roundedRectangle }
+nonisolated enum ControlSizeChoice: String, Codable, Hashable, Sendable, CaseIterable { case mini, small, regular, large }
 nonisolated enum NinePointAlignment: String, Codable, Hashable, Sendable, CaseIterable {
     case topLeading, top, topTrailing, leading, center, trailing, bottomLeading, bottom, bottomTrailing
 }

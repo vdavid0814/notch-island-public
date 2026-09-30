@@ -160,14 +160,17 @@ private func scratchDefaults() -> (UserDefaults, String) {
         }
     }
 
+    /// More cells are more room, not larger widgets: a kind's least and default size is its
+    /// reference size in cells on any grid; its largest grows with the grid, so a widget may still
+    /// span it.
     @Test func kindLimitsConvertToOtherGrids() {
         let fine = BoardGrid(columns: 24, rows: 6, gap: 6)
-        #expect(fine.minimum(for: .nowPlaying) == GridSize(width: 6, height: 2))
+        #expect(fine.minimum(for: .nowPlaying) == IslandWidgetKind.nowPlaying.minimumSize)
+        #expect(fine.defaultSize(for: .timer) == IslandWidgetKind.timer.defaultSize)
         #expect(fine.maximum(for: .wifi) == GridSize(width: 8, height: 4))
         let coarse = BoardGrid(columns: 8, rows: 2, gap: 8)
-        // 3 × 1 → 2 × 1 (rounded up), never below a cell; 4 × 2 → 2 × 1 (rounded down).
-        #expect(coarse.minimum(for: .timer) == GridSize(width: 2, height: 1))
-        #expect(coarse.maximum(for: .wifi) == GridSize(width: 2, height: 1))
+        #expect(coarse.minimum(for: .timer) == IslandWidgetKind.timer.minimumSize)
+        #expect(coarse.maximum(for: .wifi) == IslandWidgetKind.wifi.maximumSize)
         for grid in [fine, coarse, BoardGrid(columns: 10, rows: 5, gap: 8)] {
             for kind in IslandWidgetKind.allCases {
                 let lower = grid.minimum(for: kind), upper = grid.maximum(for: kind), preferred = grid.defaultSize(for: kind)
@@ -297,7 +300,8 @@ private func scratchDefaults() -> (UserDefaults, String) {
 @Suite struct WidgetSpecTests {
     @Test func everyKindHasASpecFromItsFamily() {
         #expect(IslandWidgetKind.allCases.count == 57)
-        #expect(IslandWidgetKind.allCases.filter { !$0.spec.isImplemented }.count == 31)
+        // Every kind is built: none is a placeholder.
+        #expect(IslandWidgetKind.allCases.filter { !$0.spec.isImplemented }.isEmpty)
         for family in WidgetFamily.allCases {
             for (kind, spec) in family.specs { #expect(spec.family == family, "\(kind)") }
         }
@@ -313,7 +317,18 @@ private func scratchDefaults() -> (UserDefaults, String) {
     }
 
     @Test func theGalleryOffersTodaysKinds() {
-        #expect(IslandWidgetKind.allCases.filter(\.isOffered).count == 26)
+        // What the gallery offers depends on the Mac (a battery, True Tone, the Apps launcher): the
+        // kinds that need nothing are offered everywhere.
+        let offered = IslandWidgetKind.allCases.filter(\.isOffered)
+        let battery: Set<IslandWidgetKind> = [.batteryTime, .batteryHealth, .batteryCycles, .batteryChart, .batteryPower,
+                                              .batteryTemperature, .charger, .lowPowerMode]
+        let needsTheMac: Set<IslandWidgetKind> = battery.union([.trueTone, .appsLauncher, .missionControl, .showDesktop])
+        #expect(Set(offered).isSuperset(of: Set(IslandWidgetKind.allCases).subtracting(needsTheMac)))
+        #expect(offered.count >= 57 - needsTheMac.count && offered.count <= 57)
+        // The battery's widgets come and go together with the battery (the temperature's with its sensor).
+        let hasBattery = BatteryAvailability.hasBattery
+        for kind in battery.subtracting([.batteryTemperature]) { #expect(kind.isOffered == hasBattery, "\(kind)") }
+        #expect(IslandWidgetKind.batteryTemperature.isOffered == BatteryAvailability.hasTemperature)
         for category in WidgetCategory.allCases {
             #expect(category.kinds.contains { $0.isOffered }, "\(category)")
         }
@@ -323,19 +338,33 @@ private func scratchDefaults() -> (UserDefaults, String) {
         #expect(IslandWidgetKind.nowPlaying.options == [.artwork, .trackInfo, .artist, .progress, .playbackButtons, .skipButtons])
         #expect(IslandWidgetKind.timer.defaultOptions == [.ruler, .readout])
         #expect(IslandWidgetKind.stopwatch.defaultOptions == [.readout, .resetButton])
-        let sizable = IslandWidgetKind.allCases.flatMap { $0.spec.elements.filter { !$0.isSizable }.map(\.id) }
+        // The switchable ones: those always drawn (a start button, a slider) have no switch.
+        let sizable = IslandWidgetKind.allCases.flatMap { $0.spec.elements.filter { !$0.isSizable && !$0.isRequired }.map(\.id) }
         #expect(Set(sizable) == [.progress, .skipButtons, .addMinute, .timerSeconds, .timerHours, .resetButton, .shelfActions])
         #expect(IslandWidgetKind.nowPlaying.spec.element(.skipButtons)?.parts == [ElementID(rawValue: "skipButtons.previous"),
                                                                                 ElementID(rawValue: "skipButtons.next")])
     }
 
-    @Test func extendedControlsAreStubsUntilBuilt() {
+    @Test func theControlsAddedIn06AreSwitchesOrActions() {
         let extended: [SystemControl] = [.soundOutput, .outputMute, .trueTone, .stageManager, .lowPowerMode, .screenMirroring,
                                          .missionControl, .showDesktop, .appsLauncher, .characterViewer, .displaySleep]
+        let switches: Set<SystemControl> = [.outputMute, .trueTone, .stageManager, .lowPowerMode]
         for control in extended {
             #expect(!control.title.isEmpty && control.title != control.rawValue)
-            #expect(!ExtendedControls.isOn(control))
+            #expect(control.isAction == !switches.contains(control))
+            #expect(!control.symbol(on: true).isEmpty && control.symbol(on: true) != "questionmark")
+            // An action has no state to show, and says what a click does.
+            if control.isAction {
+                #expect(!ExtendedControls.isOn(control))
+                #expect(control.status(on: false) == control.status(on: true))
+            } else {
+                #expect(control.status(on: true) != control.status(on: false))
+            }
+            #expect(!control.status(on: true).isEmpty)
         }
+        #expect(SystemControl.outputMute.status(on: true) == "Muted")
+        // What opens something has somewhere to open.
+        for control in [SystemControl.screenMirroring, .lowPowerMode] { #expect(ExtendedControls.actionURL(of: control) != nil) }
     }
 }
 
@@ -376,9 +405,9 @@ private func scratchDefaults() -> (UserDefaults, String) {
     }
 
     @Test func settingsAreClampedAndTolerant() throws {
-        #expect(PanelSettings(widthFactor: 9, boardHeightFactor: 0) == PanelSettings(widthFactor: 1.6, boardHeightFactor: 0.8))
-        let decoded = try JSONDecoder().decode(PanelSettings.self, from: Data(#"{"widthFactor":"wide","boardHeightFactor":3}"#.utf8))
-        #expect(decoded.widthFactor == 1 && decoded.boardHeightFactor == 2.2)
+        #expect(PanelSettings(widthFactor: 9, boardHeightFactor: 0) == PanelSettings(widthFactor: 3, boardHeightFactor: 0.8))
+        let decoded = try JSONDecoder().decode(PanelSettings.self, from: Data(#"{"widthFactor":"wide","boardHeightFactor":9,"keepsSize":true}"#.utf8))
+        #expect(decoded.widthFactor == 1 && decoded.boardHeightFactor == 4 && decoded.keepsSize)
         let empty = try JSONDecoder().decode(PanelSettings.self, from: Data("{}".utf8))
         #expect(empty == PanelSettings() && empty.layout == PanelLayout())
     }

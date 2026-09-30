@@ -110,7 +110,8 @@ extension StyleColor {
         switch self {
         case .automatic, .accent: nil
         case .theme: .islandAccent
-        case .artwork: artwork
+        // Nothing playing (or a cover without a colour): the theme's, so the choice still shows.
+        case .artwork: artwork ?? .islandAccent
         case .semantic(let semantic): semantic.color
         case .named(let tint): tint.color
         case .rgb(let rgb, let alpha): Color(red: rgb.red, green: rgb.green, blue: rgb.blue).opacity(alpha)

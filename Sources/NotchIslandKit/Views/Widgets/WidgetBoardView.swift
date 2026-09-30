@@ -12,7 +12,8 @@ struct WidgetBoardView: View {
         GeometryReader { proxy in
             let geometry = WidgetBoardGeometry(size: proxy.size, grid: board.grid)
             ZStack(alignment: .topLeading) {
-                ForEach(board.widgets) { widget in
+                // One shown only while it has something to do waits off the board until it has.
+                ForEach(board.widgets.filter { !$0.isHiddenOnIsland(in: model) }) { widget in
                     let frame = geometry.frame(for: widget.frame)
                     IslandWidgetView(widget: widget, size: frame.size, thumbnails: thumbnails)
                         .offset(x: frame.minX, y: frame.minY)

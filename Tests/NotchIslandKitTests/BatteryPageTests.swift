@@ -106,41 +106,25 @@ private func today(_ hour: Int, _ minute: Int = 0) -> Date {
     }
 }
 
-// MARK: - Text
+// MARK: - The page as a board
 
-@Suite struct BatteryPageTextTests {
-    @Test func theStateLineSaysWhatTheBatteryIsDoing() {
-        #expect(BatteryPageText.state(laptop(charging: true, minutes: 72), details: nil) == "Charging — 1 h 12 min to full")
-        #expect(BatteryPageText.state(laptop(minutes: 340), details: nil) == "5 h 40 min left")
-        #expect(BatteryPageText.state(laptop(level: 100, plugged: true, charged: true), details: nil) == "Fully charged")
-        #expect(BatteryPageText.state(laptop(level: 80, plugged: true), details: nil) == "On power adapter")
-        #expect(BatteryPageText.state(laptop(charging: true), details: nil) == "Charging")
-        #expect(BatteryPageText.state(laptop(), details: nil) == "On battery")
+@Suite struct BatteryBoardTests {
+    /// The battery page's board starts as the page was: the level, health, cycles and the charger
+    /// down the left, the chart over the rest; every widget placed, none parked.
+    @Test(arguments: [BoardGrid.standard, BoardGrid(columns: 16, rows: 3, gap: 8), BoardGrid(columns: 12, rows: 2, gap: 8)])
+    func itStartsAsThePageWas(grid: BoardGrid) {
+        let board = WidgetPages.batterySeed(grid: grid)
+        #expect(board.parked.isEmpty)
+        #expect(board.widgets.map(\.kind).contains(.batteryChart) && board.widgets.map(\.kind).contains(.battery))
+        #expect(board.widgets.contains { $0.kind == .charger } == (grid.rows >= 3))
     }
 
-    @Test func theGaugesEstimateStandsInForTheSystems() {
-        let details = BatteryDetails.demo(power: laptop(charging: true))
-        var charging = details, onBattery = details
-        charging.minutesToFull = 45
-        onBattery.minutesToEmpty = 300
-        #expect(BatteryPageText.state(laptop(charging: true), details: charging) == "Charging — 45 min to full")
-        #expect(BatteryPageText.state(laptop(), details: onBattery) == "5 h left")
-    }
-
-    @Test func theLastChargeNamesItsDay() {
-        let now = Date()
-        #expect(BatteryPageText.lastCharged(BatteryLastCharge(level: 80, date: now)).hasPrefix("Last charged to 80% at "))
-        #expect(BatteryPageText.lastCharged(BatteryLastCharge(level: 100, date: now.addingTimeInterval(-86_400)))
-            .hasPrefix("Last charged to 100% yesterday at "))
-        #expect(BatteryPageText.lastCharged(BatteryLastCharge(level: 100, date: now.addingTimeInterval(-3 * 86_400)))
-            .hasPrefix("Last charged to 100% on "))
-    }
-
-    @Test func theFactsAreHealthCyclesAndTheAdapter() {
-        #expect(BatteryPageText.facts(nil).map(\.value) == ["—", "—"])
-        let plugged = BatteryPageText.facts(BatteryDetails.demo(power: laptop(charging: true)))
-        #expect(plugged.map(\.value) == ["94%", "212", "96 W"])
-        #expect(BatteryPageText.facts(BatteryDetails.demo(power: laptop())).count == 2)
+    @Test(arguments: [BoardGrid.standard, BoardGrid(columns: 16, rows: 3, gap: 8)])
+    func theTimersIsTheTimerOverThePage(grid: BoardGrid) {
+        let board = WidgetPages.timerSeed(grid: grid)
+        #expect(board.parked.isEmpty && board.widgets.count == 1)
+        #expect(board.widgets[0].kind == .timer && board.widgets[0].frame.height == grid.rows)
+        #expect(board.widgets[0].options.isSuperset(of: [.ruler, .readout, .addMinute]))
     }
 }
 
@@ -356,8 +340,7 @@ private func segmentedControl(in view: NSView) -> NSSegmentedControl? {
         }
     }
 
-    /// The tallest summary (three facts) and the longest state: one line each, measured in the page's
-    /// type, and nothing drawn below the page.
+    /// Charging with the adapter (every figure at its longest): nothing drawn below the page.
     @Test(arguments: IslandScale.allCases)
     func chargingWithTheAdapterNothingIsCut(scale: IslandScale) async throws {
         try await withModelAsync { model in
@@ -367,24 +350,6 @@ private func segmentedControl(in view: NSView) -> NSSegmentedControl? {
             model.preferences.battery.range = .last24Hours
             model.battery.injectDemo((BatteryHistory.demoRecords(now: Date(), calendar: .autoupdatingCurrent), details))
             let page = Self.pageSize(scale)
-            let column = BatteryPage.summaryWidth(page: page.width)
-            let chart = page.width - column - Metrics.Expanded.columnSpacing
-
-            // The state line picks the first of its forms that fits: the short one always does.
-            #expect(BatteryPageText.state(state, details: details, short: true) == "1 h 12 min to full")
-            #expect(Self.width(BatteryPageText.state(state, details: details, short: true), .subheadline.weight(.medium)) <= column)
-            let facts = BatteryPageText.facts(details)
-            #expect(facts.map(\.label) == ["Maximum Capacity", "Cycle Count", "Power Adapter"])
-            let labels = facts.map { Self.width($0.label, .caption) }.max() ?? 0
-            let values = facts.map { Self.width($0.value, .caption.monospacedDigit()) }.max() ?? 0
-            #expect(labels + Metrics.Spacing.medium + values <= column)
-            // The last charge with its time, today, yesterday or on a weekday (the range's name gives way).
-            let evening = Calendar.current.date(bySettingHour: 18, minute: 30, second: 0, of: Date())!
-            for days in [0, 1, 3] {
-                let charge = BatteryLastCharge(level: 100, date: evening.addingTimeInterval(-86_400 * Double(days)))
-                #expect(Self.width(BatteryPageText.lastCharged(charge), .caption2.weight(.medium)) <= chart, "\(days) days ago")
-            }
-
             let picture = try await Self.render(model, scale: scale, under: 40)
             #expect(Self.count(in: picture, rows: Int(page.height * 2)..<picture.height) { max($0, $1, $2) > 24 } == 0,
                     "drawn below the page")
@@ -404,7 +369,7 @@ private func segmentedControl(in view: NSView) -> NSSegmentedControl? {
     /// The page as the panel lays it out at `scale`, with `under` points of black below it, at 2×.
     private static func render(_ model: AppModel, scale: IslandScale, under: CGFloat = 0) async throws -> CGImage {
         let page = pageSize(scale)
-        let view = BatteryPage()
+        let view = HomePage(page: .battery, thumbnails: ThumbnailCache())
             .frame(width: page.width, height: page.height)
             .padding(.bottom, under)
             .background(.black)

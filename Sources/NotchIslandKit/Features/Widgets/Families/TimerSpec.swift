@@ -1,5 +1,11 @@
 import Foundation
 
+nonisolated extension ElementID {
+    /// The timer's one action (Start, Pause, Done) and, while it runs, Cancel (`timerActions.cancel`).
+    static let timerActions = ElementID(rawValue: "timerActions")
+    static let stopwatchButton = ElementID(rawValue: "stopwatchButton")
+}
+
 /// The timer and the stopwatch (`TimerWidget`, `StopwatchWidget`).
 nonisolated enum TimerSpecs {
     static let all: [IslandWidgetKind: WidgetKindSpec] = [
@@ -16,6 +22,8 @@ nonisolated enum TimerSpecs {
                 ElementSpec(.ruler, "Ruler", symbol: "ruler", role: .feature, priority: 60, minRoom: MinRoom(height: 18),
                             isBlock: true),
                 ElementSpec(.readout, "Time", symbol: "clock", role: .text, samples: ["88:88", "8:88:88"], priority: 100),
+                ElementSpec(.timerActions, "Start and cancel buttons", symbol: "play.circle", role: .button, priority: 95,
+                            isSizable: false, parts: ["cancel"], isRequired: true),
                 ElementSpec(.addMinute, "+1 minute button", symbol: "plus.circle", role: .button, priority: 40,
                             defaultVisible: false, isSizable: false),
                 ElementSpec(.timerSeconds, "Set seconds", symbol: "s.circle", role: .feature, defaultVisible: false,
@@ -37,6 +45,8 @@ nonisolated enum TimerSpecs {
                 ElementSpec(.readout, "Time", symbol: "clock", role: .text, samples: ["00:00", "0:00:00"], priority: 100),
                 ElementSpec(.resetButton, "Reset button", symbol: "arrow.counterclockwise", role: .button, priority: 40,
                             isSizable: false),
+                ElementSpec(.stopwatchButton, "Start and pause button", symbol: "playpause.circle", role: .button, priority: 95,
+                            isSizable: false, isRequired: true),
             ],
             canMirror: true
         ),

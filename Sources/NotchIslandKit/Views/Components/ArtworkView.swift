@@ -12,13 +12,21 @@ struct ArtworkView: View {
     var minimumRadius: CGFloat
 
     @State private var appIcon: NSImage?
+    @Environment(\.widgetRenderMode) private var renderMode
 
     var body: some View {
         // A clear square that takes exactly the proposed frame; the image fills it from an overlay
         // and is clipped, so a non-square cover never spills over its neighbours.
         Color.clear
             .overlay {
-                if let image {
+                if let image, renderMode == .canvas {
+                    // A picture of the cover as its layer fills it: drawn off screen too (the
+                    // Customize transition's snapshot), which a layer is not.
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fill)
+                } else if let image {
                     CoverLayer(image: image)
                 } else if let appIcon {
                     Image(nsImage: appIcon)

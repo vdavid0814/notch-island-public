@@ -1,8 +1,42 @@
 import AppKit
 import SwiftUI
 
-/// The colour mixer: the basic colours as circles, and any colour from the spectrum (hue across,
-/// saturation down), its brightness beside it, the result with its hex code and RGB values.
+/// The colours mixed lately (newest first), offered again in every mixer. Kept per user, a few.
+@MainActor enum RecentColors {
+    static let limit = 8
+    private static let key = "recentColors"
+
+    static var all: [IslandTheme.RGB] {
+        (UserDefaults.standard.stringArray(forKey: key) ?? []).compactMap(IslandTheme.RGB.init(hex:))
+    }
+
+    /// `rgb` first; a basic colour is not kept (it has its own circle).
+    static func add(_ rgb: IslandTheme.RGB) {
+        guard !IslandTheme.Preset.allCases.contains(where: { $0.color == rgb }) else { return }
+        let hex = rgb.hex
+        let kept = (UserDefaults.standard.stringArray(forKey: key) ?? []).filter { $0 != hex }
+        UserDefaults.standard.set(Array(([hex] + kept).prefix(limit)), forKey: key)
+    }
+}
+
+extension IslandTheme.RGB {
+    /// `#RRGGBB`.
+    var hex: String {
+        func byte(_ c: Double) -> Int { Int((min(max(c, 0), 1) * 255).rounded()) }
+        return String(format: "#%02X%02X%02X", byte(red), byte(green), byte(blue))
+    }
+
+    init?(hex: String) {
+        let digits = hex.trimmingCharacters(in: CharacterSet(charactersIn: "# ")).uppercased()
+        guard digits.count == 6, let value = Int(digits, radix: 16) else { return nil }
+        self.init(red: Double((value >> 16) & 0xFF) / 255, green: Double((value >> 8) & 0xFF) / 255,
+                  blue: Double(value & 0xFF) / 255)
+    }
+}
+
+/// The colour mixer: the basic colours and the ones mixed lately as circles, and any colour from
+/// the spectrum (hue across, saturation down), its brightness beside it, the result with its hex
+/// code and RGB values.
 struct ColorMixer: View {
     @Binding var rgb: IslandTheme.RGB
     /// Where the owner names a basic colour (the theme's preset): a pick sets only it, and it is
@@ -13,6 +47,8 @@ struct ColorMixer: View {
     @State private var brightness: Double = 1
     @State private var hex = ""
     @State private var appeared = false
+    /// Read once, as the mixer opens: a colour mixed now joins them when it closes.
+    @State private var recents = RecentColors.all
 
     /// The theme's own colours.
     private static let basics = IslandTheme.Preset.allCases.filter { $0 != .custom }
@@ -57,6 +93,22 @@ struct ColorMixer: View {
                         .animation(.spring(response: 0.4, dampingFraction: 0.7).delay(0.025 * Double(index)), value: appeared)
                     }
                 }
+                if !recents.isEmpty {
+                    Text("Recent")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(SettingsPalette.secondary)
+                        .padding(.top, 4)
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+                        ForEach(recents, id: \.hex) { recent in
+                            Button { pickRecent(recent) } label: {
+                                ColorCircle(color: recent.color, isSelected: preset == nil && recent == rgb)
+                            }
+                            .buttonStyle(.plain)
+                            .help(recent.hex)
+                            .accessibilityLabel("Recent colour \(recent.hex)")
+                        }
+                    }
+                }
             }
             .frame(width: 4 * 26 + 3 * 10, alignment: .leading)
 
@@ -92,6 +144,14 @@ struct ColorMixer: View {
             load(rgb)
             appeared = true
         }
+        // What was mixed here is offered again next time.
+        .onDisappear { if preset.map({ $0.wrappedValue == .custom }) ?? true { RecentColors.add(rgb) } }
+    }
+
+    /// A colour mixed before, as it was.
+    func pickRecent(_ recent: IslandTheme.RGB) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { rgb = recent }
+        load(recent)
     }
 
     /// A basic colour, as it is.
@@ -107,17 +167,15 @@ struct ColorMixer: View {
     private func apply() {
         let color = IslandTheme.RGB(NSColor(hue: hue, saturation: saturation, brightness: brightness, alpha: 1))
         rgb = color
-        hex = Self.hex(color)
+        hex = color.hex
     }
 
     private func applyHex() {
-        let digits = hex.trimmingCharacters(in: CharacterSet(charactersIn: "# ")).uppercased()
-        guard digits.count == 6, let value = Int(digits, radix: 16) else {
-            hex = Self.hex(rgb)
+        guard let typed = IslandTheme.RGB(hex: hex) else {
+            hex = rgb.hex
             return
         }
-        load(IslandTheme.RGB(red: Double((value >> 16) & 0xFF) / 255, green: Double((value >> 8) & 0xFF) / 255,
-                             blue: Double(value & 0xFF) / 255))
+        load(typed)
         apply()
     }
 
@@ -126,12 +184,7 @@ struct ColorMixer: View {
         hue = Double(color.hueComponent)
         saturation = Double(color.saturationComponent)
         brightness = Double(color.brightnessComponent)
-        hex = Self.hex(rgb)
-    }
-
-    private static func hex(_ rgb: IslandTheme.RGB) -> String {
-        func byte(_ c: Double) -> Int { Int((min(max(c, 0), 1) * 255).rounded()) }
-        return String(format: "#%02X%02X%02X", byte(rgb.red), byte(rgb.green), byte(rgb.blue))
+        hex = rgb.hex
     }
 }
 
@@ -221,6 +274,25 @@ struct ColorWell: View {
     @Binding var color: StyleColor
     @State private var isOpen = false
 
+    var body: some View {
+        Button { isOpen.toggle() } label: {
+            Circle()
+                .fill(color.swatch)
+                .overlay { Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1) }
+                .frame(width: 22, height: 22)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Colour")
+        .popover(isPresented: $isOpen, arrowEdge: .bottom) { ColorWellPanel(color: $color) }
+    }
+}
+
+/// A colour well's popover: where the colour comes from, and the mixer for one of its own. The
+/// choices' bar is the small one: at its regular size it was wider than the popover.
+struct ColorWellPanel: View {
+    @Binding var color: StyleColor
+
     private enum Choice: Hashable, CaseIterable, Identifiable {
         case automatic, accent, artwork, theme, custom
 
@@ -238,28 +310,19 @@ struct ColorWell: View {
     }
 
     var body: some View {
-        Button { isOpen.toggle() } label: {
-            Circle()
-                .fill(color.swatch)
-                .overlay { Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1) }
-                .frame(width: 22, height: 22)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Colour")
-        .popover(isPresented: $isOpen, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 14) {
-                Picker("Colour", selection: choice) {
-                    ForEach(Choice.allCases) { Text($0.title).tag(Optional($0)) }
-                }
-                .choiceBar()
-                .labelsHidden()
-                .fixedSize()
-                ColorMixer(rgb: mixed)
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("Colour", selection: choice) {
+                ForEach(Choice.allCases) { Text($0.title).tag(Optional($0)) }
             }
-            .padding(18)
-            .frame(width: 440)
+            .choiceBar()
+            .labelsHidden()
+            .controlSize(.small)
+            .fixedSize()
+            .frame(maxWidth: .infinity)
+            ColorMixer(rgb: mixed)
         }
+        .padding(18)
+        .frame(width: 440)
     }
 
     /// nil for a colour the well does not offer (a named tint, a value's scale): nothing marked.

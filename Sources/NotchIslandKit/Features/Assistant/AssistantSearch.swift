@@ -52,6 +52,7 @@ nonisolated enum AssistantSearch {
     /// search kept to the three app folders (a tester's "Siri does not bring up my apps", v0.4.9).
     static let everywhere = [kMDQueryScopeComputer as String]
     static let iCloudDrive = NSHomeDirectory() + "/Library/Mobile Documents/com~apple~CloudDocs"
+    static let homeLibrary = NSHomeDirectory() + "/Library/"
     static let fileScopes: [String] = ["Desktop", "Documents", "Downloads"].map { NSHomeDirectory() + "/" + $0 }
         + [iCloudDrive]
 
@@ -140,10 +141,15 @@ nonisolated enum AssistantSearch {
         guard !term.isEmpty, !scope.paths.isEmpty else { return [] }
         // Word starts ("q*"cdw), or anywhere in the name ("*q*"cd).
         let pattern = scope.anywhere ? "\"*\(term)*\"cd" : "\"\(term)*\"cdw"
-        // Folders too, as in Spotlight (the recent list keeps to files).
-        let predicate = "kMDItemDisplayName == \(pattern) && \(notApps)"
+        // Folders too, as in Spotlight (the recent list keeps to files). With the contents on,
+        // also the files that say it (whole words from three letters on, as Spotlight indexes them).
+        let name = "kMDItemDisplayName == \(pattern)"
+        let match = scope.contents && query.count >= 3 ? "(\(name) || kMDItemTextContent == \"\(term)*\"cdw)" : name
+        let predicate = "\(match) && \(notApps)"
         let hits = run(predicate, scopes: scope.paths, fetch: max(40, limit * 3), kind: .file)
-        return Array(rank(hits, for: query).prefix(limit))
+        // By name first: a file that only says the word comes after the ones called it.
+        let named = hits.filter { AssistantMatch.matches($0.name, query, scope.anywhere ? .anywhere : .wordStart) }
+        return Array((rank(named, for: query) + rank(hits.filter { !named.contains($0) }, for: query)).prefix(limit))
     }
 
     /// Files used in the last month, most recent first (the Files suggestion).
@@ -259,7 +265,8 @@ nonisolated enum AssistantSearch {
             guard let raw = MDQueryGetResultAtIndex(query, index) else { continue }
             let item = Unmanaged<MDItem>.fromOpaque(raw).takeUnretainedValue()
             guard let path = MDItemCopyAttribute(item, kMDItemPath) as? String, seen.insert(path).inserted else { continue }
-            if kind == .app ? !isListedApp(path) : isBuried(path) { continue }
+            // The home folder's Library is nobody's documents (caches, containers, mail stores).
+            if kind == .app ? !isListedApp(path) : (isBuried(path) || path.hasPrefix(homeLibrary)) && !path.hasPrefix(iCloudDrive) { continue }
             let url = URL(fileURLWithPath: path)
             var name = MDItemCopyAttribute(item, kMDItemDisplayName) as? String ?? url.lastPathComponent
             if kind == .app, name.hasSuffix(".app") { name.removeLast(4) }

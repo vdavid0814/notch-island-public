@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Control Center's controls (`ControlSpecs`): every built one is a `ControlWidget`, one not built
 /// yet its placeholder.
-struct ControlFamily: View {
+struct ControlFamily: View, WidgetFamilyElements {
     let widget: IslandWidget
     let size: CGSize
 
@@ -12,6 +12,81 @@ struct ControlFamily: View {
             ControlWidget(control: control, widget: widget, size: size)
         } else {
             WidgetPlaceholder(kind: widget.kind, size: size)
+        }
+    }
+
+    func demands(_ input: PlanInput) -> [ElementDemand] {
+        input.demands(types: [.controlName: ControlWidget.nameType.at(13), .controlStatus: ControlWidget.statusType.at(11)])
+    }
+
+    func element(_ id: ElementID) -> ControlElement { ControlElement(widget: widget, id: id) }
+
+    /// A control drawn as its lone button (one cell, or the Button layout) keeps it.
+    func allowsCustomLayout(_ size: CGSize) -> Bool { !WidgetMetrics.isRound(widget) && widget.layout != .button }
+}
+
+/// One element of a control on its own (a custom layout): its button, its name, its state.
+struct ControlElement: View {
+    let widget: IslandWidget
+    let id: ElementID
+
+    @Environment(\.widgetPlan) private var plan
+    @Environment(\.widgetStyle) private var style
+    @Environment(\.isWidgetPreview) private var isPreview
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let control = widget.kind.systemControl {
+            let controls = model.controls
+            let on = isPreview ? !control.isAction : !control.isAction && controls.isOn(control)
+            let planned = plan?.elements[id]
+            let alignment = style.element(id)?.text.alignment?.frameAlignment ?? .leading
+            switch id {
+            case .controlButton:
+                let diameter = min(planned?.size.width ?? 28, planned?.size.height ?? 28)
+                Button {
+                    guard !isPreview else { return }
+                    ControlWidget.perform(control, widget: widget, controls: controls)
+                    model.haptics.play(.tick)
+                } label: {
+                    ControlButtonFace(control: control, on: on, diameter: diameter, style: style)
+                        .offset(x: controls.failed == control ? 3 : 0)
+                        .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .animation(Motion.content, value: on)
+                .help(control.title)
+                .accessibilityLabel(control.title)
+                .accessibilityValue(control.isAction ? "" : control.status(on: on))
+                .whileShown { if !isPreview { withoutAnimation { controls.startObserving(control) } } }
+                    stop: { if !isPreview { controls.stopObserving(control) } }
+            case .controlName:
+                let lines = style.element(.controlName)?.text.lineLimit ?? 1
+                let words = control.title.split(separator: " ").map(String.init)
+                let type = ControlWidget.nameType.at(planned?.points ?? 13)
+                Group {
+                    if lines >= 2, words.count == 2 {
+                        // A word a line, as the tile sets a two-word name.
+                        VStack(alignment: .leading, spacing: -1) {
+                            ForEach(words, id: \.self) { Text($0).widgetText(.controlName, type, in: style).lineLimit(1) }
+                        }
+                    } else {
+                        Text(control.title).widgetText(.controlName, type, in: style).lineLimit(lines)
+                    }
+                }
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+            case .controlStatus:
+                Text(control.status(on: on))
+                    .widgetText(.controlStatus, ControlWidget.statusType.at(planned?.points ?? 11), in: style)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .contentTransition(.opacity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+            default:
+                EmptyView()
+            }
         }
     }
 }
@@ -31,8 +106,23 @@ struct ControlWidget: View {
     let size: CGSize
 
     @Environment(\.widgetFrameProbe) private var probe
+    @Environment(\.widgetStyle) private var style
     @Environment(AppModel.self) private var model
     @Environment(\.isWidgetPreview) private var isPreview
+
+    /// A click: the switch or the action; Focus runs the shortcut its widget names (one of the
+    /// user's that turns Do Not Disturb on and off), where it names one.
+    static func perform(_ control: SystemControl, widget: IslandWidget, controls: SystemControls) {
+        if control == .focus, let name = widget.config.shortcutName {
+            AssistantActions.runShortcut(named: name)
+        } else {
+            controls.toggle(control)
+        }
+    }
+
+    /// The name's type (semibold) and the state's.
+    static let nameType = TypeSpec(points: 13, weight: .semibold)
+    static let statusType = TypeSpec(points: 11)
 
     private var hasLabel: Bool { widget.shows(.controlName) || widget.shows(.controlStatus) }
 
@@ -73,7 +163,7 @@ struct ControlWidget: View {
         let on = isPreview ? !control.isAction : !control.isAction && controls.isOn(control)
         Button {
             guard !isPreview else { return }
-            controls.toggle(control)
+            ControlWidget.perform(control, widget: widget, controls: controls)
             model.haptics.play(.tick)
         } label: {
             Group {
@@ -83,8 +173,10 @@ struct ControlWidget: View {
                     // One circle: the widget's own background (plate, colour or none, at its
                     // strength) is the button, so no second circle is drawn inside it. On shows as
                     // the glyph in colour, off as a quiet glyph.
+                    let glyph = min(size.width, size.height, 56) * 0.46
                     ControlGlyph(control: control, on: on || control.isAction,
-                                 size: min(size.width, size.height, 56) * 0.46)
+                                 size: style.symbolPoints(.controlButton, auto: glyph, fit: min(size.width, size.height) * 0.8),
+                                 style: style)
                         .foregroundStyle(buttonGlyphStyle(on: on))
                         .frame(width: size.width, height: size.height)
                 }
@@ -116,7 +208,8 @@ struct ControlWidget: View {
             // Button at the top, the name under it (Control Center's 2 × 2).
             let diameter = min(size.width * 0.5, size.height * 0.5, 44)
             VStack(alignment: .leading, spacing: Metrics.Spacing.xSmall) {
-                ControlButtonFace(control: control, on: on, diameter: diameter)
+                ControlButtonFace(control: control, on: on, diameter: diameter, style: style)
+                    .editorElement(.controlButton, in: probe)
                 Spacer(minLength: 0)
                 label(on: on, room: size.width, width: size.width, lineRoom: size.height - diameter - Metrics.Spacing.xSmall)
             }
@@ -125,7 +218,8 @@ struct ControlWidget: View {
             let diameter = min(size.height, max(20, size.width * 0.32), 44)
             let gap = max(4, diameter * 0.2)
             HStack(spacing: gap) {
-                ControlButtonFace(control: control, on: on, diameter: diameter)
+                ControlButtonFace(control: control, on: on, diameter: diameter, style: style)
+                    .editorElement(.controlButton, in: probe)
                 label(on: on, room: size.height * 1.4, width: size.width - diameter - gap, lineRoom: size.height)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -147,51 +241,56 @@ struct ControlWidget: View {
             width: width - 2, height: lineRoom,
             nameSize: widget.size(of: .controlName), statusSize: widget.size(of: .controlStatus),
             minimum: Self.minimumLabelSize)
+        // A fixed size (the style's) is drawn as set, up to what the room gives the arrangement.
+        let nameFit = WidgetType.size(fittingLines: layout.arrangement == .twoWords ? 2.1 : 1, in: lineRoom)
+        let name = style.textPoints(.controlName, auto: layout.name, fit: nameFit)
+        let status = style.textPoints(.controlStatus, auto: layout.status, fit: WidgetType.size(fittingLines: 1, in: lineRoom))
         switch layout.arrangement {
         case .nameAndStatus:
             VStack(alignment: .leading, spacing: 0) {
-                nameText(layout.name).lineLimit(1)
-                    .editorElement(.controlName, in: probe)
-                Text(control.status(on: on)).font(.system(size: layout.status)).foregroundStyle(.secondary)
+                nameText(name, fit: nameFit).lineLimit(1)
+                Text(control.status(on: on))
+                    .widgetTextElement(.controlStatus, Self.statusType.at(status), fit: nameFit, in: style, probe: probe)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1).contentTransition(.opacity)
-                    .editorElement(.controlStatus, in: probe)
             }
             .minimumScaleFactor(0.85)
         case .line:
-            line(on: on, size: layout.name, statusSize: layout.status)
+            line(on: on, size: name, statusSize: status, fit: nameFit)
         case .twoWords:
-            twoWords(layout.name)
+            twoWords(name, fit: nameFit)
         case .none:
             Color.clear.frame(width: 0, height: 0)
         }
     }
 
-    private func nameText(_ size: CGFloat) -> Text {
-        Text(control.title).font(.system(size: size, weight: .semibold))
+    private func nameText(_ size: CGFloat, fit: CGFloat) -> some View {
+        Text(control.title).widgetTextElement(.controlName, Self.nameType.at(size), fit: fit, in: style, probe: probe)
     }
 
     /// The name on one line (or the state alone when the name is off).
-    private func line(on: Bool, size: CGFloat, statusSize: CGFloat) -> some View {
+    private func line(on: Bool, size: CGFloat, statusSize: CGFloat, fit: CGFloat) -> some View {
         Group {
             if widget.shows(.controlName) {
-                nameText(size)
+                nameText(size, fit: fit)
             } else {
-                Text(control.status(on: on)).font(.system(size: statusSize)).foregroundStyle(.secondary)
+                Text(control.status(on: on))
+                    .widgetTextElement(.controlStatus, Self.statusType.at(statusSize), fit: fit, in: style, probe: probe)
+                    .foregroundStyle(.secondary)
             }
         }
         .lineLimit(1)
         .minimumScaleFactor(0.85)
-        .editorElement(widget.shows(.controlName) ? .controlName : .controlStatus, in: probe)
     }
 
-    private func twoWords(_ size: CGFloat) -> some View {
+    private func twoWords(_ size: CGFloat, fit: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: -1) {
             ForEach(control.title.split(separator: " ").map(String.init), id: \.self) { word in
-                Text(word).font(.system(size: size, weight: .semibold)).lineLimit(1)
+                Text(word).widgetText(.controlName, Self.nameType.at(size), in: style).lineLimit(1)
             }
         }
         .minimumScaleFactor(0.85)
-        .editorElement(.controlName, in: probe)
+        .editorElement(.controlName, in: probe, drawn: .text(style.drawnType(.controlName, Self.nameType.at(size)), lines: 2, fit: fit))
     }
 }
 
@@ -266,16 +365,27 @@ nonisolated struct ControlLabelLayout: Equatable, Sendable {
 }
 
 /// Control Center's round button: the glyph on a filled circle while on, on a faint one while off.
+/// In a widget, its Button element's style: the glyph's size, weight and colours, and the circle's
+/// colour while on (`backing`).
 struct ControlButtonFace: View {
     let control: SystemControl
     let on: Bool
     let diameter: CGFloat
+    var style: ResolvedWidgetStyle = .empty
+
+    @Environment(\.widgetArtworkColor) private var artwork
+    /// In a custom layout, its rectangle: the face fills it (a capsule unless square).
+    @Environment(\.elementFill) private var fill
 
     var body: some View {
-        ControlGlyph(control: control, on: on || control.isAction, size: diameter * 0.42)
+        let backing = style.element(.controlButton)?.colors[.backing]?.shapeStyle(artwork: artwork)
+        let size = fill ?? CGSize(width: diameter, height: diameter)
+        let side = min(size.width, size.height)
+        ControlGlyph(control: control, on: on || control.isAction,
+                     size: style.symbolPoints(.controlButton, auto: side * 0.42, fit: side * 0.8), style: style)
             .foregroundStyle(on ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-            .frame(width: diameter, height: diameter)
-            .background(on ? AnyShapeStyle(.tint) : AnyShapeStyle(.white.opacity(0.14)), in: Circle())
+            .frame(width: size.width, height: size.height)
+            .background(on ? backing ?? AnyShapeStyle(.tint) : AnyShapeStyle(.white.opacity(0.14)), in: .capsule)
     }
 }
 
@@ -286,6 +396,8 @@ struct ControlGlyph: View {
     let on: Bool
     /// The symbol's point size; the logo is drawn as tall.
     let size: CGFloat
+    /// In a widget: its Button element's look.
+    var style: ResolvedWidgetStyle = .empty
 
     var body: some View {
         if control == .bluetooth {
@@ -299,7 +411,7 @@ struct ControlGlyph: View {
                 .frame(width: size * 1.1, height: size * 1.1)
         } else {
             Image(systemName: control.symbol(on: on))
-                .font(.system(size: size, weight: .semibold))
+                .widgetSymbol(.controlButton, points: size, weight: .semibold, in: style)
                 .contentTransition(.symbolEffect(.replace))
         }
     }

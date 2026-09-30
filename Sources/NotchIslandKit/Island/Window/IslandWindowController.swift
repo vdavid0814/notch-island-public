@@ -125,11 +125,14 @@ import SwiftUI
                 guard let self, !self.model.assistant.isAwaitingFileAccess else { return }
                 // Our own popovers, menus and the colour panel take the keyboard for a moment and
                 // give it back; only another app's window ends the assistant or Settings. Judged a
-                // turn later, once the new key window is known.
+                // turn later, once the new key window is known — and while one of our own passing
+                // windows is up (a popover opening or closing leaves no key window for a moment,
+                // which ended Settings as a colour or a symbol was picked), not at all: the panel
+                // takes the keyboard back once they are gone.
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    if NSApp.isActive, let key = NSApp.keyWindow, key !== self.panel { return }
-                    if NSApp.isActive, NSApp.keyWindow === self.panel { return }
+                    if NSApp.isActive, NSApp.keyWindow != nil { return }
+                    if self.hasPassingWindow { self.reclaimKeyboardAfterPassingWindows(); return }
                     self.model.controller.closeKeyboardOverlay()
                 }
             }
@@ -145,6 +148,36 @@ import SwiftUI
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
             guard let self, !self.model.assistant.isAwaitingFileAccess else { return }
             self.model.controller.closeKeyboardOverlay()
+        }
+    }
+
+    /// One of our own windows that comes and goes over the panel: a popover, a menu, a sheet or an
+    /// alert, the colour panel.
+    private var hasPassingWindow: Bool {
+        NSApp.modalWindow != nil || NSApp.windows.contains { window in
+            guard window !== panel, window.isVisible else { return false }
+            let name = String(describing: type(of: window))
+            return name.contains("Popover") || name.contains("Menu") || window is NSColorPanel || window.isSheet
+                || window.level.rawValue >= NSWindow.Level.modalPanel.rawValue
+        }
+    }
+
+    /// Gives the panel the keyboard back once our passing windows are gone (it lost it to them), or
+    /// ends Settings and the assistant if another app took it meanwhile. Checked a few times a
+    /// second, only while such a window is up.
+    private func reclaimKeyboardAfterPassingWindows() {
+        Task { @MainActor [weak self] in
+            while let self, self.panel?.acceptsKeyboard == true {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard self.panel?.acceptsKeyboard == true else { return }
+                if self.hasPassingWindow { continue }
+                if NSApp.isActive {
+                    if NSApp.keyWindow == nil { self.panel?.makeKey() }
+                } else {
+                    self.model.controller.closeKeyboardOverlay()
+                }
+                return
+            }
         }
     }
 

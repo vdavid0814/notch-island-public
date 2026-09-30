@@ -1,5 +1,10 @@
 import Foundation
 
+nonisolated extension ElementID {
+    /// A control's round button (the glyph on its circle).
+    static let controlButton = ElementID(rawValue: "controlButton")
+}
+
 /// Control Center's controls, each its own widget (`ControlWidget`; the switches are
 /// `SystemControls`, the ones added in 0.6 `ExtendedControls`).
 nonisolated enum ControlSpecs {
@@ -22,22 +27,19 @@ nonisolated enum ControlSpecs {
         .clock: control(.clock, "Open Clock for alarms and world time.", graphite),
         .home: control(.home, "Open Home for your accessories.", [.rgb(1.0, 0.66, 0.2), .rgb(1.0, 0.48, 0.1)]),
         // Added in 0.6.
-        .soundOutput: control(.soundOutput, "Choose where the sound plays.", blue, isImplemented: false),
-        .outputMute: control(.outputMute, "Mute or unmute the sound.", [.rgb(0.6, 0.5, 1.0), .rgb(0.4, 0.28, 0.92)],
-                             isImplemented: false),
-        .trueTone: control(.trueTone, "Turn True Tone on or off.", [.rgb(1.0, 0.88, 0.35), .rgb(0.98, 0.7, 0.1)],
-                           isImplemented: false),
-        .stageManager: control(.stageManager, "Turn Stage Manager on or off.", slate, isImplemented: false),
+        .soundOutput: control(.soundOutput, "Choose where the sound plays.", blue),
+        .outputMute: control(.outputMute, "Mute or unmute the sound.", [.rgb(0.6, 0.5, 1.0), .rgb(0.4, 0.28, 0.92)]),
+        .trueTone: control(.trueTone, "Turn True Tone on or off.", [.rgb(1.0, 0.88, 0.35), .rgb(0.98, 0.7, 0.1)]),
+        .stageManager: control(.stageManager, "Turn Stage Manager on or off.", slate),
         .lowPowerMode: control(.lowPowerMode, "Whether Low Power Mode is on; opens Battery settings.",
-                               [.rgb(1.0, 0.82, 0.25), .rgb(1.0, 0.6, 0.1)], isImplemented: false),
-        .screenMirroring: control(.screenMirroring, "Mirror or extend to another display.", blue, isImplemented: false),
-        .missionControl: control(.missionControl, "Show every open window at once.", slate, isImplemented: false),
-        .showDesktop: control(.showDesktop, "Move the windows aside to show the desktop.", slate, isImplemented: false),
-        .appsLauncher: control(.appsLauncher, "Open the Apps launcher.", [.rgb(0.36, 0.62, 1.0), .rgb(0.86, 0.3, 0.95)],
-                               isImplemented: false),
+                               [.rgb(1.0, 0.82, 0.25), .rgb(1.0, 0.6, 0.1)]),
+        .screenMirroring: control(.screenMirroring, "Mirror or extend to another display.", blue),
+        .missionControl: control(.missionControl, "Show every open window at once.", slate),
+        .showDesktop: control(.showDesktop, "Move the windows aside to show the desktop.", slate),
+        .appsLauncher: control(.appsLauncher, "Open the Apps launcher.", [.rgb(0.36, 0.62, 1.0), .rgb(0.86, 0.3, 0.95)]),
         .characterViewer: control(.characterViewer, "Emoji and symbols, ready to type.",
-                                  [.rgb(1.0, 0.86, 0.3), .rgb(0.98, 0.7, 0.08)], isImplemented: false),
-        .displaySleep: control(.displaySleep, "Put the display to sleep.", graphite, isImplemented: false),
+                                  [.rgb(1.0, 0.86, 0.3), .rgb(0.98, 0.7, 0.08)]),
+        .displaySleep: control(.displaySleep, "Put the display to sleep.", graphite),
     ]
 
     private static let blue: [IslandTheme.RGB] = [.rgb(0.3, 0.62, 1.0), .rgb(0.05, 0.4, 0.95)]
@@ -46,20 +48,23 @@ nonisolated enum ControlSpecs {
 
     /// Controls start as a tile with their name, the way Control Center shows them.
     private static func control(_ control: SystemControl, _ summary: String, _ colors: [IslandTheme.RGB],
-                                permission: WidgetPermission? = nil, isImplemented: Bool = true) -> WidgetKindSpec {
+                                permission: WidgetPermission? = nil) -> WidgetKindSpec {
         WidgetKindSpec(
             title: control.title, summary: summary, symbol: control.symbol(on: true), iconColors: colors,
             category: .controls, family: .controls,
             minimumSize: GridSize(width: 1, height: 1), defaultSize: GridSize(width: 2, height: 1),
             maximumSize: GridSize(width: 4, height: 2),
             elements: [
-                ElementSpec(.controlName, "Name", symbol: "textformat", role: .text, samples: [control.title], priority: 60),
+                ElementSpec(.controlButton, "Button", symbol: control.symbol(on: true), role: .symbol, priority: 100,
+                            isRequired: true),
+                ElementSpec(.controlName, "Name", symbol: "textformat", role: .text, samples: [control.title], priority: 60,
+                            acceptsLabel: true),
                 ElementSpec(.controlStatus, "On or Off", symbol: "power", role: .text,
                             samples: [control.status(on: true), control.status(on: false)], priority: 40),
             ],
             layouts: [.automatic, .button, .tile],
-            permission: permission,
-            isImplemented: isImplemented
+            isAvailable: { ExtendedControls.isAvailable(control) },
+            permission: permission
         )
     }
 }

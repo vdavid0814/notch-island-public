@@ -40,6 +40,9 @@ nonisolated struct WidgetKindSpec: Sendable {
     /// Its elements can be placed freely (the grid inside the widget). Not for round 1 × 1
     /// widgets, controls drawn as a button, or Siri.
     var supportsCustomLayout = true
+    /// Its elements stand in one row or column the style may order, space and align
+    /// (`LayoutStyle.axis`, `spacing`, `alignment`, `order`): the kinds that show a reading.
+    var stacksElements = false
 
     func element(_ id: ElementID) -> ElementSpec? { elements.first { $0.id == id } }
 
@@ -100,10 +103,16 @@ nonisolated struct ElementSpec: Sendable, Hashable {
     var isBlock: Bool
     /// Pieces a custom layout may place on their own (skip → previous and next).
     var parts: [ElementID]
+    /// Always drawn (a level's slider, a control's button, the timer's start button): it has no
+    /// switch, but has a place and a look of its own like any element.
+    var isRequired: Bool
+    /// A text the user may reword (`TextStyle.labelOverride`): a caption or a name, not a reading.
+    var acceptsLabel: Bool
 
     init(_ id: ElementID, _ title: String, symbol: String, role: ElementRole, samples: [String] = [],
          colorSlots: [ColorSlot]? = nil, priority: Int = 50, minRoom: MinRoom? = nil, defaultVisible: Bool = true,
-         isSizable: Bool = true, isBlock: Bool = false, parts: [String] = []) {
+         isSizable: Bool = true, isBlock: Bool = false, parts: [String] = [], isRequired: Bool = false,
+         acceptsLabel: Bool = false) {
         self.id = id
         self.title = title
         self.symbol = symbol
@@ -116,6 +125,8 @@ nonisolated struct ElementSpec: Sendable, Hashable {
         self.isSizable = isSizable
         self.isBlock = isBlock
         self.parts = parts.map(id.part)
+        self.isRequired = isRequired
+        self.acceptsLabel = acceptsLabel
     }
 }
 
@@ -152,7 +163,7 @@ nonisolated extension ElementSpec {
     /// A reading with its caption and symbol: what a kind that shows one value starts with.
     static func reading(_ samples: [String], caption: String) -> [ElementSpec] {
         [ElementSpec(.value, "Value", symbol: "number", role: .text, samples: samples, priority: 90),
-         ElementSpec(.label, "Caption", symbol: "textformat", role: .text, samples: [caption], priority: 40),
+         ElementSpec(.label, "Caption", symbol: "textformat", role: .text, samples: [caption], priority: 40, acceptsLabel: true),
          ElementSpec(.symbol, "Symbol", symbol: "star", role: .symbol, priority: 60)]
     }
 }

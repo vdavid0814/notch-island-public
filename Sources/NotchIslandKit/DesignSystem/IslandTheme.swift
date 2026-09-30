@@ -73,6 +73,12 @@ nonisolated struct IslandTheme: Codable, Equatable, Sendable {
 
         var color: Color { Color(.sRGB, red: red, green: green, blue: blue) }
 
+        /// Light enough that white text on it would not read (its relative luminance over 0.6).
+        var isLight: Bool {
+            func linear(_ c: Double) -> Double { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+            return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue) > 0.6
+        }
+
         /// `t` of the way to `other`, in linear light (a mix of red and blue is a clear purple, not
         /// the muddy one plain sRGB averaging gives).
         func mixed(with other: RGB, by t: Double) -> RGB {
@@ -112,4 +118,10 @@ nonisolated struct IslandTheme: Codable, Equatable, Sendable {
 extension Color {
     /// The island's accent: the theme's colour (in place of the system's `accentColor`).
     @MainActor static var islandAccent: Color { IslandThemeStore.shared.theme.color }
+
+    /// Text and symbols on a fill of the accent: black on a light accent (the white theme), white
+    /// on the others.
+    @MainActor static var onIslandAccent: Color {
+        IslandTheme.RGB(IslandThemeStore.shared.theme.color).isLight ? .black : .white
+    }
 }

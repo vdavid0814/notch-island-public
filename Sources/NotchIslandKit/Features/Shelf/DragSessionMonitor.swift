@@ -23,7 +23,8 @@ import AppKit
     /// stopped mid-drag). Never fires for clicks, text selections or window moves.
     var onDragEnded: (() -> Void)?
 
-    private var monitors: [Any] = []
+    /// The press/release listener on the shared hub; nil while stopped.
+    private var token: GlobalMouseHub.Token?
     /// `.leftMouseDragged` monitors, installed only while `latch` is undecided.
     private var dragMonitors: [Any] = []
     private var latch = DragLatch()
@@ -31,29 +32,18 @@ import AppKit
 
     init() {}
 
-    var isRunning: Bool { !monitors.isEmpty }
+    var isRunning: Bool { token != nil }
 
     /// Idempotent.
     func start() {
-        guard monitors.isEmpty else { return }
+        guard token == nil else { return }
         pasteboard = NSPasteboard(name: .drag)
         latch = DragLatch()
-        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .leftMouseUp]
-        // Global monitors see events headed to other apps — where every drag worth
-        // announcing starts. The local monitor sees our own, which global monitors skip:
-        // it is how a press on our own shelf tiles is recognised (and ignored), and it
-        // still catches a mouse-up that happens to be routed to us. AppKit calls both on
-        // the main thread.
-        if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] event in
-            self?.handle(event, inOwnProcess: false)
-        }) {
-            monitors.append(global)
-        }
-        if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
-            self?.handle(event, inOwnProcess: true)
-            return event
-        }) {
-            monitors.append(local)
+        // Presses and releases everywhere, from the shared hub: events headed to other apps —
+        // where every drag worth announcing starts — and our own, which is how a press on our
+        // own shelf tiles is recognised (and ignored), and how a mouse-up routed to us is caught.
+        token = GlobalMouseHub.shared.add { [weak self] event, inOwnProcess in
+            self?.handle(event, inOwnProcess: inOwnProcess)
         }
         Log.shelf.notice("drag session monitor armed")
     }
@@ -61,9 +51,9 @@ import AppKit
     /// Idempotent. A drag that began is reported as ended, so nobody is left waiting for
     /// a mouse-up we will no longer see.
     func stop() {
-        guard !monitors.isEmpty else { return }
-        for monitor in monitors { NSEvent.removeMonitor(monitor) }
-        monitors.removeAll()
+        guard let token else { return }
+        GlobalMouseHub.shared.remove(token)
+        self.token = nil
         setDragMonitors(installed: false)
         pasteboard = nil
         if latch.mouseUp() { onDragEnded?() }

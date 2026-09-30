@@ -35,13 +35,19 @@ nonisolated struct PlanInput: Sendable {
 
     init(widget: IslandWidget, size: CGSize, scale: CGFloat, displayScale: CGFloat = 2, samples: [ElementID: [String]] = [:]) {
         self.init(spec: widget.kind.spec, size: size, style: widget.style, scale: scale, displayScale: displayScale,
-                  samples: samples, shown: widget.options, sizes: widget.sizes, padding: WidgetMetrics.padding(for: widget))
+                  samples: samples, shown: Set(widget.kind.spec.elements.map(\.id).filter(widget.shows)), sizes: widget.sizes,
+                  padding: WidgetMetrics.padding(for: widget))
     }
 
     /// The element's size: the style's fixed points, else its S/M/L (`IslandWidget.sizes`).
     func textSize(_ id: ElementID) -> TextSize {
         let style = style.elements[id]
-        let points = spec.element(id)?.role == .symbol ? style?.symbol.points : style?.text.points
+        let points: Double? = switch spec.element(id)?.role {
+        case .symbol?: style?.symbol.points
+        case .text?: style?.text.points
+        // An element the kind's spec does not name (a decoration): whichever size is set.
+        default: style?.symbol.points ?? style?.text.points
+        }
         return points.map(TextSize.fixed) ?? .auto(sizes[id] ?? .medium)
     }
 
@@ -150,6 +156,17 @@ nonisolated extension ElementDemand {
         let contentScale = CGFloat(input.style.layout.contentScale ?? 1)
         self.init(id: element.id, content: content, design: design * input.scale * contentScale, size: input.textSize(element.id),
                   priority: element.priority, minRoom: element.minRoom)
+    }
+}
+
+nonisolated extension PlanInput {
+    /// Every shown element as a planner asks for it: text in the kind's type (`types`, at its
+    /// design size), a symbol by its spec's name, anything else a box.
+    func demands(types: [ElementID: TypeSpec] = [:]) -> [ElementDemand] {
+        spec.elements.filter { shown.contains($0.id) }.map { element in
+            let type = types[element.id] ?? TypeSpec(points: 13)
+            return ElementDemand(element, input: self, type: type, design: type.points)
+        }
     }
 }
 

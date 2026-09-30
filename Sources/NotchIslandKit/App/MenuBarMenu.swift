@@ -51,6 +51,19 @@ struct MenuBarMenu: View {
             }
         }
 
+        if model.canAnchorWindows {
+            Divider()
+            if model.isWindowAnchored {
+                Button("Release Window", systemImage: "rectangle.topthird.inset.filled") {
+                    model.perform(.releaseAnchoredWindow)
+                }
+            } else {
+                Button("Anchor Front Window", systemImage: "rectangle.topthird.inset.filled") {
+                    model.perform(.anchorFrontWindow)
+                }
+            }
+        }
+
         Divider()
 
         Button("Customize Island…", systemImage: "square.grid.3x2") {

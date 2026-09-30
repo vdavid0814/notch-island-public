@@ -19,6 +19,8 @@ nonisolated struct IslandInputs: Sendable, Equatable {
     var page: ExpandedPage = .home
     var banner: BannerKind? = nil
     var isDragInProgress: Bool = false
+    /// A window dragged under the notch can be let go there (Window Anchor).
+    var isAnchorTargeted: Bool = false
     /// Running, paused, or finished-but-unacknowledged.
     var countdownActive: Bool = false
     /// Running, or paused with time on the clock.
@@ -42,6 +44,7 @@ nonisolated enum IslandResolver {
             return .idle
         }
         if i.isDragInProgress { return .banner(.dropTarget) }
+        if i.isAnchorTargeted { return .banner(.anchorTarget) }
         if let banner = i.banner { return .banner(banner) }
         if i.countdownActive { return .compact(.timer) }
         if i.stopwatchActive { return .compact(.stopwatch) }

@@ -74,7 +74,7 @@ struct ButtonLookRow: View {
         VStack(alignment: .leading, spacing: 6) {
             Label(button.title, systemImage: button.systemImage)
                 .font(.callout.weight(.medium))
-            TintSwatches(selection: look.tint, automaticHint: "Colourless") { tint in
+            TintWell(selection: look.tint, automaticHint: "colourless", purpose: "The button's circle.") { tint in
                 var new = look
                 new.tint = tint
                 withAnimation(Motion.content) { set(new) }
@@ -134,38 +134,136 @@ struct LayoutOption: View {
     }
 }
 
-/// The colours as round swatches, like the accent colour picker; automatic is a colour wheel.
-struct TintSwatches: View {
-    /// nil: several widgets with different colours (nothing marked).
+/// A widget's accent colour, as one row: its swatch, what it is and what it colours. A click opens
+/// the colours — automatic, each tint, and the ones picked lately.
+struct TintWell: View {
+    /// nil: several widgets with different colours.
+    let selection: WidgetTint?
+    /// Where automatic takes its colour from ("from the artwork").
+    let automaticHint: String
+    /// What it colours.
+    var purpose = "Its buttons, bars and rings, and the Colour and Gradient backgrounds."
+    let set: (WidgetTint) -> Void
+    @State private var isOpen = false
+
+    var body: some View {
+        Button { isOpen.toggle() } label: {
+            HStack(spacing: 10) {
+                TintSwatch(tint: selection, side: 24)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(selection.map { $0 == .automatic ? "Automatic — \(automaticHint)" : $0.title } ?? "Mixed")
+                        .font(.callout)
+                        .foregroundStyle(.primary)
+                    Text(purpose)
+                        .font(.caption)
+                        .foregroundStyle(SettingsPalette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(SettingsPalette.secondary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Accent colour")
+        .accessibilityValue(selection?.title ?? "Mixed")
+        .popover(isPresented: $isOpen, arrowEdge: .bottom) {
+            TintPanel(selection: selection, automaticHint: automaticHint) { tint in
+                RecentTints.add(tint)
+                set(tint)
+            }
+        }
+    }
+}
+
+/// The tints picked lately (newest first), offered again where a widget's colour is picked.
+@MainActor enum RecentTints {
+    static let limit = 5
+    private static let key = "recentWidgetTints"
+
+    static var all: [WidgetTint] {
+        (UserDefaults.standard.stringArray(forKey: key) ?? []).compactMap(WidgetTint.init(rawValue:))
+    }
+
+    static func add(_ tint: WidgetTint) {
+        guard tint != .automatic else { return }
+        let kept = all.filter { $0 != tint }
+        UserDefaults.standard.set(([tint] + kept).prefix(limit).map(\.rawValue), forKey: key)
+    }
+}
+
+/// The colours a widget's accent can be, in the well's popover: automatic, the tints, the recent.
+struct TintPanel: View {
     let selection: WidgetTint?
     let automaticHint: String
     let set: (WidgetTint) -> Void
+    /// Read as it opens.
+    @State private var recents = RecentTints.all
+
+    private let columns = Array(repeating: GridItem(.fixed(28), spacing: 10), count: 5)
 
     var body: some View {
-        HStack(spacing: 7) {
-            ForEach(WidgetTint.allCases) { tint in
-                Button {
-                    set(tint)
-                } label: {
-                    Circle()
-                        .fill(tint.color.map { AnyShapeStyle($0.gradient) }
-                              ?? AnyShapeStyle(AngularGradient(colors: [.red, .orange, .yellow, .green, .blue, .purple, .red],
-                                                               center: .center)))
-                        .frame(width: 20, height: 20)
-                        .overlay {
-                            if tint == selection {
-                                Circle().fill(.white).frame(width: 7, height: 7)
-                            }
-                        }
-                        .padding(2)
-                        .overlay { Circle().strokeBorder(tint == selection ? .white.opacity(0.8) : .clear, lineWidth: 1.5) }
-                        .contentShape(Circle())
+        VStack(alignment: .leading, spacing: 12) {
+            Button { set(.automatic) } label: {
+                HStack(spacing: 10) {
+                    TintSwatch(tint: .automatic, side: 28, isSelected: selection == .automatic)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Automatic").font(.callout.weight(.medium))
+                        Text(automaticHint.prefix(1).uppercased() + automaticHint.dropFirst())
+                            .font(.caption)
+                            .foregroundStyle(SettingsPalette.secondary)
+                    }
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.plain)
-                .help(tint == .automatic ? "Automatic — \(automaticHint)" : tint.title)
-                .accessibilityLabel(tint.title)
-                .accessibilityAddTraits(tint == selection ? .isSelected : [])
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            Divider().opacity(0.6)
+            section("Colours", WidgetTint.allCases.filter { $0 != .automatic })
+            if !recents.isEmpty {
+                section("Recent", recents)
             }
         }
+        .padding(16)
+        .frame(width: 5 * 28 + 4 * 10 + 32)
+    }
+
+    private func section(_ title: String, _ tints: [WidgetTint]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(SettingsPalette.secondary)
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+                ForEach(tints) { tint in
+                    Button { set(tint) } label: { TintSwatch(tint: tint, side: 28, isSelected: tint == selection) }
+                        .buttonStyle(.plain)
+                        .help(tint.title)
+                        .accessibilityLabel(tint.title)
+                        .accessibilityAddTraits(tint == selection ? .isSelected : [])
+                }
+            }
+        }
+    }
+}
+
+/// A tint as a circle; automatic as a colour wheel, several (nil) as a grey one. Ringed when picked.
+struct TintSwatch: View {
+    let tint: WidgetTint?
+    var side: CGFloat
+    var isSelected = false
+
+    var body: some View {
+        Circle()
+            .fill(tint.map { tint in
+                tint.color.map { AnyShapeStyle($0.gradient) }
+                    ?? AnyShapeStyle(AngularGradient(colors: [.red, .orange, .yellow, .green, .blue, .purple, .red], center: .center))
+            } ?? AnyShapeStyle(Color.gray.opacity(0.4)))
+            .overlay { Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1) }
+            .padding(isSelected ? 3 : 0)
+            .overlay { Circle().strokeBorder(Color.white.opacity(isSelected ? 0.9 : 0), lineWidth: 2) }
+            .frame(width: side, height: side)
+            .contentShape(Circle())
     }
 }

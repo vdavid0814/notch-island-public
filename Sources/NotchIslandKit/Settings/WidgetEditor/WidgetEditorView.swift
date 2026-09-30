@@ -22,6 +22,8 @@ struct BoardEditor: View {
     var group: Binding<Set<WidgetID>> = .constant([])
     /// A widget was clicked (not dragged): Settings opens its editor.
     var onEdit: ((WidgetID) -> Void)?
+    /// Every cell drawn, the widgets faint over them (Settings ▸ Widgets ▸ Size).
+    var showsGrid = false
 
     @Environment(AppModel.self) private var model
     /// A drag in progress: where the widget is under the pointer, and the cells it will land on.
@@ -34,11 +36,11 @@ struct BoardEditor: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let board = model.widgets.board
+            let board = model.editedWidgets.board
             let geometry = WidgetBoardGeometry(size: proxy.size, grid: board.grid)
             ZStack(alignment: .topLeading) {
-                GridLayer(geometry: geometry, isEmphasized: interaction != nil,
-                          occupied: board.widgets.filter { $0.id != interaction?.id }.map(\.frame))
+                GridLayer(geometry: geometry, isEmphasized: interaction != nil || showsGrid,
+                          occupied: showsGrid ? [] : board.widgets.filter { $0.id != interaction?.id }.map(\.frame))
                     .contentShape(.rect)
                     .onTapGesture {
                         selection = nil
@@ -59,8 +61,12 @@ struct BoardEditor: View {
 
                 ForEach(board.widgets) { widget in
                     widgetView(widget, geometry: geometry)
+                        .opacity(showsGrid ? 0.55 : 1)
                 }
             }
+            // The board's space in AppKit, for the Customize transition to fly from.
+            .background { StageAnchor(probe: model.studio.probe, geometry: geometry) }
+            .background { StudioPhaseReporter(probe: model.studio.probe, phase: model.studio.phase, report: \.stageReport) }
             .coordinateSpace(.named(BoardSpace.name))
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
         }
@@ -73,7 +79,7 @@ struct BoardEditor: View {
         .onDeleteCommand {
             let doomed = group.wrappedValue.isEmpty ? Set([selection].compactMap { $0 }) : group.wrappedValue
             guard !doomed.isEmpty else { return }
-            withAnimation(Self.settle) { doomed.forEach { model.widgets.remove($0) } }
+            withAnimation(Self.settle) { doomed.forEach { model.editedWidgets.remove($0) } }
             selection = nil
             group.wrappedValue = []
         }
@@ -96,8 +102,13 @@ struct BoardEditor: View {
         let isSelected = selection == widget.id || isGrouped
         let showsHandles = selection == widget.id && group.wrappedValue.count < 2
 
+        // Flying into its Customize editor or back: the flier stands in for it.
+        let isFlying = model.studio.customizing == widget.id && model.studio.phase != .idle
         ZStack(alignment: .topLeading) {
             IslandWidgetView(widget: widget, size: contentFrame.size, thumbnails: thumbnails)
+                // A picture, as the editor's canvas draws it: no live glass, nothing ticking.
+                .environment(\.widgetRenderMode, .canvas)
+                .opacity(isFlying ? 0 : 1)
                 .allowsHitTesting(false)
                 .overlay {
                     RoundedRectangle(cornerRadius: min(WidgetMetrics.cornerRadius, contentFrame.height / 2), style: .continuous)
@@ -189,20 +200,20 @@ struct BoardEditor: View {
     }
 
     private func update(_ interaction: inout DragSession<WidgetID, GridRect>, candidate: GridRect, kind: IslandWidgetKind) {
-        interaction.land(on: candidate, isValid: model.widgets.board.isFree(candidate, for: kind, excluding: interaction.id))
+        interaction.land(on: candidate, isValid: model.editedWidgets.board.isFree(candidate, for: kind, excluding: interaction.id))
     }
 
     private func finish() {
         guard let current = interaction else { return }
         withAnimation(Self.settle) {
-            if current.isValid { model.widgets.setFrame(current.candidate, for: current.id) }
+            if current.isValid { model.editedWidgets.setFrame(current.candidate, for: current.id) }
             interaction = nil
         }
     }
 
     /// Arrow keys move the selected widget one cell, when there is room.
     private func nudge(_ key: KeyEquivalent) -> Bool {
-        guard let selection, let widget = model.widgets.board.widget(selection) else { return false }
+        guard let selection, let widget = model.editedWidgets.board.widget(selection) else { return false }
         var rect = widget.frame
         switch key {
         case .leftArrow: rect.column -= 1
@@ -212,7 +223,7 @@ struct BoardEditor: View {
         default: return false
         }
         var moved = false
-        withAnimation(Self.settle) { moved = model.widgets.setFrame(rect, for: selection) }
+        withAnimation(Self.settle) { moved = model.editedWidgets.setFrame(rect, for: selection) }
         if !moved { NSSound.beep() }
         return true
     }
@@ -313,4 +324,28 @@ struct WidgetIcon: View {
 extension IslandWidgetKind {
     /// The app icon's gradient (`WidgetKindSpec.iconColors`).
     var iconColors: [Color] { spec.iconColors.map(\.color) }
+}
+
+/// A view over the stage's board (top-left origin): the board's space in AppKit, for the Customize
+/// transition, and the board's geometry to find each widget in it.
+private struct StageAnchor: NSViewRepresentable {
+    let probe: StudioProbe
+    let geometry: WidgetBoardGeometry
+
+    func makeNSView(context: Context) -> FlippedView {
+        let view = FlippedView()
+        probe.stageView = view
+        probe.boardGeometry = geometry
+        return view
+    }
+
+    func updateNSView(_ view: FlippedView, context: Context) {
+        probe.stageView = view
+        probe.boardGeometry = geometry
+    }
+
+    final class FlippedView: NSView {
+        override var isFlipped: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
 }
