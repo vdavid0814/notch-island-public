@@ -15,10 +15,13 @@ SCENARIOS = {
     "open-home": [("open?page=home", 2.5), ("close", 3)],
     "open-timer": [("open?page=timer", 2.5), ("close", 3)],
     "open-shelf": [("open?page=shelf", 2.5), ("close", 3)],
+    "open-battery": [("open?page=battery", 2.5), ("close", 3)],
     "hover": [("demo/hover?inside=1", 2.5), ("demo/hover?inside=0", 3)],
     "siri": [("siri", 2.5), ("close", 3)],
     "siri-apps": [("demo/siriapps", 3), ("close", 3)],
     "siri-clipboard": [("demo/siriclipboard", 2.5), ("close", 3)],
+    # Typing a query that reaches apps, commands, settings panes and emoji.
+    "siri-search": [("demo/siritype?text=smile", 3), ("close", 3)],
     "volume": [("demo/volume?level=0.3", 0.5), ("demo/volume?level=0.6", 0.5), ("demo/volume?level=0.8", 3)],
     "battery": [("demo/charging", 4), ("demo/reset", 2)],
     "airpods": [("demo/airpods", 5), ("close", 2)],

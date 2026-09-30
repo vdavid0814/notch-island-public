@@ -1,0 +1,119 @@
+import SwiftUI
+
+/// The battery's widgets (`BatterySpecs`): each kind to its view, a kind not built yet to its placeholder.
+struct BatteryFamily: View {
+    let widget: IslandWidget
+    let size: CGSize
+
+    var body: some View {
+        switch widget.kind {
+        case .battery: BatteryWidget(widget: widget, size: size)
+        default: WidgetPlaceholder(kind: widget.kind, size: size)
+        }
+    }
+}
+
+struct BatteryWidget: View {
+    let widget: IslandWidget
+    let size: CGSize
+
+    @Environment(\.widgetFrameProbe) private var probe
+    @Environment(AppModel.self) private var model
+
+    /// Automatic: a ring when the widget is about square, the battery when it is wide.
+    private var layout: WidgetLayout {
+        switch widget.layout {
+        case .automatic: size.width < size.height * 1.4 ? .ring : .glyph
+        default: widget.layout
+        }
+    }
+
+    var body: some View {
+        let state = model.power.state
+        Group {
+            if layout == .ring {
+                ring(state)
+            } else {
+                glyph(state)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func ring(_ state: PowerState) -> some View {
+        let side = min(size.width, size.height)
+        let diameter = WidgetType.fitted(side, fit: side, widget.size(of: .batteryGlyph), floor: 20)
+        let timeSize = WidgetType.fitted(11, fit: WidgetType.size(fittingLines: 1, in: size.height - diameter - Metrics.Spacing.xSmall),
+                                         widget.size(of: .timeRemaining), floor: 8)
+        return VStack(spacing: Metrics.Spacing.xSmall) {
+            BatteryRing(level: state.level, isCharging: state.isCharging, tint: state.tint,
+                        showsPercentage: widget.shows(.percentage) && diameter >= 40, diameter: diameter,
+                        percentSize: widget.size(of: .percentage))
+                .editorElement(.batteryGlyph, in: probe)
+            if widget.shows(.timeRemaining), size.height - diameter >= 14, let text = remaining(state) {
+                Text(text).font(.system(size: timeSize)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
+                    .editorElement(.timeRemaining, in: probe)
+            }
+        }
+    }
+
+    // The battery with its percentage inside; the time left beside it (or under it when the
+    // widget is tall). Without the battery element, the percentage alone, large.
+    private func glyph(_ state: PowerState) -> some View {
+        let tall = size.height >= 70
+        let time = widget.shows(.timeRemaining) && (size.width >= 110 || tall) ? remaining(state) : nil
+        // Beside the battery (or the percentage), the time left takes what the other leaves.
+        let share: CGFloat = time == nil || tall ? 1 : 0.5
+        let glyphHeight = WidgetType.fitted(
+            WidgetType.points(size.height, ratio: tall ? 0.3 : 0.5, min: 11, max: 34),
+            fit: min((size.width - 8) * share / 2.35, size.height * (tall ? 0.5 : 0.8)),
+            widget.size(of: .batteryGlyph), floor: 9)
+        let percentText = state.hasBattery ? IslandFormat.percent(Double(state.level) / 100) : "—"
+        let percentSize = WidgetType.fitted(
+            WidgetType.points(size.height, ratio: 0.42, min: 13, max: 34),
+            fit: min(WidgetType.size(fitting: "100%", in: (size.width - 8) * share, weight: .semibold, rounded: true, monospacedDigits: true),
+                     WidgetType.size(fittingLines: tall && time != nil ? 1.6 : 1, in: size.height)),
+            widget.size(of: .percentage), floor: 10)
+        let besideWidth = widget.shows(.batteryGlyph) ? glyphHeight * 2.35 : WidgetType.textWidth(percentText, size: percentSize)
+        let timeSize = WidgetType.fitted(
+            WidgetType.points(size.height, ratio: 0.18, min: 10, max: 15),
+            fit: min(WidgetType.size(fitting: time ?? "", in: tall ? size.width - 8 : size.width - besideWidth - Metrics.Spacing.medium - 8),
+                     WidgetType.size(fittingLines: 1, in: tall ? size.height * 0.3 : size.height)),
+            widget.size(of: .timeRemaining), floor: 8)
+        let layout = tall ? AnyLayout(VStackLayout(spacing: Metrics.Spacing.small))
+                          : AnyLayout(HStackLayout(spacing: Metrics.Spacing.medium))
+        return layout {
+            if widget.shows(.batteryGlyph) {
+                BatteryGlyph(level: state.level, isCharging: state.isCharging, tint: state.tint,
+                             showsPercentage: widget.shows(.percentage), height: glyphHeight)
+                    .ownDirection()
+                    .editorElement(.batteryGlyph, in: probe)
+            } else if widget.shows(.percentage) {
+                Text(percentText)
+                    .font(.system(size: percentSize, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(state.tint.style)
+                    .contentTransition(.opacity)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .editorElement(.percentage, in: probe)
+            }
+            if let text = time {
+                Text(text)
+                    .font(.system(size: timeSize))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .ownDirection()
+                    .editorElement(.timeRemaining, in: probe)
+            }
+        }
+        .mirroredSides(widget.mirrored && !tall)
+    }
+
+    private func remaining(_ state: PowerState) -> String? {
+        if state.isCharging { return String(localized: "Charging") }
+        guard let minutes = state.minutesRemaining, minutes > 0 else { return nil }
+        let text = Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes], width: .narrow))
+        return String(localized: "\(text) left")
+    }
+}

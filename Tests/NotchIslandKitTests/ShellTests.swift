@@ -293,7 +293,9 @@ struct FeatureStateTests {
         replaceHUD: Bool = true,
         trusted: Bool = true,
         shelf: Bool = true,
-        suspended: Bool = false
+        suspended: Bool = false,
+        liquidVolume: Bool = true,
+        liquidAirPods: Bool = true
     ) -> FeatureState {
         FeatureState(
             showNowPlaying: nowPlaying,
@@ -302,7 +304,9 @@ struct FeatureStateTests {
             replaceSystemHUD: replaceHUD,
             accessibilityTrusted: trusted,
             shelfEnabled: shelf,
-            suspended: suspended
+            suspended: suspended,
+            liquidVolume: liquidVolume,
+            liquidAirPods: liquidAirPods
         )
     }
 
@@ -362,6 +366,15 @@ struct FeatureStateTests {
         #expect(FeatureState.actions(from: state(suspended: true), to: state()) == [
             .setInterception(true), .setSuspended(false),
         ])
+    }
+
+    @Test func aLiquidCardTurnedOnHasItsFramesWorkedOutAhead() {
+        #expect(FeatureState.actions(from: state(liquidVolume: false), to: state()) == [.prewarmLiquid])
+        #expect(FeatureState.actions(from: state(liquidAirPods: false), to: state()) == [.prewarmLiquid])
+        #expect(FeatureState.actions(from: state(liquidVolume: false, liquidAirPods: false), to: state(liquidVolume: false)) == [.prewarmLiquid])
+        // Turned off: nothing to work out. At launch `AppModel.start` works them out once it has settled.
+        #expect(FeatureState.actions(from: state(), to: state(liquidVolume: false)).isEmpty)
+        #expect(!FeatureState.actions(from: nil, to: state()).contains(.prewarmLiquid))
     }
 
     @Test func togglingSingleFeatures() {

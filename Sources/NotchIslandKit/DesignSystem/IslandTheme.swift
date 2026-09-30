@@ -51,7 +51,7 @@ nonisolated struct IslandTheme: Codable, Equatable, Sendable {
     }
 
     /// A colour as sRGB components, so it can be stored.
-    nonisolated struct RGB: Codable, Equatable, Sendable {
+    nonisolated struct RGB: Codable, Hashable, Sendable {
         var red: Double
         var green: Double
         var blue: Double

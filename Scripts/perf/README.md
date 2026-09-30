@@ -3,6 +3,7 @@
 | File | What |
 |---|---|
 | `bench.py <label> <seconds> [full\|opens\|settings\|idle]` | Drives the island through `notchisland://` URLs and samples CPU %, GPU %, footprint and Energy Impact (top's POWER) every second. `NI_APP` picks the app bundle. |
+| `ab.py <out.tsv> <label=app> … -- [scenario …]` | Back-to-back comparison of builds with `anim.py` (A B A B …), one row per scenario and round, then the medians. Refuses a build that still sends diagnostics. |
 | `per_event.py <label>.json` | CPU ms, peak % and peak energy per event type of a `bench.py` run. |
 | `states.py <label> [seconds]` | Steady-state cost of each island state (rest, panels, Siri, Settings pages). |
 | `cpu.py <pid> <seconds>` | CPU % and footprint of any process over a window. |
@@ -153,3 +154,15 @@ ships inside the app). Points for these tools:
   Strip `NIDiagnosticsConfig` from a measuring copy's Info.plist and sign it again.
 - A test run can hang loading its bundle (system policy) in the shared `.build`: `Scripts/test.sh
   --scratch-path <elsewhere>` runs.
+
+## v0.6 (September 30, 2026)
+
+Tables and changes in `docs/ENERGY-LOG.md`. Points for these tools:
+- **The order of the scenarios changes the numbers**: the first opening of the panel or Siri after a
+  launch costs a third more than later ones, and spam-open measured 27 when run first and 38 after
+  the other scenarios. `ab.py` keeps the order fixed, so compare only runs with the same list.
+- **Energy can rise with the same CPU time**: spam-open's 33 → 38 came with 1120 → 1126 ms. Look for
+  work moved to the render server or bunched into shorter, faster bursts, not only for more CPU.
+- **Undo one change at a time**: a copy of the tree with one file put back, built in release (about
+  40 s incrementally with a cloned `.build`), its binary swapped into a signed copy of the app and
+  measured back to back. That is how the glow and the widget corners were cleared.

@@ -28,6 +28,12 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
     var showsActions = true
     /// Clipboard (⌘4): the history of copied text. Off, nothing is watched or kept.
     var showsClipboard = true
+    /// System (⌘5): the island's commands, Control Center's switches, the Mac's commands and
+    /// System Settings' panes.
+    var showsSystem = true
+    /// Windows (⌘6): the running apps and their windows.
+    var showsWindows = true
+    var showsEmoji = true
 
     // MARK: App gallery
 
@@ -90,6 +96,9 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
         showsFiles = value(.showsFiles, d.showsFiles)
         showsActions = value(.showsActions, d.showsActions)
         showsClipboard = value(.showsClipboard, d.showsClipboard)
+        showsSystem = value(.showsSystem, d.showsSystem)
+        showsWindows = value(.showsWindows, d.showsWindows)
+        showsEmoji = value(.showsEmoji, d.showsEmoji)
         galleryColumns = min(max(value(.galleryColumns, d.galleryColumns), Self.galleryColumnsRange.lowerBound), Self.galleryColumnsRange.upperBound)
         gallerySort = value(.gallerySort, d.gallerySort)
         folders = value(.folders, d.folders)
@@ -110,7 +119,7 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
         SiriLayout(widthFactor: panelSize.factor, listRows: listRows, galleryRows: galleryRows, galleryColumns: galleryColumns)
     }
 
-    /// The suggestions (⌘1–⌘4) that are switched on, in order.
+    /// The suggestions (⌘1–⌘7) that are switched on, in order.
     var categories: [AssistantCategory] {
         AssistantCategory.allCases.filter {
             switch $0 {
@@ -118,6 +127,9 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
             case .files: showsFiles
             case .actions: showsActions
             case .clipboard: showsClipboard
+            case .system: showsSystem
+            case .windows: showsWindows
+            case .emoji: showsEmoji
             }
         }
     }

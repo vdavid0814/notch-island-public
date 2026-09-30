@@ -1,12 +1,13 @@
 import AppKit
 import FoundationModels
 import NaturalLanguage
+import Synchronization
 import UniformTypeIdentifiers
 
 /// The suggestions shown before anything is typed, as in the system's Search window: each one
-/// lists everything of its kind (⌘1, ⌘2, ⌘3) and the field then filters that list.
+/// lists everything of its kind (⌘1–⌘7) and the field then filters that list.
 nonisolated enum AssistantCategory: Int, CaseIterable, Hashable, Sendable {
-    case applications = 1, files, actions, clipboard
+    case applications = 1, files, actions, clipboard, system, windows, emoji
 
     /// What the user may type to find the suggestion itself: its title, and its English names in
     /// any language (the title is localized).
@@ -16,12 +17,18 @@ nonisolated enum AssistantCategory: Int, CaseIterable, Hashable, Sendable {
         case .files: ["Files", "Documents"]
         case .actions: ["Actions", "Shortcuts"]
         case .clipboard: ["Clipboard", "Pasteboard", "Copied"]
+        case .system: ["System", "Commands", "Control Center"]
+        case .windows: ["Windows", "Running Apps", "Switch Apps"]
+        case .emoji: ["Emoji", "Emojis", "Smileys"]
         }
         let title = switch self {
         case .applications: String(localized: "Applications")
         case .files: String(localized: "Files")
         case .actions: String(localized: "Actions")
         case .clipboard: String(localized: "Clipboard")
+        case .system: String(localized: "System")
+        case .windows: String(localized: "Windows")
+        case .emoji: String(localized: "Emoji")
         }
         return [title] + english.filter { $0 != title }
     }
@@ -34,6 +41,14 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
     case action(AssistantAction)
     /// Something the user copied (Clipboard, ⌘4).
     case clip(ClipboardItem)
+    /// An island command, a Control Center switch or one of the Mac's (System, ⌘5).
+    case command(AssistantCommand)
+    /// A System Settings pane (System, ⌘5).
+    case settingsPane(SystemSettingsPane)
+    /// A running app or one of its windows (Windows, ⌘6).
+    case window(AssistantWindow)
+    /// Return pastes it, ⌘C copies it (Emoji, ⌘7).
+    case emoji(AssistantEmoji)
     /// A sum or a unit conversion worked out from the query (Return copies the result).
     case calculation(AssistantCalculation)
     /// The query is a web address: Return opens it.
@@ -48,6 +63,10 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
         case .hit(let hit): "hit:\(hit.url.path)"
         case .action(let action): "action:\(action.id)"
         case .clip(let item): "clip:\(item.id)"
+        case .command(let command): "command:\(command.id)"
+        case .settingsPane(let pane): "pane:\(pane.id)"
+        case .window(let window): "window:\(window.id)"
+        case .emoji(let emoji): "emoji:\(emoji.id)"
         case .calculation: "calculation"
         case .openURL: "url"
         case .askIntelligence: "ask"
@@ -140,6 +159,10 @@ nonisolated struct AssistantSources: Sendable {
     var allApps: @Sendable () async -> [AssistantHit]
     var shortcuts: @Sendable () async -> [String]
     var isUnsupportedLanguage: @Sendable (String) -> Bool
+    var settingsPanes: @Sendable () async -> [SystemSettingsPane]
+    /// The running apps; with `titles`, as their windows (Accessibility, off the main thread).
+    var windows: @Sendable (_ titles: Bool) async -> [AssistantWindow]
+    var emoji: @Sendable () async -> [AssistantEmoji]
 
     static let live = AssistantSources(
         apps: { await AssistantSearch.apps(matching: $0, limit: $1) },
@@ -147,7 +170,10 @@ nonisolated struct AssistantSources: Sendable {
         recentFiles: { await AssistantSearch.recentFiles(scope: $0) },
         allApps: { await AssistantSearch.allApps() },
         shortcuts: { await AssistantSearch.shortcuts() },
-        isUnsupportedLanguage: { AssistantModel.isUnsupportedLanguage($0) }
+        isUnsupportedLanguage: { AssistantModel.isUnsupportedLanguage($0) },
+        settingsPanes: { await SystemSettingsPane.table() },
+        windows: { await RunningWindows.list(titles: $0) },
+        emoji: { await EmojiTable.build() }
     )
 }
 
@@ -172,8 +198,8 @@ nonisolated struct FileScope: Sendable, Equatable {
 }
 
 /// Siri in the notch: the query, the live search, the list's selection, and answers from the
-/// on-device model. Everything is torn down when the assistant closes (`end()`), so nothing runs
-/// while it is not on screen.
+/// on-device model. Everything is torn down when the assistant closes (`end()`; the lists it read
+/// go `keepDuration` later), so nothing runs while it is not on screen.
 @Observable final class AssistantModel {
     /// Typed by the user; every change re-runs the search after a short pause.
     var query = "" {
@@ -182,29 +208,71 @@ nonisolated struct FileScope: Sendable, Equatable {
             queryChanged()
         }
     }
-    /// The suggestion the user opened (⌘1–⌘4); nil is the root.
+    /// The suggestion the user opened (⌘1–⌘7); nil is the root.
     private(set) var category: AssistantCategory?
     /// Root search hits.
-    private(set) var apps: [AssistantHit] = []
+    private(set) var apps: [AssistantHit] = [] { didSet { if apps != oldValue { listsVersion &+= 1 } } }
     /// Root search hits, or the Files list (recent files, or the ones matching the query).
-    private(set) var files: [AssistantHit] = []
+    private(set) var files: [AssistantHit] = [] { didSet { if files != oldValue { listsVersion &+= 1 } } }
     /// Every app, most recently used first: the Applications gallery, filtered in memory.
-    private(set) var allApps: [AssistantHit] = []
+    private(set) var allApps: [AssistantHit] = [] { didSet { if allApps != oldValue { listsVersion &+= 1 } } }
     /// When `allApps` was read from Spotlight: it is kept across openings (asking Spotlight and
     /// drawing the icons again on every opening of the gallery was most of its energy, measured)
     /// and read again in the background once it is older than `appsLifetime`.
     @ObservationIgnored private var allAppsRead: Date?
     static let appsLifetime: TimeInterval = 10 * 60
-    /// The user's shortcuts, read once per opening.
-    private(set) var shortcuts: [String]?
+    /// The user's shortcuts, read once per opening (and kept for `keepDuration` after it).
+    private(set) var shortcuts: [String]? { didSet { if shortcuts != oldValue { listsVersion &+= 1 } } }
+    /// The System Settings panes (⌘5), read once per opening (and kept for `keepDuration` after it).
+    private(set) var settingsPanes: [SystemSettingsPane]? {
+        didSet {
+            guard settingsPanes != oldValue else { return }
+            listsVersion &+= 1
+            matchedPanes = nil
+        }
+    }
+    /// The running apps (root), or their windows (⌘6), read once per opening.
+    private(set) var windows: [AssistantWindow]? { didSet { if windows != oldValue { listsVersion &+= 1 } } }
+    /// `windows` has the windows' titles: read through Accessibility only once ⌘6 opened.
+    @ObservationIgnored private var windowsHaveTitles = false
+    /// Every emoji (⌘7), built once per opening: a few thousand names are not kept at rest, only
+    /// for `keepDuration` after a close.
+    private(set) var emoji: EmojiIndex? {
+        didSet {
+            listsVersion &+= 1
+            matchedEmoji = nil
+        }
+    }
+    /// How long the lists read for an opening (shortcuts, panes, emoji) and Apple Intelligence's
+    /// availability outlive it, as a closed panel is kept: a quick re-open reads and builds none of
+    /// them again (a `shortcuts list` process, the emoji table and its index).
+    static let keepDuration: Duration = .seconds(10)
+    /// Times `keepDuration` (a test moves its own).
+    @ObservationIgnored var clock: any Clock<Duration> = ContinuousClock()
+    /// Frees the kept lists `keepDuration` after a close; nil while Siri is open or once they are gone.
+    @ObservationIgnored private var releaseTask: Task<Void, Never>?
+    /// The switches' states as read this opening (their rows show "On" or "Off").
+    private(set) var commandStates: [AssistantCommand: Bool] = [:]
+    /// The row waiting for a second Return (Empty Trash); another selection or `confirmWindow` cancels it.
+    private(set) var confirming: AssistantRow.ID?
+    static let confirmWindow: Duration = .seconds(4)
+    /// The second Return counts only this long after the first press: a double click or a
+    /// double press of Return is not a confirmation (and a click never confirms).
+    static let confirmDelay: Duration = .milliseconds(400)
+    @ObservationIgnored private var confirmArmed = ContinuousClock.now
     private(set) var selection = 0
     /// Shown instead of the list while present.
     private(set) var answer: AssistantAnswer?
     /// Apple Intelligence can answer on this Mac.
-    private(set) var intelligenceAvailable = false
+    private(set) var intelligenceAvailable = false { didSet { if intelligenceAvailable != oldValue { listsVersion &+= 1 } } }
     /// The query's language is one the on-device model does not support (it then answers poorly
     /// or refuses, measured with Hungarian), so the "Ask" row moves down.
-    private(set) var languageUnsupported = false
+    private(set) var languageUnsupported = false { didSet { if languageUnsupported != oldValue { listsVersion &+= 1 } } }
+    /// Moves with every list the rows are made of, so `rows` is composed once per change and not
+    /// at every move of the pointer (observed: a view reading `rows` redraws when a list lands).
+    /// Only a list that really changed moves it: the same hits landing again, or a close that
+    /// empties lists already empty, redrew the list for nothing (~5 ms per close, measured).
+    private var listsVersion = 0
     /// ↑/↓ brought the suggestions down under the field (the pointer does it by hovering).
     private(set) var revealsSuggestions = false
 
@@ -226,6 +294,14 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// A files read that may ask for folder access has finished (the app takes the keyboard back
     /// from the system's prompt).
     @ObservationIgnored var onFileAccessSettled: (() -> Void)?
+    /// Carries out the Mac's commands and switches: the app gives the live one, a test a recorder.
+    @ObservationIgnored var system = AssistantSystem()
+    /// A countdown is running or paused: "Cancel Timer" is listed.
+    @ObservationIgnored var timerIsActive: () -> Bool = { false }
+    /// The kinds of widget on the board ("Edit Timer Widget").
+    @ObservationIgnored var widgetKinds: () -> [IslandWidgetKind] = { [] }
+    /// The panel's pages this Mac has ("Open Battery" only with a battery).
+    @ObservationIgnored var pages: () -> [ExpandedPage] = { ExpandedPage.allCases }
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let sources: AssistantSources
@@ -245,6 +321,13 @@ nonisolated struct FileScope: Sendable, Equatable {
 
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var loadTask: Task<Void, Never>?
+    /// The running apps, read apart from the other lists so their rows never wait on Accessibility.
+    @ObservationIgnored private var windowsTask: Task<Void, Never>?
+    /// The current query's search has not landed: the rows are still an earlier query's.
+    @ObservationIgnored private var searchPending = false
+    /// A Return pressed while `searchPending`: it runs once the results land, or after `returnWait`.
+    @ObservationIgnored private var deferredReturn: Task<Void, Never>?
+    @ObservationIgnored var returnWait: Duration = .milliseconds(400)
     @ObservationIgnored private var askTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
     /// The user moved the selection (keys or pointer): results landing keep that row selected.
@@ -307,9 +390,32 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// The rows can be seen and chosen (the field alone shows none).
     private var rowsAreShowing: Bool { needsList || revealsSuggestions || hoverReveals }
 
+    /// What the rows are made of besides the lists (`listsVersion`): read at every access, so the
+    /// views reading `rows` keep observing them, and compared, so a hover reuses the rows.
+    private struct RowsKey: Equatable {
+        var query: String
+        var category: AssistantCategory?
+        var lists: Int
+        var settings: SiriSettings
+        var media: MediaState
+        var timerIsActive: Bool
+        var widgetKinds: [IslandWidgetKind]
+        var clips: [ClipboardItem]
+    }
+
+    @ObservationIgnored private var composed: (key: RowsKey, rows: [AssistantRow])?
+
     var rows: [AssistantRow] {
-        let text = trimmedQuery
-        let settings = settings()
+        let key = RowsKey(query: trimmedQuery, category: category, lists: listsVersion, settings: settings(),
+                          media: mediaState(), timerIsActive: timerIsActive(), widgetKinds: widgetKinds(),
+                          clips: category == .clipboard ? clipboard() : [])
+        if let composed, composed.key == key { return composed.rows }
+        let rows = compose(key.query, key.settings, clips: key.clips)
+        composed = (key, rows)
+        return rows
+    }
+
+    private func compose(_ text: String, _ settings: SiriSettings, clips: [ClipboardItem]) -> [AssistantRow] {
         switch category {
         case .applications:
             let gallery = settings.gallerySort == .name
@@ -323,19 +429,36 @@ nonisolated struct FileScope: Sendable, Equatable {
         case .actions:
             return actions(matching: text).map(AssistantRow.action)
         case .clipboard:
-            let items = clipboard()
-            guard !text.isEmpty else { return items.map(AssistantRow.clip) }
-            return items.filter { AssistantMatch.matches($0.text, text, .anywhere) }.map(AssistantRow.clip)
+            guard !text.isEmpty else { return clips.map(AssistantRow.clip) }
+            return clips.filter { AssistantMatch.matches($0.text, text, .anywhere) }.map(AssistantRow.clip)
+        case .system:
+            return typedTimer(text) + commands(matching: text).map(AssistantRow.command)
+                + panes(matching: text).map(AssistantRow.settingsPane)
+        case .windows:
+            return windows(matching: text).map(AssistantRow.window)
+        case .emoji:
+            return emoji(matching: text).map(AssistantRow.emoji)
         case nil:
             guard !text.isEmpty else { return settings.categories.map(AssistantRow.category) }
             // A sum or a conversion is worked out at once and comes first, above everything, as in
             // Spotlight: "12 + 30 * 2" had five words and went to Apple Intelligence (seen, v0.4.5).
-            // A typed web address first of all, as in Spotlight ("github.com", Return).
+            // A typed web address first of all, as in Spotlight ("github.com", Return); a typed
+            // timer ("10 min timer") with them.
             let calculation = (AssistantURL.url(from: text).map { [AssistantRow.openURL($0)] } ?? [])
                 + (calculation(for: text).map { [AssistantRow.calculation($0)] } ?? [])
+                + (settings.showsSystem ? typedTimer(text) : [])
+            // The other kinds' best few: commands and panes by name after the apps, emoji last
+            // (and only from two letters: one matches hundreds).
+            let few = min(settings.resultsPerKind, Self.rootActionLimit)
+            let system = settings.showsSystem
+                ? commands(matching: text).prefix(few).map(AssistantRow.command) + panes(matching: text).prefix(few).map(AssistantRow.settingsPane)
+                : []
             let hits = (settings.showsApplications ? apps.map(AssistantRow.hit) : [])
+                + system
                 + (settings.showsFiles ? files.map(AssistantRow.hit) : [])
+                + (settings.showsWindows ? windows(matching: text).prefix(few).map(AssistantRow.window) : [])
                 + (settings.showsActions ? actions(matching: text).prefix(Self.rootActionLimit).map(AssistantRow.action) : [])
+                + (settings.showsEmoji && text.count >= 2 ? emoji(matching: text).prefix(few).map(AssistantRow.emoji) : [])
             let intelligence = answersWithIntelligence
             // A question is answered on Return: the answer comes first, above any hits (Apple
             // Intelligence here, ChatGPT without it).
@@ -396,21 +519,118 @@ nonisolated struct FileScope: Sendable, Equatable {
         return all.filter { AssistantMatch.matches($0.title, text, settings.matching) }
     }
 
+    /// "timer 10": a row that starts it.
+    private func typedTimer(_ text: String) -> [AssistantRow] {
+        AssistantCommand.timerMinutes(in: text).map { [.command(.timer(minutes: $0))] } ?? []
+    }
+
+    /// What the commands matched for a query, and the panes and emoji: worked out once per query,
+    /// as the rows are composed again for the same query when its search lands.
+    private struct CommandsKey: Equatable {
+        var text: String
+        var matching: SiriMatching
+        var timerIsActive: Bool
+        var widgetKinds: [IslandWidgetKind]
+        var pages: [ExpandedPage]
+    }
+
+    @ObservationIgnored private var matchedCommands: (key: CommandsKey, commands: [AssistantCommand])?
+    @ObservationIgnored private var matchedPanes: (text: String, matching: SiriMatching, panes: [SystemSettingsPane])?
+    @ObservationIgnored private var matchedEmoji: (text: String, emoji: [AssistantEmoji])?
+
+    /// The island's commands (pages the actions do not open, Settings tabs, keep open, the
+    /// board's widgets' editors), Control Center's switches, then the Mac's own.
+    func commands(matching text: String) -> [AssistantCommand] {
+        let key = CommandsKey(text: text, matching: settings().matching, timerIsActive: timerIsActive(), widgetKinds: widgetKinds(), pages: pages())
+        if let matchedCommands, matchedCommands.key == key { return matchedCommands.commands }
+        let actionPages = IslandAction.allCases.map(\.command)
+        var all = key.pages.filter { !actionPages.contains(.open($0)) }.map(AssistantCommand.page)
+        all += IslandSettingsPane.allCases.map(AssistantCommand.settings)
+        all.append(.keepOpen)
+        if key.timerIsActive { all.append(.cancelTimer) }
+        var seen = Set<IslandWidgetKind>()
+        all += key.widgetKinds.filter { seen.insert($0).inserted }.map(AssistantCommand.editWidget)
+        all += AssistantCommand.controls.map(AssistantCommand.control)
+        all += MacCommand.allCases.map(AssistantCommand.mac)
+        let commands = text.isEmpty ? all
+            : all.filter { command in command.searchNames.contains { AssistantMatch.matches($0, text, key.matching) } }
+        matchedCommands = (key, commands)
+        return commands
+    }
+
+    private func panes(matching text: String) -> [SystemSettingsPane] {
+        let panes = settingsPanes ?? []
+        guard !text.isEmpty else { return panes }
+        let matching = settings().matching
+        if let matchedPanes, matchedPanes.text == text, matchedPanes.matching == matching { return matchedPanes.panes }
+        // Found by its own name first ("sound" is Sound before Headphones' "Sound" synonyms).
+        let named = panes.filter { AssistantMatch.matches($0.title, text, matching) }
+        let found = named + panes.filter { pane in !named.contains(pane) && pane.synonyms.contains { AssistantMatch.matches($0, text, matching) } }
+        matchedPanes = (text, matching, found)
+        return found
+    }
+
+    private func windows(matching text: String) -> [AssistantWindow] {
+        let windows = windows ?? []
+        guard !text.isEmpty else { return windows }
+        let matching = settings().matching
+        return windows.filter { AssistantMatch.matches($0.name, text, matching) || AssistantMatch.matches($0.appName, text, matching) }
+    }
+
+    /// An alias typed exactly first ("ok" is 👌), then names that start with it, then the rest.
+    private func emoji(matching text: String) -> [AssistantEmoji] {
+        guard let emoji else { return [] }
+        if let matchedEmoji, matchedEmoji.text == text { return matchedEmoji.emoji }
+        let found = emoji.matching(text)
+        matchedEmoji = (text, found)
+        return found
+    }
+
+    /// The row the selection is on, while the list shows.
+    private var selectedRow: AssistantRow? {
+        guard answer == nil else { return nil }
+        let rows = rows
+        return rows.indices.contains(selection) ? rows[selection] : nil
+    }
+
     /// The copied item the selection is on, in Clipboard (the field shows it, as Spotlight does).
     var selectedClip: ClipboardItem? {
-        guard category == .clipboard, answer == nil else { return nil }
-        let rows = rows
-        guard rows.indices.contains(selection), case .clip(let item) = rows[selection] else { return nil }
+        guard category == .clipboard, case .clip(let item) = selectedRow else { return nil }
         return item
     }
 
-    /// ⌘C in Clipboard: the copy the selection is on goes back on the pasteboard, without a click
-    /// on it. False when the selection is on none (the key goes on to the field).
-    func copySelectedClip() -> Bool {
-        guard let item = selectedClip else { return false }
+    /// ⌘C on a copy (Clipboard) or an emoji: it goes on the pasteboard, without a click on it.
+    /// False when the selection is on neither (the key goes on to the field).
+    func copySelection() -> Bool {
+        let text: String
+        switch selectedRow {
+        case .clip(let item) where category == .clipboard: text = item.text
+        case .emoji(let emoji): text = emoji.character
+        default: return false
+        }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(item.text, forType: .string)
+        pasteboard.setString(text, forType: .string)
+        return true
+    }
+
+    /// ⌘H on a running app or its window the user moved to or picked: hides the app, Spotlight
+    /// stays. False on any other row, and on a row the list merely starts at.
+    func hideSelectedApp() -> Bool {
+        guard selectionIsUsers || marksSelection, case .window(let window) = selectedRow else { return false }
+        system.hide(window)
+        return true
+    }
+
+    /// ⌘Q on a running app or its window: quits the app (macOS asks about unsaved documents) and
+    /// its rows go. False on any other row, and on a row the user did not move to or pick.
+    func quitSelectedApp() -> Bool {
+        guard selectionIsUsers || marksSelection, case .window(let window) = selectedRow else { return false }
+        system.quit(window)
+        replaceLists { windows?.removeAll { $0.pid == window.pid } }
+        // The row the selection falls to was not chosen: another ⌘Q waits for a move.
+        selectionIsUsers = false
+        marksSelection = false
         return true
     }
 
@@ -418,15 +638,21 @@ nonisolated struct FileScope: Sendable, Equatable {
 
     /// The assistant opened.
     func begin() {
+        // Closed less than `keepDuration` ago: what that opening read is still here.
+        let reopensQuickly = releaseTask != nil
         end()
+        releaseTask?.cancel()
+        releaseTask = nil
         // Read ahead in the background (`prewarm`): the first query loads the framework's model
         // catalogue on the calling thread (~0.1 s on the main thread at the first opening, measured).
         if let known = knownIntelligence {
             intelligenceAvailable = known
-            Task { [weak self] in
-                let now = await Self.readIntelligence()
-                self?.knownIntelligence = now
-                if self?.intelligenceAvailable != now { self?.intelligenceAvailable = now }
+            if !reopensQuickly {
+                Task { [weak self] in
+                    let now = await Self.readIntelligence()
+                    self?.knownIntelligence = now
+                    if self?.intelligenceAvailable != now { self?.intelligenceAvailable = now }
+                }
             }
         } else {
             intelligenceAvailable = Self.readIntelligenceNow()
@@ -447,9 +673,10 @@ nonisolated struct FileScope: Sendable, Equatable {
     @concurrent nonisolated static func readIntelligence() async -> Bool { readIntelligenceNow() }
 
     /// What the first opening of Siri would otherwise do at once — Apple Intelligence's
-    /// availability, the app list and the gallery's first icons — done a while after launch on
-    /// the background queue (efficiency cores), a little at a time. The first opening then only
-    /// builds its views (it cost Energy Impact 130, the app gallery 300, measured cold).
+    /// availability, the app list and the gallery's first icons (from disk after the first launch,
+    /// `IconDiskCache`) — done a while after launch on the background queue (efficiency cores), a
+    /// little at a time. The first opening then only builds its views (it cost Energy Impact 130,
+    /// the app gallery 300, measured cold).
     func prewarm(icons: Int = 42) async {
         knownIntelligence = await Self.readIntelligence()
         if allApps.isEmpty {
@@ -468,22 +695,34 @@ nonisolated struct FileScope: Sendable, Equatable {
         for hit in gallery.prefix(icons) {
             _ = await AssistantIcons.thumbnail(for: hit, points: AssistantIcons.galleryIconSize, prewarming: true)
         }
+        // The kept icons of apps and icon styles that are gone go, and the least recently used
+        // beyond the cache's bound.
+        await AssistantIcons.tidyDisk()?.value
     }
 
-    /// The assistant closed: cancel everything and forget the query and the lists.
+    /// The assistant closed: cancel everything and forget the query; the lists go `keepDuration`
+    /// later unless it opens again meanwhile.
     func end() {
         generation &+= 1
         searchTask?.cancel()
         searchTask = nil
         loadTask?.cancel()
         loadTask = nil
+        windowsTask?.cancel()
+        windowsTask = nil
         askTask?.cancel()
         askTask = nil
+        searchPending = false
+        cancelDeferredReturn()
         category = nil
         query = ""
         apps = []
         files = []
-        shortcuts = nil
+        // Read live at every opening.
+        windows = nil
+        windowsHaveTitles = false
+        commandStates = [:]
+        cancelConfirmation()
         selection = 0
         selectionIsUsers = false
         selectionFollowsPointer = false
@@ -494,6 +733,19 @@ nonisolated struct FileScope: Sendable, Equatable {
         // The app list and the gallery's icons stay for the next opening; the icons go after a
         // while without Siri (`AssistantIcons.purgeLater`).
         AssistantIcons.purgeLater()
+        // The icons kept on disk are tidied here too: the prewarm, which tidies them, is skipped
+        // when Siri opens first.
+        AssistantIcons.tidyDisk()
+        releaseTask?.cancel()
+        releaseTask = Task { [weak self, clock] in
+            try? await clock.sleep(for: Self.keepDuration, tolerance: .seconds(1))
+            guard !Task.isCancelled, let self else { return }
+            self.releaseTask = nil
+            self.shortcuts = nil
+            self.settingsPanes = nil
+            self.emoji = nil
+            AssistantMatch.forget()
+        }
     }
 
     // MARK: Keys
@@ -511,7 +763,9 @@ nonisolated struct FileScope: Sendable, Equatable {
         revealsSuggestions = true
         let count = rows.count
         guard count > 0 else { return }
-        selection = min(max(selection + delta, 0), count - 1)
+        let next = min(max(selection + delta, 0), count - 1)
+        if next != selection { cancelConfirmation() }
+        selection = next
         selectionIsUsers = true
         selectionFollowsPointer = false
         marksSelection = true
@@ -519,6 +773,7 @@ nonisolated struct FileScope: Sendable, Equatable {
 
     func select(_ row: AssistantRow) {
         guard let index = rows.firstIndex(where: { $0.id == row.id }) else { return }
+        if index != selection { cancelConfirmation() }
         selection = index
         selectionIsUsers = true
         selectionFollowsPointer = true
@@ -526,16 +781,42 @@ nonisolated struct FileScope: Sendable, Equatable {
     }
 
     /// Return: runs the selected row. On an answer it asks again if the question was edited; on the
-    /// bare field it does nothing (nothing is shown to run).
+    /// bare field it does nothing (nothing is shown to run). Pressed before the query's results
+    /// land, it waits for them (up to `returnWait`), so it runs the row the user then sees: "blu"
+    /// and Return at once turned Bluetooth off, the row above the apps until they landed.
     func activateSelection() {
         if let answer {
             if !trimmedQuery.isEmpty, trimmedQuery != answer.question { ask() }
             return
         }
         guard rowsAreShowing else { return }
+        guard searchPending else { return runSelection() }
+        guard deferredReturn == nil else { return }
+        let wait = returnWait
+        deferredReturn = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled, let self else { return }
+            self.deferredReturn = nil
+            self.runSelection()
+        }
+    }
+
+    private func runSelection() {
         let rows = rows
-        guard rows.indices.contains(selection) else { return }
-        perform(rows[selection])
+        guard rowsAreShowing, answer == nil, rows.indices.contains(selection) else { return }
+        let row = rows[selection]
+        // From the root a switch or a Mac command runs only once the query's own results are in:
+        // the apps landing may put another row where it was. (Only those have no island command.)
+        if category == nil, searchPending, case .command(let command) = row, command.appCommand == nil {
+            DiagnosticsFlow.record("siri: Return on \(row.id) before \"\(trimmedQuery)\" landed, not run")
+            return
+        }
+        perform(row, byKey: true)
+    }
+
+    private func cancelDeferredReturn() {
+        deferredReturn?.cancel()
+        deferredReturn = nil
     }
 
     /// Esc: from an answer back to the list, then clear the query, then leave the suggestion, then
@@ -581,6 +862,8 @@ nonisolated struct FileScope: Sendable, Equatable {
         }
         guard category != self.category else { return }
         self.category = category
+        cancelConfirmation()
+        cancelDeferredReturn()
         // Back at the root the suggestions stay down: the user was just in one.
         revealsSuggestions = true
         selection = 0
@@ -594,7 +877,8 @@ nonisolated struct FileScope: Sendable, Equatable {
 
     // MARK: Actions
 
-    func perform(_ row: AssistantRow) {
+    /// A row clicked, or (`byKey`) chosen with Return.
+    func perform(_ row: AssistantRow, byKey: Bool = false) {
         DiagnosticsFlow.record("siri: picked \(row.id) for \"\(trimmedQuery)\"")
         // From the answer pane the hand-offs take the question that was answered.
         let text = answer?.question ?? trimmedQuery
@@ -607,7 +891,7 @@ nonisolated struct FileScope: Sendable, Equatable {
             open(category)
         case .hit(let hit):
             onClose?()
-            NSWorkspace.shared.open(hit.url)
+            system.open(hit.url)
         case .action(.island(let action)):
             onCommand?(action.command)
         case .action(.shortcut(let name)):
@@ -615,6 +899,18 @@ nonisolated struct FileScope: Sendable, Equatable {
             AssistantActions.runShortcut(named: name)
         case .clip(let item):
             onPaste?(item)
+        case .command(let command):
+            run(command, row: row, byKey: byKey)
+        case .settingsPane(let pane):
+            guard let url = pane.url else { return }
+            onClose?()
+            system.open(url)
+        case .window(let window):
+            // Handed over while Spotlight is still the active app, then closed.
+            system.switchTo(window)
+            onClose?()
+        case .emoji(let emoji):
+            onPaste?(ClipboardItem(text: emoji.character, copied: .now))
         case .openURL(let url):
             onClose?()
             NSWorkspace.shared.open(url)
@@ -632,6 +928,49 @@ nonisolated struct FileScope: Sendable, Equatable {
             guard let url = AssistantActions.chatGPTURL(for: text) else { return }
             onClose?()
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func run(_ command: AssistantCommand, row: AssistantRow, byKey: Bool) {
+        switch command {
+        case .page, .settings, .keepOpen, .timer, .cancelTimer, .editWidget:
+            if let appCommand = command.appCommand { onCommand?(appCommand) }
+        case .control(let control):
+            // `refresh` reads only the switches a widget shows: this one is read now, so the
+            // switch goes the right way.
+            let on = system.state(command, true) ?? false
+            onClose?()
+            system.setControl(control, !on)
+        case .mac(.emptyTrash) where confirming != row.id:
+            confirming = row.id
+            confirmArmed = .now
+            confirmTask = Task { [weak self] in
+                try? await Task.sleep(for: Self.confirmWindow)
+                guard !Task.isCancelled else { return }
+                self?.cancelConfirmation()
+            }
+        case .mac(.emptyTrash) where !byKey || ContinuousClock.now - confirmArmed < Self.confirmDelay:
+            // Armed: only a Return after the pause empties it.
+            break
+        case .mac(let mac):
+            cancelConfirmation()
+            onClose?()
+            system.run(mac)
+        }
+    }
+
+    @ObservationIgnored private var confirmTask: Task<Void, Never>?
+
+    private func cancelConfirmation() {
+        confirmTask?.cancel()
+        confirmTask = nil
+        if confirming != nil { confirming = nil }
+    }
+
+    /// Reads the states of the switches among `commands` not read yet this opening.
+    private func readStates(of commands: [AssistantCommand]) {
+        for command in commands where command.hasState && commandStates[command] == nil {
+            if let on = system.state(command, false) { commandStates[command] = on }
         }
     }
 
@@ -671,6 +1010,8 @@ nonisolated struct FileScope: Sendable, Equatable {
     // MARK: Search
 
     private func queryChanged() {
+        cancelConfirmation()
+        cancelDeferredReturn()
         selection = 0
         selectionIsUsers = false
         selectionFollowsPointer = false
@@ -695,9 +1036,14 @@ nonisolated struct FileScope: Sendable, Equatable {
         let text = trimmedQuery
         let category = category
         searchTask?.cancel()
+        searchPending = false
         loadLists(for: category, query: text)
         switch category {
-        case .applications, .actions, .clipboard:
+        case .system:
+            // Filtered in memory as the user types; the switches' states are read once.
+            readStates(of: commands(matching: ""))
+            return
+        case .applications, .actions, .clipboard, .windows, .emoji:
             // Filtered in memory as the user types.
             return
         case .files:
@@ -719,6 +1065,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         // The app list in memory in every mode (it has the apps Spotlight's name query misses:
         // "device hub" for DeviceHub, v0.4.10), with Spotlight's hits (other names: localized,
         // alternate) merged in.
+        searchPending = true
         let inMemoryApps: [AssistantHit]? = allApps.isEmpty ? nil
             : Array(AssistantSearch.rank(allApps.filter { AssistantMatch.matches($0.name, text, settings.matching) }, for: text)
                 .prefix(hitLimit))
@@ -753,10 +1100,19 @@ nonisolated struct FileScope: Sendable, Equatable {
             // The rows come with their icons, drawn off the main thread.
             await AssistantIcons.prepare((foundApps + foundFiles).map(AssistantIcons.source(for:)))
             guard !Task.isCancelled, self.generation == generation else { return }
+            // The switches the root lists show their state (read once the typing pauses).
+            if category == nil, settings.showsSystem {
+                self.readStates(of: Array(self.commands(matching: text).prefix(min(hitLimit, Self.rootActionLimit))))
+            }
             self.replaceLists {
                 self.apps = foundApps
                 self.files = foundFiles
                 self.languageUnsupported = unsupported
+            }
+            self.searchPending = false
+            if self.deferredReturn != nil {
+                self.cancelDeferredReturn()
+                self.runSelection()
             }
             DiagnosticsFlow.record("siri: \"\(text)\" in \(category.map { String(describing: $0) } ?? "root") → \(foundApps.count) apps, \(foundFiles.count) files (\(settings.matching))")
         }
@@ -770,20 +1126,31 @@ nonisolated struct FileScope: Sendable, Equatable {
         return Array(AssistantSearch.rank(AssistantSearch.merged(inMemory, indexed), for: text).prefix(limit))
     }
 
-    /// Every app for Applications; the shortcuts for Actions and for root queries.
+    /// Every app for Applications; the shortcuts for Actions, the panes for System, the running
+    /// apps for Windows and the emoji for Emoji; all but the apps for root queries too.
     private func loadLists(for category: AssistantCategory?, query: String) {
+        let settings = settings()
+        let rootQuery = category == nil && !query.isEmpty
+        loadWindows(for: category, rootQuery: rootQuery, settings: settings)
         let isStale = allAppsRead.map { Date().timeIntervalSince($0) > Self.appsLifetime } ?? true
         let needsApps = category == .applications && (allApps.isEmpty || isStale)
-        let needsShortcuts = shortcuts == nil && settings().includesShortcuts
-            && (category == .actions || (category == nil && !query.isEmpty))
-        guard needsApps || needsShortcuts, loadTask == nil else { return }
+        let needsShortcuts = shortcuts == nil && settings.includesShortcuts && (category == .actions || rootQuery)
+        let needsPanes = settingsPanes == nil && settings.showsSystem && (category == .system || rootQuery)
+        // Built once per opening, at its first use, and dropped `keepDuration` after `end()`.
+        let needsEmoji = emoji == nil && settings.showsEmoji && (category == .emoji || rootQuery)
+        guard needsApps || needsShortcuts || needsPanes || needsEmoji, loadTask == nil else { return }
         let sources = sources
         loadTask = Task { [weak self] in
             async let apps = needsApps ? sources.allApps() : []
             async let shortcuts = needsShortcuts ? sources.shortcuts() : nil
-            let (foundApps, foundShortcuts) = await (apps, shortcuts)
-            // The shortcuts' rows come with their icon, drawn off the main thread.
-            if foundShortcuts?.isEmpty == false { await AssistantIcons.prepare([AssistantIcons.shortcutsSource]) }
+            async let panes = needsPanes ? sources.settingsPanes() : nil
+            async let emoji = needsEmoji ? EmojiIndex.build(sources.emoji) : nil
+            let (foundApps, foundShortcuts, foundPanes, foundEmoji) = await (apps, shortcuts, panes, emoji)
+            // The rows come with their icons, drawn off the main thread.
+            var icons = Set<AssistantIcons.Source>()
+            if foundShortcuts?.isEmpty == false { icons.insert(AssistantIcons.shortcutsSource) }
+            if foundPanes?.isEmpty == false { icons.insert(AssistantIcons.systemSettingsSource) }
+            if !icons.isEmpty { await AssistantIcons.prepare(Array(icons)) }
             guard !Task.isCancelled, let self else { return }
             self.loadTask = nil
             self.replaceLists {
@@ -792,9 +1159,31 @@ nonisolated struct FileScope: Sendable, Equatable {
                     self.allAppsRead = Date()
                 }
                 if needsShortcuts { self.shortcuts = foundShortcuts ?? [] }
+                if needsPanes { self.settingsPanes = foundPanes ?? [] }
+                if needsEmoji { self.emoji = foundEmoji ?? EmojiIndex([]) }
             }
             // Asked for something else while this ran (the task is single-flight).
             self.loadLists(for: self.category, query: self.trimmedQuery)
+        }
+    }
+
+    /// The running apps for root queries (no Accessibility), their windows' titles only for ⌘6.
+    private func loadWindows(for category: AssistantCategory?, rootQuery: Bool, settings: SiriSettings) {
+        guard settings.showsWindows, windowsTask == nil else { return }
+        let titles = category == .windows
+        guard titles ? !windowsHaveTitles : (rootQuery && windows == nil) else { return }
+        let sources = sources
+        windowsTask = Task { [weak self] in
+            let found = await sources.windows(titles)
+            await AssistantIcons.prepare(found.map { AssistantIcons.Source.app($0.appPath) })
+            guard !Task.isCancelled, let self else { return }
+            self.windowsTask = nil
+            self.replaceLists {
+                self.windows = found
+                self.windowsHaveTitles = titles
+            }
+            // ⌘6 opened while the root's list was read.
+            self.loadWindows(for: self.category, rootQuery: false, settings: self.settings())
         }
     }
 
@@ -815,9 +1204,10 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// For tests: waits for the searches and loads in flight.
     func settle() async {
         // A finished load may start the next one (the task is single-flight).
-        while let task = loadTask ?? searchTask {
+        while let task = loadTask ?? windowsTask ?? searchTask {
             await task.value
             if task == loadTask { loadTask = nil }
+            if task == windowsTask { windowsTask = nil }
             if task == searchTask { searchTask = nil }
         }
     }
@@ -874,12 +1264,12 @@ nonisolated struct FileScope: Sendable, Equatable {
 nonisolated enum AssistantMatch {
     /// Whether `name` matches what was typed, in the user's matching mode (`SiriMatching`).
     static func matches(_ name: String, _ query: String, _ mode: SiriMatching = .wordStart) -> Bool {
-        let original = name
-        let name = fold(name)
-        let query = fold(query).trimmingCharacters(in: .whitespaces)
+        let query = folded(query).trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return true }
+        let original = name
+        let name = folded(name)
         if name.hasPrefix(query) { return true }
-        let words = Self.words(of: original)
+        let words = keptWords(of: original)
         let tokens = query.split(whereSeparator: \.isWhitespace)
         let wordStarts = tokens.allSatisfy { token in words.contains { $0.hasPrefix(token) } }
         switch mode {
@@ -891,6 +1281,37 @@ nonisolated enum AssistantMatch {
             return wordStarts || tokens.allSatisfy { name.contains($0) } || isSubsequence(query.filter { !$0.isWhitespace }, of: name)
         }
     }
+
+    /// Names folded and split into their words, kept: the same few hundred names (apps, panes and
+    /// their synonyms, commands) are matched again at every keystroke, and folding them again was
+    /// most of Siri's main-thread time while typing (measured). Long texts (copies in Clipboard)
+    /// are not kept; the rest goes with the lists a while after Siri closes (`forget`).
+    private struct Kept { var names: [String: String] = [:]; var words: [String: [Substring]] = [:] }
+    private static let known = Mutex(Kept())
+
+    private static func folded(_ text: String) -> String {
+        guard text.utf8.count <= 256 else { return fold(text) }
+        if let kept = known.withLock({ $0.names[text] }) { return kept }
+        let folded = fold(text)
+        known.withLock { known in
+            if known.names.count >= 4096 { known.names.removeAll() }
+            known.names[text] = folded
+        }
+        return folded
+    }
+
+    private static func keptWords(of text: String) -> [Substring] {
+        guard text.utf8.count <= 256 else { return words(of: text) }
+        if let kept = known.withLock({ $0.words[text] }) { return kept }
+        let words = words(of: text)
+        known.withLock { known in
+            if known.words.count >= 4096 { known.words.removeAll() }
+            known.words[text] = words
+        }
+        return words
+    }
+
+    static func forget() { known.withLock { $0 = Kept() } }
 
     /// The name's words, folded: split at spaces and marks, and where a capital follows a small
     /// letter ("DeviceHub" is "device" and "hub": "device hub" found no app, v0.4.10).
@@ -920,10 +1341,9 @@ nonisolated enum AssistantMatch {
     /// The name starts with what was typed ("application" and "appl" start "Applications"); case
     /// and accents do not matter.
     static func startsName(_ name: String, _ query: String) -> Bool {
-        let name = fold(name)
-        let query = fold(query).trimmingCharacters(in: .whitespaces)
+        let query = folded(query).trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return false }
-        return name.hasPrefix(query)
+        return folded(name).hasPrefix(query)
     }
 
     /// Every character of `needle` in `haystack`, in order ("sfr" in "safari").
@@ -944,7 +1364,8 @@ nonisolated enum AssistantMatch {
 /// Siri's icons, looked up and drawn off the main thread and kept while Siri is used (a list
 /// re-renders on every keystroke and hover). A row's is the very picture SwiftUI took from the
 /// system's full icon (the same pixels on screen), which the rows used to look up, and SwiftUI to
-/// draw, on the main thread; a gallery cell's is drawn once at the size it is shown (2x).
+/// draw, on the main thread; a gallery cell's is drawn once at the size it is shown (2x). An app's
+/// picture of either kind is kept on disk as well, for the next launch (`IconDiskCache`).
 @MainActor enum AssistantIcons {
     /// Where an icon comes from.
     nonisolated enum Source: Hashable, Sendable {
@@ -961,6 +1382,10 @@ nonisolated enum AssistantMatch {
         let source: Source
         let scale: CGFloat
     }
+
+    /// Where app icons are kept across launches: the app's Caches from its start (`AppModel.start`),
+    /// nowhere before (tests).
+    static var disk = IconDiskCache(folder: nil)
 
     private static var icons: [Key: NSImage] = [:]
     private static var thumbnails: [String: NSImage] = [:]
@@ -979,17 +1404,24 @@ nonisolated enum AssistantMatch {
     }
 
     static let shortcutsSource = Source.app(AssistantSearch.shortcutsApp)
+    static let systemSettingsSource = Source.app("/System/Applications/System Settings.app")
 
     /// A row's icon: drawn ahead with the rows' search (`prepare`), or here the first time.
     static func icon(for hit: AssistantHit, scale: CGFloat) -> NSImage { icon(source(for: hit), scale: scale) }
 
     static func shortcuts(scale: CGFloat) -> NSImage { icon(shortcutsSource, scale: scale) }
 
+    static func systemSettings(scale: CGFloat) -> NSImage { icon(systemSettingsSource, scale: scale) }
+
+    /// A running app's (Windows, ⌘6).
+    static func app(_ path: String, scale: CGFloat) -> NSImage { icon(.app(path), scale: scale) }
+
     private static func icon(_ source: Source, scale: CGFloat) -> NSImage {
         rowScale = scale
         let key = Key(source: source, scale: scale)
         if let icon = icons[key] { return icon }
-        let icon = rowPicture(source, scale: scale).map { rowImage($0, scale: scale) } ?? systemIcon(source)
+        // On the main thread: read from disk at most, never written (`prepare` keeps them).
+        let icon = rowPicture(source, scale: scale, disk: disk, writes: false).map { rowImage($0, scale: scale) } ?? systemIcon(source)
         icons[key] = icon
         return icon
     }
@@ -1000,10 +1432,12 @@ nonisolated enum AssistantMatch {
 
     /// Draws the icons of rows about to be shown (a search's hits) before they show.
     static func prepare(_ sources: [Source]) async {
-        let scale = rowScale
+        let scale = rowScale, disk = disk
         let missing = Set(sources).filter { icons[Key(source: $0, scale: scale)] == nil }
         guard !missing.isEmpty else { return }
-        let pictures = await Thrifty.run { missing.compactMap { source in rowPicture(source, scale: scale).map { (source, $0) } } }
+        let pictures = await Thrifty.run {
+            missing.compactMap { source in rowPicture(source, scale: scale, disk: disk, writes: true).map { (source, $0) } }
+        }
         for (source, picture) in pictures {
             let key = Key(source: source, scale: scale)
             // A row may have drawn it meanwhile: the one it shows stays.
@@ -1023,9 +1457,9 @@ nonisolated enum AssistantMatch {
         let key = hit.url.path
         if let image = thumbnails[key] { return image }
         let source = Source.app(hit.url.path)
-        let pixels = Int(points * 2)
-        let rendered = prewarming ? await Thrifty.runInBackground { draw(source, pixels: pixels) }
-                                  : await render(source, pixels: pixels)
+        let pixels = Int(points * 2), disk = disk
+        let rendered = prewarming ? await Thrifty.runInBackground { thumbnail(source, pixels: pixels, disk: disk) }
+                                  : await render(source, pixels: pixels, disk: disk)
         guard let cgImage = rendered, !Task.isCancelled else { return nil }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: points, height: points))
         thumbnails[key] = image
@@ -1034,8 +1468,8 @@ nonisolated enum AssistantMatch {
 
     /// On the `Thrifty` queue: a gallery of icons drawn in parallel from its cells ran every
     /// performance core at full clock (measured 2.2 W for half a second).
-    private static func render(_ source: Source, pixels: Int) async -> CGImage? {
-        await Thrifty.run { draw(source, pixels: pixels) }
+    private static func render(_ source: Source, pixels: Int, disk: IconDiskCache) async -> CGImage? {
+        await Thrifty.run { thumbnail(source, pixels: pixels, disk: disk) }
     }
 
     nonisolated private static func systemIcon(_ source: Source) -> NSImage {
@@ -1048,12 +1482,24 @@ nonisolated enum AssistantMatch {
 
     /// The system icon's own picture for a row: its variant for the row's size at the screen's
     /// scale (48 pixels for 22 points at 2x), which Core Animation scales to the row as it did the
-    /// full icon's.
-    nonisolated private static func rowPicture(_ source: Source, scale: CGFloat) -> CGImage? {
-        var rect = CGRect(x: 0, y: 0, width: rowIconSize, height: rowIconSize)
-        let transform = NSAffineTransform()
-        transform.scale(by: scale)
-        return systemIcon(source).cgImage(forProposedRect: &rect, context: nil, hints: [.ctm: transform])
+    /// full icon's. An app's comes from disk while the app is unchanged (`IconDiskCache`).
+    nonisolated private static func rowPicture(_ source: Source, scale: CGFloat, disk: IconDiskCache, writes: Bool) -> CGImage? {
+        let picture = {
+            var rect = CGRect(x: 0, y: 0, width: rowIconSize, height: rowIconSize)
+            let transform = NSAffineTransform()
+            transform.scale(by: scale)
+            return systemIcon(source).cgImage(forProposedRect: &rect, context: nil, hints: [.ctm: transform])
+        }
+        guard case .app(let path) = source else { return picture() }
+        return disk.image(forApp: path, variant: "row \(scale)x", style: IconDiskCache.iconStyle(), writes: writes, draw: picture)
+    }
+
+    /// A gallery thumbnail: from disk while the app is unchanged, else drawn (`draw`).
+    nonisolated private static func thumbnail(_ source: Source, pixels: Int, disk: IconDiskCache) -> CGImage? {
+        guard case .app(let path) = source else { return draw(source, pixels: pixels) }
+        return disk.image(forApp: path, variant: "gallery \(pixels)px", style: IconDiskCache.iconStyle()) {
+            draw(source, pixels: pixels)
+        }
     }
 
     nonisolated private static func draw(_ source: Source, pixels: Int) -> CGImage? {
@@ -1088,6 +1534,20 @@ nonisolated enum AssistantMatch {
             purge()
             purgeTask = nil
         }
+    }
+
+    /// When the icons on disk were last tidied.
+    static var diskTidied: Date?
+    /// How often at most.
+    static let tidyInterval: TimeInterval = 24 * 60 * 60
+
+    /// Tidies the icons kept on disk (`IconDiskCache.purge`) on the background queue, at most once
+    /// every `tidyInterval`: nil when it was done more recently.
+    @discardableResult static func tidyDisk() -> Task<Void, Never>? {
+        if let diskTidied, Date().timeIntervalSince(diskTidied) < tidyInterval { return nil }
+        diskTidied = Date()
+        let disk = disk
+        return Task { await Thrifty.runInBackground { disk.purge(style: IconDiskCache.iconStyle()) } }
     }
 }
 

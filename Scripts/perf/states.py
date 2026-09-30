@@ -9,6 +9,7 @@ STATES = [
     ("rest (compact or idle)", "close", None),
     ("expanded home", "open?page=home", None),
     ("expanded timer", "open?page=timer", None),
+    ("expanded battery", "open?page=battery", None),
     ("siri field", "siri", None),
     ("settings general", "settings/general", None),
     ("settings widgets", "settings/widgets", None),

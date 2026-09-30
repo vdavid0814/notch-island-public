@@ -47,6 +47,15 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     var screen: CGSize = .zero
     /// Siri's window proportions (Settings ▸ Siri ▸ Window).
     var siri = SiriLayout()
+    /// The open panel's width and board height (Settings ▸ Widgets ▸ Size).
+    var panel = PanelLayout()
+
+    /// The same island with other panel proportions: a draft the Size editor shows while dragging.
+    func replacing(panel: PanelLayout) -> IslandLayout {
+        var layout = self
+        layout.panel = panel
+        return layout
+    }
 
     /// Glass extends this far above the window top, where it is clipped, so its
     /// top edge never shows a rim against the bezel.
@@ -78,9 +87,12 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     /// The detail row a banner adds below the header band.
     static let bannerDetailHeight: CGFloat = 48
     /// Expanded panel before scaling: extra width beside the notch, its floor, and the page height.
+    /// The panel's own factors (`panel`) scale them further, within the screen: no wider than
+    /// Settings may be, and a page no taller than `expandedMaximumScreenShare` of the screen.
     static let expandedExtraWidth: CGFloat = 380
     static let expandedMinimumWidth: CGFloat = 600
     static let expandedPageHeight: CGFloat = 160
+    static let expandedMaximumScreenShare: CGFloat = 0.62
     /// The assistant below its header band: the search field, a list of hits and actions, or an
     /// answer. As wide as the expanded panel, so from the header's Siri button it grows downward.
     static let assistantPageHeight: CGFloat = 280
@@ -176,11 +188,14 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             )
         case .expanded:
             let f = scale.factor
+            let screen = screen == .zero ? Self.fallbackScreen : screen
             // Scaled lengths are rounded so glass edges stay on the pixel grid at every scale.
+            let width = (max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f * panel.widthFactor).rounded()
+            let page = (Self.expandedPageHeight * f * panel.boardHeightFactor).rounded()
             return CGSize(
-                width: (max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f).rounded(),
+                width: min(width, screen.width - 2 * Self.settingsSideMargin),
                 // The header band stays exactly the notch height; only the page scales.
-                height: notch.height + (Self.expandedPageHeight * f).rounded()
+                height: notch.height + min(page, (Self.expandedMaximumScreenShare * screen.height - notch.height).rounded(.down))
             )
         case .settings:
             let screen = screen == .zero ? Self.fallbackScreen : screen
@@ -190,6 +205,7 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             return CGSize(width: width.rounded(), height: notch.height + page.rounded())
         case .assistant(let room):
             let f = scale.factor
+            let screen = screen == .zero ? Self.fallbackScreen : screen
             // The user's rows and columns scale the defaults (7 list rows, a 9 × 4 gallery).
             let list = (Self.assistantPageHeight * f * CGFloat(siri.listRows) / 7).rounded()
             let page: CGFloat = switch room {
@@ -202,10 +218,12 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             case .gallery: Self.galleryPageHeight(rows: siri.galleryRows)
             case .galleryRows(let count): Self.galleryPageHeight(rows: min(count, siri.galleryRows))
             }
-            let panel = (max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f * siri.widthFactor).rounded()
+            // The panel's width times Siri's own factor, so Siri grows out of the header as wide.
+            let panel = (max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f * self.panel.widthFactor
+                         * siri.widthFactor).rounded()
             let gallery = (Self.assistantGalleryWidth * f * CGFloat(siri.galleryColumns) / 9).rounded()
             return CGSize(
-                width: room.isGallery ? max(panel, gallery) : panel,
+                width: min(room.isGallery ? max(panel, gallery) : panel, screen.width - 2 * Self.settingsSideMargin),
                 height: notch.height + page
             )
         }

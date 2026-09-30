@@ -51,6 +51,10 @@ nonisolated struct ActivitySignals: Sendable, Equatable {
 
     var prefersReducedWork: Bool { isLowPowerMode || isThermallyConstrained }
 
+    /// Every sleep, wake, session and lock edge as it arrives, whether or not it changes
+    /// `isSuspended` (the battery history marks sleep, wake and the displays going off and on).
+    @ObservationIgnored var onEdge: ((ActivitySignals.Edge) -> Void)?
+
     /// Why it is (or is not) suspended, for diagnostics.
     var diagnosticsSignals: String { String(describing: signals) }
 
@@ -115,6 +119,7 @@ nonisolated struct ActivitySignals: Sendable, Equatable {
     }
 
     private func receive(_ edge: ActivitySignals.Edge) {
+        onEdge?(edge)
         signals.apply(edge)
         let suspended = signals.isSuspended
         guard suspended != isSuspended else { return }

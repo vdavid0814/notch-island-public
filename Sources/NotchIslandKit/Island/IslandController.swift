@@ -212,7 +212,7 @@ nonisolated extension BannerKind {
 
     func expand(page: ExpandedPage? = nil, pinned: Bool = false, userInitiated: Bool) {
         hoverDwell.cancel()
-        if let page, model.island.page != page { model.island.page = page }
+        if let page, model.island.page != page, model.availablePages.contains(page) { model.island.page = page }
         if pinned, !model.island.isPinned { model.island.isPinned = true }
         if !wantsExpanded {
             wantsExpanded = true
@@ -457,7 +457,7 @@ nonisolated extension BannerKind {
             wantsSettings: wantsSettings,
             assistantRoom: model.assistant.room,
             wantsExpanded: wantsExpanded,
-            page: model.island.page,
+            page: model.panelPage,
             banner: model.banners.current,
             isDragInProgress: isDragInProgress,
             countdownActive: model.timers.isCountdownActive,

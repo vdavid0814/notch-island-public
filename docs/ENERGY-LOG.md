@@ -4,6 +4,121 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-09-30: v0.6 (build 23): the new features, and the next energy round
+
+**Machine:** the same MacBook Air M5 (Mac17,3), macOS 27, on battery the whole time (57 % for the
+middle pass, 39 → 38 % for the final one: both above 30 %, the same core scheduling). Music
+playing. Release builds signed with the same identity, report destinations removed.
+
+**Builds compared:** "v0.5.1" = v0.5.1 (22) as released plus the uncommitted liquid-card lead
+(`airPodsMode` 0.20); "v0.6" = this release. Every number is the median of two rounds run back to
+back, v0.5.1 and v0.6 alternating, with the same scenario list (`Scripts/perf/ab.py`).
+
+### Result in short
+
+Activity Monitor's Energy Impact (coalition mW, worst 5 s window), and the app's CPU ms:
+
+| scenario | v0.5.1 | v0.6 | change | CPU ms v0.5.1 → v0.6 |
+|---|---|---|---|---|
+| settings (General, then Widgets, close) | 500.8 | 424.9 | −15 % | 1460 → 1328 |
+| siri-apps (Siri's app gallery) | 48.3 | 40.7 | −16 % | 542 → 524 |
+| spam-pages (home → timer → shelf, 4 rounds) | 53.1 | 49.1 | −8 % | 1206 → 1188 |
+| open-home | 12.8 | 12.4 | −3 % | 218 → 206 |
+| open-timer | 7.8 | 7.5 | −4 % | 154 → 154 |
+| timer-done | 12.6 | 12.1 | −4 % | 432 → 448 |
+| volume | 6.1 | 5.8 | −5 % | 218 → 226 |
+| airpods | 1.8 | 1.6 | | 110 → 112 |
+| open-battery (new page) | — | 7.5 | below open-home | 148 |
+| siri | 63.0 | 67.9 | +8 % (the middle pass: 68.4 → 64.8, noise) | 310 → 311 |
+| siri-search (typing "smile") | 113.3 | 133.4 | **+18 %, not met** | 366 → 421 |
+| spam-open (10 × open/close, 0.25 s) | 32.9 | 37.9 | **+15 %, not met** (another order: 25.8 → 27.1) | 1120 → 1126 |
+| spam-siri (8 × open/close) | 79.8 | 90.7 | **+14 %, not met** (another order: equal) | 1528 → 1590 |
+
+- **First opening of the panel after a launch** (open-home run first): 33.6 → 46.8 (+36 %, once per
+  launch). About 5 of the 13 come from the header's four-page picker and the battery button; the
+  rest from the new widget code's first build.
+- **siri-search** pays for the new Spotlight sources (commands, System Settings panes, emoji) on
+  the first search after a launch; typing itself got cheaper (below).
+- **spam-open / spam-siri** depend on the order of the scenarios: with the panel or Siri opened
+  first after a launch they are within noise of v0.5.1, after the other scenarios 14–15 % above.
+
+### What changed (each kept only with the look, the timing and the behaviour unchanged)
+
+**Settings**
+- The pages and every gallery preview fade in on the render server (a Core Animation opacity
+  animation on their own layer) instead of a SwiftUI fade that updated the outer view graph on
+  every frame. Each preview is its own picture host, re-rendered only when its widget changes.
+- The desktop picture behind the stage and the gallery is looked up once per opening and shared
+  (it was looked up about ten times).
+- Isolated hosts re-render only when their input changes (an equatable input).
+
+**Siri and Spotlight**
+- App icons are kept on disk (8-bit BGRA, keyed by the app's path, the dates of the bundle and its
+  Info.plist, the scale and the icon style), so the app gallery draws no icons when it opens; a
+  tidy at most once a day drops icons of removed apps and old icon styles.
+- Siri's lists, rows and icons are kept 10 s after closing, so a quick re-opening rebuilds nothing.
+- The glow's flowing band is played by the render server (SwiftUI's own gradient layer with a
+  49-step keyframe animation of its end point, 30 frames a second) instead of a 30 fps SwiftUI
+  timeline: no CPU in the app while the glow runs. Held-frame screenshots are identical to v0.5.1.
+- Typing: names are folded for matching once and kept (the lists are matched again on every key);
+  the result list is redrawn only when a list really changed; the Siri view no longer rebuilds on
+  every keystroke. Offscreen: 11.2 → 3.0 ms per typed query in the model, 62 → 37 ms for the view.
+- Emoji are indexed once per opening.
+
+**Panel and widgets**
+- The header's page picker measures itself once, not on every opening: a `ViewThatFits` (added
+  for the fourth page) had measured the system's segmented bar again at every opening, the
+  largest new item in a `sample` of spam-open.
+- The widget style layer costs nothing when a widget has no style: the element modifiers take the
+  resolved style as a value, and an element without overrides gets exactly its old font. Board
+  opening offscreen: 103.3 → 89.1 M instructions (v0.5.1: 96.4).
+- The timer ruler's resting picture draws one capsule per minute and a number every fifth minute
+  instead of a full tick stack per minute: the timer widget costs 18 % less to open (pixel
+  identical at 1×, 2× and 3×).
+- Clock texts and text widths are remembered instead of formatted and measured again.
+
+**Rest and launch**
+- The diagnostics report after a launch is scheduled by the system at background priority, with
+  the hardware and app sections kept per boot and version.
+- The liquid card's outlines are kept on disk and not worked out at all when both liquid cards are
+  off.
+- The widget board is written 0.4 s after the last change, not on every slider step.
+- The battery history records only real changes from the power notifications the app already
+  receives: no new wake-ups.
+
+### Tried and left out
+- **Settings ▸ General built lazily** (sections below the fold built when scrolled to): opening
+  General 37 % cheaper offscreen, but every scroll through the page cost about twice the CPU. Left
+  out.
+- **The Widgets page's stage shadow as a fixed outline shadow**: SwiftUI's shadow is drawn from
+  the glass's own transparency, so an outline shadow cannot be proven identical. Left live.
+- **Settings gradients and shadows as pre-rendered bitmaps**: they already are Core Animation
+  layers; nothing to gain.
+- **The glow as a film of pre-rendered frames**: the renderer's frames differ from the render
+  server's gradient by up to 155/255 (dithering). The render server's own layer is animated instead.
+- Suspects measured and cleared for spam-open and spam-siri: the glow (old vs new: equal) and the
+  new concentric widget corners (uniform vs concentric: equal).
+
+### Left for next time (worst first)
+- Opening Settings: 425, the goal is 200 (and 30 for every animation).
+- siri-search and the first opening after a launch: the new sources' and widgets' first build.
+- spam-open and spam-siri after the other scenarios.
+- The Now Playing and Shelf widgets alone: +2.6 % and +6 % instructions per opening against
+  v0.5.1 (the player's icon is drawn again each time).
+
+### Checks
+- **Looks:** frozen-frame screenshots against v0.5.1 (`demo/freeze`, `Scripts/perf/frames/`):
+  Siri 0.1 s into opening and settled, the app gallery, the timer page (its ruler included) and
+  Settings ▸ General settled within the noise of two shots of the same build; in the middle pass
+  Siri at 0.1 and 0.3 s was identical to the pixel. Intended differences only: the header's fourth
+  page (Battery), the widgets' bottom corners concentric with the panel's, the Now Playing cover's
+  corners following its padding, and the widget gallery's new categories (a narrower bar, so the
+  Widgets page no longer widens Settings by 12 pt).
+- **Unit tests:** 724 tests in 160 suites, plus the 242 widget snapshots (exact) in their own run.
+  Failing in the full run: the known liquid-card lead (0.25 → 0.20, the owner's change) and
+  timing tests that pass when run alone (`DelayedActionTests`, `BannerCenterTests`, the Settings
+  fade test, `otherRowsNeverWaitForTheRunningApps`).
+
 ## 2026-09-29: energy campaign on v0.5 (build 21)
 
 **Machine:** MacBook Air M5 (Mac17,3), macOS 27, 3024×1964 built-in display, on battery the

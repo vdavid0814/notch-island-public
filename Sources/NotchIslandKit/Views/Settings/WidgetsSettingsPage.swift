@@ -14,9 +14,9 @@ import SwiftUI
 ///   selects it, Edit selects one that is already there.
 struct WidgetsSettingsPage: View {
     @Environment(AppModel.self) private var model
-    @State private var selection: IslandWidgetKind?
+    @State private var selection: WidgetID?
     /// Two or more widgets picked with ⌘-click: edited together.
-    @State private var group: Set<IslandWidgetKind> = []
+    @State private var group: Set<WidgetID> = []
     @State private var thumbnails = ThumbnailCache()
     @State private var notice: String?
     @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
@@ -30,16 +30,18 @@ struct WidgetsSettingsPage: View {
                     Group {
                         let picked = group.filter { model.widgets.board.contains($0) }
                         if picked.count >= 2 {
-                            GroupInspector(kinds: picked, selection: $selection, group: $group)
+                            GroupInspector(ids: picked, selection: $selection, group: $group)
                                 .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
                                                         removal: .opacity))
-                        } else if let kind = selection, model.widgets.board.contains(kind) {
-                            WidgetInspector(kind: kind, selection: $selection, notice: $notice)
+                        } else if let id = selection, model.widgets.board.contains(id) {
+                            WidgetInspector(id: id, selection: $selection, notice: $notice)
                                 .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
                                                         removal: .opacity))
                         } else {
                             WidgetStoreView(add: { add($0, scroller: scroller) },
-                                        open: { kind in select(kind, scroller: scroller) })
+                                        open: { kind in
+                                            if let id = model.widgets.board.first(of: kind)?.id { select(id, scroller: scroller) }
+                                        })
                                 .transition(.opacity)
                         }
                     }
@@ -75,22 +77,22 @@ struct WidgetsSettingsPage: View {
 
     /// "Edit …" from a widget's context menu in the island.
     private func takeRequestedEdit() {
-        guard let kind = model.editingWidget else { return }
+        guard let id = model.editingWidget else { return }
         model.editingWidget = nil
-        guard model.widgets.board.contains(kind) else { return }
-        selection = kind
+        guard model.widgets.board.contains(id) else { return }
+        selection = id
     }
 
-    private func select(_ kind: IslandWidgetKind, scroller: ScrollViewProxy) {
-        selection = kind
+    private func select(_ id: WidgetID, scroller: ScrollViewProxy) {
+        selection = id
         withAnimation(.spring(duration: 0.4)) { scroller.scrollTo(StudioAnchor.stage, anchor: .top) }
     }
 
     private func add(_ kind: IslandWidgetKind, scroller: ScrollViewProxy) {
-        var added = false
+        var added: WidgetID?
         withAnimation(.spring(duration: 0.35, bounce: 0.2)) { added = model.widgets.add(kind) }
-        if added {
-            select(kind, scroller: scroller)
+        if let added {
+            select(added, scroller: scroller)
         } else {
             NSSound.beep()
             notice = "No room for \(kind.title). Make a widget smaller or remove one first."
@@ -101,12 +103,18 @@ struct WidgetsSettingsPage: View {
 
 private enum StudioAnchor: Hashable { case stage }
 
+/// What the stage's island takes from Settings around it: the widgets picked.
+private struct StagePick: Equatable {
+    let selection: WidgetID?
+    let group: Set<WidgetID>
+}
+
 // MARK: - Stage
 
 /// The desktop with the island open under the notch, at real size.
 private struct StudioStage: View {
-    @Binding var selection: IslandWidgetKind?
-    @Binding var group: Set<IslandWidgetKind>
+    @Binding var selection: WidgetID?
+    @Binding var group: Set<WidgetID>
     let thumbnails: ThumbnailCache
     @Binding var backdrop: DesktopBackdropStyle
     let notice: String?
@@ -140,8 +148,10 @@ private struct StudioStage: View {
                            backing: backdrop.menuBarBacking)
                 .allowsHitTesting(false)
             // In a graph of its own: the live widgets on it (clocks, readings) keep ticking, and
-            // each tick would otherwise update all of Settings (`IsolatedHosting`).
-            IsolatedHosting(size: island) {
+            // each tick would otherwise update all of Settings (`IsolatedHosting`). Handed over
+            // again only when the picked widgets change: the model (the board, the layout) is
+            // observed inside, and the thumbnails' cache is the same object throughout.
+            IsolatedHosting(size: island, input: StagePick(selection: selection, group: group)) {
                 StageIsland(selection: $selection, group: $group, thumbnails: thumbnails)
                     .environment(model)
                     .environment(\.appearsActive, true)
@@ -198,8 +208,8 @@ private struct StudioStage: View {
 
 /// The open island exactly as the notch shows it, with the editable board for its home page.
 private struct StageIsland: View {
-    @Binding var selection: IslandWidgetKind?
-    @Binding var group: Set<IslandWidgetKind>
+    @Binding var selection: WidgetID?
+    @Binding var group: Set<WidgetID>
     let thumbnails: ThumbnailCache
 
     @Environment(AppModel.self) private var model
@@ -248,18 +258,21 @@ private struct StageIsland: View {
 /// strength — set on all of them at once. A setting the widgets differ in shows nothing marked
 /// until it is chosen.
 private struct GroupInspector: View {
-    let kinds: Set<IslandWidgetKind>
-    @Binding var selection: IslandWidgetKind?
-    @Binding var group: Set<IslandWidgetKind>
+    let ids: Set<WidgetID>
+    @Binding var selection: WidgetID?
+    @Binding var group: Set<WidgetID>
 
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let widgets = model.widgets.board.widgets.filter { kinds.contains($0.kind) }
+        let widgets = model.widgets.board.widgets.filter { ids.contains($0.id) }
         let tints = Set(widgets.map(\.tint))
         let backgrounds = Set(widgets.map(\.background))
-        // Only backgrounds every picked widget offers (Artwork is Now Playing's own).
-        let offered = WidgetBackground.allCases.filter { background in widgets.allSatisfy { $0.kind.backgrounds.contains(background) } }
+        // Only backgrounds every picked widget offers (Artwork is Now Playing's own); one chosen in
+        // Customize (a gradient, a picture) only while every picked widget has it.
+        let offered = WidgetBackground.allCases.filter { background in
+            (!background.needsCustomize || backgrounds == [background]) && widgets.allSatisfy { $0.kind.backgrounds.contains(background) }
+        }
         let strengths = widgets.filter { $0.background.hasOpacity }.map(\.effectiveBackgroundOpacity)
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 14) {
@@ -278,7 +291,7 @@ private struct GroupInspector: View {
                 }
                 Spacer()
                 Button("Remove All", systemImage: "minus.circle", role: .destructive) {
-                    let doomed = kinds
+                    let doomed = ids
                     group = []
                     selection = nil
                     withAnimation(.spring(duration: 0.3)) { doomed.forEach { model.widgets.remove($0) } }
@@ -333,7 +346,7 @@ private struct GroupInspector: View {
 
     private func apply(_ change: (inout IslandWidget) -> Void) {
         withAnimation(Motion.content) {
-            for kind in kinds { model.widgets.update(kind, change) }
+            for id in ids { model.widgets.update(id, change) }
         }
     }
 }
@@ -342,14 +355,15 @@ private struct GroupInspector: View {
 
 /// One widget's own system: size, look, and each element inside it.
 private struct WidgetInspector: View {
-    let kind: IslandWidgetKind
-    @Binding var selection: IslandWidgetKind?
+    let id: WidgetID
+    @Binding var selection: WidgetID?
     @Binding var notice: String?
 
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let widget = model.widgets.board.widget(kind) {
+        if let widget = model.widgets.board.widget(id) {
+            let kind = widget.kind
             VStack(alignment: .leading, spacing: 16) {
                 header(widget)
                 HStack(alignment: .top, spacing: 16) {
@@ -359,10 +373,10 @@ private struct WidgetInspector: View {
                     if !kind.options.isEmpty {
                         StudioCard("Elements", subtitle: "What the widget shows, and how large.") {
                             VStack(spacing: 0) {
-                                ForEach(Array(kind.options.enumerated()), id: \.element) { index, option in
+                                ForEach(Array(kind.spec.elements.enumerated()), id: \.element.id) { index, element in
                                     if index > 0 { Divider().opacity(0.5) }
-                                    ElementRow(option: option, widget: widget) { change in
-                                        withAnimation(Motion.content) { model.widgets.update(kind, change) }
+                                    ElementRow(element: element, widget: widget) { change in
+                                        withAnimation(Motion.content) { model.widgets.update(id, change) }
                                     }
                                 }
                             }
@@ -375,7 +389,8 @@ private struct WidgetInspector: View {
     }
 
     private func header(_ widget: IslandWidget) -> some View {
-        HStack(spacing: 14) {
+        let kind = widget.kind
+        return HStack(spacing: 14) {
             WidgetIcon(kind: kind, side: 52)
             VStack(alignment: .leading, spacing: 2) {
                 Text(kind.title).font(.system(size: 20, weight: .bold))
@@ -386,7 +401,7 @@ private struct WidgetInspector: View {
             Spacer()
             Button("Remove", systemImage: "minus.circle", role: .destructive) {
                 selection = nil
-                withAnimation(.spring(duration: 0.3)) { model.widgets.remove(kind) }
+                withAnimation(.spring(duration: 0.3)) { model.widgets.remove(id) }
             }
             .controlSize(.large)
             Button("Done") { selection = nil }
@@ -399,13 +414,14 @@ private struct WidgetInspector: View {
     // MARK: Look
 
     private func lookCard(_ widget: IslandWidget) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let kind = widget.kind
+        return VStack(alignment: .leading, spacing: 14) {
             if !kind.layouts.isEmpty {
                 LabeledSetting("Layout") {
                     HStack(spacing: 8) {
                         ForEach(kind.layouts) { layout in
                             LayoutOption(layout: layout, isSelected: widget.layout == layout) {
-                                withAnimation(Motion.content) { model.widgets.update(kind) { $0.layout = layout } }
+                                withAnimation(Motion.content) { model.widgets.update(id) { $0.layout = layout } }
                             }
                         }
                     }
@@ -413,20 +429,20 @@ private struct WidgetInspector: View {
             }
             LabeledSetting("Colour") {
                 TintSwatches(selection: widget.tint, automaticHint: kind == .nowPlaying ? "From the artwork" : "Accent colour") { tint in
-                    withAnimation(Motion.content) { model.widgets.update(kind) { $0.tint = tint } }
+                    withAnimation(Motion.content) { model.widgets.update(id) { $0.tint = tint } }
                 }
             }
             LabeledSetting("Background") {
                 VStack(alignment: .leading, spacing: 10) {
                     Picker("Background", selection: Binding(get: { widget.background }, set: { background in
                         withAnimation(.spring(duration: 0.4, bounce: 0.18)) {
-                            model.widgets.update(kind) {
+                            model.widgets.update(id) {
                                 $0.background = background
                                 $0.backgroundOpacity = nil
                             }
                         }
                     })) {
-                        ForEach(kind.backgrounds) { Text($0.title).tag($0) }
+                        ForEach(kind.backgrounds.filter { !$0.needsCustomize || $0 == widget.background }) { Text($0.title).tag($0) }
                     }
                     .choiceBar()
                     .labelsHidden()
@@ -434,7 +450,7 @@ private struct WidgetInspector: View {
                     // Plate, Colour and Artwork have a strength; it slides out under the picker.
                     if widget.background.hasOpacity {
                         BackgroundOpacitySlider(value: widget.effectiveBackgroundOpacity) { value in
-                            model.widgets.update(kind) { $0.backgroundOpacity = value }
+                            model.widgets.update(id) { $0.backgroundOpacity = value }
                         }
                         .transition(.asymmetric(
                             insertion: .opacity.combined(with: .offset(y: -8)).combined(with: .scale(scale: 0.97, anchor: .topLeading)),
@@ -448,7 +464,7 @@ private struct WidgetInspector: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Toggle(isOn: Binding(get: { widget.plainButtons }, set: { on in
                             withAnimation(.spring(duration: 0.4, bounce: 0.18)) {
-                                model.widgets.update(kind) { $0.plainButtons = on }
+                                model.widgets.update(id) { $0.plainButtons = on }
                             }
                         })) {
                             Text("Colourless buttons")
@@ -461,7 +477,7 @@ private struct WidgetInspector: View {
                             VStack(alignment: .leading, spacing: 12) {
                                 ForEach(TransportButton.allCases) { button in
                                     ButtonLookRow(button: button, look: widget.look(of: button)) { look in
-                                        model.widgets.update(kind) { $0.buttonLooks[button.rawValue] = look }
+                                        model.widgets.update(id) { $0.buttonLooks[button.rawValue] = look }
                                     }
                                 }
                             }
@@ -475,7 +491,7 @@ private struct WidgetInspector: View {
             }
             if kind.canMirror {
                 Toggle(isOn: Binding(get: { widget.mirrored }, set: { on in
-                    withAnimation(Motion.content) { model.widgets.update(kind) { $0.mirrored = on } }
+                    withAnimation(Motion.content) { model.widgets.update(id) { $0.mirrored = on } }
                 })) {
                     Text("Swap sides")
                     Text(kind == .nowPlaying ? "Artwork on the right." : "The two halves change places.")
@@ -488,193 +504,26 @@ private struct WidgetInspector: View {
     }
 }
 
-/// A titled card of the inspector.
-private struct StudioCard<Content: View>: View {
-    let title: String
-    var subtitle: String?
-    @ViewBuilder var content: Content
-
-    init(_ title: String, subtitle: String? = nil, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.subtitle = subtitle
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.headline)
-                if let subtitle {
-                    Text(subtitle).font(.caption).foregroundStyle(SettingsPalette.secondary)
-                }
-            }
-            content
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        // Rounded as the form's cards on the other pages.
-        .background(SettingsPalette.card, in: .rect(cornerRadius: SettingsForm.cardRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: SettingsForm.cardRadius, style: .continuous).strokeBorder(SettingsPalette.cardStroke)
-        }
-    }
-}
-
-/// A caption over a control.
-/// A strength (a background's or a button's), 0–100 %, snapped to whole percents so a slow drag does
-/// not rewrite the board for every pixel.
-private struct BackgroundOpacitySlider: View {
-    let value: Double
-    let set: (Double) -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "circle.lefthalf.filled")
-                .foregroundStyle(SettingsPalette.secondary)
-                .accessibilityHidden(true)
-            Slider(value: Binding(get: { value }, set: { new in
-                let snapped = (new * 100).rounded() / 100
-                if snapped != value { set(snapped) }
-            }), in: 0...1) {
-                Text("Opacity")
-            }
-            .labelsHidden()
-            .tint(Color.islandAccent)
-            .frame(maxWidth: 260)
-            ReservedWidthText(value.formatted(.percent.precision(.fractionLength(0))),
-                              fitting: [Double(0).formatted(.percent.precision(.fractionLength(0))),
-                                        Double(1).formatted(.percent.precision(.fractionLength(0)))])
-                .foregroundStyle(SettingsPalette.secondary)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Opacity")
-    }
-}
-
-/// One Now Playing button's look: its colour (automatic = colourless) and strength.
-private struct ButtonLookRow: View {
-    let button: TransportButton
-    let look: ButtonLook
-    let set: (ButtonLook) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(button.title, systemImage: button.systemImage)
-                .font(.callout.weight(.medium))
-            TintSwatches(selection: look.tint, automaticHint: "Colourless") { tint in
-                var new = look
-                new.tint = tint
-                withAnimation(Motion.content) { set(new) }
-            }
-            BackgroundOpacitySlider(value: look.opacity) { value in
-                var new = look
-                new.opacity = value
-                set(new)
-            }
-        }
-    }
-}
-
-private struct LabeledSetting<Content: View>: View {
-    let title: String
-    @ViewBuilder var content: Content
-
-    init(_ title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.subheadline.weight(.medium)).foregroundStyle(SettingsPalette.secondary)
-            content
-        }
-    }
-}
-
-private struct LayoutOption: View {
-    let layout: WidgetLayout
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 5) {
-                Image(systemName: layout.systemImage)
-                    .font(.system(size: 17))
-                    .frame(height: 20)
-                Text(layout.title).font(.caption.weight(.medium)).lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, minHeight: 50)
-            .foregroundStyle(isSelected ? .primary : SettingsPalette.secondary)
-            .background(isSelected ? Color.islandAccent.opacity(0.18) : .white.opacity(0.04),
-                        in: .rect(cornerRadius: 10, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(isSelected ? Color.islandAccent : .clear, lineWidth: 1.5)
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-}
-
-/// The colours as round swatches, like the accent colour picker; automatic is a colour wheel.
-private struct TintSwatches: View {
-    /// nil: several widgets with different colours (nothing marked).
-    let selection: WidgetTint?
-    let automaticHint: String
-    let set: (WidgetTint) -> Void
-
-    var body: some View {
-        HStack(spacing: 7) {
-            ForEach(WidgetTint.allCases) { tint in
-                Button {
-                    set(tint)
-                } label: {
-                    Circle()
-                        .fill(tint.color.map { AnyShapeStyle($0.gradient) }
-                              ?? AnyShapeStyle(AngularGradient(colors: [.red, .orange, .yellow, .green, .blue, .purple, .red],
-                                                               center: .center)))
-                        .frame(width: 20, height: 20)
-                        .overlay {
-                            if tint == selection {
-                                Circle().fill(.white).frame(width: 7, height: 7)
-                            }
-                        }
-                        .padding(2)
-                        .overlay { Circle().strokeBorder(tint == selection ? .white.opacity(0.8) : .clear, lineWidth: 1.5) }
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .help(tint == .automatic ? "Automatic — \(automaticHint)" : tint.title)
-                .accessibilityLabel(tint.title)
-                .accessibilityAddTraits(tint == selection ? .isSelected : [])
-            }
-        }
-    }
-}
-
 /// One element of a widget: its switch, and its size while it is shown.
 private struct ElementRow: View {
-    let option: WidgetOption
+    let element: ElementSpec
     let widget: IslandWidget
     let change: ((inout IslandWidget) -> Void) -> Void
 
     var body: some View {
+        let option = element.id
         let on = widget.shows(option)
         HStack(spacing: 10) {
-            Image(systemName: option.systemImage)
+            Image(systemName: element.symbol)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(on ? .white : SettingsPalette.secondary)
                 .frame(width: 26, height: 26)
                 .background(on ? AnyShapeStyle(Color.islandAccent.gradient) : AnyShapeStyle(.white.opacity(0.08)),
                             in: .rect(cornerRadius: 7, style: .continuous))
-            Text(option.title)
+            Text(element.title)
                 .foregroundStyle(on ? .primary : SettingsPalette.secondary)
             Spacer(minLength: 8)
-            if option.isSizable, on {
+            if element.isSizable, on {
                 Picker("Size", selection: Binding(get: { widget.size(of: option) }, set: { size in
                     change { $0.sizes[option] = size }
                 })) {
@@ -688,7 +537,7 @@ private struct ElementRow: View {
                 .controlSize(.small)
                 .transition(.opacity)
             }
-            Toggle(option.title, isOn: Binding(get: { on }, set: { new in
+            Toggle(element.title, isOn: Binding(get: { on }, set: { new in
                 change { widget in
                     if new { widget.options.insert(option) } else { widget.options.remove(option) }
                 }
@@ -716,7 +565,8 @@ private struct WidgetStoreView: View {
     @State private var search = ""
 
     var body: some View {
-        let kinds = IslandWidgetKind.allCases.filter { kind in
+        let offered = IslandWidgetKind.allCases.filter(\.isOffered)
+        let kinds = offered.filter { kind in
             (category == nil || kind.category == category)
                 && (search.isEmpty || kind.title.localizedStandardContains(search) || kind.summary.localizedStandardContains(search))
         }
@@ -724,7 +574,7 @@ private struct WidgetStoreView: View {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("All Widgets").font(.title3.weight(.semibold))
-                    Text("Built in · \(model.widgets.board.widgets.count) of \(IslandWidgetKind.allCases.count) on your island")
+                    Text("Built in · \(offered.filter { model.widgets.board.contains($0) }.count) of \(offered.count) on your island")
                         .font(.callout)
                         .foregroundStyle(SettingsPalette.secondary)
                 }
@@ -734,7 +584,10 @@ private struct WidgetStoreView: View {
             }
             Picker("Category", selection: $category) {
                 Text("All").tag(WidgetCategory?.none)
-                ForEach(WidgetCategory.allCases) { Text($0.title).tag(Optional($0)) }
+                // Only groups with something to offer: kinds still being built stay out of the bar.
+                ForEach(WidgetCategory.allCases.filter { group in offered.contains { $0.category == group } }) {
+                    Text($0.title).tag(Optional($0))
+                }
             }
             .choiceBar()
             .labelsHidden()
@@ -750,7 +603,7 @@ private struct WidgetStoreView: View {
                         Label(group.title, systemImage: group.systemImage)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(SettingsPalette.secondary)
-                        grid(group.kinds)
+                        grid(group.kinds.filter(\.isOffered))
                     }
                     .padding(.top, 4)
                 }
@@ -763,7 +616,8 @@ private struct WidgetStoreView: View {
     private func grid(_ kinds: [IslandWidgetKind]) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 300), spacing: 12)], spacing: 12) {
             ForEach(kinds) { kind in
-                GalleryCard(kind: kind, order: IslandWidgetKind.allCases.firstIndex(of: kind) ?? 0,
+                GalleryCard(kind: kind, grid: model.widgets.board.grid,
+                            order: IslandWidgetKind.allCases.firstIndex(of: kind) ?? 0,
                             isAdded: model.widgets.board.contains(kind),
                             add: { add(kind) }, open: { open(kind) })
             }
@@ -775,6 +629,7 @@ private struct WidgetStoreView: View {
 /// rounded well, then its icon, name and the quiet Add / Edit, and two lines on what it shows.
 private struct GalleryCard: View {
     let kind: IslandWidgetKind
+    let grid: BoardGrid
     /// Position in the gallery: previews come in one after another.
     let order: Int
     let isAdded: Bool
@@ -783,7 +638,8 @@ private struct GalleryCard: View {
 
     @State private var isHovered = false
     /// A live preview is a whole widget (sliders, glass buttons…). Built all at once, sixteen of
-    /// them stalled the frame Settings opened in; each now arrives a few frames after the last.
+    /// them stalled the frame Settings opened in; each now arrives a few frames after the last,
+    /// fading in on the render server (`WidgetPreview`).
     @State private var showsPreview = false
 
     /// The preview's well, and how far in it sits: the card's corners are concentric with it.
@@ -795,8 +651,7 @@ private struct GalleryCard: View {
         VStack(alignment: .leading, spacing: 9) {
             ZStack {
                 if showsPreview {
-                    WidgetPreview(kind: kind, maxSize: CGSize(width: 176, height: 60))
-                        .transition(.opacity)
+                    WidgetPreview(kind: kind, grid: grid, maxSize: CGSize(width: 176, height: 60))
                 }
             }
                 .frame(maxWidth: .infinity)
@@ -839,7 +694,7 @@ private struct GalleryCard: View {
         .task {
             try? await Task.sleep(for: .milliseconds(60 + 35 * order))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.2)) { showsPreview = true }
+            showsPreview = true
         }
     }
 }
@@ -871,29 +726,65 @@ private struct AddWidgetButton: View {
 }
 
 /// A live picture of the widget at its default size on the island's grid, scaled down to fit.
-private struct WidgetPreview: View {
+///
+/// In a graph of its own that fades in on the render server as it appears: a fade driven by
+/// SwiftUI in the gallery's graph updated and redrew all of Settings at every frame, and the
+/// sixteen staggered previews kept it redrawing for most of a second. The nested graph gets what
+/// the gallery's gave it (`GalleryPreviewStyle`), and fills the well to centre the picture in it
+/// exactly where the gallery did (a host only the picture's size sat on whole pixels, which moved
+/// the picture by a fraction of one).
+struct WidgetPreview: View {
     let kind: IslandWidgetKind
+    /// The board's, passed in: read here, every board change would redraw every preview.
+    let grid: BoardGrid
     let maxSize: CGSize
-    /// Small widgets may be shown larger than life (the featured banner).
-    var maxScale: CGFloat = 1
 
     @Environment(AppModel.self) private var model
     @State private var thumbnails = ThumbnailCache()
 
+    /// As long as the SwiftUI fade it replaces.
+    static let fadeIn: TimeInterval = 0.2
+
     var body: some View {
-        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), gap: WidgetMetrics.gap)
-        let rect = GridRect(column: 0, row: 0, width: kind.defaultSize.width, height: kind.defaultSize.height)
+        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: grid)
+        let cells = grid.defaultSize(for: kind)
+        let rect = GridRect(column: 0, row: 0, width: cells.width, height: cells.height)
         let size = geometry.frame(for: rect).size
-        let scale = min(maxScale, maxSize.width / size.width, maxSize.height / size.height)
-        IslandWidgetView(widget: IslandWidget(kind: kind, frame: rect, options: kind.defaultOptions),
-                         size: size, thumbnails: thumbnails)
-            .environment(\.isWidgetPreview, true)
-            .environment(\.colorScheme, .dark)
-            .allowsHitTesting(false)
-            .frame(width: size.width, height: size.height)
-            .scaleEffect(scale)
-            .frame(width: size.width * scale, height: size.height * scale)
-            .accessibilityHidden(true)
+        let scale = min(1, maxSize.width / size.width, maxSize.height / size.height)
+        IsolatedFillHosting(input: PreviewInput(kind: kind, rect: rect, size: size, scale: scale), fadeIn: Self.fadeIn, isPicture: true) {
+            IslandWidgetView(widget: IslandWidget(kind: kind, frame: rect, options: kind.defaultOptions),
+                             size: size, thumbnails: thumbnails)
+                .environment(\.isWidgetPreview, true)
+                .environment(\.colorScheme, .dark)
+                .allowsHitTesting(false)
+                .frame(width: size.width, height: size.height)
+                .scaleEffect(scale)
+                .frame(width: size.width * scale, height: size.height * scale)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .modifier(GalleryPreviewStyle())
+                .environment(model)
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// All the nested graph takes from here.
+    struct PreviewInput: Equatable {
+        let kind: IslandWidgetKind
+        let rect: GridRect
+        let size: CGSize
+        let scale: CGFloat
+    }
+}
+
+/// What a preview drew with in the gallery's own graph, which the nested one does not inherit:
+/// Settings' control styles (`SettingsDetail`) and its active appearance (`IslandSettingsView`).
+struct GalleryPreviewStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .toggleStyle(.islandSwitch)
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .environment(\.appearsActive, true)
     }
 }
 
@@ -903,6 +794,7 @@ extension WidgetCategory {
         case .media: "music.note"
         case .time: "timer"
         case .controls: "switch.2"
+        case .battery: "battery.75percent"
         case .system: "sun.max.fill"
         case .tools: "wrench.and.screwdriver.fill"
         }

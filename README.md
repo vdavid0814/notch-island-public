@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.5.1 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.6 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -23,6 +23,42 @@ How much energy each animation and the idle state take, measured before and afte
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.6
+
+A battery page, a Spotlight that reaches the whole Mac, widgets you can have more than once, and
+another energy round.
+
+- **Battery page**: a fourth page in the open island (on Macs with a battery). Click the battery at
+  the top, or pick it beside Home, Timer and Shelf. The level, how long until full or empty, the
+  battery's maximum capacity and cycle count, the charger's watts, and an iPhone-style chart of
+  today with charging, sleep and display-off times ("Last charged to 100 % at 7:40"). The history
+  of the last 8 days stays on the Mac and is recorded without waking it. Chart style (bars, area,
+  line), range (today, 24 h, 48 h), colours and captions: Settings ▸ Live Activities ▸ Battery
+  Page, or right-click the chart.
+- **Spotlight reaches more**:
+  - **⌘5 System**: the island's own commands (its pages, Settings panes, keep open, edit a widget),
+    Control Center switches (Wi-Fi, Bluetooth, Dark Mode, Night Shift, Focus…), about 65 System
+    Settings panes by name or synonym, and Lock Screen, Sleep, Turn Display Off, Screen Saver, Show
+    Desktop, Mission Control, Restart, Shut Down, Log Out and Empty Trash (asks first).
+  - **⌘6 Windows**: running apps and their windows; Return switches, ⌘H hides, ⌘Q quits.
+  - **⌘7 Emoji**: find an emoji by name; Return pastes it, ⌘C copies it.
+- **Widgets**:
+  - The same widget more than once, each with its own settings: right-click a widget ▸
+    Duplicate.
+  - Widgets in the panel's bottom corners follow the panel's curve, and Now Playing's cover takes
+    corners that match its padding.
+  - The widget gallery is grouped into Media, Timers, Controls, Battery, System and Tools.
+- **Energy** (Activity Monitor, worst 5 s, v0.5.1 → v0.6, both on battery):
+  - Opening Settings 501 → 425 (−15 %), Siri's app gallery 48 → 41 (−16 %), flicking between
+    the panel's pages 53 → 49 (−8 %), opening the panel 12.8 → 12.4. The battery page opens on
+    less than the home page (7.5).
+  - Siri's glow now runs entirely in macOS's render server; app icons are kept on disk; typing in
+    Spotlight does less work per key.
+  - Not met yet, and written down: the first search after a launch (the new sources: +18 %), fast
+    repeated opening of the panel and Siri, and Settings, still far above 30. Every number, what
+    changed and what was tried and left out: [docs/ENERGY-LOG.md](docs/ENERGY-LOG.md) and
+    [docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md) (also in the .dmg and inside the app).
 
 ## What's new in v0.5.1
 

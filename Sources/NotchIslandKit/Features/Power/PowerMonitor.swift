@@ -18,9 +18,17 @@ import Observation
     /// `state`, so those changes do not re-evaluate them (the island's root among them).
     private(set) var isOnBattery = false
 
+    /// `state.hasBattery` on its own, for what only exists with a battery (the battery page): the
+    /// level's changes do not re-evaluate it.
+    private(set) var hasBattery = false
+
     /// Plug / unplug / charged / low. Fired for real transitions only (never for the first
     /// reading after `start()`, never while a demo state is showing).
     @ObservationIgnored var onEvent: ((PowerEvent) -> Void)?
+
+    /// Every real reading that changed something, with the one before it (`.unknown` for the
+    /// first after `start()`): the battery history's input. Never called for demo states.
+    @ObservationIgnored var onRealReading: ((_ old: PowerState, _ new: PowerState) -> Void)?
 
     @ObservationIgnored private let readState: () -> PowerState
     /// The live IOKit reader (not a test fixture): refreshes can run it off the main thread.
@@ -76,6 +84,7 @@ import Observation
         announcer = PowerAnnouncer()
         realState = readState()
         _ = announcer.events(from: .unknown, to: realState)
+        onRealReading?(.unknown, realState)
         if demoState == nil { publish(realState) }
         Log.power.notice("power monitor armed (IOKit run-loop source)")
     }
@@ -132,6 +141,7 @@ import Observation
         guard next != realState else { return }
         let previous = realState
         realState = next
+        onRealReading?(previous, next)
 
         // The announcer always sees real transitions so its memory stays true; the events
         // are dropped while a demo owns the screen, because a banner describing real data
@@ -150,6 +160,7 @@ import Observation
         // model, so skip no-op writes.
         if state != next { state = next }
         if isOnBattery != next.isOnBattery { isOnBattery = next.isOnBattery }
+        if hasBattery != next.hasBattery { hasBattery = next.hasBattery }
     }
 
     // MARK: IOKit bridge

@@ -86,6 +86,8 @@ nonisolated enum SettingsPalette {
 struct IslandSettingsView: View {
     /// Between the sidebar and the island's edge, at the side and at the bottom alike.
     static let sidebarGap: CGFloat = 8
+    /// How long the pages take to fade in once the island has grown.
+    static let pagesFadeIn: TimeInterval = 0.16
 
     @Environment(AppModel.self) private var model
     /// The pages join once the island has grown. Laid out during the growth they were re-laid out
@@ -132,14 +134,15 @@ struct IslandSettingsView: View {
                 )
                 // In a view graph of its own, dropped with it when Settings closes: in the island's
                 // graph, the pages' caches outlived them (measured: ~70 MB kept after one visit).
-                IsolatedFillHosting(input: placement) {
+                // Faded in by the render server: faded by SwiftUI, every frame of the fade updated
+                // the island's graph around it.
+                IsolatedFillHosting(input: placement, fadeIn: Self.pagesFadeIn) {
                     SettingsPages(placement: placement)
                         .environment(model)
                         .environment(\.colorScheme, .dark)
                         .environment(\.appearsActive, true)
                 }
                 .opacity(model.island.presentation.isSettings ? 1 : 0)
-                .transition(.opacity)
             } else {
                 Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -156,7 +159,7 @@ struct IslandSettingsView: View {
             // and held the panel's fading widgets still while it ran (tried, seen on video).
             try? await Task.sleep(for: .seconds(model.preferences.animationDuration * 0.9))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.16)) { showsPages = true }
+            showsPages = true
             // Synchronous system queries (Login Items alone took ~20 ms): after the pages are in.
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }

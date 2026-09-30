@@ -96,9 +96,13 @@ final class IslandPanel: NSPanel {
     /// While the island has the keyboard, app-level shortcuts would act on NotchIsland itself — the
     /// SwiftUI app lifecycle builds a full main menu even for this agent — quitting or hiding it (or
     /// every other app) from inside a search field. Editing shortcuts (⌘C/⌘V/⌘X/⌘A/⌘Z) still reach
-    /// the Edit menu.
+    /// the Edit menu. The island's own views still see them (Spotlight's ⌘H and ⌘Q hide or quit the
+    /// app the selection is on); the menu never does.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if acceptsKeyboard, Self.isSwallowedShortcut(event) { return true }
+        if acceptsKeyboard, Self.isSwallowedShortcut(event) {
+            _ = super.performKeyEquivalent(with: event)
+            return true
+        }
         return super.performKeyEquivalent(with: event)
     }
 

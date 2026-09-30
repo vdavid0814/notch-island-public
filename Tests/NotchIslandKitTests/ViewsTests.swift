@@ -130,6 +130,18 @@ struct IslandFormatTests {
         #expect(IslandFormat.clock(.nan) == zero)
     }
 
+    /// Remembered, the clock gives exactly what formatting gives, asked once or again, on both
+    /// sides of the hour and for fractions of a second.
+    @Test func aRememberedClockIsTheFormattedOne() {
+        for seconds in stride(from: 0.0, through: 7_300, by: 0.75) + [3_599.9, 3_600, 86_399, 360_000] {
+            let whole = Duration.seconds(Int(seconds.rounded(.down)))
+            let formatted = seconds >= 3600 ? whole.formatted(.time(pattern: .hourMinuteSecond))
+                                            : whole.formatted(.time(pattern: .minuteSecond))
+            #expect(IslandFormat.clock(seconds) == formatted, "\(seconds)")
+            #expect(IslandFormat.clock(seconds) == formatted, "\(seconds), again")
+        }
+    }
+
     @Test func percentClamps() {
         #expect(IslandFormat.percent(0.62).contains("62"))
         #expect(IslandFormat.percent(1.7).contains("100"))

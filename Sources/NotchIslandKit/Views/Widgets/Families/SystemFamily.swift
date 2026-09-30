@@ -1,58 +1,15 @@
 import SwiftUI
 
-/// The time, large, with today's date under it (or beside it when the widget is one row wide
-/// enough). Re-rendered once a minute, on the minute.
-struct DateTimeWidget: View {
+/// The Mac's readings (`SystemSpecs`): each kind to its view, a kind not built yet to its placeholder.
+struct SystemFamily: View {
     let widget: IslandWidget
     let size: CGSize
 
     var body: some View {
-        PanelTimelineView(.everyMinute) { context in
-            let showsTime = widget.shows(.readout), showsDate = widget.shows(.dateLine)
-            let tall = size.height >= 56
-            // Never wider than the widget, nor taller than its share of it; below that cap S, M
-            // and L stay apart (`WidgetType.fitted`).
-            let dateSize = WidgetType.fitted(WidgetType.points(size.height, ratio: tall ? 0.18 : 0.42, min: 9, max: 17),
-                                             fit: WidgetType.size(fittingLines: 1, in: tall ? size.height * 0.34 : size.height),
-                                             widget.size(of: .dateLine), floor: 8)
-            let timeText = context.date.formatted(.dateTime.hour().minute())
-            let timeSize = WidgetType.fitted(
-                WidgetType.points(tall ? size.height * 0.62 : size.height, ratio: 0.8, min: 13, max: 48),
-                fit: min(WidgetType.size(fitting: timeText, in: size.width - 8, weight: .semibold, rounded: true, monospacedDigits: true),
-                         WidgetType.size(fittingLines: 1, in: tall && showsDate ? size.height - dateSize * WidgetType.lineHeight : size.height) * 1.08),
-                widget.size(of: .readout), floor: 11)
-            let time = Text(context.date, format: .dateTime.hour().minute())
-                .font(.system(size: timeSize, weight: .semibold, design: .rounded).monospacedDigit())
-            // The longest date that fits: "Thursday, 24 September", "Thu, 24 Sep", "24".
-            let date = ViewThatFits(in: .horizontal) {
-                Text(context.date, format: .dateTime.weekday(.wide).day().month(.wide)).fixedSize()
-                Text(context.date, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated)).fixedSize()
-                Text(context.date, format: .dateTime.weekday(.abbreviated).day()).fixedSize()
-                Text(context.date, format: .dateTime.day()).fixedSize()
-            }
-            .font(.system(size: dateSize, weight: .medium))
-            .foregroundStyle(.secondary)
-            Group {
-                if tall {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if showsDate { date }
-                        if showsTime { time.lineLimit(1).minimumScaleFactor(0.6) }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                } else {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            if showsTime { time.lineLimit(1).fixedSize() }
-                            if showsDate { date }
-                        }
-                        if showsTime { time.lineLimit(1).minimumScaleFactor(0.6) } else { date }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .padding(.horizontal, 4)
+        switch widget.kind {
+        case .systemStats: SystemStatsWidget(widget: widget, size: size)
+        default: WidgetPlaceholder(kind: widget.kind, size: size)
         }
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -62,6 +19,7 @@ struct SystemStatsWidget: View {
     let widget: IslandWidget
     let size: CGSize
 
+    @Environment(\.widgetFrameProbe) private var probe
     @Environment(AppModel.self) private var model
     @Environment(\.isWidgetPreview) private var isPreview
 
@@ -71,7 +29,7 @@ struct SystemStatsWidget: View {
         let tall = size.height >= 56
         let itemWidth = !tall && size.width >= 200 ? size.width / 2 : size.width
         let narrow = itemWidth < 170
-        let items: [(option: WidgetOption, title: String, value: Double)] = [
+        let items: [(option: ElementID, title: String, value: Double)] = [
             (.cpuLoad, "CPU", isPreview ? 0.23 : stats.cpu),
             (.memoryLoad, narrow ? "RAM" : "Memory", isPreview ? 0.61 : stats.memory),
         ].filter { widget.shows($0.option) }
@@ -83,6 +41,7 @@ struct SystemStatsWidget: View {
                         let room = min(size.height - 4, size.width / CGFloat(max(items.count, 1)) - 10)
                         StatRing(title: item.title, value: item.value,
                                  diameter: WidgetType.fitted(room, fit: room, widget.size(of: item.option), floor: 20))
+                            .editorElement(item.option, in: probe)
                     }
                 }
             } else {
@@ -99,6 +58,7 @@ struct SystemStatsWidget: View {
                         StatBar(title: item.title, value: item.value,
                                 textSize: WidgetType.fitted(WidgetType.points(rowHeight, ratio: 0.42, min: 8, max: 13),
                                                             fit: fit, widget.size(of: item.option), floor: 7))
+                            .editorElement(item.option, in: probe)
                     }
                 }
                 .padding(.horizontal, 4)

@@ -136,6 +136,11 @@ struct ChosenDesktopBackdrop: View {
     private var loading: [String: Task<NSImage?, Never>] = [:]
     /// What `.desktop` last resolved to: the picture is looked up again when the desktop changes.
     private var desktopKey: String?
+    /// The desktop's source as looked up for a stamp (`desktopSource`), while Settings is open.
+    private(set) var desktop: (stamp: DesktopStamp, lookup: Task<WallpaperSource, Never>)?
+    /// Spaces switched to while a looked-up desktop is kept: a space may show its own picture.
+    private var spaceSwitches = 0
+    private var spaceObserver: (any NSObjectProtocol)?
     /// The default wallpaper's videos, light and dark (the catalogue is read once).
     private var defaultSources: [Bool: WallpaperSource] = [:]
 
@@ -157,6 +162,9 @@ struct ChosenDesktopBackdrop: View {
     func purge() {
         for task in loading.values { task.cancel() }
         loading.removeAll()
+        desktop = nil
+        if let spaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(spaceObserver) }
+        spaceObserver = nil
         let full = "@\(WallpaperDetail.full.pixels)"
         images = images.filter { !$0.key.hasSuffix(full) }
     }
@@ -177,7 +185,7 @@ struct ChosenDesktopBackdrop: View {
         switch style {
         case .checkerboard: return nil
         case .desktop:
-            source = await WallpaperSource.currentDesktop()
+            source = await desktopSource()
             desktopKey = source.key
         case .system, .systemLight:
             source = systemDefault(light: style == .systemLight)
@@ -195,6 +203,26 @@ struct ChosenDesktopBackdrop: View {
         loading[key] = nil
         if let image { images[key] = image }
         return image
+    }
+
+    /// What `.desktop` shows: looked up once and shared while nothing it depends on has changed
+    /// (`DesktopStamp`). Every picture of the desktop looked it up for itself: a synchronous call to
+    /// the wallpaper agent on the main thread (~2 ms) and a parse of the 240 KB wallpaper store on
+    /// the performance cores (~15 ms), about ten times per opening of Settings (measured: ~20 ms of
+    /// main thread and ~100 ms on other cores).
+    func desktopSource() async -> WallpaperSource {
+        if spaceObserver == nil {
+            spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.spaceSwitches += 1 }
+            }
+        }
+        let stamp = DesktopStamp.current(spaceSwitches: spaceSwitches)
+        if let desktop, desktop.stamp == stamp { return await desktop.lookup.value }
+        let lookup = Task { await WallpaperSource.currentDesktop() }
+        desktop = (stamp, lookup)
+        return await lookup.value
     }
 
     /// The picture as 8-bit premultiplied BGRA in sRGB, converted by vImage: the bytes Core
@@ -327,6 +355,35 @@ nonisolated enum WallpaperSource: Sendable, Equatable {
     }
 }
 
+/// Everything the desktop's source is looked up from (`WallpaperSource.currentDesktop`): while none
+/// of it changes, neither does the answer.
+nonisolated struct DesktopStamp: Equatable {
+    /// The wallpaper store's index, rewritten whenever a desktop picture is chosen.
+    var index: Date?
+    /// The aerials' catalogue.
+    var catalogue: Date?
+    /// The aerial's appearance follows the system's.
+    var dark: Bool
+    /// The main screen, whose desktop is pictured.
+    var screen: UInt32?
+    /// Spaces switched to meanwhile.
+    var spaceSwitches: Int
+
+    @MainActor static func current(spaceSwitches: Int, index: URL = WallpaperSource.storeIndex,
+                                   catalogue: URL = AerialEntries.catalogue) -> DesktopStamp {
+        func modified(_ url: URL) -> Date? {
+            (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+        }
+        return DesktopStamp(
+            index: modified(index),
+            catalogue: modified(catalogue),
+            dark: NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua,
+            screen: (NSScreen.main?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value,
+            spaceSwitches: spaceSwitches
+        )
+    }
+}
+
 /// The wallpaper chosen for every space and display, from the wallpaper store's index.
 nonisolated struct StoreChoice: Sendable, Equatable {
     var provider: String
@@ -386,9 +443,10 @@ nonisolated struct AerialEntries: Sendable {
     /// The category of the system's dynamic wallpapers (the default macOS one among them).
     static let dynamicCategory = "dynamic-aerials"
 
+    static let catalogue = WallpaperSource.aerialsDirectory.appendingPathComponent("manifest/entries.json")
+
     static func load() -> AerialEntries {
-        let url = WallpaperSource.aerialsDirectory.appendingPathComponent("manifest/entries.json")
-        guard let data = try? Data(contentsOf: url) else { return AerialEntries(assets: []) }
+        guard let data = try? Data(contentsOf: catalogue) else { return AerialEntries(assets: []) }
         return parse(data)
     }
 

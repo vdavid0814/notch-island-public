@@ -24,6 +24,9 @@ nonisolated struct PowerState: Sendable, Equatable {
     /// Running from the battery: there is one, and the charger is not connected.
     var isOnBattery: Bool { hasBattery && !isPluggedIn }
 
+    /// Below this the battery reads red (the header, the widgets, the battery page's chart).
+    static let lowLevel = 20
+
     static let unknown = PowerState(
         hasBattery: false, level: 0, isCharging: false, isPluggedIn: false,
         isCharged: false, minutesRemaining: nil, isLowPowerMode: false

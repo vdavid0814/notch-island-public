@@ -23,8 +23,13 @@ import Observation
     /// Set by `Scripts/publish-baseline.sh --replace`: the next reference replaces every number.
     nonisolated static let referenceReplaceKey = "ni2.diagnostics.referenceReplace"
 
+    /// The launch report's moment is left to the system (`NSBackgroundActivityScheduler`, background
+    /// quality of service): one when the Mac is not busy, never before `launchDelay` and usually
+    /// within twice `launchTolerance` after it. The hourly reports do not wait for it.
     static let launchDelay: Duration = .seconds(90)
-    /// After a crash or unclean exit, and on a new version's first launch.
+    static let launchTolerance: TimeInterval = 60
+    nonisolated static let launchActivityID = "com.davidvarga.notchisland.diagnostics.launch"
+    /// After a crash or unclean exit, and on a new version's first launch: at this time exactly.
     static let urgentLaunchDelay: Duration = .seconds(25)
     static let periodicInterval: Duration = .seconds(3600)
     /// Hours of log in an automatic report, in the hourly one, and in a bug report.
@@ -39,11 +44,39 @@ import Observation
     }
     /// The hourly report is light (what changes by the hour: energy, the app's state, the user's
     /// flow, this run's log read in-process); a full one (the Mac's setup, installed apps, Spotlight,
-    /// hardware, `log show` over earlier runs) goes at most this often, and at launch, after an
-    /// update or a crash, by hand, with a bug report or an anomaly. A full report and its tools
-    /// cost ~21 J (measured, coalition): hourly that was ten times the app's own energy.
+    /// hardware, `log show` over earlier runs) goes at most this often, and at a launch that comes
+    /// later than that after the last one, after an update or a crash, by hand, with a bug report
+    /// or an anomaly. A full report and its tools cost ~21 J (measured, coalition): hourly that was
+    /// ten times the app's own energy.
     static let fullReportInterval: TimeInterval = 6 * 3600
     nonisolated static let lastFullKey = "ni2.diagnostics.lastFull"
+
+    /// The hourly report, and the launch report within `fullReportInterval` of the last full one
+    /// (relaunches in a row each sent a full report), are light.
+    static func isLight(_ reason: DiagnosticsReason, lastFull: Date, now: Date = Date()) -> Bool {
+        (reason == .periodic || reason == .launch) && now.timeIntervalSince(lastFull) < fullReportInterval
+    }
+
+    /// How the reports start: the launch report at the system's moment (`scheduled`) and the hourly
+    /// ones an hour after launch, however long the system holds it back; any other first report at
+    /// `firstDelay` exactly, the hourly ones after it.
+    static func reportTimes(firstDelay: Duration, firstReason: DiagnosticsReason)
+        -> (scheduled: Bool, loopDelay: Duration, loopReason: DiagnosticsReason) {
+        firstReason == .launch ? (true, periodicInterval, .periodic) : (false, firstDelay, firstReason)
+    }
+
+    /// The Mac's hardware, apps and Spotlight as kept since an earlier report (`DiagnosticsCache`):
+    /// automatic reports. By hand, a bug report, the preview and the reference (no reason) read them
+    /// afresh: the user may be telling about what just changed.
+    static func reusesKept(_ reason: DiagnosticsReason?) -> Bool {
+        reason.map { $0 != .manual } ?? false
+    }
+
+    /// The system's call for the launch report `fired` sends it only while that is still the one
+    /// waiting: not after `stop()`, a later `reschedule` or once it went.
+    static func sendsLaunchReport(fired: ObjectIdentifier, current: NSBackgroundActivityScheduler?) -> Bool {
+        current.map { ObjectIdentifier($0) == fired } ?? false
+    }
 
     static let bugLogHours = 24
     /// A second Send Report Now this soon after a report sends nothing (four in six seconds were
@@ -101,6 +134,8 @@ import Observation
     @ObservationIgnored private let outbox: URL?
     @ObservationIgnored private weak var model: AppModel?
     @ObservationIgnored private var schedule: Task<Void, Never>?
+    /// The launch report's moment, left to the system.
+    @ObservationIgnored private var launchActivity: NSBackgroundActivityScheduler?
     @ObservationIgnored private var isSending = false
     @ObservationIgnored private(set) var energy: EnergyMeter!
     @ObservationIgnored let references = DiagnosticsReferenceStore()
@@ -183,6 +218,8 @@ import Observation
     func stop() {
         schedule?.cancel()
         schedule = nil
+        launchActivity?.invalidate()
+        launchActivity = nil
         problemWatch?.cancel()
         problemWatch = nil
         energy.stop()
@@ -202,15 +239,40 @@ import Observation
         }
     }
 
-    /// The launch report, then one every `periodicInterval`; nothing while turned off.
+    /// The first report (`reportTimes`), and one every `periodicInterval`; nothing while turned off.
     private func reschedule(firstDelay: Duration, firstReason: DiagnosticsReason) {
         schedule?.cancel()
         schedule = nil
+        launchActivity?.invalidate()
+        launchActivity = nil
         problemWatch?.cancel()
         problemWatch = nil
         guard isEnabled, isConfigured, model != nil else { return }
         watchProblems()
-        schedule = Task { [weak self] in
+        let times = Self.reportTimes(firstDelay: firstDelay, firstReason: firstReason)
+        startReports(after: times.loopDelay, reason: times.loopReason)
+        guard times.scheduled else { return }
+        let activity = NSBackgroundActivityScheduler(identifier: Self.launchActivityID)
+        activity.repeats = false
+        activity.qualityOfService = .background
+        activity.tolerance = Self.launchTolerance
+        activity.interval = TimeInterval(firstDelay.components.seconds) + Self.launchTolerance
+        let id = ObjectIdentifier(activity)
+        activity.schedule { [weak self] completion in
+            completion(.finished)
+            Task(priority: .background) { @MainActor in
+                guard let self, Self.sendsLaunchReport(fired: id, current: self.launchActivity) else { return }
+                self.launchActivity = nil
+                await self.sendReport(.launch)
+            }
+        }
+        launchActivity = activity
+    }
+
+    /// A report after `firstDelay`, then one every `periodicInterval`. At background
+    /// priority: collecting a report runs on the efficiency cores.
+    private func startReports(after firstDelay: Duration, reason firstReason: DiagnosticsReason) {
+        schedule = Task(priority: .background) { [weak self] in
             var delay = firstDelay
             var reason = firstReason
             while !Task.isCancelled {
@@ -326,11 +388,11 @@ import Observation
         // By hand: the newest version and reference, not an hour-old answer.
         await references.refresh(force: reason == .manual)
         let lastFull = defaults.object(forKey: Self.lastFullKey) as? Date ?? .distantPast
-        let light = reason == .periodic && Date().timeIntervalSince(lastFull) < Self.fullReportInterval
+        let light = Self.isLight(reason, lastFull: lastFull)
         // The 6-hourly full report reads the log back to the previous full one (the hourly ones
         // bring none): 1 hour of it left five hours of errors unseen.
         let report = await makeReport(logHours: Self.reportLogHours, crashesSince: crashesSince, light: light,
-                                      logSince: Self.logStart(for: reason, lastFull: lastFull))
+                                      logSince: Self.logStart(for: reason, lastFull: lastFull), reason: reason)
         if !light { defaults.set(Date(), forKey: Self.lastFullKey) }
         let crashes = report.attachments.count(where: \.isCrashReport)
         let kind: DiagnosticsEnvelope.Kind = crashes > 0 ? .crash : reason == .anomaly ? .anomaly : .report
@@ -657,8 +719,10 @@ import Observation
     // MARK: The report
 
     /// The whole report: the app's state and energy here, everything else off the main actor.
+    /// `reason`: the automatic report's; none for a bug report, the preview and the reference
+    /// (`reusesKept`).
     func makeReport(logHours: Int, crashesSince: Date?, basicOnly: Bool = false, light: Bool = false,
-                    logSince: Date? = nil) async -> DiagnosticsReport {
+                    logSince: Date? = nil, reason: DiagnosticsReason? = nil) async -> DiagnosticsReport {
         var appSections: [DiagnosticsReport.Section] = []
         var metrics: [DiagnosticsMetric: Double] = [:]
         if !basicOnly {
@@ -669,9 +733,11 @@ import Observation
         }
         // The tools the collection starts count as NotchIsland's helpers: that stretch is not judged.
         energy.beginCollecting()
+        var cache = DiagnosticsCache.caches
+        cache.reuses = Self.reusesKept(reason)
         let background = await Self.collect(launchedAt: launchedAt, logHours: logHours, logSince: logSince,
                                             crashesSince: crashesSince, basicOnly: basicOnly,
-                                            light: light)
+                                            light: light, cache: cache)
         energy.endCollecting()
         metrics.merge(background.metrics) { $1 }
         var report = DiagnosticsReport()
@@ -788,8 +854,8 @@ import Observation
         return section
     }
 
-    @concurrent nonisolated private static func collect(launchedAt: Date, logHours: Int, logSince: Date? = nil, crashesSince: Date?,
-                                                         basicOnly: Bool, light: Bool = false) async -> DiagnosticsReport {
+    @concurrent nonisolated static func collect(launchedAt: Date, logHours: Int, logSince: Date? = nil, crashesSince: Date?,
+                                                 basicOnly: Bool, light: Bool = false, cache: DiagnosticsCache) async -> DiagnosticsReport {
         var report = DiagnosticsReport()
         var app = DiagnosticsProbes.bundle(launchedAt: launchedAt)
         app.add("Crash reports kept", DiagnosticsProbes.crashSummary())
@@ -812,11 +878,17 @@ import Observation
             return report
         }
         report.sections += [BatteryProbe.section(), BatteryProbe.topUsers()]
-        let spotlight = await DiagnosticsProbes.spotlight()
+        let spotlight = await cache.report("spotlight", key: DiagnosticsCache.spotlightKey(),
+                                           lifetime: DiagnosticsCache.spotlightLifetime) { await DiagnosticsProbes.spotlight() }
         report.sections += spotlight.sections
         report.metrics = spotlight.metrics
-        report.sections.append(DiagnosticsProbes.hardware())
-        report.sections += DiagnosticsEnvironment.sections()
+        report.sections += await cache.report("hardware", key: DiagnosticsCache.hardwareKey()) {
+            DiagnosticsReport(sections: [DiagnosticsProbes.hardware()])
+        }.sections
+        let apps = await cache.report("apps", key: DiagnosticsCache.appsKey()) {
+            DiagnosticsReport(sections: [DiagnosticsEnvironment.appsOnDisk()])
+        }
+        report.sections += DiagnosticsEnvironment.sections(appsOnDisk: apps.sections.first ?? DiagnosticsEnvironment.appsOnDisk())
         report.metrics[.crashes] = Double(DiagnosticsProbes.crashCount(days: 7))
         if logHours > 0 {
             let start = logSince ?? Date().addingTimeInterval(-Double(logHours) * 3600)

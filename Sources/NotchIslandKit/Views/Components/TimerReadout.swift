@@ -114,7 +114,4 @@ extension PowerState {
         if isLowPowerMode { return .lowPower }
         return .none
     }
-
-    /// Below this the battery reads red.
-    static let lowLevel = 20
 }

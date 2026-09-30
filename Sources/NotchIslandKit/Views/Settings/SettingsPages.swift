@@ -182,204 +182,15 @@ private struct ThemePicker: View {
             }
             .frame(minHeight: Self.swatch)
             if isMixing {
-                PaintPalette(theme: $theme)
+                ColorMixer(theme: $theme)
+                    .padding(18)
+                    .background(Color.white.opacity(0.04), in: .rect(cornerRadius: 16, style: .continuous))
+                    .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1) }
                     .transition(.asymmetric(
                         insertion: .scale(scale: 0.15, anchor: .topTrailing).combined(with: .opacity),
                         removal: .scale(scale: 0.3, anchor: .topTrailing).combined(with: .opacity)))
             }
         }
-    }
-}
-
-/// The colour mixer: the basic colours as circles, and any colour from the spectrum (hue across,
-/// saturation down), its brightness beside it, the result with its hex code and RGB values.
-private struct PaintPalette: View {
-    @Binding var theme: IslandTheme
-    @State private var hue: Double = 0
-    @State private var saturation: Double = 0
-    @State private var brightness: Double = 1
-    @State private var hex = ""
-    @State private var appeared = false
-
-    private static let basics = IslandTheme.Preset.allCases.filter { $0 != .custom }
-    private let columns = Array(repeating: GridItem(.fixed(26), spacing: 10), count: 4)
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 26) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Basic colours")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(SettingsPalette.secondary)
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
-                    ForEach(Array(Self.basics.enumerated()), id: \.element) { index, preset in
-                        Button { pick(preset) } label: {
-                            ColorCircle(color: preset.color?.color ?? .white, isSelected: theme.preset == preset)
-                        }
-                        .buttonStyle(.plain)
-                        .help(preset.title)
-                        .accessibilityLabel(preset.title)
-                        .scaleEffect(appeared ? 1 : 0.2)
-                        .opacity(appeared ? 1 : 0)
-                        .animation(.spring(response: 0.4, dampingFraction: 0.7).delay(0.025 * Double(index)), value: appeared)
-                    }
-                }
-            }
-            .frame(width: 4 * 26 + 3 * 10, alignment: .leading)
-
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    SpectrumField(hue: $hue, saturation: $saturation, onChange: apply)
-                        .frame(height: 140)
-                    BrightnessBar(hue: hue, saturation: saturation, brightness: $brightness, onChange: apply)
-                        .frame(width: 16, height: 140)
-                }
-                HStack(spacing: 12) {
-                    Circle()
-                        .fill(theme.color)
-                        .overlay { Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1) }
-                        .frame(width: 30, height: 30)
-                    TextField("Hex", text: $hex)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 12).monospaced())
-                        .frame(width: 84)
-                        .onSubmit(applyHex)
-                    Spacer(minLength: 8)
-                    let rgb = theme.rgb
-                    ForEach([("R", rgb.red), ("G", rgb.green), ("B", rgb.blue)], id: \.0) { name, value in
-                        HStack(spacing: 3) {
-                            Text(name).foregroundStyle(SettingsPalette.secondary)
-                            Text("\(Int((value * 255).rounded()))").monospacedDigit()
-                        }
-                        .font(.system(size: 11))
-                    }
-                }
-            }
-        }
-        .padding(18)
-        .background(Color.white.opacity(0.04), in: .rect(cornerRadius: 16, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1) }
-        .onAppear {
-            load(theme.rgb)
-            appeared = true
-        }
-    }
-
-    /// A basic colour, as it is.
-    private func pick(_ preset: IslandTheme.Preset) {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { theme.preset = preset }
-        if let color = preset.color { load(color) }
-    }
-
-    /// The spectrum's colour becomes the theme (named after a basic colour when it is one).
-    private func apply() {
-        let color = NSColor(hue: hue, saturation: saturation, brightness: brightness, alpha: 1)
-        let rgb = IslandTheme.RGB(color)
-        theme.first = rgb
-        theme.mix = 0
-        theme.preset = Self.basics.first { $0.color == rgb } ?? .custom
-        hex = Self.hex(rgb)
-    }
-
-    private func applyHex() {
-        let digits = hex.trimmingCharacters(in: CharacterSet(charactersIn: "# ")).uppercased()
-        guard digits.count == 6, let value = Int(digits, radix: 16) else {
-            hex = Self.hex(theme.rgb)
-            return
-        }
-        load(IslandTheme.RGB(red: Double((value >> 16) & 0xFF) / 255, green: Double((value >> 8) & 0xFF) / 255,
-                             blue: Double(value & 0xFF) / 255))
-        apply()
-    }
-
-    private func load(_ rgb: IslandTheme.RGB) {
-        let color = NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
-        hue = Double(color.hueComponent)
-        saturation = Double(color.saturationComponent)
-        brightness = Double(color.brightnessComponent)
-        hex = Self.hex(rgb)
-    }
-
-    static func hex(_ rgb: IslandTheme.RGB) -> String {
-        func byte(_ c: Double) -> Int { Int((min(max(c, 0), 1) * 255).rounded()) }
-        return String(format: "#%02X%02X%02X", byte(rgb.red), byte(rgb.green), byte(rgb.blue))
-    }
-}
-
-/// A colour as a plain circle; the chosen one ringed.
-private struct ColorCircle: View {
-    let color: Color
-    var isSelected = false
-
-    var body: some View {
-        Circle()
-            .fill(color)
-            .overlay { Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1) }
-            .padding(isSelected ? 3 : 0)
-            .overlay { Circle().strokeBorder(Color.white.opacity(isSelected ? 0.9 : 0), lineWidth: 2) }
-            .frame(width: 26, height: 26)
-            .contentShape(Circle())
-    }
-}
-
-/// Hue across, saturation from full at the top to grey at the bottom; a ring marks the colour.
-private struct SpectrumField: View {
-    @Binding var hue: Double
-    @Binding var saturation: Double
-    let onChange: () -> Void
-
-    var body: some View {
-        GeometryReader { proxy in
-            let size = proxy.size
-            ZStack(alignment: .topLeading) {
-                LinearGradient(colors: stride(from: 0.0, through: 1.0, by: 1 / 12).map { Color(hue: $0, saturation: 1, brightness: 1) },
-                               startPoint: .leading, endPoint: .trailing)
-                LinearGradient(colors: [.white.opacity(0), .white], startPoint: .top, endPoint: .bottom)
-                Circle()
-                    .strokeBorder(.white, lineWidth: 2)
-                    .background(Circle().fill(Color(hue: hue, saturation: saturation, brightness: 1)))
-                    .shadow(color: .black.opacity(0.4), radius: 2)
-                    .frame(width: 16, height: 16)
-                    .position(x: hue * size.width, y: (1 - saturation) * size.height)
-            }
-            .clipShape(.rect(cornerRadius: 10, style: .continuous))
-            .contentShape(.rect)
-            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                hue = min(max(value.location.x / size.width, 0), 0.9999)
-                saturation = 1 - min(max(value.location.y / size.height, 0), 1)
-                onChange()
-            })
-        }
-        .accessibilityLabel("Colour spectrum")
-    }
-}
-
-/// The colour's brightness, from full at the top to black.
-private struct BrightnessBar: View {
-    let hue: Double
-    let saturation: Double
-    @Binding var brightness: Double
-    let onChange: () -> Void
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .top) {
-                LinearGradient(colors: [Color(hue: hue, saturation: saturation, brightness: 1), .black],
-                               startPoint: .top, endPoint: .bottom)
-                    .clipShape(Capsule())
-                Circle()
-                    .strokeBorder(.white, lineWidth: 2)
-                    .background(Circle().fill(Color(hue: hue, saturation: saturation, brightness: brightness)))
-                    .shadow(color: .black.opacity(0.4), radius: 2)
-                    .frame(width: 16, height: 16)
-                    .offset(y: (1 - brightness) * (proxy.size.height - 16))
-            }
-            .contentShape(.rect)
-            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                brightness = 1 - min(max(value.location.y / proxy.size.height, 0), 1)
-                onChange()
-            })
-        }
-        .accessibilityLabel("Brightness")
     }
 }
 
@@ -659,6 +470,10 @@ struct ActivitiesSettingsPage: View {
                 }
             }
 
+            if model.power.hasBattery {
+                BatteryPageSection(settings: $preferences.battery)
+            }
+
             Section("Shelf and Timer") {
                 Toggle(isOn: $preferences.shelfEnabled) {
                     InfoLabel("Shelf", "Drag files onto the notch to keep them at hand, then drag them out or AirDrop them.")
@@ -667,6 +482,49 @@ struct ActivitiesSettingsPage: View {
                     InfoLabel("Play a sound when a timer ends", "The timer's alert sound plays with the notice in the island.")
                 }
             }
+        }
+    }
+}
+
+/// The battery page's chart (the header's battery opens the page): its style, range, colours and
+/// what it marks. The chart's context menu sets the style and range too.
+private struct BatteryPageSection: View {
+    @Binding var settings: BatteryDisplaySettings
+
+    var body: some View {
+        Section {
+            Picker(selection: $settings.style) {
+                ForEach(BatteryChartStyle.allCases, id: \.self) { Text($0.title).tag($0) }
+            } label: {
+                InfoLabel("Chart", "Bars: the level at the end of each quarter hour, as the iPhone shows it. Area and Line: every reading.")
+            }
+            .choiceBar()
+            Picker(selection: $settings.range) {
+                ForEach(BatteryChartRange.allCases, id: \.self) { Text($0.title).tag($0) }
+            } label: {
+                InfoLabel("Shows", "Today from midnight, or the last 24 or 48 hours (in half hours).")
+            }
+            .choiceBar()
+            LabeledContent {
+                HStack(spacing: 12) {
+                    ColorWell(color: $settings.normalColor).help("On battery")
+                    ColorWell(color: $settings.chargingColor).help("Charging")
+                    ColorWell(color: $settings.lowColor).help("Below 20 %")
+                }
+            } label: {
+                InfoLabel("Colours", "On battery, while charging, and below 20 % on battery. Automatic: white, green and red.")
+            }
+            Toggle(isOn: $settings.showsGaps) {
+                InfoLabel("Mark gaps", "Hatching where nothing is known: the Mac asleep, or NotchIsland not running.")
+            }
+            Toggle(isOn: $settings.shadesDisplayOff) {
+                InfoLabel("Shade display off", "A faint band where the displays were off.")
+            }
+            Toggle(isOn: $settings.showsCaptions) {
+                InfoLabel("Captions", "When the battery was last charged, over the chart, and the percentages beside it.")
+            }
+        } header: {
+            InfoLabel("Battery Page", "Click the battery at the top of the open island: the level, how long it lasts, the battery's health and the day's charge.")
         }
     }
 }
@@ -753,7 +611,7 @@ struct SiriSettingsPage: View {
                     InfoLabel("Matching", Self.matchingDetail(siri.matching))
                 }
                 .choiceBar()
-                RowsStepper(title: "Results of each kind", detail: "How many apps and how many files a search lists.",
+                RowsStepper(title: "Results of each kind", detail: "How many apps and how many files a search lists. Commands, System Settings panes, windows and emoji: up to two of each.",
                             value: $preferences.siri.resultsPerKind, range: SiriSettings.resultsRange, unit: "")
             } header: {
                 Text("Search")
@@ -771,6 +629,15 @@ struct SiriSettingsPage: View {
                 }
                 Toggle(isOn: $preferences.siri.showsClipboard) {
                     InfoLabel("Clipboard  ⌘4", "The last 50 texts you copied, kept on this Mac; Return pastes one where you were typing. Copies that password managers mark as secret are never kept. Off, nothing is watched.")
+                }
+                Toggle(isOn: $preferences.siri.showsSystem) {
+                    InfoLabel("System  ⌘5", "The island's commands (\u{201C}timer 10\u{201D} starts one), Control Center's switches with their state, Lock, Sleep, Restart, Empty Trash and System Settings' panes, found by name. Restart, Shut Down and Log Out ask first; Empty Trash asks for a second Return.")
+                }
+                Toggle(isOn: $preferences.siri.showsWindows) {
+                    InfoLabel("Windows  ⌘6", "Your open apps and their windows: Return switches to one, ⌘H hides its app, ⌘Q quits it. Read only while Spotlight lists them; window names need Accessibility.")
+                }
+                Toggle(isOn: $preferences.siri.showsEmoji) {
+                    InfoLabel("Emoji  ⌘7", "Emoji by name (\u{201C}thumbs up\u{201D}, \u{201C}fire\u{201D}): Return pastes one where you were typing, ⌘C copies it.")
                 }
             } header: {
                 InfoLabel("Suggestions", "What Spotlight lists and searches. A suggestion that is off does not open with its shortcut either.")

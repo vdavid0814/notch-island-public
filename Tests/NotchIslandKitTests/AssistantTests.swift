@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 import FoundationModels
+import Synchronization
 import Testing
 @testable import NotchIslandKit
 
@@ -13,15 +14,17 @@ import Testing
         let suggestions = layout.size(for: .assistant(.suggestions))
         let list = layout.size(for: .assistant(.list))
         #expect(field.width == expanded.width && suggestions.width == expanded.width && list.width == expanded.width)
+        let fourRows = layout.size(for: .assistant(.rows(4)))
         // Only the field: the top inset, the 40 pt field and the bottom inset.
         #expect(field.height == CGFloat(28 + 8 + 40 + 12))
-        // The four suggestions exactly: four rows and their spacing, one inset between, and the
-        // last row as far above the bottom as the rows are in from the side (30 − 16 = 14, not
-        // the field's 12): its capsule is concentric with the panel's corners.
+        // Four rows exactly: four rows and their spacing, one inset between, and the last row as
+        // far above the bottom as the rows are in from the side (30 − 16 = 14, not the field's
+        // 12): its capsule is concentric with the panel's corners.
         #expect(layout.assistantRowInset == 14)
-        #expect(suggestions.height == field.height + 8 + 4 * 32 + 3 * 2 + 2)
+        #expect(fourRows.height == field.height + 8 + 4 * 32 + 3 * 2 + 2)
         #expect(list.height == 28 + IslandLayout.assistantPageHeight)
-        #expect(field.height < suggestions.height && suggestions.height < list.height)
+        // All seven suggestions fill the list.
+        #expect(field.height < fourRows.height && fourRows.height < list.height && suggestions.height == list.height)
         #expect(layout.bottomRadius(for: .assistant(.field)) == layout.bottomRadius(for: .expanded(.home)))
     }
 
@@ -79,7 +82,8 @@ import Testing
 
 /// Fixed lists instead of Spotlight and `shortcuts list`.
 @MainActor func stubSources(
-    apps: [String] = [], files: [String] = [], recent: [String] = [], allApps: [String] = [], shortcuts: [String] = []
+    apps: [String] = [], files: [String] = [], recent: [String] = [], allApps: [String] = [], shortcuts: [String] = [],
+    panes: [SystemSettingsPane] = [], windows: [AssistantWindow] = [], emoji: [AssistantEmoji] = []
 ) -> AssistantSources {
     func hits(_ names: [String], _ kind: AssistantHit.Kind) -> [AssistantHit] {
         names.enumerated().map { index, name in
@@ -95,7 +99,10 @@ import Testing
         recentFiles: { _ in recentHits },
         allApps: { allAppHits },
         shortcuts: { shortcuts },
-        isUnsupportedLanguage: { _ in false }
+        isUnsupportedLanguage: { _ in false },
+        settingsPanes: { panes },
+        windows: { _ in windows },
+        emoji: { emoji }
     )
 }
 
@@ -115,7 +122,7 @@ import Testing
 
     @Test func bareFieldListsTheSuggestionsButNeedsNoList() {
         let model = model()
-        #expect(model.rows == [.category(.applications), .category(.files), .category(.actions), .category(.clipboard)])
+        #expect(model.rows == AssistantCategory.allCases.map(AssistantRow.category))
         #expect(!model.needsList && !model.revealsSuggestions)
         // Return on the bare field does nothing: nothing is shown to run.
         model.activateSelection()
@@ -443,23 +450,23 @@ import Testing
     @Test func oldBoardsDecodeWithDefaults() throws {
         let json = #"{"widgets":[{"kind":"timer","frame":{"column":7,"row":0,"width":5,"height":2},"options":["ruler","readout","bogus"]}]}"#
         let board = try JSONDecoder().decode(WidgetBoard.self, from: Data(json.utf8))
-        let timer = try #require(board.widget(.timer))
+        let timer = try #require(board.first(of: .timer))
         #expect(timer.options == [.ruler, .readout])
         #expect(timer.tint == .automatic && timer.showsPlate && !timer.mirrored)
     }
 
     @Test func styleRoundTripsAndKeepsTheFrame() throws {
         var board = WidgetBoard.standard
-        board.update(.timer) { widget in
+        board.update(.legacy(.timer)) { widget in
             widget.tint = .teal
             widget.mirrored = true
             widget.frame = GridRect(column: 0, row: 0, width: 1, height: 1)   // ignored
         }
         let data = try JSONEncoder().encode(board)
         let decoded = try JSONDecoder().decode(WidgetBoard.self, from: data)
-        let timer = try #require(decoded.widget(.timer))
+        let timer = try #require(decoded.widget(.legacy(.timer)))
         #expect(timer.tint == .teal && timer.mirrored)
-        #expect(timer.frame == WidgetBoard.standard.widget(.timer)?.frame)
+        #expect(timer.frame == WidgetBoard.standard.first(of: .timer)?.frame)
     }
 
     @Test func everyControlIsItsOwnWidget() {
@@ -472,7 +479,7 @@ import Testing
         }
         var board = WidgetBoard(widgets: [])
         let wifi = board.add(.wifi), bluetooth = board.add(.bluetooth)
-        #expect(wifi && bluetooth && board.widget(.wifi)?.frame.size == GridSize(width: 2, height: 1))
+        #expect(wifi != nil && bluetooth != nil && board.first(of: .wifi)?.frame.size == GridSize(width: 2, height: 1))
     }
 
     @Test func anUnknownWidgetDoesNotLoseTheBoard() throws {
@@ -480,6 +487,8 @@ import Testing
         let json = #"{"widgets":[{"kind":"controls","frame":{"column":0,"row":0,"width":5,"height":1},"options":[]},{"kind":"timer","frame":{"column":7,"row":0,"width":5,"height":2},"options":["ruler"]}]}"#
         let board = try JSONDecoder().decode(WidgetBoard.self, from: Data(json.utf8))
         #expect(board.widgets.map(\.kind) == [.timer])
+        // Kept as it was, for a build that knows it.
+        #expect(board.foreign.count == 1)
     }
 
     @Test func settingsFitsTheScreen() {
@@ -603,3 +612,470 @@ import Testing
     }
 }
 
+
+/// Records what Spotlight asks of the Mac instead of doing it: no test may lock, sleep, restart or
+/// empty anything.
+@MainActor final class SystemRecorder {
+    var calls: [String] = []
+    var states: [AssistantCommand: Bool] = [:]
+
+    var system: AssistantSystem {
+        AssistantSystem(
+            state: { command, mayAsk in
+                self.calls.append("state \(command.id)\(mayAsk ? " live" : "")")
+                return self.states[command]
+            },
+            setControl: { self.calls.append("set \($0.rawValue) \($1)") },
+            run: { self.calls.append("run \($0.rawValue)") },
+            open: { self.calls.append("open \($0.absoluteString)") },
+            switchTo: { self.calls.append("switch \($0.id)") },
+            hide: { self.calls.append("hide \($0.pid)") },
+            quit: { self.calls.append("quit \($0.pid)") }
+        )
+    }
+}
+
+@MainActor @Suite struct AssistantReachTests {
+    func model(_ sources: AssistantSources = stubSources(), recorder: SystemRecorder? = nil) -> AssistantModel {
+        let model = AssistantModel(defaults: UserDefaults(suiteName: "AssistantReachTests.\(UUID().uuidString)")!, sources: sources)
+        if let recorder { model.system = recorder.system }
+        model.begin()
+        return model
+    }
+
+    static let windows = [
+        AssistantWindow(pid: 11, appName: "Safari", appPath: "/Applications/Safari.app", title: "Apple", index: 0),
+        AssistantWindow(pid: 11, appName: "Safari", appPath: "/Applications/Safari.app", title: "GitHub", index: 2),
+        AssistantWindow(pid: 22, appName: "Finder", appPath: "/System/Library/CoreServices/Finder.app"),
+    ]
+
+    @Test func categoriesFiveToSevenHaveTheirKeysAndToggles() throws {
+        #expect([AssistantCategory.system, .windows, .emoji].map(\.rawValue) == [5, 6, 7])
+        // Settings saved before these existed turn them on.
+        let old = try JSONDecoder().decode(SiriSettings.self, from: Data(#"{"showsClipboard": false}"#.utf8))
+        #expect(old.showsSystem && old.showsWindows && old.showsEmoji)
+        #expect(old.categories == [.applications, .files, .actions, .system, .windows, .emoji])
+        var settings = SiriSettings()
+        settings.showsEmoji = false
+        let model = model()
+        model.settings = { settings }
+        model.open(.emoji)
+        #expect(model.category == nil)
+        model.open(.windows)
+        #expect(model.category == .windows)
+    }
+
+    @Test func systemListsCommandsWithTheirStateAndPanes() async {
+        let recorder = SystemRecorder()
+        recorder.states[.control(.wifi)] = true
+        let model = model(stubSources(panes: await SystemSettingsPane.table()), recorder: recorder)
+        model.open(.system)
+        await model.settle()
+        #expect(model.rows.contains(.command(.control(.wifi))) && model.rows.contains(.command(.mac(.restart))))
+        #expect(model.rows.contains { if case .settingsPane = $0 { true } else { false } })
+        // Read once as the list opened, without a permission prompt.
+        #expect(model.commandStates[.control(.wifi)] == true && recorder.calls.contains("state control:wifi"))
+        // "Cancel Timer" only with a timer, a widget's editor only for one on the board.
+        #expect(!model.rows.contains(.command(.cancelTimer)))
+        model.timerIsActive = { true }
+        model.widgetKinds = { [.timer, .timer] }
+        #expect(model.rows.contains(.command(.cancelTimer)))
+        #expect(model.rows.filter { $0 == .command(.editWidget(.timer)) }.count == 1)
+    }
+
+    @Test func togglesReadTheLiveStateBeforeSwitching() async {
+        let recorder = SystemRecorder()
+        recorder.states[.control(.wifi)] = false
+        let model = model(recorder: recorder)
+        var closed = false
+        model.onClose = { closed = true }
+        model.open(.system)
+        #expect(model.commandStates[.control(.wifi)] == false)
+        // Switched on in Control Center meanwhile: the switch goes by what the Mac has now.
+        recorder.states[.control(.wifi)] = true
+        model.query = "wifi"
+        #expect(model.rows.first == .command(.control(.wifi)))
+        model.activateSelection()
+        #expect(recorder.calls.suffix(2) == ["state control:wifi live", "set wifi false"])
+        #expect(closed)
+    }
+
+    @Test func macCommandsRunThroughTheExecutor() {
+        for command in MacCommand.allCases where command != .emptyTrash {
+            let recorder = SystemRecorder()
+            let model = model(recorder: recorder)
+            var closed = false
+            model.onClose = { closed = true }
+            model.open(.system)
+            model.select(.command(.mac(command)))
+            model.activateSelection()
+            #expect(recorder.calls.last == "run \(command.rawValue)" && closed, "\(command)")
+        }
+    }
+
+    @Test func emptyTrashNeedsASecondReturn() async {
+        let recorder = SystemRecorder()
+        let model = model(recorder: recorder)
+        var closed = false
+        model.onClose = { closed = true }
+        let trash = AssistantRow.command(.mac(.emptyTrash))
+        model.open(.system)
+        model.select(trash)
+        model.activateSelection()
+        #expect(model.confirming == trash.id && !recorder.calls.contains("run emptyTrash") && !closed)
+        // Moving away and back asks again.
+        model.moveSelection(by: -1)
+        #expect(model.confirming == nil)
+        model.moveSelection(by: 1)
+        model.activateSelection()
+        #expect(model.confirming == trash.id && !recorder.calls.contains("run emptyTrash"))
+        // So does typing.
+        model.query = "trash"
+        #expect(model.confirming == nil)
+        model.select(trash)
+        model.activateSelection()
+        try? await Task.sleep(for: .milliseconds(450))
+        model.activateSelection()
+        #expect(recorder.calls.last == "run emptyTrash" && closed && model.confirming == nil)
+    }
+
+    @Test func islandCommandsGoThroughTheApp() async {
+        let model = model()
+        var commands: [AppCommand] = []
+        model.onCommand = { commands.append($0) }
+        model.timerIsActive = { true }
+        model.widgetKinds = { [.timer] }
+        for (query, row) in [("timer 10", AssistantRow.command(.timer(minutes: 10))), ("10 min timer", .command(.timer(minutes: 10))),
+                             ("keep island open", .command(.keepOpen)), ("cancel timer", .command(.cancelTimer)),
+                             ("customize timer", .command(.editWidget(.timer))), ("island settings widgets", .command(.settings(.widgets))),
+                             ("open island", .command(.page(.home)))] {
+            model.query = query
+            await model.settle()
+            #expect(model.rows.contains(row), "\(query)")
+            model.select(row)
+            model.activateSelection()
+        }
+        #expect(commands == [.startTimer(minutes: 10), .startTimer(minutes: 10), .togglePin, .cancelTimer,
+                             .editWidget(.kind(.timer)), .showSettingsPane(.widgets), .open(.home)])
+        // A typed timer comes first, even before an answer to a "question" of three words.
+        model.query = "10 min timer"
+        #expect(model.rows.first == .command(.timer(minutes: 10)))
+    }
+
+    @Test func typedTimers() {
+        #expect(AssistantCommand.timerMinutes(in: "timer 10") == 10)
+        #expect(AssistantCommand.timerMinutes(in: "10 min timer") == 10)
+        #expect(AssistantCommand.timerMinutes(in: "Timer 1.5 h") == 90)
+        #expect(AssistantCommand.timerMinutes(in: "set a timer for 25 minutes") == 25)
+        #expect(AssistantCommand.timerMinutes(in: "90s timer") == 1.5)
+        #expect(AssistantCommand.timerMinutes(in: "időzítő 10 perc") == 10)
+        #expect(AssistantCommand.timerMinutes(in: "timer") == nil)
+        #expect(AssistantCommand.timerMinutes(in: "10 min") == nil)
+        #expect(AssistantCommand.timerMinutes(in: "timer 10 20") == nil)
+        #expect(AssistantCommand.timerMinutes(in: "timer pro 10") == nil)
+        #expect(AssistantCommand.timerMinutes(in: "timer 0") == nil)
+        #expect(AssistantCommand.timerMinutes(in: "timer 2000 h") == nil)
+    }
+
+    @Test func settingsPanesMatchTheirSynonymsAndOpenTheirLink() async {
+        let recorder = SystemRecorder()
+        let model = model(stubSources(panes: await SystemSettingsPane.table()), recorder: recorder)
+        var closed = false
+        model.onClose = { closed = true }
+        func firstPane(_ query: String) async -> String? {
+            model.query = query
+            await model.settle()
+            return model.rows.lazy.compactMap { if case .settingsPane(let pane) = $0 { pane.title } else { nil } }.first
+        }
+        model.open(.system)
+        await model.settle()
+        #expect(await firstPane("hot corners") == "Desktop & Dock")
+        #expect(await firstPane("dock") == "Desktop & Dock")
+        #expect(await firstPane("sound") == "Sound")
+        #expect(await firstPane("webcam") == "Camera Access")
+        #expect(await firstPane("filevault") == "FileVault")
+        model.query = "webcam"
+        model.select(model.rows.first { if case .settingsPane = $0 { true } else { false } }!)
+        model.activateSelection()
+        #expect(recorder.calls.last == "open x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Camera")
+        #expect(closed)
+        // Every pane has a working link and a distinct place.
+        let table = await SystemSettingsPane.table()
+        #expect(table.count >= 55 && Set(table.map(\.id)).count == table.count && table.allSatisfy { $0.url != nil })
+    }
+
+    @Test func windowsSwitchHideAndQuit() async {
+        let recorder = SystemRecorder()
+        let model = model(stubSources(windows: Self.windows), recorder: recorder)
+        var closed = false
+        model.onClose = { closed = true }
+        model.open(.windows)
+        await model.settle()
+        #expect(model.rows == Self.windows.map(AssistantRow.window))
+        model.query = "git"
+        #expect(model.rows == [.window(Self.windows[1])])
+        // By the app's name too.
+        model.query = "finder"
+        #expect(model.rows == [.window(Self.windows[2])])
+        model.query = "saf"
+        model.moveSelection(by: 0)
+        #expect(model.hideSelectedApp() && !closed)
+        #expect(model.quitSelectedApp())
+        #expect(recorder.calls == ["hide 11", "quit 11"])
+        // The quit app's rows go at once.
+        #expect(model.rows.isEmpty)
+        model.query = ""
+        model.activateSelection()
+        #expect(recorder.calls.last == "switch 22:0" && closed)
+        // Other rows leave ⌘H and ⌘Q to the panel.
+        model.open(.system)
+        #expect(!model.hideSelectedApp() && !model.quitSelectedApp())
+    }
+
+    @Test func emojiAreFoundByAliasAndNameAndPaste() async throws {
+        let table = await EmojiTable.build()
+        let characters = Set(table.map(\.character))
+        #expect(table.count > 1000)
+        // Every alias names an emoji the table has.
+        #expect(EmojiTable.aliases.keys.allSatisfy { characters.contains($0) })
+        #expect(characters.isSuperset(of: ["😂", "❤️", "🇭🇺", "❤️‍🔥"]))
+        let model = model(stubSources(emoji: table))
+        var pasted: ClipboardItem?
+        model.onPaste = { pasted = $0 }
+        model.open(.emoji)
+        await model.settle()
+        func first(_ query: String) -> String? {
+            model.query = query
+            if case .emoji(let emoji) = model.rows.first { return emoji.character }
+            return nil
+        }
+        #expect(first("thumbs up") == "👍")
+        #expect(first("ok") == "👌")
+        #expect(first("fire") == "🔥")
+        #expect(first("heart") == "❤️")
+        #expect(first("hungary") == "🇭🇺")
+        model.query = "laugh"
+        #expect(model.rows.contains(.emoji(try #require(table.first { $0.character == "😂" }))))
+        model.activateSelection()
+        #expect(pasted?.text == "😂" || pasted?.text == "🤣")
+    }
+
+    @Test func rootMixesInTheBestOfEachKindInOrder() async {
+        let sources = stubSources(apps: ["Wireless Diagnostics"], panes: await SystemSettingsPane.table(),
+                                  windows: [AssistantWindow(pid: 5, appName: "Notes", appPath: "/System/Applications/Notes.app", title: "Wiki draft")],
+                                  emoji: [AssistantEmoji(character: "🧙", name: "mage", aliases: ["wizard"])])
+        let model = model(sources)
+        model.query = "wi"
+        await model.settle()
+        let rows = model.rows
+        func kind(_ row: AssistantRow) -> Int? {
+            switch row {
+            case .hit: 0
+            case .command: 1
+            case .settingsPane: 2
+            case .window: 3
+            case .emoji: 4
+            case .searchWeb: 5
+            default: nil
+            }
+        }
+        let kinds = rows.compactMap(kind)
+        #expect(kinds == kinds.sorted() && Set(kinds) == [0, 1, 2, 3, 4, 5], "\(rows.map(\.id))")
+        // No more of each than "results of each kind" and the root's limit allow.
+        #expect(kinds.filter { $0 == 2 }.count == AssistantModel.rootActionLimit)
+        var settings = SiriSettings()
+        settings.resultsPerKind = 1
+        settings.showsEmoji = false
+        model.settings = { settings }
+        #expect(model.rows.compactMap(kind).filter { $0 == 2 }.count == 1)
+        #expect(!model.rows.contains { if case .emoji = $0 { true } else { false } })
+    }
+
+    @Test func rowsAreComposedOncePerQueryAcrossHovers() async {
+        let model = model(stubSources(apps: ["Mail", "Maps"]))
+        model.query = "ma"
+        await model.settle()
+        func storage(_ rows: [AssistantRow]) -> UnsafeRawPointer? { rows.withUnsafeBufferPointer { UnsafeRawPointer($0.baseAddress) } }
+        let before = model.rows
+        for row in before { model.select(row) }
+        // The same rows, not composed again: the very same storage.
+        #expect(storage(model.rows) == storage(before))
+        model.query = "mai"
+        await model.settle()
+        #expect(storage(model.rows) != storage(before))
+    }
+}
+
+/// What the root's search reads per opening: running apps without Accessibility, the emoji table once.
+@MainActor @Suite struct AssistantReadsTests {
+    nonisolated static let apps = [AssistantWindow(pid: 11, appName: "Safari", appPath: "/Applications/Safari.app")]
+    nonisolated static let titled = [AssistantWindow(pid: 11, appName: "Safari", appPath: "/Applications/Safari.app", title: "Apple", index: 0)]
+
+    @Test func rootListsRunningAppsWithoutAccessibilityAndBuildsEmojiOnce() async {
+        let titleReads = Mutex<[Bool]>([])
+        let emojiBuilds = Mutex(0)
+        var sources = stubSources()
+        sources.windows = { titles in
+            titleReads.withLock { $0.append(titles) }
+            return titles ? Self.titled : Self.apps
+        }
+        sources.emoji = {
+            emojiBuilds.withLock { $0 += 1 }
+            return [AssistantEmoji(character: "🧭", name: "compass", aliases: ["safari"])]
+        }
+        let model = AssistantModel(defaults: UserDefaults(suiteName: "AssistantReadsTests.\(UUID().uuidString)")!, sources: sources)
+        model.begin()
+        for query in ["sa", "saf", "safa", "safari"] {
+            model.query = query
+            await model.settle()
+        }
+        #expect(model.rows.contains(.window(Self.apps[0])))
+        #expect(titleReads.withLock { $0 } == [false])
+        #expect(emojiBuilds.withLock { $0 } == 1)
+        // ⌘6 reads the titles.
+        model.open(.windows)
+        await model.settle()
+        #expect(model.rows == Self.titled.map(AssistantRow.window))
+        #expect(titleReads.withLock { $0 } == [false, true])
+        // The running apps go with the opening; the table is kept a while (`AssistantKeepTests`),
+        // so an opening right after builds none.
+        model.end()
+        #expect(model.windows == nil && model.emoji != nil)
+        model.begin()
+        model.query = "sa"
+        await model.settle()
+        #expect(emojiBuilds.withLock { $0 } == 1)
+        #expect(titleReads.withLock { $0 } == [false, true, false])
+        model.end()
+    }
+
+    @Test func otherRowsNeverWaitForTheRunningApps() async {
+        var sources = stubSources(shortcuts: ["Wiki"], panes: await SystemSettingsPane.table(),
+                                  emoji: [AssistantEmoji(character: "🧙", name: "mage", aliases: ["wizard"])])
+        sources.windows = { _ in
+            try? await Task.sleep(for: .seconds(3))
+            return AssistantReadsTests.apps
+        }
+        let model = AssistantModel(defaults: UserDefaults(suiteName: "AssistantReadsTests.\(UUID().uuidString)")!, sources: sources)
+        model.begin()
+        model.query = "wi"
+        // Polled rather than a fixed wait: under a loaded full-suite run the search can land late,
+        // but always well before the 3 s the windows take.
+        for _ in 0..<48 where model.settingsPanes == nil || model.shortcuts == nil || model.emoji == nil {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(model.windows == nil)
+        #expect(model.settingsPanes != nil && model.shortcuts != nil && model.emoji != nil)
+        model.end()
+    }
+}
+
+/// Return, clicks and ⌘H/⌘Q act only on what the user can see and meant.
+@MainActor @Suite struct AssistantIntentTests {
+    func model(_ sources: AssistantSources = stubSources(), recorder: SystemRecorder) -> AssistantModel {
+        let model = AssistantModel(defaults: UserDefaults(suiteName: "AssistantIntentTests.\(UUID().uuidString)")!, sources: sources)
+        model.system = recorder.system
+        // Long enough that a busy test machine's search lands first (the slow-search test sets it back).
+        model.returnWait = .seconds(10)
+        model.begin()
+        return model
+    }
+
+    static func hitURL(_ app: String) -> String { URL(fileURLWithPath: "/stub/app/\(app)").absoluteString }
+
+    @Test func returnRightAfterTypingWaitsForTheQuerysResults() async {
+        // Before the apps land the first row is a switch or a Mac command; after, an app.
+        for (query, app) in [("blu", "Bluebook"), ("mic", "Microsoft Word"), ("sle", "Sleep Cycle"), ("lo", "Logic Pro")] {
+            let recorder = SystemRecorder()
+            recorder.states[.control(.bluetooth)] = true
+            recorder.states[.control(.microphone)] = true
+            let model = model(stubSources(apps: [app]), recorder: recorder)
+            model.query = query
+            model.activateSelection()
+            #expect(!recorder.calls.contains { $0.hasPrefix("set") || $0.hasPrefix("run") || $0.hasPrefix("open") }, "\(query)")
+            await model.settle()
+            let acted = recorder.calls.filter { !$0.hasPrefix("state") }
+            #expect(acted == ["open \(Self.hitURL(app))"], "\(query): \(acted)")
+        }
+    }
+
+    @Test func returnOnASwitchRunsOnceItsResultsLandedAndItIsStillFirst() async {
+        let recorder = SystemRecorder()
+        recorder.states[.control(.bluetooth)] = true
+        let model = model(recorder: recorder)
+        model.query = "bluetooth"
+        model.activateSelection()
+        #expect(!recorder.calls.contains("set bluetooth false"))
+        await model.settle()
+        #expect(recorder.calls.last == "set bluetooth false")
+    }
+
+    @Test func aSlowSearchLetsReturnGoAfterItsWaitButNeverToASwitch() async {
+        var sources = stubSources(apps: ["Bluebook"])
+        let fast = sources.apps
+        sources.apps = { query, limit in
+            // Never lands while the test runs (a new query or `end()` cancels it).
+            try? await Task.sleep(for: .seconds(30))
+            return await fast(query, limit)
+        }
+        let recorder = SystemRecorder()
+        recorder.states[.control(.bluetooth)] = true
+        let model = model(sources, recorder: recorder)
+        model.returnWait = .milliseconds(400)
+        var commands: [AppCommand] = []
+        model.onCommand = { commands.append($0) }
+        model.query = "open island"
+        model.activateSelection()
+        #expect(commands.isEmpty)
+        for _ in 0..<50 where commands.isEmpty { try? await Task.sleep(for: .milliseconds(100)) }
+        #expect(commands == [.open(.home)])
+        model.query = "blu"
+        #expect(model.rows.first == .command(.control(.bluetooth)))
+        model.activateSelection()
+        try? await Task.sleep(for: .seconds(1))
+        #expect(!recorder.calls.contains { $0.hasPrefix("set") })
+        model.end()
+    }
+
+    @Test func emptyTrashIsConfirmedOnlyByAReturnAfterAPause() async {
+        let recorder = SystemRecorder()
+        let model = model(recorder: recorder)
+        let trash = AssistantRow.command(.mac(.emptyTrash))
+        model.open(.system)
+        // A double click arms it, and never empties.
+        model.perform(trash)
+        model.perform(trash)
+        #expect(model.confirming == trash.id && !recorder.calls.contains("run emptyTrash"))
+        // A Return at once is the same double press.
+        model.select(trash)
+        model.activateSelection()
+        #expect(!recorder.calls.contains("run emptyTrash"))
+        try? await Task.sleep(for: .milliseconds(450))
+        // A click after the pause still does not.
+        model.perform(trash)
+        #expect(model.confirming == trash.id && !recorder.calls.contains("run emptyTrash"))
+        model.activateSelection()
+        #expect(recorder.calls.last == "run emptyTrash" && model.confirming == nil)
+    }
+
+    @Test func hideAndQuitNeedARowTheUserChose() async {
+        let recorder = SystemRecorder()
+        let model = model(stubSources(windows: AssistantReachTests.windows), recorder: recorder)
+        model.open(.windows)
+        await model.settle()
+        // The first row is only where the list starts.
+        #expect(!model.hideSelectedApp() && !model.quitSelectedApp())
+        model.query = "saf"
+        #expect(!model.hideSelectedApp() && !model.quitSelectedApp())
+        #expect(recorder.calls.isEmpty)
+        model.moveSelection(by: 1)
+        #expect(model.hideSelectedApp())
+        model.query = ""
+        model.select(.window(AssistantReachTests.windows[0]))
+        #expect(model.quitSelectedApp())
+        #expect(recorder.calls == ["hide 11", "quit 11"])
+        // The row the list falls back to after a quit was not chosen.
+        #expect(model.rows == [.window(AssistantReachTests.windows[2])])
+        #expect(!model.quitSelectedApp())
+    }
+}

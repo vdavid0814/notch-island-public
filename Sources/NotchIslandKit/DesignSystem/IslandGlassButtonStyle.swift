@@ -26,12 +26,16 @@ private struct IslandButtonModifier: ViewModifier {
 
     /// A widget drawn as a picture (Settings' gallery): each glass button there would keep its own
     /// backdrop buffers (sixteen widgets of them cost ~130 MB of graphics memory, measured), so the
-    /// pictures use the system's plain bordered buttons in the same shape.
+    /// pictures use the system's plain bordered buttons in the same shape; on the editor's canvas,
+    /// a drawing of the glass button in its room (`GlassButtonPicture`).
     @Environment(\.isWidgetPreview) private var isPreview
+    @Environment(\.widgetRenderMode) private var renderMode
 
     func body(content: Content) -> some View {
         Group {
-            if isPreview {
+            if renderMode == .canvas {
+                content.buttonStyle(GlassButtonPicture(prominent: prominent, shape: shape == .circle ? .circle : .capsule))
+            } else if isPreview {
                 if prominent {
                     content.buttonStyle(.borderedProminent)
                 } else {

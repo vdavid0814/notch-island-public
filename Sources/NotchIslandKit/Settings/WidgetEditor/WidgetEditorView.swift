@@ -15,38 +15,18 @@ struct WidgetEditorView: View {
 
 // MARK: - Board editing
 
-private enum Handle: CaseIterable {
-    case topLeading, topTrailing, bottomLeading, bottomTrailing
-
-    var movesLeading: Bool { self == .topLeading || self == .bottomLeading }
-    var movesTop: Bool { self == .topLeading || self == .topTrailing }
-}
-
-/// A drag in progress: where the widget is under the pointer, and the cells it will land on.
-private struct Interaction: Equatable {
-    let kind: IslandWidgetKind
-    /// nil while moving.
-    let handle: Handle?
-    let start: CGRect
-    var live: CGRect
-    var candidate: GridRect
-    var isValid: Bool
-}
-
 struct BoardEditor: View {
-    @Binding var selection: IslandWidgetKind?
+    @Binding var selection: WidgetID?
     let thumbnails: ThumbnailCache
     /// Widgets picked together with ⌘-click, edited as one (two or more; empty otherwise).
-    var group: Binding<Set<IslandWidgetKind>> = .constant([])
+    var group: Binding<Set<WidgetID>> = .constant([])
     /// A widget was clicked (not dragged): Settings opens its editor.
-    var onEdit: ((IslandWidgetKind) -> Void)?
+    var onEdit: ((WidgetID) -> Void)?
 
     @Environment(AppModel.self) private var model
-    @State private var interaction: Interaction?
-    /// True for as long as a move or resize drag is really in progress. Unlike `onEnded`, a
-    /// `GestureState` also resets when the drag is cancelled (released outside the panel, the
-    /// panel losing the pointer): the drag is then finished instead of the widget staying stuck
-    /// half-way.
+    /// A drag in progress: where the widget is under the pointer, and the cells it will land on.
+    @State private var interaction: DragSession<WidgetID, GridRect>?
+    /// True for as long as a move or resize drag is really in progress (`tracking`).
     @GestureState private var isDragging = false
     @FocusState private var isFocused: Bool
 
@@ -54,11 +34,11 @@ struct BoardEditor: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let geometry = WidgetBoardGeometry(size: proxy.size, gap: WidgetMetrics.gap)
             let board = model.widgets.board
+            let geometry = WidgetBoardGeometry(size: proxy.size, grid: board.grid)
             ZStack(alignment: .topLeading) {
                 GridLayer(geometry: geometry, isEmphasized: interaction != nil,
-                          occupied: board.widgets.filter { $0.kind != interaction?.kind }.map(\.frame))
+                          occupied: board.widgets.filter { $0.id != interaction?.id }.map(\.frame))
                     .contentShape(.rect)
                     .onTapGesture {
                         selection = nil
@@ -98,13 +78,11 @@ struct BoardEditor: View {
             group.wrappedValue = []
         }
         .onChange(of: selection) { _, new in if new != nil { isFocused = true } }
-        .onChange(of: isDragging) { _, dragging in
-            if !dragging, interaction != nil { finish() }
-        }
+        .finishingCancelledDrag(isDragging, finish: finish)
     }
 
     @ViewBuilder private func widgetView(_ widget: IslandWidget, geometry: WidgetBoardGeometry) -> some View {
-        let active = interaction?.kind == widget.kind ? interaction : nil
+        let active = interaction?.id == widget.id ? interaction : nil
         let resting = geometry.frame(for: widget.frame)
         let isResizing = active?.handle != nil
         let isMoving = active != nil && !isResizing
@@ -114,9 +92,9 @@ struct BoardEditor: View {
         // follow the pointer exactly.
         let pointerFrame = active?.live ?? resting
         let contentFrame = if let active, isResizing { geometry.frame(for: active.candidate) } else { pointerFrame }
-        let isGrouped = group.wrappedValue.contains(widget.kind)
-        let isSelected = selection == widget.kind || isGrouped
-        let showsHandles = selection == widget.kind && group.wrappedValue.count < 2
+        let isGrouped = group.wrappedValue.contains(widget.id)
+        let isSelected = selection == widget.id || isGrouped
+        let showsHandles = selection == widget.id && group.wrappedValue.count < 2
 
         ZStack(alignment: .topLeading) {
             IslandWidgetView(widget: widget, size: contentFrame.size, thumbnails: thumbnails)
@@ -130,11 +108,11 @@ struct BoardEditor: View {
                 .shadow(color: .black.opacity(isMoving ? 0.45 : 0), radius: 14, y: 6)
                 .onTapGesture {
                     if NSEvent.modifierFlags.contains(.command) {
-                        toggleInGroup(widget.kind)
+                        toggleInGroup(widget.id)
                     } else {
                         group.wrappedValue = []
-                        selection = widget.kind
-                        onEdit?(widget.kind)
+                        selection = widget.id
+                        onEdit?(widget.id)
                     }
                 }
                 .gesture(moveGesture(widget, geometry: geometry))
@@ -143,17 +121,16 @@ struct BoardEditor: View {
                 .animation(isResizing ? .spring(duration: 0.2, bounce: 0.08) : nil, value: contentFrame)
 
             if let active, isResizing {
-                ResizeOutline(frame: pointerFrame, rect: active.candidate, isValid: active.isValid)
+                ResizeOutline(frame: pointerFrame, cornerRadius: min(WidgetMetrics.cornerRadius, pointerFrame.height / 2),
+                              badge: "\(active.candidate.width) × \(active.candidate.height)",
+                              badgeAtBottom: active.candidate.row == 0, isValid: active.isValid)
             }
 
             if showsHandles, !isMoving {
                 ZStack(alignment: .topLeading) {
-                    ForEach(Handle.allCases, id: \.self) { handle in
+                    ForEach(ResizeHandle.corners, id: \.self) { handle in
                         HandleDot()
-                            .position(
-                                x: handle.movesLeading ? pointerFrame.minX : pointerFrame.maxX,
-                                y: handle.movesTop ? pointerFrame.minY : pointerFrame.maxY
-                            )
+                            .position(handle.position(on: pointerFrame))
                             .gesture(resizeGesture(widget, handle: handle, geometry: geometry))
                     }
                 }
@@ -167,70 +144,58 @@ struct BoardEditor: View {
 
     private func moveGesture(_ widget: IslandWidget, geometry: WidgetBoardGeometry) -> some Gesture {
         DragGesture(minimumDistance: 2, coordinateSpace: .named(BoardSpace.name))
-            .updating($isDragging) { _, dragging, _ in dragging = true }
+            .tracking($isDragging)
             .onChanged { value in
                 var current = interaction ?? begin(widget, handle: nil, geometry: geometry)
                 current.live = current.start.offsetBy(dx: value.translation.width, dy: value.translation.height)
-                update(&current, candidate: geometry.snappedMove(origin: current.live.origin, size: widget.frame.size))
+                update(&current, candidate: BoardSnapper(geometry: geometry).move(current.live, size: widget.frame.size),
+                       kind: widget.kind)
                 interaction = current
             }
             .onEnded { _ in finish() }
     }
 
-    private func resizeGesture(_ widget: IslandWidget, handle: Handle, geometry: WidgetBoardGeometry) -> some Gesture {
+    private func resizeGesture(_ widget: IslandWidget, handle: ResizeHandle, geometry: WidgetBoardGeometry) -> some Gesture {
         DragGesture(minimumDistance: 1, coordinateSpace: .named(BoardSpace.name))
-            .updating($isDragging) { _, dragging, _ in dragging = true }
+            .tracking($isDragging)
             .onChanged { value in
                 var current = interaction ?? begin(widget, handle: handle, geometry: geometry)
-                let start = current.start
-                var minX = start.minX, maxX = start.maxX, minY = start.minY, maxY = start.maxY
-                if handle.movesLeading { minX = min(start.minX + value.translation.width, maxX - 24) }
-                else { maxX = max(start.maxX + value.translation.width, minX + 24) }
-                if handle.movesTop { minY = min(start.minY + value.translation.height, maxY - 20) }
-                else { maxY = max(start.maxY + value.translation.height, minY + 20) }
-                current.live = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
-                update(&current, candidate: geometry.snappedResize(
-                    frame: current.live, from: widget.frame, kind: widget.kind,
-                    movesLeading: handle.movesLeading, movesTop: handle.movesTop
-                ))
+                current.live = handle.resized(current.start, by: value.translation, minimum: CGSize(width: 24, height: 20))
+                update(&current, candidate: BoardSnapper(geometry: geometry).resize(current.live, from: widget.frame,
+                                                                                    kind: widget.kind, handle: handle),
+                       kind: widget.kind)
                 interaction = current
             }
             .onEnded { _ in finish() }
     }
 
     /// ⌘-click: adds the widget to the group (with the one already selected), or takes it out.
-    private func toggleInGroup(_ kind: IslandWidgetKind) {
+    private func toggleInGroup(_ id: WidgetID) {
         var picked = group.wrappedValue
         if picked.isEmpty, let selection { picked.insert(selection) }
-        if picked.contains(kind) { picked.remove(kind) } else { picked.insert(kind) }
+        if picked.contains(id) { picked.remove(id) } else { picked.insert(id) }
         withAnimation(.spring(duration: 0.3)) {
             group.wrappedValue = picked.count >= 2 ? picked : []
-            selection = picked.count == 1 ? picked.first : (picked.contains(kind) ? kind : picked.first)
+            selection = picked.count == 1 ? picked.first : (picked.contains(id) ? id : picked.first)
         }
     }
 
-    private func begin(_ widget: IslandWidget, handle: Handle?, geometry: WidgetBoardGeometry) -> Interaction {
+    private func begin(_ widget: IslandWidget, handle: ResizeHandle?, geometry: WidgetBoardGeometry) -> DragSession<WidgetID, GridRect> {
         // Dragging one widget of a group moves that widget only; the group stays picked.
-        if !group.wrappedValue.contains(widget.kind) { group.wrappedValue = [] }
-        selection = widget.kind
+        if !group.wrappedValue.contains(widget.id) { group.wrappedValue = [] }
+        selection = widget.id
         let frame = geometry.frame(for: widget.frame)
-        return Interaction(kind: widget.kind, handle: handle, start: frame, live: frame,
-                           candidate: widget.frame, isValid: true)
+        return DragSession(id: widget.id, handle: handle, start: frame, candidate: widget.frame)
     }
 
-    private func update(_ interaction: inout Interaction, candidate: GridRect) {
-        if candidate != interaction.candidate {
-            // The "click" of snapping: one tick per new landing place.
-            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
-        }
-        interaction.candidate = candidate
-        interaction.isValid = model.widgets.board.isFree(candidate, for: interaction.kind)
+    private func update(_ interaction: inout DragSession<WidgetID, GridRect>, candidate: GridRect, kind: IslandWidgetKind) {
+        interaction.land(on: candidate, isValid: model.widgets.board.isFree(candidate, for: kind, excluding: interaction.id))
     }
 
     private func finish() {
         guard let current = interaction else { return }
         withAnimation(Self.settle) {
-            if current.isValid { model.widgets.setFrame(current.candidate, for: current.kind) }
+            if current.isValid { model.widgets.setFrame(current.candidate, for: current.id) }
             interaction = nil
         }
     }
@@ -264,8 +229,8 @@ private struct GridLayer: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            ForEach(0..<WidgetBoard.rows, id: \.self) { row in
-                ForEach(0..<WidgetBoard.columns, id: \.self) { column in
+            ForEach(0..<geometry.grid.rows, id: \.self) { row in
+                ForEach(0..<geometry.grid.columns, id: \.self) { column in
                     let cell = GridRect(column: column, row: row, width: 1, height: 1)
                     let frame = geometry.frame(for: cell)
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -277,33 +242,6 @@ private struct GridLayer: View {
         }
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         .animation(.easeOut(duration: 0.15), value: isEmphasized)
-    }
-}
-
-/// The pointer's rectangle while a corner is dragged: a thin dashed line with the size the widget
-/// will take — accent when it fits, red when it would cover another widget.
-private struct ResizeOutline: View {
-    let frame: CGRect
-    let rect: GridRect
-    let isValid: Bool
-
-    var body: some View {
-        let tint = isValid ? Color.islandAccent : .red
-        RoundedRectangle(cornerRadius: min(WidgetMetrics.cornerRadius, frame.height / 2), style: .continuous)
-            .strokeBorder(tint.opacity(0.9), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
-            .overlay(alignment: rect.row == 0 ? .bottom : .top) {
-                Text("\(rect.width) × \(rect.height)")
-                    .font(.caption2.weight(.semibold).monospacedDigit())
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(tint, in: Capsule())
-                    .foregroundStyle(.white)
-                    .fixedSize()
-                    .offset(y: rect.row == 0 ? 9 : -9)
-            }
-            .frame(width: max(frame.width, 1), height: max(frame.height, 1))
-            .offset(x: frame.minX, y: frame.minY)
-            .allowsHitTesting(false)
     }
 }
 
@@ -320,16 +258,7 @@ private struct Ghost: View {
             .strokeBorder(tint.opacity(0.9), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
             // The size badge sits on the edge away from the island's header: under the top row it
             // was covered by the header (and its tooltips).
-            .overlay(alignment: rect.row == 0 ? .bottom : .top) {
-                Text("\(rect.width) × \(rect.height)")
-                    .font(.caption2.weight(.semibold).monospacedDigit())
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(tint, in: Capsule())
-                    .foregroundStyle(.white)
-                    .fixedSize()
-                    .offset(y: rect.row == 0 ? 9 : -9)
-            }
+            .sizeBadge("\(rect.width) × \(rect.height)", tint: tint, atBottom: rect.row == 0)
             .frame(width: frame.width, height: frame.height)
             .offset(x: frame.minX, y: frame.minY)
             .animation(.spring(duration: 0.18, bounce: 0), value: frame)
@@ -347,34 +276,12 @@ private struct Guides: View {
         ZStack(alignment: .topLeading) {
             // Only the notch's centre line; the edge-alignment lines were taken out (the user found
             // them noisy — the grid and the ghost already show where it lands).
-            if candidate.isHorizontallyCentred {
-                line(x: size.width / 2, color: .yellow)
+            if candidate.isHorizontallyCentred(in: geometry.grid) {
+                GuideLine(axis: .vertical, position: size.width / 2, length: size.height)
             }
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .allowsHitTesting(false)
-    }
-
-    private func line(x: CGFloat, color: Color) -> some View {
-        Rectangle().fill(color.opacity(0.85))
-            .frame(width: 1, height: geometry.size.height + 16)
-            .offset(x: x - 0.5, y: -8)
-    }
-
-}
-
-private struct HandleDot: View {
-    var body: some View {
-        Circle()
-            .fill(.white)
-            .overlay(Circle().strokeBorder(Color.islandAccent, lineWidth: 2))
-            .frame(width: 12, height: 12)
-            .shadow(color: .black.opacity(0.4), radius: 2)
-            .frame(width: 26, height: 26)
-            .contentShape(.rect)
-            .onHover { inside in
-                if inside { NSCursor.crosshair.push() } else { NSCursor.pop() }
-            }
     }
 }
 
@@ -404,32 +311,6 @@ struct WidgetIcon: View {
 }
 
 extension IslandWidgetKind {
-    var iconColors: [Color] {
-        switch self {
-        case .nowPlaying: [Color(red: 1.0, green: 0.36, blue: 0.47), Color(red: 0.93, green: 0.16, blue: 0.33)]
-        case .timer: [Color(red: 1.0, green: 0.66, blue: 0.2), Color(red: 1.0, green: 0.45, blue: 0.08)]
-        case .stopwatch: [Color(red: 1.0, green: 0.82, blue: 0.25), Color(red: 1.0, green: 0.6, blue: 0.1)]
-        case .shelf: [Color(red: 0.35, green: 0.78, blue: 1.0), Color(red: 0.12, green: 0.48, blue: 1.0)]
-        case .battery: [Color(red: 0.4, green: 0.9, blue: 0.45), Color(red: 0.16, green: 0.7, blue: 0.3)]
-        case .volume: [Color(red: 0.6, green: 0.5, blue: 1.0), Color(red: 0.4, green: 0.28, blue: 0.92)]
-        case .brightness: [Color(red: 1.0, green: 0.88, blue: 0.35), Color(red: 0.98, green: 0.7, blue: 0.1)]
-        case .assistant: [Color(red: 0.36, green: 0.62, blue: 1.0), Color(red: 0.86, green: 0.3, blue: 0.95)]
-        case .keyboardBrightness: [Color(red: 0.5, green: 0.85, blue: 0.95), Color(red: 0.2, green: 0.6, blue: 0.8)]
-        case .wifi, .bluetooth, .airDrop: [Color(red: 0.3, green: 0.62, blue: 1.0), Color(red: 0.05, green: 0.4, blue: 0.95)]
-        case .darkMode: [Color(red: 0.45, green: 0.45, blue: 0.55), Color(red: 0.2, green: 0.2, blue: 0.28)]
-        case .nightShift: [Color(red: 1.0, green: 0.72, blue: 0.3), Color(red: 0.98, green: 0.5, blue: 0.1)]
-        case .keepAwake: [Color(red: 0.7, green: 0.55, blue: 0.4), Color(red: 0.5, green: 0.35, blue: 0.22)]
-        case .microphone: [Color(red: 1.0, green: 0.45, blue: 0.4), Color(red: 0.9, green: 0.2, blue: 0.2)]
-        case .calculator: [Color(red: 1.0, green: 0.62, blue: 0.2), Color(red: 0.95, green: 0.42, blue: 0.05)]
-        case .voiceMemos: [Color(red: 1.0, green: 0.38, blue: 0.38), Color(red: 0.85, green: 0.12, blue: 0.2)]
-        case .screenshot: [Color(red: 0.62, green: 0.64, blue: 0.7), Color(red: 0.38, green: 0.4, blue: 0.47)]
-        case .notes: [Color(red: 1.0, green: 0.86, blue: 0.3), Color(red: 0.98, green: 0.7, blue: 0.08)]
-        case .lockScreen: [Color(red: 0.5, green: 0.52, blue: 0.6), Color(red: 0.26, green: 0.28, blue: 0.36)]
-        case .focus: [Color(red: 0.55, green: 0.45, blue: 1.0), Color(red: 0.35, green: 0.22, blue: 0.85)]
-        case .clock: [Color(red: 0.4, green: 0.42, blue: 0.48), Color(red: 0.14, green: 0.15, blue: 0.2)]
-        case .home: [Color(red: 1.0, green: 0.66, blue: 0.2), Color(red: 1.0, green: 0.48, blue: 0.1)]
-        case .dateTime: [Color(red: 1.0, green: 0.4, blue: 0.36), Color(red: 0.95, green: 0.2, blue: 0.22)]
-        case .systemStats: [Color(red: 0.36, green: 0.85, blue: 0.62), Color(red: 0.1, green: 0.62, blue: 0.45)]
-        }
-    }
+    /// The app icon's gradient (`WidgetKindSpec.iconColors`).
+    var iconColors: [Color] { spec.iconColors.map(\.color) }
 }

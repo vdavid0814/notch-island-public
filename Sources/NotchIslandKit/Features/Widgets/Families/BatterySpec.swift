@@ -1,0 +1,59 @@
+import Foundation
+
+/// The battery and, from 0.6, a widget for each of its figures (`BatteryWidget`).
+nonisolated enum BatterySpecs {
+    static let all: [IslandWidgetKind: WidgetKindSpec] = [
+        .battery: WidgetKindSpec(
+            title: "Battery",
+            summary: "Charge level and time remaining.",
+            symbol: "battery.75percent",
+            iconColors: green,
+            category: .battery, family: .battery,
+            minimumSize: GridSize(width: 1, height: 1), defaultSize: GridSize(width: 3, height: 1),
+            maximumSize: GridSize(width: 6, height: 3),
+            elements: [
+                ElementSpec(.batteryGlyph, "Battery", symbol: "battery.75percent", role: .symbol, priority: 90),
+                // In a ring, the percentage from a 40-pt ring.
+                ElementSpec(.percentage, "Percentage", symbol: "percent", role: .text, samples: ["100%"], priority: 100),
+                // Beside the battery, from a widget 110 pt wide (or 70 tall).
+                ElementSpec(.timeRemaining, "Time remaining", symbol: "hourglass", role: .text,
+                            samples: ["Charging", "88h 88m left"], priority: 40, minRoom: MinRoom(width: 110)),
+            ],
+            layouts: [.automatic, .glyph, .ring],
+            canMirror: true
+        ),
+        .batteryTime: figure("Battery Time", "Time left on the battery, or until it is charged.", symbol: "hourglass",
+                             samples: ["88:88", "Charged"]),
+        .batteryHealth: figure("Battery Health", "The battery's maximum capacity and condition.", symbol: "heart.fill",
+                               samples: ["100%", "Normal"]),
+        .batteryCycles: figure("Charge Cycles", "How many charge cycles the battery has been through.",
+                               symbol: "arrow.triangle.2.circlepath", samples: ["8888"]),
+        .batteryPower: figure("Power", "What the Mac draws, or what the charger gives it.", symbol: "bolt.fill",
+                              samples: ["-88.8 W"]),
+        .batteryTemperature: figure("Battery Temperature", "How warm the battery is.", symbol: "thermometer.medium",
+                                    samples: ["88 °C"]),
+        .charger: figure("Charger", "The charger's power and whether it is charging.", symbol: "powerplug.fill",
+                         samples: ["888 W", "Not Charging"]),
+        .batteryChart: WidgetKindSpec(
+            title: "Battery Chart", summary: "Today's charge level, like the iPhone's battery chart.",
+            symbol: "chart.bar.fill", iconColors: green, category: .battery, family: .battery,
+            minimumSize: GridSize(width: 3, height: 1), defaultSize: GridSize(width: 4, height: 2),
+            maximumSize: GridSize(width: 12, height: 3),
+            elements: [ElementSpec(.chart, "Chart", symbol: "chart.bar", role: .chart, priority: 100, isBlock: true)]
+                + ElementSpec.reading(["100%"], caption: "Today"),
+            isImplemented: false
+        ),
+    ]
+
+    private static let green: [IslandTheme.RGB] = [.rgb(0.4, 0.9, 0.45), .rgb(0.16, 0.7, 0.3)]
+
+    private static func figure(_ title: String, _ summary: String, symbol: String, samples: [String]) -> WidgetKindSpec {
+        WidgetKindSpec(
+            title: title, summary: summary, symbol: symbol, iconColors: green, category: .battery, family: .battery,
+            minimumSize: GridSize(width: 1, height: 1), defaultSize: GridSize(width: 2, height: 1),
+            maximumSize: GridSize(width: 4, height: 2),
+            elements: ElementSpec.reading(samples, caption: title),
+            isImplemented: false
+        )
+    }
+}

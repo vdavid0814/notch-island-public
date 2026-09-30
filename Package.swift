@@ -41,6 +41,7 @@ let package = Package(
         .testTarget(
             name: "NotchIslandKitTests",
             dependencies: ["NotchIslandKit"],
+            exclude: ["Snapshots"],
             swiftSettings: swiftSettings
         ),
     ]

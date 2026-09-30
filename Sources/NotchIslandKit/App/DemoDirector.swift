@@ -22,6 +22,7 @@ import SwiftUI
     private var demoCountdown: CountdownState?
     private var demoShelfIDs: Set<ShelfItem.ID> = []
     private var injectedLevels = false
+    private var injectedBattery = false
 
     func run(_ command: DemoCommand, model: AppModel) {
         switch command {
@@ -74,6 +75,8 @@ import SwiftUI
             }
         case .timerUnit:
             NotificationCenter.default.post(name: .demoNextTimerUnit, object: nil)
+        case .batteryHistory:
+            showBatteryHistory(model)
         case .surface(let style):
             withAnimation(.spring(duration: 0.25)) { model.preferences.glassStyle = style }
         case .freeze(let time):
@@ -115,11 +118,33 @@ import SwiftUI
         model.controller.expand(page: .shelf, pinned: false, userInitiated: true)
     }
 
+    /// The day up to now, the level where it ends (on battery, 5 h 40 min left, or charging, as
+    /// the day has it at this hour), and the battery page.
+    private func showBatteryHistory(_ model: AppModel) {
+        let records = BatteryHistory.demoRecords(now: Date(), calendar: .autoupdatingCurrent)
+        let last = records.last { $0.kind.carriesLevel }
+        let charging = last?.isCharging ?? false
+        var state = PowerState.demo(level: Int(last?.level ?? 76), charging: charging, minutes: charging ? 72 : 340)
+        if last?.flags.contains(.pluggedIn) == true, !charging {
+            state.isPluggedIn = true
+            state.isCharged = last?.level == 100
+            state.minutesRemaining = nil
+        }
+        injectedBattery = true
+        model.power.injectDemo(state, event: nil)
+        model.battery.injectDemo((records, BatteryDetails.demo(power: state)))
+        model.controller.expand(page: .battery, pinned: false, userInitiated: true)
+    }
+
     private func reset(_ model: AppModel) {
         dropTask?.cancel()
         endDrop(model)
         model.media.injectDemo(nil, playing: false)
         model.power.injectDemo(nil, event: nil)
+        if injectedBattery {
+            injectedBattery = false
+            model.battery.injectDemo(nil)
+        }
         if injectedLevels {
             injectedLevels = false
             // Silent and in place: restarting the level services here used to report the first

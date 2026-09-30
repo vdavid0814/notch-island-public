@@ -2,15 +2,15 @@ import SwiftUI
 
 /// Siri in the notch, as spare as the system's Search window: the Siri orb in the header band and
 /// the field; under it (when the island makes room, see `AssistantRoom`) the suggestions
-/// (Applications ⌘1, Files ⌘2, Actions ⌘3), the app gallery, the hits and actions for the query, or
-/// Apple Intelligence's answer.
+/// (Applications ⌘1 … Emoji ⌘7), the app gallery, the hits and actions for the query, or Apple
+/// Intelligence's answer.
 ///
 /// The view is always laid out at the list's full height and the island's outline clips it, so
 /// growing from the field to the list uncovers the rows instead of squeezing them.
 ///
 /// Keys: typing goes to the field; ↑/↓ move the selection (←/→ too in the gallery), Return runs
-/// it, ⌘Return asks Apple Intelligence, ⌘1–⌘3 open a suggestion, Delete in an empty field leaves
-/// it, Esc steps back (answer → empty field → suggestions → closed). The whole view keeps one
+/// it, ⌘Return asks Apple Intelligence, ⌘1–⌘7 open a suggestion, ⌘C copies a clip or an emoji,
+/// ⌘H and ⌘Q hide or quit a running app, Delete in an empty field leaves it, Esc steps back (answer → empty field → suggestions → closed). The whole view keeps one
 /// identity while it is open (`surfaceKey` "assistant"): a new one would recreate the field and
 /// drop its keyboard focus.
 struct AssistantView: View {
@@ -20,8 +20,11 @@ struct AssistantView: View {
     var body: some View {
         let layout = model.layout
         let assistant = model.assistant
+        // Its room's kind (`AssistantModel.room`) without reading the room: that reads the rows, and
+        // every keystroke and landing search would build this whole view again, not only the list.
+        let isGallery = assistant.category == .applications && assistant.answer == nil
         // Laid out at the largest size of the current kind: the list, or the gallery's window.
-        let fullRoom: AssistantRoom = assistant.room.isGallery ? .gallery : .list
+        let fullRoom: AssistantRoom = isGallery ? .gallery : .list
         let split = NotchSplit(
             layout: layout,
             presentation: .assistant(fullRoom),
@@ -29,7 +32,6 @@ struct AssistantView: View {
             clearance: Metrics.notchClearance
         )
         let fullHeight = layout.size(for: .assistant(fullRoom)).height
-        let isGallery = assistant.category == .applications && assistant.answer == nil
         // The gallery's grid is always as wide as in the gallery's window, also while the island
         // shrinks back to the list around it (it would reflow into the narrower width meanwhile).
         let galleryWidth = layout.size(for: .assistant(.gallery)).width - 2 * NotchSplit(
@@ -107,7 +109,15 @@ struct AssistantView: View {
         }
         .onKeyPress(KeyEquivalent("c"), phases: .down) { press in
             guard press.modifiers == .command else { return .ignored }
-            return assistant.copySelectedClip() ? .handled : .ignored
+            return assistant.copySelection() ? .handled : .ignored
+        }
+        .onKeyPress(KeyEquivalent("h"), phases: .down) { press in
+            guard press.modifiers == .command else { return .ignored }
+            return assistant.hideSelectedApp() ? .handled : .ignored
+        }
+        .onKeyPress(KeyEquivalent("q"), phases: .down) { press in
+            guard press.modifiers == .command else { return .ignored }
+            return assistant.quitSelectedApp() ? .handled : .ignored
         }
         .onKeyPress(.delete) {
             assistant.deleteBackwardInEmptyField() ? .handled : .ignored
@@ -205,10 +215,13 @@ extension AssistantCategory {
         case .files: String(localized: "Files")
         case .actions: String(localized: "Actions")
         case .clipboard: String(localized: "Clipboard")
+        case .system: String(localized: "System")
+        case .windows: String(localized: "Windows")
+        case .emoji: String(localized: "Emoji")
         }
     }
 
-    /// ⌘1–⌘4.
+    /// ⌘1–⌘7.
     var key: KeyEquivalent { KeyEquivalent(Character(String(rawValue))) }
 
     var tile: some View {
@@ -217,6 +230,9 @@ extension AssistantCategory {
         case .files: AssistantTile(symbol: "folder.fill", color: .cyan)
         case .actions: AssistantTile(symbol: "bolt.fill", color: .orange)
         case .clipboard: AssistantTile(symbol: "list.clipboard.fill", color: .gray)
+        case .system: AssistantTile(symbol: "switch.2", color: .indigo)
+        case .windows: AssistantTile(symbol: "macwindow.on.rectangle", color: .purple)
+        case .emoji: AssistantTile(symbol: "face.smiling.inverse", color: .yellow)
         }
     }
 }
@@ -254,6 +270,7 @@ private struct RowsList: View {
                 LazyVStack(spacing: IslandLayout.assistantRowSpacing) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         RowView(row: row, isMarked: assistant.marksSelection && index == assistant.selection,
+                                state: Self.state(of: row, in: assistant), isConfirming: assistant.confirming == row.id,
                                 leadingInset: max(Metrics.Spacing.small, Metrics.Spacing.large - extraInset))
                             .id(row.id)
                             .contentShape(.rect)
@@ -267,6 +284,12 @@ private struct RowsList: View {
             // Fewer rows than fit: nothing to scroll, so no rubber-band either.
             .scrollBounceBehavior(.basedOnSize)
         }
+    }
+
+    /// A switch's state as read this opening ("Wi-Fi — On").
+    private static func state(of row: AssistantRow, in assistant: AssistantModel) -> Bool? {
+        guard case .command(let command) = row else { return nil }
+        return assistant.commandStates[command]
     }
 }
 
@@ -320,16 +343,17 @@ private struct GalleryCell: View {
                 if let icon = icon ?? AssistantIcons.cachedThumbnail(for: hit) {
                     Image(nsImage: icon)
                 } else {
+                    // Only a cell without its icon yet asks for it: a gallery of kept icons starts
+                    // no task per cell.
                     RoundedRectangle(cornerRadius: 11, style: .continuous)
                         .fill(.white.opacity(0.08))
                         .padding(4)
+                        .task(id: hit.url) {
+                            icon = await AssistantIcons.thumbnail(for: hit, points: Self.iconSize)
+                        }
                 }
             }
             .frame(width: Self.iconSize, height: Self.iconSize)
-            .task(id: hit.url) {
-                guard AssistantIcons.cachedThumbnail(for: hit) == nil else { return }
-                icon = await AssistantIcons.thumbnail(for: hit, points: Self.iconSize)
-            }
             Text(hit.name)
                 .font(.caption)
                 .lineLimit(1)
@@ -382,6 +406,10 @@ private struct RowView: View {
     let row: AssistantRow
     /// The keys moved the selection here (`AssistantModel.marksSelection`).
     var isMarked = false
+    /// A switch's On or Off.
+    var state: Bool?
+    /// Waiting for a second Return (`AssistantModel.confirming`).
+    var isConfirming = false
     /// From the capsule's ends to the icon and the shortcut: the icon lines up with the field's
     /// magnifying glass above.
     var leadingInset: CGFloat = Metrics.Spacing.large
@@ -402,6 +430,11 @@ private struct RowView: View {
             if case .category(let category) = row {
                 Text(verbatim: "⌘\(category.rawValue)")
                     .foregroundStyle(.secondary)
+            }
+            if let detail {
+                Text(detail)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
         }
         .padding(.horizontal, leadingInset)
@@ -425,6 +458,20 @@ private struct RowView: View {
                 .aspectRatio(contentMode: .fit)
         case .clip:
             Image(systemName: "doc.plaintext").foregroundStyle(.secondary).imageScale(.large)
+        case .command(.control(let control)):
+            AssistantTile(symbol: control.symbol(on: state ?? true), color: state == false ? .gray : .blue)
+        case .command(let command):
+            AssistantTile(symbol: command.symbol, color: .gray)
+        case .settingsPane:
+            Image(nsImage: AssistantIcons.systemSettings(scale: displayScale))
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+        case .window(let window):
+            Image(nsImage: AssistantIcons.app(window.appPath, scale: displayScale))
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+        case .emoji(let emoji):
+            Text(emoji.character).font(.system(size: 17))
         case .calculation:
             AssistantTile(symbol: "equal", color: .orange)
         case .openURL:
@@ -438,12 +485,27 @@ private struct RowView: View {
         }
     }
 
+    /// Trailing, in grey: where a pane or a window is.
+    private var detail: String? {
+        switch row {
+        case .settingsPane: String(localized: "System Settings")
+        case .window(let window) where window.title != nil: window.appName
+        default: nil
+        }
+    }
+
     private var title: String {
         switch row {
         case .category(let category): category.title
         case .hit(let hit): hit.name
         case .action(let action): action.title
         case .clip(let item): item.preview
+        case .command(.mac(.emptyTrash)) where isConfirming: String(localized: "Press Return again to empty the Trash")
+        case .command(.control(let control)): state.map { "\(control.title) — \(control.status(on: $0))" } ?? control.title
+        case .command(let command): state.map { "\(command.title) — \($0 ? String(localized: "On") : String(localized: "Off"))" } ?? command.title
+        case .settingsPane(let pane): pane.title
+        case .window(let window): window.name
+        case .emoji(let emoji): emoji.title
         case .calculation(let calculation): "\(calculation.expression) = \(calculation.result)"
         case .openURL(let url): String(localized: "Open \(AssistantURL.display(url))")
         case .askIntelligence: String(localized: "Ask Apple Intelligence")

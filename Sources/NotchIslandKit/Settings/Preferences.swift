@@ -39,6 +39,8 @@ import Foundation
         static let levelStyle = prefix + "levelStyle"
         static let showAirPods = prefix + "showAirPods"
         static let siri = prefix + "siri"
+        static let panel = prefix + "panel"
+        static let battery = prefix + "battery"
         static let levelDuration = prefix + "levelDuration"
         static let airPodsDuration = prefix + "airPodsDuration"
         static let powerDuration = prefix + "powerDuration"
@@ -109,6 +111,20 @@ import Foundation
             defaults.set(data, forKey: Key.siri)
         }
     }
+    /// The open panel's width and board height (Settings ▸ Widgets ▸ Size).
+    var panel: PanelSettings {
+        didSet {
+            guard panel != oldValue, let data = try? JSONEncoder().encode(panel) else { return }
+            defaults.set(data, forKey: Key.panel)
+        }
+    }
+    /// The battery page's chart: its style, range, colours and what it marks.
+    var battery: BatteryDisplaySettings {
+        didSet {
+            guard battery != oldValue, let data = try? JSONEncoder().encode(battery) else { return }
+            defaults.set(data, forKey: Key.battery)
+        }
+    }
     /// How the bars beside the notch move while music plays, on battery.
     var musicBars: MusicBarsStyle { didSet { defaults.set(musicBars.rawValue, forKey: Key.musicBars) } }
     /// … and on the charger (or a Mac without a battery).
@@ -167,6 +183,9 @@ import Foundation
         liquidVolume = defaults.object(forKey: Key.liquidVolume) as? Bool ?? true
         liquidAirPods = defaults.object(forKey: Key.liquidAirPods) as? Bool ?? true
         siri = defaults.data(forKey: Key.siri).flatMap { try? JSONDecoder().decode(SiriSettings.self, from: $0) } ?? SiriSettings()
+        panel = defaults.data(forKey: Key.panel).flatMap { try? JSONDecoder().decode(PanelSettings.self, from: $0) } ?? PanelSettings()
+        battery = defaults.data(forKey: Key.battery).flatMap { try? JSONDecoder().decode(BatteryDisplaySettings.self, from: $0) }
+            ?? BatteryDisplaySettings()
         let duration = defaults.object(forKey: Key.animationDuration) as? Double ?? Motion.defaultDuration
         animationDuration = min(
             max(duration.isFinite ? duration : Motion.defaultDuration, Motion.durationRange.lowerBound),

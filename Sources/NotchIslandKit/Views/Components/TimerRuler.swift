@@ -25,7 +25,7 @@ struct TimerRuler: View {
     /// ticks keep their height.
     var markerSize: CGFloat = 9
 
-    static let tickSpacing: CGFloat = 8
+    nonisolated static let tickSpacing: CGFloat = 8
     static let tint = Color.orange
 
     init(
@@ -277,22 +277,19 @@ private struct Tick: View {
 
     static let labelFont = Font.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit()
     /// The label line's height (10-pt rounded semibold), so unlabelled ticks line up.
-    static let labelHeight = ceil(NSFont.systemFont(ofSize: 10, weight: .semibold).boundingRectForFont.height)
+    nonisolated static let labelHeight = ceil(NSFont.systemFont(ofSize: 10, weight: .semibold).boundingRectForFont.height)
 
     var body: some View {
         let major = minute % 5 == 0
         let style = tint.opacity(isPast ? 0.35 : 1)
-        VStack(spacing: 3) {
+        VStack(spacing: Self.labelGap) {
             if showsLabel {
                 // Text only on the labelled minutes: an empty label is still a text to resolve and
                 // lay out, and the ruler has dozens on screen, all updated on every frame of the
                 // island's growth.
                 Group {
                     if major {
-                        Text("\(minute)")
-                            .font(Self.labelFont)
-                            .foregroundStyle(tint.opacity(isPast ? 0.4 : 0.9))
-                            .fixedSize()
+                        TickLabel(minute: minute, isPast: isPast, tint: tint)
                     } else {
                         Color.clear
                     }
@@ -301,10 +298,30 @@ private struct Tick: View {
             }
             Capsule()
                 .fill(style)
-                .frame(width: 2.5)
+                .frame(width: Self.width)
                 .frame(maxHeight: .infinity)
-                .padding(.vertical, major ? 0 : 3)
+                .padding(.vertical, major ? 0 : Self.minorInset)
         }
+    }
+
+    nonisolated static let width: CGFloat = 2.5
+    /// Above and below a minute that is not a fifth: shorter than the labelled ones.
+    nonisolated static let minorInset: CGFloat = 3
+    /// Between the label line and the ticks.
+    nonisolated static let labelGap: CGFloat = 3
+}
+
+/// A fifth minute's number over its tick.
+private struct TickLabel: View {
+    let minute: Int
+    let isPast: Bool
+    let tint: Color
+
+    var body: some View {
+        Text("\(minute)")
+            .font(Tick.labelFont)
+            .foregroundStyle(tint.opacity(isPast ? 0.4 : 0.9))
+            .fixedSize()
     }
 }
 
@@ -342,9 +359,12 @@ private struct RestingRulerTrack: View {
     }
 }
 
-/// The resting scale: the same ticks where the scroll view puts them with the value centred, in a
-/// plain stack (no scroll view to build and align), with the same fade at both ends.
-private struct RulerPicture: View {
+/// The resting scale: the same ticks where the scroll view puts them with the value centred, with
+/// the same fade at both ends — no scroll view to build and align, and no `Tick` stack per minute:
+/// each tick is its bare capsule and only the fifth minutes' numbers are drawn, each placed where
+/// its `Tick` lays it out (`restingRulerDrawsItsTicksAsTheirViewsDo`). About a third of the timer
+/// widget's cost on every opening of the panel (measured).
+struct RulerPicture: View {
     let value: Int
     let range: ClosedRange<Int>
     let showsLabels: Bool
@@ -355,11 +375,22 @@ private struct RulerPicture: View {
             let spacing = TimerRuler.tickSpacing
             let centre = proxy.size.width / 2
             let reach = Int(ceil(centre / spacing)) + 1
+            let minutes = max(range.lowerBound, value - reach)...min(range.upperBound, value + reach)
+            let columns = TickColumns(value: value, centre: centre, showsLabels: showsLabels)
             ZStack(alignment: .topLeading) {
-                ForEach(max(range.lowerBound, value - reach)...min(range.upperBound, value + reach), id: \.self) { minute in
-                    Tick(minute: minute, isPast: minute > value, showsLabel: showsLabels, tint: tint)
-                        .frame(width: spacing, height: proxy.size.height)
-                        .offset(x: centre + CGFloat(minute - value) * spacing - spacing / 2)
+                ForEach(minutes, id: \.self) { minute in
+                    let rect = columns.capsule(minute, height: proxy.size.height)
+                    Capsule()
+                        .fill(tint.opacity(minute > value ? 0.35 : 1))
+                        .frame(width: rect.width, height: rect.height)
+                        .offset(x: rect.minX, y: rect.minY)
+                }
+                if showsLabels {
+                    ForEach(minutes.filter { $0 % 5 == 0 }, id: \.self) { minute in
+                        TickLabel(minute: minute, isPast: minute > value, tint: tint)
+                            .frame(width: spacing, height: Tick.labelHeight)
+                            .offset(x: columns.left(minute))
+                    }
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
@@ -378,5 +409,27 @@ private struct RulerPicture: View {
         }
         .allowsHitTesting(true)
         .contentShape(.rect)
+    }
+}
+
+/// Where the resting scale's `Tick` stacks put a minute's column and its capsule: centred in its
+/// column, under the label line, a minute that is not a fifth inset at both ends. Left unrounded:
+/// SwiftUI puts the capsule on whole pixels where it put the stack's.
+private nonisolated struct TickColumns {
+    let value: Int
+    let centre: CGFloat
+    let showsLabels: Bool
+
+    /// The left edge of a minute's column.
+    func left(_ minute: Int) -> CGFloat {
+        centre + CGFloat(minute - value) * TimerRuler.tickSpacing - TimerRuler.tickSpacing / 2
+    }
+
+    /// A minute's capsule in a scale `height` tall.
+    func capsule(_ minute: Int, height: CGFloat) -> CGRect {
+        let top = showsLabels ? Tick.labelHeight + Tick.labelGap : 0
+        let inset = minute % 5 == 0 ? 0 : Tick.minorInset
+        return CGRect(x: left(minute) + (TimerRuler.tickSpacing - Tick.width) / 2, y: top + inset,
+                      width: Tick.width, height: max(0, height - top - 2 * inset))
     }
 }

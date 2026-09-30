@@ -19,6 +19,8 @@ import Observation
     let banners = BannerCenter()
     let media = MediaController()
     let power = PowerMonitor()
+    /// The battery history (recorded from launch on), details and chart.
+    let battery = BatteryCenter()
     let airPods = AirPodsMonitor()
     let listeningModes = AirPodsListeningModeWatch()
     /// The newest version from GitHub, downloaded from About.
@@ -28,6 +30,7 @@ import Observation
     let shelf = ShelfStore()
     let timers = TimerStore()
     let widgets = WidgetStore()
+    let studio = WidgetStudio()
     let fullscreen = FullscreenMonitor()
     let assistant = AssistantModel()
     /// What the user copied, for Siri's Clipboard (⌘4).
@@ -46,11 +49,29 @@ import Observation
     /// display, or the moment between two display configurations).
     private(set) var metrics: NotchMetrics?
 
-    /// Recomputed from `metrics` and `preferences.scale`; the window controller observes it to
-    /// re-stage the panel when either changes.
+    /// Recomputed from `metrics` and the preferences that size the island (scale, Siri's window,
+    /// the panel); the window controller observes it to re-stage the panel when any changes.
     var layout: IslandLayout {
         IslandLayout(notch: metrics?.notchSize ?? Self.fallbackNotchSize, scale: preferences.scale,
-                     screen: metrics?.screenFrame.size ?? .zero, siri: preferences.siri.layout)
+                     screen: metrics?.screenFrame.size ?? .zero, siri: preferences.siri.layout, panel: preferences.panel.layout)
+    }
+
+    /// The panel's pages on this Mac with these settings: the shelf while it is on, the battery page
+    /// only with a battery (`open?page=` and Spotlight ask for the others in vain).
+    var availablePages: [ExpandedPage] {
+        ExpandedPage.allCases.filter { page in
+            switch page {
+            case .home, .timer: true
+            case .shelf: preferences.shelfEnabled
+            case .battery: power.hasBattery
+            }
+        }
+    }
+
+    /// The page the panel shows: the one chosen, or home once that one is gone (the shelf switched
+    /// off while it was the page).
+    var panelPage: ExpandedPage {
+        availablePages.contains(island.page) ? island.page : .home
     }
 
     /// Created at the end of `init` (it needs `self`) and never replaced, hence not observed.
@@ -103,6 +124,10 @@ import Observation
         assistant.onFileAccessSettled = { [weak self] in self?.windowController?.assistantNeedsKeyboard() }
         assistant.settings = { [weak preferences] in preferences?.siri ?? SiriSettings() }
         assistant.clipboard = { [weak self] in self?.clipboard.items ?? [] }
+        assistant.system = .live(controls: controls, isPinned: { [weak self] in self?.island.isPinned ?? false })
+        assistant.timerIsActive = { [weak self] in self?.timers.isCountdownActive ?? false }
+        assistant.widgetKinds = { [weak self] in self?.widgets.board.widgets.map(\.kind) ?? [] }
+        assistant.pages = { [weak self] in self?.availablePages ?? [] }
         assistant.onPaste = { [weak self] item in
             guard let self else { return }
             // Siri gives the keyboard back to the app the user was typing in, then ⌘V lands there.
@@ -138,6 +163,7 @@ import Observation
         PerfTrace.install()
 
         permissions.start()
+        battery.start(power: power, activity: activity)
         activity.start()
         launchAtLogin.refresh()
         power.start()
@@ -161,6 +187,9 @@ import Observation
             try? await Task.sleep(for: .seconds(20))
             self?.liquidCard.prewarm()
         }
+
+        // Siri's app icons are kept on disk for the next launch (a test run keeps none).
+        AssistantIcons.disk = .caches
 
         let queued = pendingCommands
         pendingCommands.removeAll()
@@ -192,6 +221,7 @@ import Observation
         appliedFeatures = nil
         clipboard.setWatching(false)
         power.stop()
+        battery.stop()
         airPods.stop()
         listeningModes.stop()
         activity.stop()
@@ -234,8 +264,10 @@ import Observation
         case .showSettingsPane(let pane):
             settingsPane = pane
             showSettings()
-        case .editWidget(let kind):
-            editWidget(kind)
+        case .editWidget(.kind(let kind)):
+            editWidget(widgets.board.first(of: kind)?.id)
+        case .editWidget(.instance(let id)):
+            editWidget(widgets.board.contains(id) ? id : nil)
         case .customize:
             showCustomize()
         case .assistant:
@@ -270,10 +302,11 @@ import Observation
     }
 
     /// A widget whose editor Settings ▸ Widgets should open (from the island's context menu).
-    var editingWidget: IslandWidgetKind?
+    var editingWidget: WidgetID?
 
-    func editWidget(_ kind: IslandWidgetKind) {
-        editingWidget = kind
+    /// Settings ▸ Widgets, with the widget's editor open (nil: the page alone).
+    func editWidget(_ id: WidgetID?) {
+        editingWidget = id
         settingsPane = .widgets
         showSettings()
     }
@@ -483,7 +516,9 @@ import Observation
             hideInFullscreen: preferences.hideInFullscreen,
             fullscreenActive: isPlayingVideoFullscreen,
             fullscreenPresent: needsMenuBarGuard,
-            commandSpaceOpensSiri: preferences.commandSpaceOpensSiri
+            commandSpaceOpensSiri: preferences.commandSpaceOpensSiri,
+            liquidVolume: preferences.liquidVolume,
+            liquidAirPods: preferences.liquidAirPods
         )
     }
 
@@ -570,6 +605,7 @@ import Observation
             liquidCard.prewarm()
         case .setCommandSpace(let enabled):
             if enabled { commandSpaceTap.start() } else { commandSpaceTap.stop() }
+        case .prewarmLiquid: liquidCard.prewarm()
         }
     }
 }

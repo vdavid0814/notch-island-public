@@ -13,7 +13,7 @@ struct ExpandedHeader: View {
 
     var body: some View {
         NotchSplitBand(split: split, height: height) {
-            PagePicker()
+            PagePicker(room: split.earWidth)
         } trailing: {
             ZStack(alignment: .trailing) {
                 if !isHidden, let kind = model.banners.current?.levelKind {
@@ -31,15 +31,42 @@ struct ExpandedHeader: View {
     }
 }
 
-/// The pages as the system's tab picker, symbols only (the titles are the tooltips and the
-/// accessibility labels).
+/// The pages this Mac has as the system's tab picker, symbols only (the titles are the tooltips and
+/// the accessibility labels).
 private struct PagePicker: View {
+    /// The ear's width beside the notch.
+    let room: CGFloat
+
     @Environment(AppModel.self) private var model
+    @Environment(\.controlSize) private var controlSize
+
+    /// The bar's drawn width per page count and control size. Once the full bar's is known, whether
+    /// it fits is arithmetic: a `ViewThatFits` measured the system's bar again on every open.
+    private static var widths: [WidthKey: CGFloat] = [:]
+    private struct WidthKey: Hashable { let count: Int, size: ControlSize }
 
     var body: some View {
-        @Bindable var island = model.island
-        Picker("Page", selection: $island.page) {
-            ForEach(ExpandedPage.allCases, id: \.self) { page in
+        let pages = model.availablePages
+        // Where the battery's segment would reach under the notch (Extra Small and Small, or a narrow
+        // panel), the battery page is left out: the battery beside the notch opens it. Shown then,
+        // no segment is selected.
+        if !pages.contains(.battery) {
+            picker(pages)
+        } else if let width = Self.widths[WidthKey(count: pages.count, size: controlSize)] {
+            picker(width <= room ? pages : pages.filter { $0 != .battery })
+        } else {
+            ViewThatFits(in: .horizontal) {
+                picker(pages)
+                picker(pages.filter { $0 != .battery })
+            }
+        }
+    }
+
+    private func picker(_ pages: [ExpandedPage]) -> some View {
+        let island = model.island
+        let key = WidthKey(count: pages.count, size: controlSize)
+        return Picker("Page", selection: Binding { model.panelPage } set: { island.page = $0 }) {
+            ForEach(pages, id: \.self) { page in
                 Label(page.title, systemImage: page.systemImage)
                     .labelStyle(.iconOnly)
                     .controlHelp(page.title)
@@ -51,6 +78,7 @@ private struct PagePicker: View {
         .choiceBar()
         .labelsHidden()
         .fixedSize()
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { Self.widths[key] = $0 }
     }
 }
 
@@ -62,8 +90,19 @@ private struct HeaderAccessories: View {
         HStack(spacing: Metrics.Spacing.small) {
             let power = model.power.state
             if power.hasBattery {
-                BatteryIndicator(state: power)
-                    .padding(.trailing, Metrics.Spacing.xSmall)
+                // Drawn as it always was; pressed, it only dims.
+                Button {
+                    model.controller.expand(page: .battery, userInitiated: true)
+                } label: {
+                    // Clickable a little beyond the glyph, as tall as the buttons beside it.
+                    BatteryIndicator(state: power)
+                        .padding(Metrics.Spacing.xSmall)
+                        .contentShape(.rect)
+                        .padding(-Metrics.Spacing.xSmall)
+                }
+                .buttonStyle(.plain)
+                .controlHelp("Battery")
+                .padding(.trailing, Metrics.Spacing.xSmall)
             }
             Button {
                 model.perform(.assistant)

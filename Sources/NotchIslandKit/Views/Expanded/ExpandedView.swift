@@ -46,6 +46,7 @@ struct ExpandedView: View {
         case .home: HomePage(thumbnails: thumbnails)
         case .shelf: ShelfPage(scale: scale, thumbnails: thumbnails)
         case .timer: TimerPage()
+        case .battery: BatteryPage()
         }
     }
 }

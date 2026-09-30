@@ -65,6 +65,8 @@ nonisolated enum ExpandedPage: String, Sendable, Equatable, CaseIterable, Identi
     case home
     case shelf
     case timer
+    /// The battery's charge over the day, its health and the adapter (only on a Mac with a battery).
+    case battery
 
     var id: String { rawValue }
 
@@ -73,6 +75,7 @@ nonisolated enum ExpandedPage: String, Sendable, Equatable, CaseIterable, Identi
         case .home: "Home"
         case .shelf: "Shelf"
         case .timer: "Timer"
+        case .battery: "Battery"
         }
     }
 
@@ -81,6 +84,7 @@ nonisolated enum ExpandedPage: String, Sendable, Equatable, CaseIterable, Identi
         case .home: "house"
         case .shelf: "tray"
         case .timer: "timer"
+        case .battery: "battery.100percent"
         }
     }
 }
@@ -107,7 +111,7 @@ nonisolated enum AssistantRoom: Sendable, Hashable, Comparable {
         }
     }
 
-    /// The field and every suggestion (Applications, Files, Actions, Clipboard).
+    /// The field and every suggestion (Applications, Files, Actions, Clipboard, System, Windows, Emoji).
     static let suggestions = AssistantRoom.rows(AssistantCategory.allCases.count)
 
     static let allCases: [AssistantRoom] = [.field, .suggestions, .list, .gallery]

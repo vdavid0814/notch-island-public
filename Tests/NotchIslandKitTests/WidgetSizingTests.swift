@@ -78,7 +78,7 @@ import Testing
         guard let directory = ProcessInfo.processInfo.environment["NI_RENDER_WIDGETS"] else { return }
         let model = AppModel()
         let layout = IslandLayout(notch: CGSize(width: 185, height: 32), scale: .standard)
-        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(layout), gap: WidgetMetrics.gap)
+        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(layout), grid: .standard)
         let kinds: [IslandWidgetKind] = [.nowPlaying, .timer, .stopwatch, .shelf, .battery, .volume, .assistant, .dateTime,
                                          .systemStats, .keepAwake, .bluetooth]
         for kind in kinds {
@@ -116,7 +116,7 @@ import Testing
     static func widget(_ kind: IslandWidgetKind, grid: GridSize, element: ElementSize) -> IslandWidget {
         var widget = IslandWidget(kind: kind, frame: GridRect(column: 0, row: 0, width: grid.width, height: grid.height),
                                   options: kind.defaultOptions)
-        for option in kind.options where option.isSizable { widget.sizes[option] = element }
+        for spec in kind.spec.elements where spec.isSizable { widget.sizes[spec.id] = element }
         return widget
     }
 }

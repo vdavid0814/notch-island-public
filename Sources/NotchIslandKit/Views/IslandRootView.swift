@@ -216,7 +216,7 @@ extension EnvironmentValues {
 /// Just enough to lift white text off a bright spot behind the glass: at 0.55 / 2.5 pt it read as
 /// a glow around every word and tile, so it is a whisper now — tight and light. The fade style's
 /// black under the content does most of the work.
-private struct GlassLegibility: ViewModifier {
+struct GlassLegibility: ViewModifier {
     /// The content lies within the notch band (the pills). The fade style's band is solid black
     /// under it in every frame, also over a larger island held during a move (`FadeShadeMask`), and
     /// a dark halo on solid black changes no pixel: none is asked for there, as on solid black.

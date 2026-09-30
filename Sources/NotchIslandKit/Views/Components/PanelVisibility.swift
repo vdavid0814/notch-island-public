@@ -52,6 +52,8 @@ struct PanelTimelineView<Schedule: TimelineSchedule, Content: View>: View {
     let schedule: Schedule
     @ViewBuilder let content: (TimelineViewDefaultContext) -> Content
     @Environment(\.isIslandPanelHidden) private var isHidden
+    /// The editor's canvas is a picture: one entry, never a tick.
+    @Environment(\.widgetRenderMode) private var renderMode
 
     init(_ schedule: Schedule, @ViewBuilder content: @escaping (TimelineViewDefaultContext) -> Content) {
         self.schedule = schedule
@@ -59,6 +61,6 @@ struct PanelTimelineView<Schedule: TimelineSchedule, Content: View>: View {
     }
 
     var body: some View {
-        TimelineView(PanelTimeline(base: schedule, isPaused: isHidden), content: content)
+        TimelineView(PanelTimeline(base: schedule, isPaused: isHidden || renderMode == .canvas), content: content)
     }
 }

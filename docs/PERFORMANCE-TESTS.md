@@ -5,6 +5,39 @@ anyone can repeat them on their own Mac and compare. It comes with every copy: i
 (`docs/`), inside the app (`NotchIsland.app/Contents/Resources/`) and next to the app in the `.dmg`.
 The detailed before/after tables, and what was changed, are in `ENERGY-LOG.md` next to it.
 
+## The September 30, 2026 run (v0.6, build 23)
+
+**Setup.** The same MacBook Air M5, macOS 27, on battery the whole time (57 % for the middle pass,
+39 → 38 % for the final one), music playing. Release builds of v0.5.1 (22) and v0.6 (23), signed
+with the same identity, diagnostics reports removed from both.
+
+**What was run**
+1. **Every animation, back to back** (`Scripts/perf/ab.py`, which runs `anim.py`): v0.5.1 and v0.6
+   alternating, two rounds each, a fresh launch and 35 s of rest before each round. Scenarios:
+   settings, siri, siri-apps, siri-search (new: typing "smile" into Spotlight), open-home,
+   open-timer, open-battery (new: the battery page), spam-open, spam-siri, spam-pages, timer-done,
+   airpods, volume. Once after the first half of the work, once at the end.
+2. **Where the time goes**: `sample` of the app during settings, siri-search, spam-open, spam-siri
+   and the first opening after a launch, v0.5.1 against v0.6, compared symbol by symbol.
+3. **Suspects switched off one at a time** (a v0.6 build with one change undone, measured back to
+   back with v0.6): the glow's new animation, the widgets' concentric corners, the header's new
+   picker and battery button.
+4. **Offscreen benchmarks** in the unit tests (`NI_BENCH=1`): building the widget board (CPU
+   instructions), typing a query through Spotlight's model and view, opening Settings pages.
+5. **Looks unchanged**: frozen-frame screenshots (`demo/freeze`) of v0.5.1 and v0.6 compared pixel
+   by pixel against two shots of the same build: Siri 0.1 and 0.3 s into opening and settled, the
+   app gallery, the panel 0.15 s in and settled, the timer page, Settings ▸ General and Widgets.
+6. **Unit tests** (`Scripts/test.sh`): 724 tests in 160 suites, then the 242 widget snapshots
+   (exact, in their own process).
+
+**Results** (Energy Impact, worst 5 s, v0.5.1 → v0.6): Settings 501 → 425, Siri's app gallery
+48 → 41, the panel's pages 53 → 49, opening the panel 12.8 → 12.4, the battery page 7.5. Above
+v0.5.1: the first search after a launch 113 → 133 (the new Spotlight sources), fast repeated
+opening of the panel 33 → 38 and of Siri 80 → 91 (after the other scenarios; within noise when run
+first), the first panel opening after a launch 34 → 47. Unit tests: everything passes except the
+liquid card's hand-tuned lead (the owner's 0.25 → 0.20 change) and timing tests that pass alone.
+Full tables and what changed: `ENERGY-LOG.md`.
+
 ## Setup of the September 29, 2026 run (v0.5, build 21)
 
 - MacBook Air M5 (Mac17,3), macOS 27, built-in 3024×1964 display.
@@ -47,10 +80,11 @@ Worst 1 s and worst 5 s energy window and CPU ms for each:
 
 | scenario | what it does |
 |---|---|
-| open-home / open-timer / open-shelf | opens the panel on that page, closes it |
+| open-home / open-timer / open-shelf / open-battery | opens the panel on that page, closes it |
 | hover | pointer onto the notch and off |
 | siri | opens Siri, closes it |
 | siri-apps / siri-clipboard | opens Siri's app gallery / clipboard, closes it |
+| siri-search | types "smile" into Spotlight, a letter every 0.12 s, closes it |
 | volume | three volume steps in 1 s |
 | battery | charger connected banner |
 | airpods | AirPods connected card |
@@ -93,7 +127,7 @@ noise.
 checks a hand-tuned timing of the noise-control card that was being changed at the time (0.25 →
 0.20), not part of the performance work.
 
-## Results in short
+## Results in short (the v0.5 run)
 
 Energy Impact as Activity Monitor shows it (worst 5 s), before → after:
 
@@ -119,6 +153,7 @@ Start NotchIsland, play something in Music, then from the repository:
 
 ```
 python3 Scripts/perf/anim.py
+python3 Scripts/perf/ab.py ab.tsv old=/path/Old.app new=/path/New.app -- settings siri open-home
 python3 Scripts/perf/events_bench.py mine
 python3 Scripts/perf/levels_bench.py mine
 python3 Scripts/perf/states.py mine 20

@@ -3,60 +3,64 @@ import Foundation
 import Testing
 @testable import NotchIslandKit
 
+/// The standard board's widgets, by their legacy ids.
+nonisolated let timerID = WidgetID.legacy(.timer)
+nonisolated let nowPlayingID = WidgetID.legacy(.nowPlaying)
+nonisolated let shelfID = WidgetID.legacy(.shelf)
+
 @Suite struct WidgetBoardTests {
     @Test func standardBoardIsValidAndFull() {
         let board = WidgetBoard.standard
         #expect(board.widgets.map(\.kind) == [.nowPlaying, .timer, .shelf])
         for widget in board.widgets {
-            #expect(board.isFree(widget.frame, for: widget.kind))
+            #expect(board.isFree(widget.frame, for: widget.kind, excluding: widget.id))
         }
         let cells = board.widgets.reduce(0) { $0 + $1.frame.width * $1.frame.height }
-        #expect(cells == WidgetBoard.columns * WidgetBoard.rows)
+        #expect(cells == board.grid.columns * board.grid.rows)
         #expect(board.freeSlot(for: .battery) == nil)
     }
 
     @Test func overlappingAndOutOfBoundsFramesAreRefused() {
         var board = WidgetBoard.standard
-        let result1 = board.setFrame(GridRect(column: 6, row: 0, width: 5, height: 2), for: .timer)
+        let result1 = board.setFrame(GridRect(column: 6, row: 0, width: 5, height: 2), for: timerID)
         #expect(!result1)
-        let result2 = board.setFrame(GridRect(column: 8, row: 0, width: 5, height: 2), for: .timer)
+        let result2 = board.setFrame(GridRect(column: 8, row: 0, width: 5, height: 2), for: timerID)
         #expect(!result2)
         // Below the minimum size.
-        let result3 = board.setFrame(GridRect(column: 7, row: 0, width: 2, height: 1), for: .timer)
+        let result3 = board.setFrame(GridRect(column: 7, row: 0, width: 2, height: 1), for: timerID)
         #expect(!result3)
-        #expect(board.widget(.timer)?.frame == GridRect(column: 7, row: 0, width: 5, height: 2))
+        #expect(board.widget(timerID)?.frame == GridRect(column: 7, row: 0, width: 5, height: 2))
     }
 
     @Test func addFindsRoomAndShrinksToFit() {
         var board = WidgetBoard.standard
-        board.remove(.shelf)
+        board.remove(shelfID)
         // The default 3 × 1 fits where the shelf was.
-        let result4 = board.add(.battery)
-        #expect(result4)
-        #expect(board.widget(.battery)?.frame == GridRect(column: 7, row: 2, width: 3, height: 1))
+        let battery = board.add(.battery)
+        #expect(battery != nil)
+        #expect(board.first(of: .battery)?.frame == GridRect(column: 7, row: 2, width: 3, height: 1))
         // Two cells left: room for a control's 2 × 1 tile, then the board is full.
-        let result5 = board.add(.wifi)
-        #expect(result5)
-        #expect(board.widget(.wifi)?.frame == GridRect(column: 10, row: 2, width: 2, height: 1))
-        let result6 = board.add(.bluetooth)
-        #expect(!result6)
-        let result7 = board.add(.battery)
-        #expect(!result7)  // one of each kind
+        let wifi = board.add(.wifi)
+        #expect(wifi != nil && wifi != battery)
+        #expect(board.first(of: .wifi)?.frame == GridRect(column: 10, row: 2, width: 2, height: 1))
+        let bluetooth = board.add(.bluetooth), secondBattery = board.add(.battery)
+        #expect(bluetooth == nil)
+        #expect(secondBattery == nil)  // a second battery would be welcome, but the board is full
     }
 
     @Test func optionsAreLimitedToTheKind() {
         var board = WidgetBoard.standard
-        board.setOption(.percentage, true, for: .timer)
-        #expect(board.widget(.timer)?.shows(.percentage) == false)
-        board.setOption(.addMinute, true, for: .timer)
-        #expect(board.widget(.timer)?.shows(.addMinute) == true)
-        board.setOption(.ruler, false, for: .timer)
-        #expect(board.widget(.timer)?.shows(.ruler) == false)
+        board.setOption(.percentage, true, for: timerID)
+        #expect(board.widget(timerID)?.shows(.percentage) == false)
+        board.setOption(.addMinute, true, for: timerID)
+        #expect(board.widget(timerID)?.shows(.addMinute) == true)
+        board.setOption(.ruler, false, for: timerID)
+        #expect(board.widget(timerID)?.shows(.ruler) == false)
     }
 
-    @Test func roundTripsAndDropsInvalidEntries() throws {
+    @Test func roundTripsAndParksInvalidEntries() throws {
         var board = WidgetBoard.standard
-        board.setOption(.skipButtons, false, for: .nowPlaying)
+        board.setOption(.skipButtons, false, for: nowPlayingID)
         let data = try JSONEncoder().encode(board)
         #expect(try JSONDecoder().decode(WidgetBoard.self, from: data) == board)
 
@@ -69,21 +73,27 @@ import Testing
         ]}
         """
         let decoded = try JSONDecoder().decode(WidgetBoard.self, from: Data(broken.utf8))
-        // The shelf overlaps the timer, the battery leaves the board, the second timer is a duplicate.
-        #expect(decoded.widgets.map(\.kind) == [.timer])
-        #expect(decoded.widget(.timer)?.options == [.ruler])
+        // The shelf overlaps the timer and the battery leaves the board: both parked, not lost. The
+        // second timer is a second instance, with an id of its own.
+        #expect(decoded.widgets.map(\.kind) == [.timer, .timer])
+        #expect(decoded.parked.map(\.kind) == [.shelf, .battery])
+        #expect(decoded.widgets.map(\.id) == [timerID, WidgetID(name: "notchisland.widget.\(timerID).1")])
+        #expect(decoded.first(of: .timer)?.options == [.ruler])
     }
 
     @Test func centring() {
-        #expect(GridRect(column: 4, row: 0, width: 4, height: 1).isHorizontallyCentred)
-        #expect(!GridRect(column: 4, row: 0, width: 5, height: 1).isHorizontallyCentred)
-        #expect(GridRect(column: 0, row: 1, width: 12, height: 1).isVerticallyCentred)
+        #expect(GridRect(column: 4, row: 0, width: 4, height: 1).isHorizontallyCentred(in: .standard))
+        #expect(!GridRect(column: 4, row: 0, width: 5, height: 1).isHorizontallyCentred(in: .standard))
+        #expect(GridRect(column: 0, row: 1, width: 12, height: 1).isVerticallyCentred(in: .standard))
+        let wide = BoardGrid(columns: 16, rows: 4, gap: 8)
+        #expect(GridRect(column: 6, row: 1, width: 4, height: 2).isHorizontallyCentred(in: wide))
+        #expect(GridRect(column: 6, row: 1, width: 4, height: 2).isVerticallyCentred(in: wide))
     }
 }
 
 @Suite struct WidgetBoardGeometryTests {
     // 12 columns of 40 with 8 between; 3 rows of 40 with 8 between.
-    let geometry = WidgetBoardGeometry(size: CGSize(width: 12 * 40 + 11 * 8, height: 3 * 40 + 2 * 8), gap: 8)
+    let geometry = WidgetBoardGeometry(size: CGSize(width: 12 * 40 + 11 * 8, height: 3 * 40 + 2 * 8), grid: .standard)
 
     @Test func framesSitOnTheGrid() {
         #expect(geometry.cellWidth == 40 && geometry.cellHeight == 40)
@@ -125,15 +135,15 @@ import Testing
     @Test func version1BoardsGainTheNewElements() throws {
         let json = #"{"widgets":[{"kind":"nowPlaying","frame":{"column":0,"row":0,"width":7,"height":3},"options":["artwork","trackInfo"],"showsPlate":false},{"kind":"stopwatch","frame":{"column":7,"row":0,"width":4,"height":1},"options":[]}]}"#
         let board = try JSONDecoder().decode(WidgetBoard.self, from: Data(json.utf8))
-        let nowPlaying = try #require(board.widget(.nowPlaying))
+        let nowPlaying = try #require(board.first(of: .nowPlaying))
         #expect(nowPlaying.options == [.artwork, .trackInfo, .artist, .playbackButtons])
         #expect(nowPlaying.background == .none)
-        #expect(board.widget(.stopwatch)?.options == [.readout])
+        #expect(board.first(of: .stopwatch)?.options == [.readout])
     }
 
     @Test func version2BoardsKeepWhatWasSwitchedOff() throws {
         var board = WidgetBoard.standard
-        board.update(.nowPlaying) { widget in
+        board.update(nowPlayingID) { widget in
             widget.options.remove(.artist)
             widget.sizes[.trackInfo] = .large
             widget.sizes[.artist] = .medium        // medium is the default: not stored
@@ -142,7 +152,7 @@ import Testing
             widget.background = .artwork
         }
         let decoded = try JSONDecoder().decode(WidgetBoard.self, from: JSONEncoder().encode(board))
-        let nowPlaying = try #require(decoded.widget(.nowPlaying))
+        let nowPlaying = try #require(decoded.widget(nowPlayingID))
         #expect(!nowPlaying.shows(.artist))
         #expect(nowPlaying.sizes == [.trackInfo: .large])
         #expect(nowPlaying.layout == .cover && nowPlaying.background == .artwork)
@@ -150,12 +160,12 @@ import Testing
 
     @Test func layoutsAndBackgroundsAreLimitedToTheKind() {
         var board = WidgetBoard.standard
-        board.update(.timer) { widget in
+        board.update(timerID) { widget in
             widget.layout = .cover
             widget.background = .artwork
         }
-        #expect(board.widget(.timer)?.layout == .automatic)
-        #expect(board.widget(.timer)?.background == .plate)
+        #expect(board.widget(timerID)?.layout == .automatic)
+        #expect(board.widget(timerID)?.background == .plate)
     }
 
     @Test func sizePresetsRespectTheLimits() {
@@ -168,19 +178,21 @@ import Testing
         #expect(IslandWidgetKind.wifi.sizePresets.contains(GridSize(width: 2, height: 1)))
     }
 
-    @Test func placementPrefersTheCurrentSpotThenTheNearest() {
+    @Test func placementPrefersTheCurrentSpotThenTheNearest() throws {
         var board = WidgetBoard.standard
-        board.remove(.shelf)
-        let timer = board.widget(.timer)!.frame   // 7,0 5×2
+        board.remove(shelfID)
+        let timer = board.widget(timerID)!.frame   // 7,0 5×2
         // Taller: 5 × 3 fits in place now that the shelf is gone.
-        #expect(board.placement(for: .timer, size: GridSize(width: 5, height: 3), near: timer)
+        #expect(board.placement(for: .timer, size: GridSize(width: 5, height: 3), near: timer, excluding: timerID)
                 == GridRect(column: 7, row: 0, width: 5, height: 3))
         // Wider than the room right of Now Playing: nowhere.
-        #expect(board.placement(for: .timer, size: GridSize(width: 6, height: 2), near: timer) == nil)
+        #expect(board.placement(for: .timer, size: GridSize(width: 6, height: 2), near: timer, excluding: timerID) == nil)
         // A small widget lands next to where it was.
-        board.add(.battery)
-        let battery = board.widget(.battery)!.frame
-        #expect(board.placement(for: .battery, size: GridSize(width: 1, height: 1), near: battery)?.row == battery.row)
+        let added = board.add(.battery)
+        let batteryID = try #require(added)
+        let battery = board.widget(batteryID)!.frame
+        #expect(board.placement(for: .battery, size: GridSize(width: 1, height: 1), near: battery, excluding: batteryID)?.row
+                == battery.row)
     }
 
     @Test func settingsPaneAliases() {

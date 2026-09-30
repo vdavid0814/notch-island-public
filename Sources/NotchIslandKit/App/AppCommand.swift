@@ -16,6 +16,8 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case airPodsMode(AirPodsListeningMode)
     /// The timer widget's ruler moves on to its next unit (hours → minutes → seconds).
     case timerUnit
+    /// The battery page on a made-up day (`BatteryHistory.demoRecords`), never written to the history.
+    case batteryHistory
     /// Siri opened on its app gallery (as ⌘Space then ⌘1).
     case siriApps
     /// Siri opened on the clipboard history (as ⌘Space then ⌘4).
@@ -29,6 +31,12 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case freeze(TimeInterval?)
 }
 
+/// The widget a `widget/…` link means: the first on the board of a kind, or one instance.
+nonisolated enum WidgetTarget: Sendable, Equatable {
+    case kind(IslandWidgetKind)
+    case instance(WidgetID)
+}
+
 /// Everything the app can be asked to do from outside the island: the menu bar menu and the
 /// `notchisland://` URL scheme. An agent app has no window to click, so the scheme is also what makes
 /// it scriptable (Shortcuts, `open`, tests).
@@ -39,8 +47,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
     case showSettings
     /// Settings on one tab (`settings/widgets`…).
     case showSettingsPane(IslandSettingsPane)
-    /// A widget's editor in Settings ▸ Widgets (`widget/timer`…).
-    case editWidget(IslandWidgetKind)
+    /// A widget's editor in Settings ▸ Widgets (`widget/timer`, `widget/<id>`).
+    case editWidget(WidgetTarget)
     /// The widget editor (Customize Island).
     case customize
     /// ⌘Space (Siri or Spotlight), from the notch.
@@ -67,11 +75,11 @@ nonisolated enum AppCommand: Sendable, Equatable {
     /// `notchisland:media/next` work. Unknown routes and malformed parameters return nil (so the
     /// caller can log them) instead of guessing.
     ///
-    ///     open[?page=home|shelf|timer]   close   pin   settings[/general|widgets|activities|permissions|about]
-    ///     customize   widget/<kind>   siri   diagnostics/send   diagnostics/baseline
+    ///     open[?page=home|shelf|timer|battery]   close   pin   settings[/general|widgets|activities|permissions|about]
+    ///     customize   widget/<kind>|<id>   siri   diagnostics/send   diagnostics/baseline
     ///     media/play|pause|toggle|next|previous
     ///     timer[?minutes=N]   timer/cancel   stopwatch
-    ///     demo/media|charging|unplug|low|timerdone|drop|shelf|reset
+    ///     demo/media|charging|unplug|low|timerdone|drop|shelf|batteryhistory|reset
     ///     demo/volume[?level=0…1]   demo/brightness[?level=0…1]
     ///     demo/hover[?inside=1|0]   demo/state   demo/surface?style=smoked|black|fade   demo/airpods
     ///     demo/freeze[?t=seconds]
@@ -99,7 +107,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "settings": return .showSettings
         case let route where route.hasPrefix("widget/"):
             let name = String(route.dropFirst("widget/".count))
-            return IslandWidgetKind.allCases.first { $0.rawValue.lowercased() == name }.map { .editWidget($0) }
+            if let id = WidgetID(string: name) { return .editWidget(.instance(id)) }
+            return IslandWidgetKind.allCases.first { $0.rawValue.lowercased() == name }.map { .editWidget(.kind($0)) }
         case let route where route.hasPrefix("settings/"):
             return IslandSettingsPane.named(String(route.dropFirst("settings/".count))).map { .showSettingsPane($0) }
         case "customize": return .customize
@@ -147,6 +156,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
                                                          "adaptive": .adaptive, "off": .off]
             return modes[query["mode"]?.lowercased() ?? "anc"].map { .demo(.airPodsMode($0)) }
         case "demo/timerunit": return .demo(.timerUnit)
+        case "demo/batteryhistory": return .demo(.batteryHistory)
         case "demo/siriapps": return .demo(.siriApps)
         case "demo/siriclipboard": return .demo(.siriClipboard)
         case "demo/siritype": return .demo(.siriType(query["text"] ?? "notch"))

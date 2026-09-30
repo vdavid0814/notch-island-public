@@ -1,7 +1,20 @@
 import AppKit
 import SwiftUI
 
-// MARK: - Control
+/// Control Center's controls (`ControlSpecs`): every built one is a `ControlWidget`, one not built
+/// yet its placeholder.
+struct ControlFamily: View {
+    let widget: IslandWidget
+    let size: CGSize
+
+    var body: some View {
+        if let control = widget.kind.systemControl, widget.kind.spec.isImplemented {
+            ControlWidget(control: control, widget: widget, size: size)
+        } else {
+            WidgetPlaceholder(kind: widget.kind, size: size)
+        }
+    }
+}
 
 /// One Control Center control as its own widget, in one of two layouts:
 ///
@@ -17,6 +30,7 @@ struct ControlWidget: View {
     let widget: IslandWidget
     let size: CGSize
 
+    @Environment(\.widgetFrameProbe) private var probe
     @Environment(AppModel.self) private var model
     @Environment(\.isWidgetPreview) private var isPreview
 
@@ -137,8 +151,10 @@ struct ControlWidget: View {
         case .nameAndStatus:
             VStack(alignment: .leading, spacing: 0) {
                 nameText(layout.name).lineLimit(1)
+                    .editorElement(.controlName, in: probe)
                 Text(control.status(on: on)).font(.system(size: layout.status)).foregroundStyle(.secondary)
                     .lineLimit(1).contentTransition(.opacity)
+                    .editorElement(.controlStatus, in: probe)
             }
             .minimumScaleFactor(0.85)
         case .line:
@@ -165,6 +181,7 @@ struct ControlWidget: View {
         }
         .lineLimit(1)
         .minimumScaleFactor(0.85)
+        .editorElement(widget.shows(.controlName) ? .controlName : .controlStatus, in: probe)
     }
 
     private func twoWords(_ size: CGFloat) -> some View {
@@ -174,6 +191,7 @@ struct ControlWidget: View {
             }
         }
         .minimumScaleFactor(0.85)
+        .editorElement(.controlName, in: probe)
     }
 }
 
@@ -319,71 +337,5 @@ nonisolated struct AirDropLogo: Shape {
             path.addArc(center: center, radius: radius, startAngle: start, endAngle: .degrees(55), clockwise: false)
         }
         return path
-    }
-}
-
-// MARK: - Keyboard backlight
-
-/// The keyboard backlight as a slider or a ring, like the Volume and Brightness widgets.
-struct KeyboardWidget: View {
-    let widget: IslandWidget
-    let size: CGSize
-
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let controls = model.controls
-        Group {
-            if let level = controls.keyboardBrightness {
-                if widget.resolvedLevelLayout(size) == .ring {
-                    LevelRing(value: level, symbol: level < 0.01 ? "light.min" : "light.max",
-                              showsValue: widget.shows(.levelValue), size: size,
-                              set: { controls.setKeyboardBrightness($0) },
-                              onInteraction: { model.island.isInteracting = $0 },
-                              symbolSize: widget.size(of: .levelIcon), valueSize: widget.size(of: .levelValue))
-                } else {
-                    slider(level, controls)
-                }
-            } else {
-                Label("No keyboard backlight", systemImage: "light.max")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .frame(width: size.width, height: size.height)
-            }
-        }
-        .whileShown { withoutAnimation { model.controls.refresh() } }
-    }
-
-    private func slider(_ level: Double, _ controls: SystemControls) -> some View {
-        let iconSize = WidgetType.points(size.height, ratio: 0.42, min: 13, max: 22, widget.size(of: .levelIcon))
-        return HStack(spacing: Metrics.Spacing.medium) {
-            if widget.shows(.levelIcon), size.width >= 90 {
-                Image(systemName: level < 0.01 ? "light.min" : "light.max")
-                    .font(.system(size: iconSize))
-                    .foregroundStyle(.secondary)
-                    .frame(width: iconSize * 1.3)
-            }
-            Slider(value: Binding(get: { level }, set: { controls.setKeyboardBrightness($0) }), in: 0...1) {
-                Text("Keyboard Brightness")
-            } onEditingChanged: { editing in
-                model.island.isInteracting = editing
-            }
-            .labelsHidden()
-            .tint(Color.islandAccent)
-            .ownDirection()
-            if widget.shows(.levelValue), size.width >= 150 {
-                Text(IslandFormat.percent(level))
-                    .font(.system(size: WidgetType.points(size.height, ratio: 0.3, min: 11, max: 15,
-                                                          widget.size(of: .levelValue))).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 34, alignment: .trailing)
-                    .ownDirection()
-            }
-        }
-        .mirroredSides(widget.mirrored)
-        .padding(.horizontal, Metrics.Spacing.xSmall)
-        .frame(width: size.width, height: size.height)
     }
 }

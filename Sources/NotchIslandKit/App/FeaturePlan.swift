@@ -25,6 +25,9 @@ nonisolated struct FeatureState: Sendable, Equatable {
     var commandSpace = false
     /// The playing video is in full screen on the notch screen and the island steps aside.
     var hidden = false
+    /// The liquid runs out to macOS's volume card, to its AirPods card.
+    var liquidVolume = false
+    var liquidAirPods = false
 
     /// Everything stopped: the state before `start()` and after `stop()`.
     static let off = FeatureState()
@@ -43,7 +46,9 @@ nonisolated struct FeatureState: Sendable, Equatable {
         hideInFullscreen: Bool = false,
         fullscreenActive: Bool = false,
         fullscreenPresent: Bool = false,
-        commandSpaceOpensSiri: Bool = false
+        commandSpaceOpensSiri: Bool = false,
+        liquidVolume: Bool = false,
+        liquidAirPods: Bool = false
     ) {
         nowPlaying = showNowPlaying
         webMedia = showNowPlaying && showWebMedia
@@ -63,13 +68,15 @@ nonisolated struct FeatureState: Sendable, Equatable {
         needsAccessibility = showLevelHUD && replaceSystemHUD && !accessibilityTrusted
         dragMonitor = shelfEnabled
         self.suspended = suspended
+        self.liquidVolume = liquidVolume
+        self.liquidAirPods = liquidAirPods
     }
 
-    /// The side effects that move the features from `old` (nil = never applied) to `new`, in the
+    /// The side effects that move the features from `applied` (nil = never) to `new`, in the
     /// order they must run: the level reader starts before the interceptor is armed and the
     /// interceptor is disarmed before the reader stops.
-    static func actions(from old: FeatureState?, to new: FeatureState) -> [FeatureAction] {
-        let old = old ?? .off
+    static func actions(from applied: FeatureState?, to new: FeatureState) -> [FeatureAction] {
+        let old = applied ?? .off
         var actions: [FeatureAction] = []
 
         if new.nowPlaying != old.nowPlaying {
@@ -116,6 +123,11 @@ nonisolated struct FeatureState: Sendable, Equatable {
         if new.commandSpace != old.commandSpace {
             actions.append(.setCommandSpace(new.commandSpace))
         }
+        // A card's liquid turned on: its frames ahead of the first flow (at launch `AppModel.start`
+        // works them out once the launch has settled).
+        if applied != nil, (new.liquidVolume && !old.liquidVolume) || (new.liquidAirPods && !old.liquidAirPods) {
+            actions.append(.prewarmLiquid)
+        }
         return actions
     }
 }
@@ -132,4 +144,5 @@ nonisolated enum FeatureAction: Sendable, Equatable {
     case setHidden(Bool)
     case setFullscreenPresent(Bool)
     case setCommandSpace(Bool)
+    case prewarmLiquid
 }

@@ -1,14 +1,31 @@
 import Foundation
+import Synchronization
 
 /// Pure text and symbol choices for the island, kept out of the views so they can be tested.
 nonisolated enum IslandFormat {
     /// Clock-style duration: "3:07", "1:02:03". Hours appear only when needed, seconds always.
+    ///
+    /// Remembered per whole second and locale while among the last 256: formatting a `Duration`
+    /// builds its format style anew, and the timer asks for the same time several times in each
+    /// evaluation (its readout, sized to fit, in three sizes).
     static func clock(_ seconds: TimeInterval) -> String {
-        let whole = Duration.seconds(max(0, Int(seconds.isFinite ? seconds.rounded(.down) : 0)))
-        return seconds >= 3600
-            ? whole.formatted(.time(pattern: .hourMinuteSecond))
-            : whole.formatted(.time(pattern: .minuteSecond))
+        let whole = max(0, Int(seconds.isFinite ? seconds.rounded(.down) : 0))
+        let key = ClockKey(seconds: whole, hours: seconds >= 3600, locale: Locale.current.identifier)
+        if let text = clocks.withLock({ $0[key] }) { return text }
+        let text = key.hours
+            ? Duration.seconds(whole).formatted(.time(pattern: .hourMinuteSecond))
+            : Duration.seconds(whole).formatted(.time(pattern: .minuteSecond))
+        clocks.withLock { $0[key] = text }
+        return text
     }
+
+    private struct ClockKey: Hashable {
+        var seconds: Int
+        var hours: Bool
+        var locale: String
+    }
+
+    private static let clocks = Mutex(MeasureCache<ClockKey, String>())
 
     /// "62%".
     static func percent(_ fraction: Double) -> String {

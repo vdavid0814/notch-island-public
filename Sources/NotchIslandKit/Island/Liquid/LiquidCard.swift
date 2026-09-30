@@ -170,7 +170,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
                                                                                   screen: metrics.screenFrame))
         state.kind = kind
         state.notch = metrics.notchRect
-        state.frame = frame(covering: [cover.rect, notchCard.rect], metrics: metrics)
+        state.frame = Self.frame(covering: [cover.rect, notchCard.rect], metrics: metrics)
         state.surfaceShown = false
         let panel = self.panel ?? makePanel()
         panel.level = IslandPanel.coveringLevel
@@ -211,7 +211,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     private func move(to window: CGRect) {
         guard let metrics = model.metrics else { return }
         let cover = LiquidFlow.cover(overCardWindow: window, kind: state.kind.card)
-        let frame = frame(covering: [state.frame, cover.rect], metrics: metrics)
+        let frame = Self.frame(covering: [state.frame, cover.rect], metrics: metrics)
         if frame != state.frame {
             state.frame = frame
             panel?.stage(frame)
@@ -444,68 +444,67 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     // MARK: Frames
 
     /// Works out ahead, at background priority, the frames of the way out to where macOS's card is
-    /// expected and back (for both cards), so the first change does not wait on them (~0.45 s of
-    /// CPU on a performance core at that moment, measured). After launch and whenever the
-    /// situation or the card's place changes.
+    /// expected and back (for each card the liquid runs out to), so the first change does not wait
+    /// on them (~0.45 s of CPU on a performance core at that moment, measured). After launch and
+    /// whenever the situation or the card's place changes. Frames an earlier launch worked out are
+    /// read from disk (`LiquidFrames.Store`); with both cards' flow turned off, nothing is done.
     func prewarm() {
-        guard let metrics = model.metrics, !isShown else { return }
+        let cards = Self.flowingCards(volume: model.preferences.liquidVolume, airPods: model.preferences.liquidAirPods)
+        guard !cards.isEmpty, let metrics = model.metrics, !isShown else { return }
         let situation = model.fullscreen.fullscreenApps.count
         let window = memory.expected(fullscreenApps: situation, notch: metrics.notchRect, screen: metrics.screenFrame)
         guard !SystemVolumeCard.isUnderNotch(window, notch: metrics.notchRect) else { return }
-        var jobs: [(key: String, scenes: [LiquidScene], clip: CGRect, origin: CGPoint)] = []
-        for kind in [SystemVolumeCard.Kind.volume, .airPods] {
+        let moves = Self.prewarmMoves(cards: cards, towards: window, metrics: metrics).filter { framesCache[$0.key] == nil }
+        guard !moves.isEmpty else { return }
+        let store = LiquidFrames.Store.caches
+        // Traced (or read) off the main actor, at background quality of service: the efficiency cores.
+        Task(priority: .background) { [weak self] in
+            for (key, move) in moves {
+                let paths = await Self.trace(move, keptIn: store, as: key)
+                guard let self else { return }
+                if self.framesCache.count > 12 { self.framesCache.removeAll() }
+                self.framesCache[key] = paths
+            }
+        }
+    }
+
+    /// The cards the liquid runs out to, by the user's switches.
+    nonisolated static func flowingCards(volume: Bool, airPods: Bool) -> [SystemVolumeCard.Kind] {
+        (volume ? [.volume] : []) + (airPods ? [.airPods] : [])
+    }
+
+    /// What `prewarm` works out: for each card, the way out to macOS's card in `window` and back,
+    /// by the key `show` and `hide` look them up with.
+    nonisolated static func prewarmMoves(cards: [SystemVolumeCard.Kind], towards window: CGRect,
+                                         metrics: NotchMetrics) -> [(key: String, move: LiquidFrames.Move)] {
+        var moves: [(key: String, move: LiquidFrames.Move)] = []
+        for kind in cards {
             let cover = LiquidFlow.cover(overCardWindow: window, kind: kind)
             let notchCard = LiquidFlow.cover(overCardWindow: SystemVolumeCard.guess(fullscreenApps: 1, notch: metrics.notchRect,
                                                                                       screen: metrics.screenFrame))
             let frame = frame(covering: [cover.rect, notchCard.rect], metrics: metrics)
             let from = LiquidFlow.start(notch: metrics.notchRect, towards: cover.rect)
-            let out = "out|\(kind)|\(metrics.notchRect)|\(frame)|\(cover.rect)"
-            let back = "back|\(kind)|\(metrics.notchRect)|\(frame)|\(cover.rect)"
-            let clip = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height + LiquidCardState.overdraw)
-            if framesCache[out] == nil {
-                jobs.append((out, Self.scenes({ .out(start: $0, from: from, to: cover) }, duration: LiquidFlow.out.total,
-                                              notch: metrics.notchRect), clip, frame.origin))
-            }
-            if framesCache[back] == nil {
-                let total = max(LiquidFlow.back.total, 0.2 + Double(LiquidCardState.absorb))
-                jobs.append((back, Self.scenes({ .back(start: $0, from: cover) }, duration: total, notch: metrics.notchRect), clip, frame.origin))
-            }
+            let total = max(LiquidFlow.back.total, 0.2 + Double(LiquidCardState.absorb))
+            moves.append(("out|\(kind)|\(metrics.notchRect)|\(frame)|\(cover.rect)",
+                          LiquidFrames.Move(make: { .out(start: $0, from: from, to: cover) }, duration: LiquidFlow.out.total,
+                                            notch: metrics.notchRect, frame: frame)))
+            moves.append(("back|\(kind)|\(metrics.notchRect)|\(frame)|\(cover.rect)",
+                          LiquidFrames.Move(make: { .back(start: $0, from: cover) }, duration: total,
+                                            notch: metrics.notchRect, frame: frame)))
         }
-        guard !jobs.isEmpty else { return }
-        Task(priority: .background) { [weak self] in
-            for job in jobs {
-                let paths = await Self.trace(job.scenes, clip: job.clip, origin: job.origin)
-                guard let self else { return }
-                if self.framesCache.count > 12 { self.framesCache.removeAll() }
-                self.framesCache[job.key] = paths
-            }
-        }
-    }
-
-    /// Every frame's scene of a move, 120 a second.
-    private static func scenes(_ make: (Date) -> LiquidCardState.Motion, duration: TimeInterval, notch: CGRect) -> [LiquidScene] {
-        let nominal = Date()
-        let motion = make(nominal)
-        let leftNotch: Date? = if case .out = motion { nominal } else { nil }
-        let count = max(2, Int((duration * 120).rounded(.up)) + 1)
-        return (0..<count).map { index in
-            LiquidCardState.scene(motion: motion, leftNotch: leftNotch, notch: notch,
-                                  at: nominal.addingTimeInterval(min(Double(index) / 120, duration)))
-        }
+        return moves
     }
 
     /// Plays a move on the render server: its outline at every frame (120 a second), worked out off
     /// the main thread (or reused), then the state follows from the moment it starts.
-    private func play(_ make: @escaping (Date) -> LiquidCardState.Motion, duration: TimeInterval, key: String?,
+    private func play(_ make: @escaping @Sendable (Date) -> LiquidCardState.Motion, duration: TimeInterval, key: String?,
                       then started: @escaping () -> Void) {
         playID += 1
         let id = playID
-        let notch = state.notch, frame = state.frame
         let cached = key.flatMap { framesCache[$0] }
-        let scenes = cached == nil ? Self.scenes(make, duration: duration, notch: notch) : []
-        let clip = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height + LiquidCardState.overdraw)
+        let move = LiquidFrames.Move(make: make, duration: duration, notch: state.notch, frame: state.frame)
         Task { [weak self] in
-            let paths = if let cached { cached } else { await Self.trace(scenes, clip: clip, origin: frame.origin) }
+            let paths = if let cached { cached } else { await Self.trace(move) }
             guard let self, self.playID == id else { return }
             if let key, cached == nil { self.framesCache[key] = paths }
             if self.framesCache.count > 12 { self.framesCache.removeAll() }
@@ -523,9 +522,12 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
         }
     }
 
-    @concurrent nonisolated private static func trace(_ scenes: [LiquidScene], clip: CGRect, origin: CGPoint) async -> [CGPath] {
-        var move = CGAffineTransform(translationX: -origin.x, y: -origin.y)
-        return scenes.map { LiquidField.path($0, clip: clip).copy(using: &move) ?? CGMutablePath() }
+    /// The move's frames, off the main actor: read from `store` (or worked out and kept there) when
+    /// it is given.
+    @concurrent nonisolated private static func trace(_ move: LiquidFrames.Move, keptIn store: LiquidFrames.Store? = nil,
+                                                      as key: String? = nil) async -> [CGPath] {
+        guard let store, let key else { return move.paths() }
+        return store.frames(move, key: key)
     }
 
     /// The liquid shows (black over the surface) or clears (the surface under it shows).
@@ -541,7 +543,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
 
     /// Everything the liquid may reach: the notch, the card and the neck between, with room for the
     /// blur; the top is the screen's.
-    private func frame(covering rects: [CGRect], metrics: NotchMetrics) -> CGRect {
+    nonisolated private static func frame(covering rects: [CGRect], metrics: NotchMetrics) -> CGRect {
         let union = rects.reduce(metrics.notchRect) { $0.union($1) }.insetBy(dx: -24, dy: -24)
         let top = metrics.screenFrame.maxY
         return CGRect(x: union.minX, y: union.minY, width: union.width, height: top - union.minY).integral

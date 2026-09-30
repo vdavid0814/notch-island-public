@@ -13,12 +13,16 @@ struct TransportControls: View {
     /// buttons and set their interactive glass springing (see `PlayedLine`).
     var looks: [String: ButtonLook]?
 
-    private func glass(_ button: TransportButton) -> Glass? {
-        looks.map { ($0[button.rawValue] ?? ButtonLook()).glass }
+    private func look(_ button: TransportButton) -> ButtonLook? {
+        looks.map { $0[button.rawValue] ?? ButtonLook() }
     }
 
+    @Environment(\.widgetFrameProbe) private var probe
     @Environment(AppModel.self) private var model
     @Environment(\.controlSize) private var controlSize
+    @Environment(\.widgetStyle) private var style
+    /// On the editor's canvas, a drawing of each button's own glass (`GlassButtonPicture`).
+    @Environment(\.widgetRenderMode) private var renderMode
 
     var body: some View {
         HStack(spacing: Metrics.Spacing.large) {
@@ -30,8 +34,10 @@ struct TransportControls: View {
                         // A little more room around the skip glyphs inside their circles.
                         .imageScale(.small)
                 }
-                .transportGlass(glass(.previous))
+                .widgetButton(.skipButtons, in: style)
+                .transportGlass(look(.previous), on: renderMode)
                 .help("Previous")
+                .editorElement(.skipButtons.part("previous"), in: probe)
             }
 
             if showsPlay {
@@ -41,9 +47,11 @@ struct TransportControls: View {
                     Label(isPlaying ? "Pause" : "Play", systemImage: isPlaying ? "pause.fill" : "play.fill")
                         .contentTransition(.symbolEffect(.replace))
                 }
-                .transportGlass(glass(.playPause))
+                .widgetButton(.playbackButtons, in: style)
+                .transportGlass(look(.playPause), on: renderMode)
                 .controlSize(Metrics.Control.larger(controlSize))
                 .help(isPlaying ? "Pause" : "Play")
+                .editorElement(.playbackButtons, in: probe)
             }
 
             if showsSkip {
@@ -53,8 +61,10 @@ struct TransportControls: View {
                     Label("Next", systemImage: "forward.fill")
                         .imageScale(.small)
                 }
-                .transportGlass(glass(.next))
+                .widgetButton(.skipButtons, in: style)
+                .transportGlass(look(.next), on: renderMode)
                 .help("Next")
+                .editorElement(.skipButtons.part("next"), in: probe)
             }
         }
         .islandButton(.circle)
@@ -62,12 +72,16 @@ struct TransportControls: View {
     }
 }
 
-private extension View {
-    /// The system's glass button in a given glass (the nearest button style wins over the
-    /// island's plain one).
-    @ViewBuilder func transportGlass(_ glass: Glass?) -> some View {
-        if let glass {
-            buttonStyle(.glass(glass))
+extension View {
+    /// The system's glass button in a button's own look (the nearest button style wins over the
+    /// island's plain one); on the editor's canvas, a drawing of that glass.
+    @ViewBuilder func transportGlass(_ look: ButtonLook?, on mode: WidgetRenderMode) -> some View {
+        if let look {
+            if mode == .canvas {
+                buttonStyle(GlassButtonPicture(prominent: false, shape: .circle, fill: look.pictureFill))
+            } else {
+                buttonStyle(.glass(look.glass))
+            }
         } else {
             self
         }
@@ -77,12 +91,11 @@ private extension View {
 extension ButtonLook {
     /// The glass a button wears: its colour at its strength, or — colourless — a white veil as
     /// strong as the setting (0.5 is about the plain glass).
-    var glass: Glass {
-        if let color = tint.color {
-            Glass.regular.tint(color.opacity(opacity)).interactive()
-        } else {
-            Glass.regular.tint(Color.white.opacity(0.3 * opacity)).interactive()
-        }
+    var glass: Glass { Glass.regular.tint(pictureFill).interactive() }
+
+    /// That tint, which the canvas's drawing of the button is filled with.
+    var pictureFill: Color {
+        if let color = tint.color { color.opacity(opacity) } else { Color.white.opacity(0.3 * opacity) }
     }
 }
 
@@ -181,16 +194,21 @@ struct ScrubTrack: View {
     @State private var isHovering = false
     @State private var isDragging = false
     @Environment(\.controlSize) private var controlSize
+    /// The widget's Progress element (`ResolvedLine`); on the Now Playing page, empty.
+    @Environment(\.widgetStyle) private var style
+    @Environment(\.widgetArtworkColor) private var artwork
 
     var body: some View {
-        let rest: CGFloat = controlSize >= .large ? 7 : 6
+        let line = ResolvedLine(style.element(.progress))
+        let rest: CGFloat = line.thickness ?? (controlSize >= .large ? 7 : 6)
         let height = isHovering || isDragging ? rest + 4 : rest
         GeometryReader { proxy in
             let fraction = duration > 0 ? min(max(position / duration, 0), 1) : 0
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.22))
+                Capsule().fill(line.trackStyle(.white.opacity(0.22), artwork: artwork))
                 PlayedLine(fraction: fraction, rate: duration > 0 ? rate / duration : 0,
-                           opacity: isDragging ? 1 : 0.9)
+                           opacity: isDragging ? 1 : 0.9,
+                           color: line.fillColor(value: fraction, artwork: artwork).map { NSColor($0).cgColor } ?? PlayedLineView.white)
             }
             .frame(height: height)
             .frame(maxHeight: .infinity)
@@ -235,6 +253,8 @@ struct PlayedLine: NSViewRepresentable {
     /// Fraction per second (0: still).
     let rate: Double
     let opacity: Double
+    /// Set on the layer when it changes, not per frame.
+    let color: CGColor
 
     /// In the kept, hidden panel the line waits: its animation had the window server update it
     /// twice a second for as long as the panel was kept, unseen.
@@ -243,12 +263,13 @@ struct PlayedLine: NSViewRepresentable {
     func makeNSView(context: Context) -> PlayedLineView { PlayedLineView() }
 
     func updateNSView(_ view: PlayedLineView, context: Context) {
-        view.update(fraction: fraction, rate: rate, opacity: opacity, isPaused: isHidden)
+        view.update(fraction: fraction, rate: rate, opacity: opacity, color: color, isPaused: isHidden)
     }
 }
 
 final class PlayedLineView: NSView {
     private let fill = CALayer()
+    private var color: CGColor?
     private var fraction = 0.0
     private var rate = 0.0
     /// When `fraction` was true.
@@ -258,12 +279,12 @@ final class PlayedLineView: NSView {
     /// About one point of travel per frame on a ~200-pt line for a three-minute track.
     nonisolated static let frameRate = CAFrameRateRange(minimum: 1, maximum: 4, preferred: 2)
     nonisolated static let animationKey = "played"
+    static let white = NSColor.white.cgColor
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         wantsLayer = true
         fill.anchorPoint = CGPoint(x: 0, y: 0.5)
-        fill.backgroundColor = NSColor.white.cgColor
         layer?.addSublayer(fill)
     }
 
@@ -275,8 +296,16 @@ final class PlayedLineView: NSView {
     /// Clicks and drags belong to the SwiftUI track around it.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func update(fraction: Double, rate: Double, opacity: Double, isPaused: Bool) {
+    func update(fraction: Double, rate: Double, opacity: Double, color: CGColor, isPaused: Bool) {
         fill.opacity = Float(opacity)
+        if color != self.color {
+            self.color = color
+            // At once, as it was set before the view was shown: not a fade from no colour.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            fill.backgroundColor = color
+            CATransaction.commit()
+        }
         let moved = fraction != self.fraction || rate != self.rate
         guard moved || isPaused != self.isPaused else { return }
         if moved {

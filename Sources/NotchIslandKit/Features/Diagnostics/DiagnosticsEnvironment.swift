@@ -17,8 +17,9 @@ nonisolated enum DiagnosticsEnvironment {
     static let interferingKey = "May interfere"
     static let trailTitle = "Event trail (this run)"
 
-    static func sections() -> [DiagnosticsReport.Section] {
-        [menuBar(), keyboard(), systemSettings(), powerAndSecurity(), sound(), installedApps(), backgroundItems()]
+    /// `appsOnDisk`: `appsOnDisk()`, read now or kept (`DiagnosticsCache`).
+    static func sections(appsOnDisk: DiagnosticsReport.Section) -> [DiagnosticsReport.Section] {
+        [menuBar(), keyboard(), systemSettings(), powerAndSecurity(), sound(), installedApps(appsOnDisk), backgroundItems()]
     }
 
     // MARK: Menu bar, Dock, Spaces
@@ -215,13 +216,23 @@ nonisolated enum DiagnosticsEnvironment {
                               "soundsource", "backgroundmusic", "eqmac", "bettertouchtool", "karabiner", "monitorcontrol", "lunar", "betterdisplay", "raycast", "alfred", "launchbar",
                               "sketchybar", "hud", "boring"]
 
-    static func installedApps() -> DiagnosticsReport.Section {
+    static let appFolders = ["/Applications", "/Applications/Utilities",
+                             "\(FileManager.default.homeDirectoryForCurrentUser.path)/Applications", "/Applications/Setapp"]
+
+    static func installedApps(_ onDisk: DiagnosticsReport.Section = appsOnDisk()) -> DiagnosticsReport.Section {
+        var section = onDisk
+        let dock = CFPreferencesCopyAppValue("persistent-apps" as CFString, "com.apple.dock" as CFString) as? [[String: Any]] ?? []
+        section.add("In the Dock", dock.compactMap { ($0["tile-data"] as? [String: Any])?["file-label"] as? String }.joined(separator: ", "))
+        return section
+    }
+
+    /// Everything `installedApps` lists but the Dock: every app's Info.plist read, so it is kept
+    /// between reports (`DiagnosticsCache`).
+    static func appsOnDisk() -> DiagnosticsReport.Section {
         var section = DiagnosticsReport.Section(appsTitle)
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let folders = ["/Applications", "/Applications/Utilities", "\(home)/Applications", "/Applications/Setapp"]
         var interferingFound: [String] = []
         var total = 0
-        for folder in folders {
+        for folder in appFolders {
             let names = ((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).filter { $0.hasSuffix(".app") }.sorted()
             guard !names.isEmpty else { continue }
             total += names.count
@@ -242,8 +253,6 @@ nonisolated enum DiagnosticsEnvironment {
             .filter { $0.hasSuffix(".app") }.count.description + " apps")
         section.add("Apps", total)
         section.add(interferingKey, interferingFound.isEmpty ? "none" : interferingFound.joined(separator: ", "))
-        let dock = CFPreferencesCopyAppValue("persistent-apps" as CFString, "com.apple.dock" as CFString) as? [[String: Any]] ?? []
-        section.add("In the Dock", dock.compactMap { ($0["tile-data"] as? [String: Any])?["file-label"] as? String }.joined(separator: ", "))
         return section
     }
 

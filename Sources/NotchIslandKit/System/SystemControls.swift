@@ -8,6 +8,9 @@ nonisolated enum SystemControl: String, Sendable, Codable, CaseIterable, Identif
     case wifi, bluetooth, airDrop, darkMode, nightShift, keepAwake, microphone
     // Actions, like Control Center's app and utility controls: they open or do one thing.
     case calculator, voiceMemos, screenshot, notes, lockScreen, focus, clock, home
+    // Added in 0.6; what they read and do is `ExtendedControls`.
+    case soundOutput, outputMute, trueTone, stageManager, lowPowerMode, screenMirroring, missionControl
+    case showDesktop, appsLauncher, characterViewer, displaySleep
 
     var id: String { rawValue }
 
@@ -28,6 +31,9 @@ nonisolated enum SystemControl: String, Sendable, Codable, CaseIterable, Identif
         case .focus: "Focus"
         case .clock: "Clock"
         case .home: "Home"
+        case .soundOutput, .outputMute, .trueTone, .stageManager, .lowPowerMode, .screenMirroring, .missionControl,
+             .showDesktop, .appsLauncher, .characterViewer, .displaySleep:
+            ExtendedControls.title(of: self)
         }
     }
 
@@ -50,6 +56,9 @@ nonisolated enum SystemControl: String, Sendable, Codable, CaseIterable, Identif
         case .focus: "moon.fill"
         case .clock: "clock.fill"
         case .home: "house.fill"
+        case .soundOutput, .outputMute, .trueTone, .stageManager, .lowPowerMode, .screenMirroring, .missionControl,
+             .showDesktop, .appsLauncher, .characterViewer, .displaySleep:
+            ExtendedControls.symbol(of: self, on: on)
         }
     }
 
@@ -76,6 +85,9 @@ nonisolated enum SystemControl: String, Sendable, Codable, CaseIterable, Identif
         switch self {
         case .wifi, .bluetooth, .darkMode, .nightShift, .keepAwake, .microphone: false
         case .airDrop, .calculator, .voiceMemos, .screenshot, .notes, .lockScreen, .focus, .clock, .home: true
+        case .soundOutput, .outputMute, .trueTone, .stageManager, .lowPowerMode, .screenMirroring, .missionControl,
+             .showDesktop, .appsLauncher, .characterViewer, .displaySleep:
+            ExtendedControls.isAction(self)
         }
     }
 
@@ -90,6 +102,9 @@ nonisolated enum SystemControl: String, Sendable, Codable, CaseIterable, Identif
         case .clock: URL(fileURLWithPath: "/System/Applications/Clock.app")
         case .home: URL(fileURLWithPath: "/System/Applications/Home.app")
         case .focus: URL(string: "x-apple.systempreferences:com.apple.Focus-Settings.extension")
+        case .soundOutput, .outputMute, .trueTone, .stageManager, .lowPowerMode, .screenMirroring, .missionControl,
+             .showDesktop, .appsLauncher, .characterViewer, .displaySleep:
+            ExtendedControls.actionURL(of: self)
         default: nil
         }
     }
@@ -140,24 +155,39 @@ nonisolated enum SystemControl: String, Sendable, Codable, CaseIterable, Identif
 
     func refresh() {
         var next = states
-        for control in shown.keys {
-            next[control] = switch control {
-            case .wifi: CWWiFiClient.shared().interface()?.powerOn() ?? false
-            case .bluetooth: Private.bluetoothPower() ?? false
-            case .airDrop, .calculator, .voiceMemos, .screenshot, .notes, .lockScreen, .focus, .clock, .home: false
-            case .darkMode: Self.readDarkMode()
-            case .nightShift: Private.nightShiftActive() ?? false
-            case .keepAwake: awakeAssertion != nil
-            case .microphone: !(Microphone.isMuted() ?? false)
-            }
-        }
+        for control in shown.keys { next[control] = read(control) }
         if next != states { states = next }
         let keyboard = Private.keyboardBrightness()
         if keyboard != keyboardBrightness { keyboardBrightness = keyboard }
     }
 
-    func toggle(_ control: SystemControl) {
-        let target = !isOn(control)
+    /// A control's state read from the system now, also when no widget shows it (Spotlight's
+    /// switches: `refresh` reads only the ones on screen).
+    func liveState(of control: SystemControl) -> Bool {
+        let on = read(control)
+        if states[control] != on { states[control] = on }
+        return on
+    }
+
+    private func read(_ control: SystemControl) -> Bool {
+        switch control {
+        case .wifi: CWWiFiClient.shared().interface()?.powerOn() ?? false
+        case .bluetooth: Private.bluetoothPower() ?? false
+        case .airDrop, .calculator, .voiceMemos, .screenshot, .notes, .lockScreen, .focus, .clock, .home: false
+        case .darkMode: Self.readDarkMode()
+        case .nightShift: Private.nightShiftActive() ?? false
+        case .keepAwake: awakeAssertion != nil
+        case .microphone: !(Microphone.isMuted() ?? false)
+        case .soundOutput, .outputMute, .trueTone, .stageManager, .lowPowerMode, .screenMirroring, .missionControl,
+             .showDesktop, .appsLauncher, .characterViewer, .displaySleep:
+            ExtendedControls.isOn(control)
+        }
+    }
+
+    func toggle(_ control: SystemControl) { set(control, to: !isOn(control)) }
+
+    /// Switches `control` to `target`; an action (AirDrop, Lock Screen…) just runs.
+    func set(_ control: SystemControl, to target: Bool) {
         let succeeded: Bool
         switch control {
         case .wifi:
@@ -178,6 +208,9 @@ nonisolated enum SystemControl: String, Sendable, Codable, CaseIterable, Identif
             succeeded = setKeepAwake(target)
         case .microphone:
             succeeded = Microphone.setMuted(!target)
+        case .soundOutput, .outputMute, .trueTone, .stageManager, .lowPowerMode, .screenMirroring, .missionControl,
+             .showDesktop, .appsLauncher, .characterViewer, .displaySleep:
+            succeeded = ExtendedControls.toggle(control, to: target)
         }
         if succeeded {
             states[control] = target
