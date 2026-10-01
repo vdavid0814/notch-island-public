@@ -27,10 +27,12 @@ private struct BatteryUsageSource<Content: View>: View {
     @Environment(\.widgetReadsLive) private var readsLive
     @Environment(\.widgetRenderMode) private var renderMode
     private var isPreview: Bool { isPicture && !readsLive }
+    /// The tests' fixed day: a sample week ending on it, whatever the clock says.
+    @Environment(\.widgetDate) private var widgetDate
 
     var body: some View {
         let battery = model.battery
-        let days = isPreview ? BatteryUsageSamples.days() : battery.usageDays()
+        let days = isPreview ? BatteryUsageSamples.days(now: widgetDate ?? Date()) : battery.usageDays()
         let pickedDay = isPreview ? nil : battery.pickedDay()
         let picked = days.first { $0.day == pickedDay } ?? days.last
         content(days, picked) { day in
@@ -51,11 +53,12 @@ struct BatteryUsageWidget: View {
     @Environment(\.widgetFrameProbe) private var probe
     @Environment(\.widgetStyle) private var style
     @Environment(\.widgetArtworkColor) private var artwork
+    @Environment(\.widgetDate) private var widgetDate
 
     var body: some View {
         BatteryUsageSource { days, picked, pick in
             let calendar = Calendar.autoupdatingCurrent
-            let today = calendar.startOfDay(for: Date())
+            let today = calendar.startOfDay(for: widgetDate ?? Date())
             let comparison = picked.flatMap { BatteryUsage.comparison($0, among: days, today: today) }
             // The iPhone's: blue, orange where the day used more than usual (or the widget's Chart colour).
             let accent = ResolvedLine(style.element(.chart)).fillColor(value: 1, artwork: artwork)
@@ -68,24 +71,21 @@ struct BatteryUsageWidget: View {
                 value: widget.shows(.value) ? picked.map { IslandFormat.percent($0.used / 100) } : nil,
                 day: picked.map { $0.day == today ? String(localized: "Today") : $0.day.formatted(.dateTime.weekday(.abbreviated).month().day()) },
                 accent: accent)
-            // With the chart, the words take no more than part of the widget (the bars the rest);
-            // without it, all of it. The sentence only where the widget is tall, or has no chart.
-            let headerRoom = showsChart ? max(size.height * (size.height >= 130 ? 0.5 : 0.3), 14) : size.height
-            let sentence = !showsChart || size.height >= 130
+            // With the chart, the words take no more than about half the widget (the bars the rest);
+            // without it, all of it.
+            let headerRoom = showsChart ? max(size.height * 0.5, 14) : size.height
             VStack(alignment: .leading, spacing: 3) {
-                // The largest that fits its room: smaller type first, then without the sentence, then
-                // all on one line — never past the widget's edge.
-                ViewThatFits(in: .vertical) {
-                    if sentence {
-                        header.stacked(scale: 1, sentence: true)
-                        header.stacked(scale: 0.85, sentence: true)
-                        header.stacked(scale: 0.72, sentence: true)
+                // The largest that fits its room: the sentence smaller and smaller under the line,
+                // then the line alone — never past the widget's edge; only as tall as it is.
+                CappedHeight(maximum: headerRoom) {
+                    ViewThatFits(in: .vertical) {
+                        header.stacked(sentence: 1)
+                        header.stacked(sentence: 0.85)
+                        header.stacked(sentence: 0.72)
+                        header.line(scale: 1)
+                        header.line(scale: 0.8)
                     }
-                    header.stacked(scale: 1, sentence: false)
-                    header.line(scale: 1)
-                    header.line(scale: 0.8)
                 }
-                .frame(maxHeight: headerRoom, alignment: .topLeading)
                 if showsChart {
                     DailyUsageBars(days: days, picked: picked?.day, accent: accent, today: today, pick: pick)
                         .frame(maxHeight: .infinity)
@@ -99,9 +99,26 @@ struct BatteryUsageWidget: View {
     }
 }
 
-/// Daily Usage's words: the percentage and the day on top, the title, then the sentence — stacked at
-/// a scale of their type, with or without the sentence, or all on one line (`BatteryUsageWidget`
-/// takes the largest that fits).
+/// Its one subview offered no more than `maximum` tall, and as tall as it takes (a flexible frame
+/// took the whole of its maximum, leaving a gap under the words).
+private struct CappedHeight: Layout {
+    var maximum: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        let height = min(proposal.height ?? maximum, maximum)
+        let size = subview.sizeThatFits(ProposedViewSize(width: proposal.width, height: height))
+        return CGSize(width: proposal.width ?? size.width, height: min(size.height, height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, anchor: .topLeading,
+                              proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+    }
+}
+
+/// Daily Usage's words: the title and the percentage with its day on one line, the sentence under
+/// it in smaller type (`BatteryUsageWidget` takes the largest form that fits).
 private struct DailyUsageHeader {
     var title: String?
     var titleColor: AnyShapeStyle
@@ -110,18 +127,14 @@ private struct DailyUsageHeader {
     var day: String?
     var accent: Color
 
-    func stacked(scale: CGFloat, sentence showsSentence: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 2 * scale) {
-            figure(scale: scale)
-            if let title {
-                Text(title)
-                    .font(.system(size: 10 * scale, weight: .semibold))
-                    .foregroundStyle(titleColor)
-                    .lineLimit(1)
-            }
-            if showsSentence, let sentence {
+    /// The line, and the sentence under it at `sentence` times its type.
+    func stacked(sentence scale: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            line(scale: 1)
+            if let sentence {
                 Text(sentence)
-                    .font(.system(size: 11 * scale, weight: .semibold))
+                    .font(.system(size: 10 * scale, weight: .medium))
+                    .foregroundStyle(.primary.opacity(0.85))
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -129,16 +142,17 @@ private struct DailyUsageHeader {
         .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// "Daily Usage" and "70 % Today" on one line.
     func line(scale: CGFloat) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
-            figure(scale: scale)
-            Spacer(minLength: 4)
             if let title {
                 Text(title)
                     .font(.system(size: 10 * scale, weight: .semibold))
                     .foregroundStyle(titleColor)
                     .minimumScaleFactor(0.7)
             }
+            Spacer(minLength: 4)
+            figure(scale: scale)
         }
         .lineLimit(1)
         .fixedSize(horizontal: false, vertical: true)
@@ -241,11 +255,12 @@ struct BatteryScreenTimeWidget: View {
     @Environment(\.widgetFrameProbe) private var probe
     @Environment(\.widgetStyle) private var style
     @Environment(\.locale) private var locale
+    @Environment(\.widgetDate) private var widgetDate
 
     var body: some View {
         BatteryUsageSource { _, picked, _ in
             let format = WidgetFormat(style.format, locale: locale)
-            let today = Calendar.autoupdatingCurrent.startOfDay(for: Date())
+            let today = Calendar.autoupdatingCurrent.startOfDay(for: widgetDate ?? Date())
             let isPast = picked.map { $0.day != today } ?? false
             // One over the other where it is narrow and tall enough; beside each other otherwise.
             let stacked = size.width < 150 && size.height >= 90
