@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.7.1 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.7.2 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -23,6 +23,36 @@ How much energy each animation and the idle state take, measured before and afte
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.7.2
+
+Customize rebuilt from the ground up, more of every widget to style, and a battery page laid out
+like the iPhone's Battery Usage.
+
+- **Resizing and dragging, from scratch**: an element's outline is exactly its frame. Keep Shape
+  on gives four corner handles and scales it as a whole; off gives eight. Text keeps its own size:
+  wider fits more words, taller adds lines (or, switched off, grows the letters), narrower cuts the
+  text or shrinks it (Too Long: Cut / Shrink) without changing its height. Nothing limits how large
+  an element gets or where it goes.
+- **Inspector**: Layer (In Front / Behind, offered only where elements overlap), Frame and Keep
+  Shape, Text (wording, most lines, too long, lines when taller, alignment), Font (style with
+  italic, weight, size, colour). The rarer settings are out for now.
+- **Buttons**: shape, corners, material (Glass, Tinted Glass, Solid, Outline, None), button colour
+  and icon colour — previous and next included. **Bars**: the shape of their ends and a knob where
+  the fill ends (circle, pill, square, line) in a colour of its own; the times under Now Playing's
+  line take a colour too. **Pictures**: corners, border, shadow, colour strength, opacity.
+- **Now Playing**: Back and Forward by seconds (off until switched on; the seconds set on each).
+  Size L runs the cover out to the widget's edges; previous/next and the progress bar have S, M, L
+  of their own. The row of buttons makes room for what is switched on and never runs out of the
+  widget.
+- **Behaviour** says what each setting does and when; Only Active and Dim Inactive appear only
+  where a widget has an idle state.
+- **Battery page, like the iPhone's Battery Usage**: the chart in hourly bars (grey, green while
+  charging under a cap, red when low); new widgets **Daily Usage** (the last eight days, a click
+  picks a day for the chart too, with the iPhone's "more / less than usual" sentence), **Screen
+  Activity** (the displays on and off that day) and **Last Charge**. The page is laid out anew once
+  (the old one kept aside).
+- Fixes: the Elements list's symbols on the white theme; Daily Usage on a low widget.
 
 ## What's new in v0.7.1
 
