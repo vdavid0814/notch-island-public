@@ -614,7 +614,8 @@ private struct ElementRow: View {
         HStack(spacing: 10) {
             Image(systemName: element.symbol)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(on ? .white : SettingsPalette.secondary)
+                // On the accent, the colour that reads on it (black on the white theme's).
+                .foregroundStyle(on ? Color.onIslandAccent : SettingsPalette.secondary)
                 .frame(width: 26, height: 26)
                 .background(on ? AnyShapeStyle(Color.islandAccent.gradient) : AnyShapeStyle(.white.opacity(0.08)),
                             in: .rect(cornerRadius: 7, style: .continuous))
