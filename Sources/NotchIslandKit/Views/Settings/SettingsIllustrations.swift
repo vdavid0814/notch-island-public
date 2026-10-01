@@ -240,14 +240,27 @@ private struct GrowthLoop: NSViewRepresentable {
 /// notch and the open size, and the widgets fading in and out with it — the same springs and pauses
 /// the SwiftUI picture used (open: `duration`, bounce 0.2, then 0.9 s; close: 0.8 × `duration`,
 /// no bounce, then 0.6 s).
+///
+/// Each spring is its own animation, added just before it starts: between them nothing is attached
+/// and the window server draws no frames. A repeating group of the same springs was active through
+/// the pauses as well (58 % of the cycle), and every one of its 60 frames a second re-composited
+/// Settings around the picture: 0.25–0.75 W in the window server for as long as General was open
+/// (measured), against ~0.02 W without the picture.
 final class GrowthLoopView: NSView {
     private let island = CAShapeLayer()
     private let widgets = CALayer()
     static let animationKey = "growth"
+    /// How far ahead of its start a spring is handed to the render server.
+    static let lead: CFTimeInterval = 0.05
 
     var duration: Double = 0 {
         didSet { if duration != oldValue { restart() } }
     }
+
+    /// When the running loop's first cycle started (media time), and the next spring to add.
+    private var cycleStart: CFTimeInterval = 0
+    private var nextStep = 0
+    private var timer: (any DispatchSourceTimer)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -262,6 +275,8 @@ final class GrowthLoopView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    deinit { timer?.cancel() }
 
     override var isFlipped: Bool { true }
 
@@ -283,43 +298,83 @@ final class GrowthLoopView: NSView {
         CATransaction.commit()
     }
 
+    /// Open, pause, close, pause: when the close starts and how long one cycle is.
+    private var closeAt: Double { duration + 0.9 }
+    private var cycle: Double { closeAt + duration + 0.6 }
+
     private func restart() {
+        timer?.cancel()
+        timer = nil
         island.removeAnimation(forKey: Self.animationKey)
         widgets.removeAnimation(forKey: Self.animationKey)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        island.path = GrowthPicture.islandPath(GrowthPicture.closed)
+        widgets.opacity = 0
+        CATransaction.commit()
         guard let window, duration > 0 else { return }
         if widgets.contents == nil { renderWidgets(scale: window.backingScaleFactor) }
+        cycleStart = CACurrentMediaTime() + Self.lead
+        nextStep = 0
+        let timer = DispatchSource.makeTimerSource(flags: .strict, queue: .main)
+        timer.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.addNextSpring() }
+        }
+        self.timer = timer
+        timer.schedule(deadline: .now())
+        timer.resume()
+    }
 
+    /// Adds the next spring at its exact place in the loop, then waits until just before the one
+    /// after it.
+    private func addNextSpring() {
+        guard window != nil, duration > 0 else { return }
+        let opens = nextStep % 2 == 0
+        var begin = cycleStart + Double(nextStep / 2) * cycle + (opens ? 0 : closeAt)
+        // Woken late (a busy main thread, say a page being built), the loop waits for it rather
+        // than starting the spring part-way through.
+        let earliest = CACurrentMediaTime() + 0.01
+        if begin < earliest {
+            cycleStart += earliest - begin
+            begin = earliest
+        }
         let closed = GrowthPicture.islandPath(GrowthPicture.closed)
         let open = GrowthPicture.islandPath(GrowthPicture.open)
-        let closeAt = duration + 0.9
-        let cycle = closeAt + duration + 0.6
 
-        func spring(_ key: String, from: Any, to: Any, begin: Double, duration: Double, bounce: Double) -> CASpringAnimation {
+        func spring(_ key: String, from: Any, to: Any, duration: Double, bounce: Double, available: Double) -> CASpringAnimation {
             let animation = CASpringAnimation(perceptualDuration: duration, bounce: bounce)
             animation.keyPath = key
             animation.fromValue = from
             animation.toValue = to
             animation.beginTime = begin
-            animation.duration = min(animation.settlingDuration, cycle - begin)
-            animation.fillMode = .forwards
+            animation.duration = min(animation.settlingDuration, available)
+            // Until it starts, the spring holds where it starts (the model already holds where
+            // it ends).
+            animation.fillMode = .backwards
             return animation
         }
-        func loop(_ animations: [CAAnimation]) -> CAAnimationGroup {
-            let group = CAAnimationGroup()
-            group.animations = animations
-            group.duration = cycle
-            group.repeatCount = .infinity
-            group.beginTime = CACurrentMediaTime()
-            return group
+        let available = opens ? cycle : cycle - closeAt
+        let length = opens ? duration : duration * 0.8
+        let bounce = opens ? 0.2 : 0
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        island.path = opens ? open : closed
+        widgets.opacity = opens ? 1 : 0
+        // Scrolled out of sight (the picture sits at the foot of General), the loop keeps its place
+        // in time without a single frame: the springs are only skipped, and it carries on as soon
+        // as it scrolls back into view.
+        if !visibleRect.isEmpty {
+            island.add(spring("path", from: opens ? closed : open, to: opens ? open : closed,
+                              duration: length, bounce: bounce, available: available), forKey: Self.animationKey)
+            widgets.add(spring("opacity", from: opens ? 0 : 1, to: opens ? 1 : 0,
+                               duration: length, bounce: bounce, available: available), forKey: Self.animationKey)
         }
-        island.add(loop([
-            spring("path", from: closed, to: open, begin: 0, duration: duration, bounce: 0.2),
-            spring("path", from: open, to: closed, begin: closeAt, duration: duration * 0.8, bounce: 0),
-        ]), forKey: Self.animationKey)
-        widgets.add(loop([
-            spring("opacity", from: 0, to: 1, begin: 0, duration: duration, bounce: 0.2),
-            spring("opacity", from: 1, to: 0, begin: closeAt, duration: duration * 0.8, bounce: 0),
-        ]), forKey: Self.animationKey)
+        CATransaction.commit()
+
+        nextStep += 1
+        let following = cycleStart + Double(nextStep / 2) * cycle + (nextStep % 2 == 0 ? 0 : closeAt)
+        let wait = max(0, following - Self.lead - CACurrentMediaTime())
+        timer?.schedule(deadline: .now() + wait, leeway: .milliseconds(5))
     }
 
     /// The widgets never change: drawn once into the layer.

@@ -23,10 +23,12 @@ import ServiceManagement
     init() {}
 
     /// Re-read in the background: the status is a synchronous request to the system's service
-    /// manager (~20 ms on the main thread, measured in every Settings opening).
+    /// manager (~20 ms on the main thread, measured in every Settings opening). At background
+    /// priority, on the efficiency cores: nobody waits for it (20–37 ms of a performance core in
+    /// every Settings opening otherwise, measured).
     func refresh() {
         refreshTask?.cancel()
-        refreshTask = Task { [weak self] in
+        refreshTask = Task(priority: .background) { [weak self] in
             let current = await Self.readStatus()
             guard !Task.isCancelled, let self else { return }
             self.refreshTask = nil

@@ -134,31 +134,49 @@ private struct SettingsRow: View {
 
 /// The title takes what the control leaves, at least 40 % of the row unless it is shorter; the
 /// control its own width (a text field: all the rest). Both centred on the row's height.
+///
+/// Every measurement is kept in the layout's cache (which SwiftUI rebuilds whenever the row or
+/// its subviews change): measured afresh in every call, a row measured its native controls eight
+/// times per layout pass, the largest piece of our own code when a page opens (~50 ms a page).
 private struct SettingsRowLayout: Layout {
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard subviews.count == 2 else { return .zero }
-        let (title, control) = widths(proposal.width, subviews)
-        let height = max(subviews[0].sizeThatFits(ProposedViewSize(width: title, height: nil)).height,
-                         subviews[1].sizeThatFits(ProposedViewSize(width: control, height: nil)).height)
-        return CGSize(width: proposal.width ?? title + SettingsForm.titleGap + control, height: height)
+    struct Cache {
+        var ideals: (title: CGFloat, control: CGFloat)?
+        var widths: [CGFloat: (title: CGFloat, control: CGFloat)] = [:]
+        var sizes: [CGFloat?: CGSize] = [:]
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        if let size = cache.sizes[proposal.width] { return size }
+        let (title, control) = widths(proposal.width, subviews, &cache)
+        let height = max(subviews[0].sizeThatFits(ProposedViewSize(width: title, height: nil)).height,
+                         subviews[1].sizeThatFits(ProposedViewSize(width: control, height: nil)).height)
+        let size = CGSize(width: proposal.width ?? title + SettingsForm.titleGap + control, height: height)
+        cache.sizes[proposal.width] = size
+        return size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
         guard subviews.count == 2 else { return }
-        let (title, control) = widths(bounds.width, subviews)
+        let (title, control) = widths(bounds.width, subviews, &cache)
         subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
                           proposal: ProposedViewSize(width: title, height: nil))
         subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing,
                           proposal: ProposedViewSize(width: control, height: nil))
     }
 
-    private func widths(_ width: CGFloat?, _ subviews: Subviews) -> (title: CGFloat, control: CGFloat) {
-        let titleIdeal = subviews[0].sizeThatFits(.unspecified).width
-        let controlIdeal = subviews[1].sizeThatFits(.unspecified).width
+    private func widths(_ width: CGFloat?, _ subviews: Subviews, _ cache: inout Cache) -> (title: CGFloat, control: CGFloat) {
+        let ideals = cache.ideals ?? (subviews[0].sizeThatFits(.unspecified).width, subviews[1].sizeThatFits(.unspecified).width)
+        cache.ideals = ideals
+        let (titleIdeal, controlIdeal) = ideals
         guard let width else { return (titleIdeal, controlIdeal) }
+        if let widths = cache.widths[width] { return widths }
         let room = max(0, width - SettingsForm.titleGap)
         let controlWidest = subviews[1].sizeThatFits(ProposedViewSize(width: room, height: nil)).width
         let control = max(0, min(max(controlIdeal, controlWidest), room - min(titleIdeal, room * 0.4)))
+        cache.widths[width] = (room - control, control)
         return (room - control, control)
     }
 }

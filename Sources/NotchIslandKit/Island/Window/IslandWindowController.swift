@@ -396,6 +396,12 @@ import SwiftUI
             island \(measured.logDescription, privacy: .public) expected \(expected.logDescription, privacy: .public) \
             offset \(offset, privacy: .public)
             """)
+        if let root = panel.contentView?.layer {
+            // The layer tree the render server draws, for energy work (what a frame re-renders).
+            let path = NSTemporaryDirectory() + "ni-layers.txt"
+            try? LayerDump.describe(root).write(toFile: path, atomically: true, encoding: .utf8)
+            Log.window.notice("state: layer tree in \(path, privacy: .public)")
+        }
     }
 
     // MARK: Layout changes
@@ -463,5 +469,28 @@ extension CGRect {
     /// Compact, locale-free form for the log: `x,y w×h`.
     nonisolated var logDescription: String {
         isNull ? "null" : "\(minX),\(minY) \(width)×\(height)"
+    }
+}
+
+/// `demo/state`'s dump of the island window's layers: class, frame, and whatever makes the render
+/// server work per frame (masks, filters, shadows, backdrops, running animations).
+enum LayerDump {
+    static func describe(_ layer: CALayer, depth: Int = 0) -> String {
+        var line = String(repeating: "  ", count: depth) + String(describing: type(of: layer))
+        line += " \(layer.frame.integral)"
+        if layer.isHidden { line += " hidden" }
+        if layer.opacity < 1 { line += " opacity=\(layer.opacity)" }
+        if layer.mask != nil { line += " MASK" }
+        if layer.masksToBounds { line += " clips" }
+        if let filters = layer.filters, !filters.isEmpty { line += " filters=\(filters)" }
+        if let filters = layer.backgroundFilters, !filters.isEmpty { line += " bgfilters=\(filters)" }
+        if let filter = layer.compositingFilter { line += " comp=\(filter)" }
+        if layer.shadowOpacity > 0 { line += " SHADOW(\(layer.shadowOpacity), r \(layer.shadowRadius), path \(layer.shadowPath != nil))" }
+        if layer.contents != nil { line += " contents" }
+        if let keys = layer.animationKeys(), !keys.isEmpty { line += " anim=\(keys)" }
+        if let mask = layer.mask { line += "\n" + String(repeating: "  ", count: depth + 1) + "mask: " + describe(mask, depth: depth + 2).trimmingCharacters(in: .whitespaces) }
+        var out = line
+        for sub in layer.sublayers ?? [] { out += "\n" + describe(sub, depth: depth + 1) }
+        return out
     }
 }

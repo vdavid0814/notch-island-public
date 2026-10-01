@@ -23,7 +23,7 @@ struct CustomizeEditor: View {
                 ZStack(alignment: .topLeading) {
                     OutlinePane(session: session)
                         .frame(width: layout.outline.width, height: layout.outline.height)
-                        .glassEffect(Glass.regular.tint(Color.black.opacity(0.45)), in: layout.paneShape(leading: true))
+                        .settingsPanel(in: layout.paneShape(leading: true))
                         .offset(x: layout.outline.minX, y: layout.outline.minY)
                     EditorCanvas(session: session, close: close)
                         .frame(width: layout.canvasPane.width, height: layout.canvasPane.height)
@@ -33,7 +33,7 @@ struct CustomizeEditor: View {
                         // Its switches are Settings' own, the small ones of its form.
                         .environment(\.isSettingsForm, true)
                         .frame(width: layout.inspector.width, height: layout.inspector.height)
-                        .glassEffect(Glass.regular.tint(Color.black.opacity(0.45)), in: layout.paneShape(leading: false))
+                        .settingsPanel(in: layout.paneShape(leading: false))
                         .offset(x: layout.inspector.minX, y: layout.inspector.minY)
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)

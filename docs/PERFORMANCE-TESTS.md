@@ -5,6 +5,30 @@ anyone can repeat them on their own Mac and compare. It comes with every copy: i
 (`docs/`), inside the app (`NotchIsland.app/Contents/Resources/`) and next to the app in the `.dmg`.
 The detailed before/after tables, and what was changed, are in `ENERGY-LOG.md` next to it.
 
+## The October 1, 2026 run (v0.7.1, build 25): the window server
+
+**Setup.** The same MacBook Air M5, macOS 27, on battery, music playing. Release builds of v0.7 (24)
+and v0.7.1 (25), diagnostics reports removed from both.
+
+**What was run** (`Scripts/perf/ws/ws_bench.py`, which also counts the window server and coreaudiod)
+1. **Rest** 120 s with music, the pointer away; once without NotchIsland at all (the window server's
+   own baseline, 2–3 mW).
+2. **10 opens and closes** by hovering the real pointer onto the notch: 3 s open, 3 s closed.
+3. **A Settings tour**: opened from the panel's gear, each of the five pages twice (click, 1.5 s,
+   eight lines down, 2 s), closed; a 60 s window.
+4. **Steady pages**: each Settings page at rest, at its top and scrolled down; the open panel on a
+   playing track.
+5. **Ablations**: one piece switched off at a time (the halo, the fade's blur, the glass, the glass
+   container, the outline clip, the backdrop blur, the sidebar's glass, each animation picture),
+   to find what the window server pays for; and the island's layer tree (`demo/state`).
+6. **Looks unchanged**: screenshots over a still checkerboard (`frames/backdrop`) compared pixel by
+   pixel; Settings' colours sampled on screen before and after.
+7. **Unit tests** (`Scripts/test.sh`).
+
+**Results** (two rounds, before → after): window server at rest 16.4 → 14.2 mW; 10 opens 7.8 → 4.4 J
+(app 0.46 → 0.56 J); Settings tour 13.1 → 4.3 J (app 7.2 → 6.7 J); Settings ▸ General at rest 785 →
+23 mW. Details: `ENERGY-LOG.md`.
+
 ## The September 30, 2026 run (v0.6, build 23)
 
 **Setup.** The same MacBook Air M5, macOS 27, on battery the whole time (57 % for the middle pass,

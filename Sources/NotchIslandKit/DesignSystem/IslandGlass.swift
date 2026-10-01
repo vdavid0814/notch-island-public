@@ -120,12 +120,24 @@ extension View {
     /// The same shade over the top `size.height` points of a larger canvas (the island's window),
     /// centred on it: the island's surface is `size` this frame, the canvas keeps its size (see
     /// `IslandRootView`).
+    ///
+    /// `isSettled`: the surface is at its own size, not being sized frame by frame by a SwiftUI
+    /// animation. The black is then drawn once into a picture of its own: as layers, its soft sides
+    /// are a live blur filter the window server runs again in every frame the island moves or
+    /// anything on it changes (~0.08 J per open and close, measured; the same pixels within 4/255).
+    /// A surface SwiftUI sizes frame by frame keeps the layers: as a picture it would be drawn again
+    /// on the CPU in every frame.
     func islandSurfaceShade(_ style: IslandGlassStyle, solidDepth: CGFloat, size: CGSize, fadeStretch: CGFloat = 1,
-                            in shape: some Shape) -> some View {
+                            isSettled: Bool = false, in shape: some Shape) -> some View {
         background {
             if style == .fade {
                 shape.fill(Color.black).mask(alignment: .top) {
-                    FadeShadeMask(solidDepth: solidDepth, size: size, stretch: fadeStretch)
+                    if isSettled {
+                        FadeShadeMask(solidDepth: solidDepth, size: size, stretch: fadeStretch)
+                            .drawingGroup()
+                    } else {
+                        FadeShadeMask(solidDepth: solidDepth, size: size, stretch: fadeStretch)
+                    }
                 }
             }
         }

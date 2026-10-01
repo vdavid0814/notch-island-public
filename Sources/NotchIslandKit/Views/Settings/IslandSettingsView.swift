@@ -75,6 +75,29 @@ nonisolated enum SettingsPalette {
     static let cardStroke = Color.white.opacity(0.07)
     /// Secondary text, a little brighter than the system's on this dark ground.
     static let secondary = Color.white.opacity(0.62)
+
+    /// Settings' panels (the sidebar; Customize's outline and inspector), top to bottom: the greys
+    /// the smoked Liquid Glass they were drawn in showed over Settings' ground (measured on screen),
+    /// now a plain material. The glass cost the window server a pass of its own over the whole
+    /// panel whenever anything in Settings changed (~3 J per tour of the pages, measured).
+    static let panel = LinearGradient(stops: [
+        .init(color: Color(red: 17.4 / 255, green: 17.4 / 255, blue: 19.7 / 255), location: 0),
+        .init(color: Color(red: 18.9 / 255, green: 18.9 / 255, blue: 20.5 / 255), location: 0.09),
+        .init(color: Color(red: 21.2 / 255, green: 21.2 / 255, blue: 22.8 / 255), location: 0.23),
+        .init(color: Color(red: 24.3 / 255, green: 24.3 / 255, blue: 26.6 / 255), location: 0.37),
+        .init(color: Color(red: 26.6 / 255, green: 26.6 / 255, blue: 29.7 / 255), location: 0.5),
+        .init(color: Color(red: 27.4 / 255, green: 28.2 / 255, blue: 31.2 / 255), location: 0.64),
+        .init(color: Color(red: 28.9 / 255, green: 28.9 / 255, blue: 32.0 / 255), location: 0.92),
+        .init(color: Color(red: 29.7 / 255, green: 28.9 / 255, blue: 32.8 / 255), location: 1),
+    ], startPoint: .top, endPoint: .bottom)
+}
+
+extension View {
+    /// Puts a Settings panel on its plain material, edged like Settings' cards.
+    func settingsPanel(in shape: some InsettableShape) -> some View {
+        background(SettingsPalette.panel, in: shape)
+            .overlay { shape.strokeBorder(SettingsPalette.cardStroke) }
+    }
 }
 
 /// Settings, grown out of the notch over most of the screen: laid out like System Settings — a
@@ -196,8 +219,7 @@ struct SettingsPages: View {
         HStack(spacing: 0) {
             SettingsSidebar(selection: Binding(get: { model.settingsPane }, set: { model.settingsPane = $0 }))
                 .frame(width: SettingsPlacement.sidebarWidth)
-                // Liquid Glass, smoked towards the black of the island.
-                .glassEffect(Glass.regular.tint(Color.black.opacity(0.45)), in: sidebarShape)
+                .settingsPanel(in: sidebarShape)
                 .padding(.leading, placement.leading)
                 .padding(.bottom, placement.gap)
                 .padding(.top, 4)
@@ -208,19 +230,22 @@ struct SettingsPages: View {
 }
 
 /// Settings' ground: black where it hangs from the notch, easing over most of the page
-/// into the window's grey, which is slightly see-through so the island's glass shows faintly
-/// behind it. Mostly opaque, so text keeps its contrast whatever is on the desktop.
+/// into the window's grey. A plain, opaque material: text keeps its contrast whatever is on the
+/// desktop.
 private struct SettingsBackdrop: View {
     /// Where the fade reaches the window's grey: most of the page, so it reads as light falling
     /// off rather than a band.
     static let fadeLength = 0.7
 
+    /// What the gradient's last few percent of see-through showed: the desktop through the system's
+    /// behind-window blur (`NSVisualEffectView`, `.hudWindow`), a light grey on average. Solid now,
+    /// so the grey of the page stays as it was without the window server blurring the desktop
+    /// behind Settings.
+    static let ground = Color(red: 60 / 255, green: 60 / 255, blue: 64 / 255)
+
     var body: some View {
         ZStack {
-            // What shows faintly through: the desktop, blurred by the window server as behind any
-            // translucent macOS window (live Liquid Glass here cost hundreds of MB, see
-            // `IslandRootView`).
-            WindowVibrancy()
+            Self.ground
             LinearGradient(stops: Self.stops, startPoint: .top, endPoint: .bottom)
         }
     }
@@ -236,20 +261,6 @@ private struct SettingsBackdrop: View {
             location: x * fadeLength
         )
     } + [Gradient.Stop(color: SettingsPalette.window.opacity(0.94), location: 1)]
-}
-
-/// The system's behind-window blur (`NSVisualEffectView`), dark.
-private struct WindowVibrancy: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .hudWindow
-        view.blendingMode = .behindWindow
-        view.state = .active
-        view.appearance = NSAppearance(named: .darkAqua)
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }
 
 private struct SettingsSidebar: View {

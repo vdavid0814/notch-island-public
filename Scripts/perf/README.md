@@ -11,6 +11,7 @@
 | `glass-freeze-test.swift` | Glass experiments over a checkerboard: `freeze` (a Core Animation resize stopped halfway), `static` (the reference), `mask` (full-size glass under an animated mask), `swiftui` (SwiftUI's glass), `full`/`hybrid`/`hybridIn` (island-like content inside SwiftUI glass, above an AppKit glass, inside an AppKit glass). |
 | `glass-drive-test.swift` | An AppKit glass resized every frame by our own display link along SwiftUI's spring, with SwiftUI content kept still. |
 | `image-diff.swift` | Pixel difference of two screenshots. |
+| `ws/ws_bench.py <label> <app\|none\|keep:app> <scenario …>` | The app, WindowServer and coreaudiod together (coalition energy, CPU, wake-ups), with a real pointer: rest, 10 hover opens, a Settings tour, Settings ▸ General at rest. Build `ws/mouse.swift` and `ws/hideapp.swift` first. |
 | `night.py cycle\|rest\|only <label> …` | The overnight soak: every animation and opening (panels, hover, Siri and its galleries, level/battery/AirPods/timer/drop banners, a track change, every Settings page, music paused and playing), sampled four times a second, then a rest reported per minute to catch leaks. Rows in `night/` (not committed). |
 
 Findings (September 2026, macOS 27, MacBook Air M5):
@@ -166,3 +167,21 @@ Tables and changes in `docs/ENERGY-LOG.md`. Points for these tools:
 - **Undo one change at a time**: a copy of the tree with one file put back, built in release (about
   40 s incrementally with a cloned `.build`), its binary swapped into a signed copy of the app and
   measured back to back. That is how the glow and the widget corners were cleared.
+
+## The window server (October 1, 2026)
+
+What the island costs the window server is most of what it costs at all (the app at rest: ~0.1 mW;
+the window server for the same island: ~12 mW). `notchisland://demo/state` also writes the island
+window's layer tree to `$TMPDIR/ni-layers.txt` (masks, filters, shadows, backdrops, running animations).
+- **It is frames.** A frame costs the window server about the same in the pill as in a plain test
+  window with the same layers; in Settings far more. Look for animations that run unseen (scrolled
+  out, between moves of an infinite group) and for frame-rate hints that are not kept.
+- **Low frame-rate hints are not kept**: a linear animation with `preferredFrameRateRange` 1–4 fps
+  was drawn at ~200 window-server wake-ups a second. Discrete keyframes at the wanted steps are.
+- **A shadow on a large layer** (SwiftUI's `.shadow` on a container becomes one per layer) makes every
+  change under it re-render the layer offscreen and blur it — even with a clear shadow colour.
+- **Live blur filters** (SwiftUI `.blur` inside a mask) run again in every frame that touches them;
+  a `drawingGroup` turns them into a still picture.
+- The readings: the window server's energy is noisy below ~20 mW (even negative 1 s deltas); compare
+  A B A B and read its CPU %. A window started by a script may not animate at all (check a screenshot),
+  and the display sleeps after 180 idle minutes.

@@ -287,8 +287,8 @@ struct ScrubTrack: View {
     }
 }
 
-/// The played part of the line, as a Core Animation layer: while the track plays, one linear
-/// animation carries it to the end at 2 fps, drawn by the window server. A SwiftUI position ticking
+/// The played part of the line, as a Core Animation layer: while the track plays, one animation
+/// steps it to the end twice a second, drawn by the window server. A SwiftUI position ticking
 /// once a second re-rendered the card, and every re-render set the island's interactive glass
 /// springing for a third of a second (measured: ~40 frames a second while the panel was open).
 struct PlayedLine: NSViewRepresentable {
@@ -327,8 +327,10 @@ final class PlayedLineView: NSView {
     private var since = CACurrentMediaTime()
     /// Hidden: the line stands where it is, and runs on from where the time puts it when shown.
     private var isPaused = false
-    /// About one point of travel per frame on a ~200-pt line for a three-minute track.
-    nonisolated static let frameRate = CAFrameRateRange(minimum: 1, maximum: 4, preferred: 2)
+    /// About one point of travel per step on a ~200-pt line for a three-minute track.
+    nonisolated static let step: CFTimeInterval = 0.5
+    /// Steps per animation at most (keyframes the render server holds).
+    nonisolated static let maximumSteps = 2400
     nonisolated static let animationKey = "played"
     static let white = NSColor.white.cgColor
 
@@ -385,14 +387,24 @@ final class PlayedLineView: NSView {
         fill.position = CGPoint(x: 0, y: height / 2)
         fill.bounds = CGRect(x: 0, y: 0, width: Self.width(now, in: width, height: height), height: height)
         if rate > 0, now < 1, width > 0, !isPaused {
-            let animation = CABasicAnimation(keyPath: "bounds.size.width")
-            animation.fromValue = Self.width(now, in: width, height: height)
-            animation.toValue = Self.width(1, in: width, height: height)
-            animation.duration = (1 - now) / rate
-            animation.timingFunction = CAMediaTimingFunction(name: .linear)
+            // A step every half second (a longer one only on tracks over twenty minutes, where a
+            // step is still a fraction of a point), as discrete keyframes: the render server draws a
+            // frame only when the line steps. A linear animation with a 2 fps frame-rate hint was
+            // drawn far more often (~200 window-server wake-ups a second, ~25–70 mW while the
+            // panel was open on a playing track, measured), the hint notwithstanding.
+            let duration = (1 - now) / rate
+            let step = max(Self.step, duration / Double(Self.maximumSteps))
+            let steps = max(1, Int((duration / step).rounded(.up)))
+            let animation = CAKeyframeAnimation(keyPath: "bounds.size.width")
+            animation.values = (0..<steps).map {
+                NSNumber(value: Double(Self.width(min(now + rate * step * Double($0), 1), in: width, height: height)))
+            }
+            animation.keyTimes = (0...steps).map { NSNumber(value: min(step * Double($0) / duration, 1)) }
+            animation.calculationMode = .discrete
+            animation.duration = duration
             animation.fillMode = .forwards
             animation.isRemovedOnCompletion = false
-            animation.preferredFrameRateRange = Self.frameRate
+            fill.bounds.size.width = Self.width(1, in: width, height: height)
             fill.add(animation, forKey: Self.animationKey)
         }
         CATransaction.commit()

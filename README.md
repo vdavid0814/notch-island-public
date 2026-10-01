@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.7 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.7.1 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -23,6 +23,25 @@ How much energy each animation and the idle state take, measured before and afte
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.7.1
+
+The same island for far less of the window server's work: what NotchIsland costs macOS to draw,
+not only what it costs itself. Everything looks and moves as before, apart from Settings' plain
+background.
+
+- **Settings**: touring the pages takes about two thirds less of the window server (13.1 → 4.3 J);
+  General left open went from 0.8 W to 0.02 W (its animation picture now plays only when it moves
+  and while it is in view).
+- **Opening the island**: 10 opens and closes 7.8 → 4.4 J in the window server; the open panel on
+  a playing track about half (its progress line now really steps twice a second).
+- **At rest with music**: 17.7 → 14.5 mW (the fade's soft black is drawn once, not blurred again
+  for every frame of the bars).
+- **Settings' background and sidebar are a plain material** instead of glass, in the same greys;
+  the segmented bars and buttons keep their glass.
+- How it was measured (the app, the window server and coreaudiod together, with a real pointer):
+  [docs/ENERGY-LOG.md](docs/ENERGY-LOG.md), [docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)
+  and `Scripts/perf/ws/ws_bench.py`.
 
 ## What's new in v0.7
 

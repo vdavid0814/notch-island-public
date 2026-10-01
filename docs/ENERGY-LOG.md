@@ -4,6 +4,78 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-01: v0.7.1 (build 25): the window server's share
+
+**Why.** A comparison with Boring Notch (2.7.3) on September 30 counted the window server too: at rest
+NotchIsland was ahead, but opening the island and touring Settings cost more in total, because the
+window server worked far harder for NotchIsland than NotchIsland itself (Settings: the app 4.8 J, the
+window server ~245 mW). This round looked only at that side.
+
+**Machine and method.** The same MacBook Air M5, macOS 27, on battery (100 → ~75 %), Music playing.
+Release builds of v0.7 (24) ("before") and v0.7.1 (25) ("after"), signed alike, report
+destinations removed. `Scripts/perf/ws/ws_bench.py`: a real pointer (hover onto the notch, clicks on
+Settings' gear and sidebar, line scrolls), the coalitions of NotchIsland, WindowServer and coreaudiod
+sampled every second, the Claude window hidden. Two rounds, before and after alternating, fresh
+launch and 45 s of rest before each.
+
+| scenario (as in the Boring Notch comparison) | before | after | change |
+|---|---|---|---|
+| Rest with music, 120 s: window server | 16.4 mW | 14.2 mW | −13 % (−18 % in a later 90 s A/B: 17.7 → 14.5) |
+| Rest with music: the app itself | 0.07 mW | 0.10 mW | (noise; a 4 mW second at a track change) |
+| 10 opens and closes (66 s): window server | 7.8 J (106 mW) | 4.4 J (60 mW) | **−44 %** |
+| 10 opens and closes: the app | 0.46 J | 0.56 J | +0.10 J |
+| Settings tour (60 s, 10 page visits): window server | 13.1 J (218 mW) | 4.3 J (71 mW) | **−68 %** |
+| Settings tour: the app | 7.2 J | 6.7 J | −7 % |
+| Settings ▸ General open, at rest: window server | 785 mW | 23 mW | **−97 %** |
+| Panel open on a playing track, at rest: window server | 30–80 mW | ~15 mW | −50…−80 % |
+
+Without NotchIsland the window server took 2–3 mW here; with the island at rest and music paused, the
+same. Everything above that is the island's.
+
+### What changed
+
+- **General's animation picture** (Animation length) looped as one infinite Core Animation group:
+  the window server drew 60 frames a second for as long as General was open — through the picture's
+  pauses (58 % of each cycle) and while it was scrolled out of sight (it is at the foot of the page,
+  so nearly always). Each spring is now added just before it starts, and only while the picture is
+  in view; between springs nothing is attached and no frame is drawn. Same springs, same timing.
+- **Settings' halo.** The island's legibility halo (a 0.18 shadow meant for content over glass) also
+  wrapped Settings, whose surface is solid: the halo's shadow pass spanned the whole near-screen page,
+  so every frame of any animation in Settings re-rendered and blurred all of it. Settings no longer
+  gets it (the surface's black style did not reach its content through the surface transition).
+- **Settings' ground and panels are a plain material** (asked for): no behind-window blur under the
+  page, and the sidebar and the Customize editor's outline and inspector panes no longer Liquid Glass
+  — the same greys, measured on screen and matched within 1–3/255, edged like Settings' cards. The
+  segmented bars, buttons and the island's glass are unchanged, as is the black-to-grey fade.
+- **The played line** (Now Playing's progress) was a linear animation with a 2 fps frame-rate hint:
+  the window server drew it far more often (~200 wake-ups a second while the panel was open on a
+  playing track). It now steps twice a second as discrete keyframes, as the hint meant.
+- **The fade style's black** is drawn once into a picture of its own (`drawingGroup`) instead of a
+  live blur filter the window server ran again in every frame the island moved or anything on it
+  changed — at rest with music, every frame of the bars (frozen-frame screenshots: within 4/255).
+  At rest with music the window server went 17.7 → 14.5 mW with it, 17.5 without it (two rounds
+  each). The picture is drawn by the app on the CPU, once per surface: Activity Monitor's worst 5 s
+  for the app rises a little on a volume banner (4.5 → 7.7) and an open (8.5 → 12), while the
+  window server saves more (a volume banner: app +9 mJ, window server −17 mJ). A surface that
+  SwiftUI sizes frame by frame, and Siri's (which settles at many sizes), keep the live filter.
+- Settings' rows keep their measurements in the layout cache (a row measured its native controls
+  eight times per layout pass); Login Items' status is read at background priority.
+
+### Tried and left out
+- **One halo for the whole panel** (`compositingGroup` before the shadow) instead of one shadow per
+  text and shape: −37 % of an open's window-server energy, but halos over the cards came out up to
+  29/255 darker. The per-layer halo is the look: kept.
+- **Bars' frame rates on one grid** (breathing at 15 fps under the 30 fps beat): no measurable change.
+  At rest with music the window server's ~12 mW is the bars' frames themselves (a plain test window
+  with the same bars costs the same per frame); fewer of them would change how they move.
+- Leaving the glass container, the outline clip or the pill's invisible shadow out: no measurable
+  change at rest.
+
+### Tests
+`Scripts/test.sh`: 875 tests; the timing tests that fail under load (banner expiry, Siri's return
+after typing, the icon cache's daily tidy) pass alone; the `analogClock-1x1` snapshot fails the same
+way without these changes.
+
 ## 2026-09-30: v0.6 (build 23): the new features, and the next energy round
 
 **Machine:** the same MacBook Air M5 (Mac17,3), macOS 27, on battery the whole time (57 % for the

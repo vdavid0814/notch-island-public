@@ -84,6 +84,10 @@ struct IslandRootView: View {
             )
             .transition(IslandSurfaceTransition(surface: IslandSurface(
                 size: outline.size,
+                // Siri's surface settles at many sizes as it grows (field, rows, list, gallery):
+                // there the picture would be drawn again for each, on the CPU (+0.2 s per gallery
+                // opening, measured), so it keeps the layers.
+                settledSize: surfaceOf.isAssistant ? .zero : outline.size,
                 bottomRadius: outline.bottomRadius,
                 shoulderRadius: outline.shoulderRadius,
                 shoulderDrop: outline.shoulderDrop,
@@ -189,7 +193,12 @@ extension IslandContentStack {
             .frame(width: contentSize.width, height: contentSize.height, alignment: .top)
             // Where the glass shows through, text and symbols keep a soft dark halo, so they
             // stay readable over a bright desktop without darkening the glass itself.
-            .modifier(GlassLegibility(isInNotchBand: presentation.isPillShaped))
+            // Not on Settings: it sits on solid ground (`IslandRootView`'s opaque page). The surface's
+            // black style does not reach this far (the content keeps the root's environment through
+            // the surface transition), and the halo's shadow pass spanned the whole near-screen-sized
+            // page: every frame of any animation in it re-rendered and blurred all of Settings in
+            // the window server (0.25–0.75 W while General's animation picture ran, measured).
+            .modifier(GlassLegibility(isInNotchBand: presentation.isPillShaped, isOnSolidGround: presentation.isSettings))
             // Concentric corners inside (the artwork) follow the island they belong to.
             .containerShape(IslandShape(bottomRadius: layout.bottomRadius(for: presentation),
                                         shoulderRadius: layout.shoulderRadius(for: presentation)))
@@ -221,6 +230,8 @@ struct GlassLegibility: ViewModifier {
     /// under it in every frame, also over a larger island held during a move (`FadeShadeMask`), and
     /// a dark halo on solid black changes no pixel: none is asked for there, as on solid black.
     let isInNotchBand: Bool
+    /// Settings: no halo at all (and no shadow pass for it).
+    var isOnSolidGround = false
 
     @Environment(\.islandGlassStyle) private var style
 
@@ -229,7 +240,11 @@ struct GlassLegibility: ViewModifier {
 
     func body(content: Content) -> some View {
         let isSeen = style.hasGlassSurface && !(isInNotchBand && style == .fade)
-        content.shadow(color: .black.opacity(isSeen ? Self.opacity : 0), radius: Self.radius)
+        if isOnSolidGround {
+            content
+        } else {
+            content.shadow(color: .black.opacity(isSeen ? Self.opacity : 0), radius: Self.radius)
+        }
     }
 }
 
@@ -287,6 +302,9 @@ nonisolated private struct IslandSurfaceTransition: Transition {
 
 nonisolated private struct IslandSurface: ViewModifier, Animatable {
     var size: CGSize
+    /// The size the surface comes to rest at (`size` is where a SwiftUI animation has it this frame);
+    /// `.zero`: the fade's black stays layers throughout (`islandSurfaceShade`).
+    let settledSize: CGSize
     var bottomRadius: CGFloat
     var shoulderRadius: CGFloat
     let shoulderDrop: CGFloat
@@ -349,6 +367,7 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
                 .islandSurfaceShade(glassStyle, solidDepth: solidDepth,
                                     size: CGSize(width: size.width, height: size.height + IslandLayout.overdraw),
                                     fadeStretch: fadeStretch,
+                                    isSettled: size == settledSize,
                                     in: surface.inset(by: -IslandGlassStyle.shadeBleed))
                 // Off, the glass is parked out of sight rather than taken down (`IslandGlassBody`);
                 // while SwiftUI animates the surface (Reduce Motion) it goes, as a parked glass

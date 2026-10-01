@@ -13,3 +13,6 @@ Support/diagnostics-webhook.txt
 Support/diagnostics-webhooks.json
 Support/discord-bot-token.txt
 Support/reports/
+Scripts/perf/ws/mouse
+Scripts/perf/ws/hideapp
+Scripts/perf/ws/ws_results.jsonl
