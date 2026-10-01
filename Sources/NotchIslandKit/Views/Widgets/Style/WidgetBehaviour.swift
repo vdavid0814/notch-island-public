@@ -20,6 +20,22 @@ extension IslandWidget {
     }
 }
 
+extension IslandWidgetKind {
+    /// When it has nothing to do, in words ("no music is loaded"); nil for a kind that always has
+    /// (a clock): Only Active and Dim Inactive do nothing there.
+    var idleSituation: String? {
+        switch self {
+        case .nowPlaying: String(localized: "no music or video is loaded in a player")
+        case .timer: String(localized: "no timer is set")
+        case .stopwatch: String(localized: "the stopwatch is at zero")
+        case .shelf: String(localized: "the shelf is empty")
+        case .battery, .batteryTime, .batteryPower, .charger: String(localized: "the Mac is plugged in and fully charged")
+        default:
+            if let control = systemControl, !control.isAction { String(localized: "it is switched off") } else { nil }
+        }
+    }
+}
+
 /// The widget's behaviour on the island: its tap, its haptic, and its dimming while inactive (the
 /// board leaves out one shown only while active — `WidgetBoardView`). In a picture (Settings'
 /// gallery, the editor's canvas) nothing is performed.

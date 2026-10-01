@@ -20,9 +20,8 @@ struct InspectorPane: View {
                         if let id = session.selectedElement, let element = session.elementSpec(id) {
                             // Its place on the grid inside the widget first, then its look.
                             FrameInspector(session: session, id: id)
-                            if element.id == id || id.isCustom {
-                                ElementInspector(session: session, widget: widget, element: element)
-                            }
+                            // A part (previous or next) is styled as its element: both alike.
+                            ElementInspector(session: session, widget: widget, element: element)
                         } else if session.selection.count > 1 {
                             ArrangeInspector(session: session)
                         } else {
@@ -103,7 +102,7 @@ private struct ElementInspector: View {
                     ColorRows(session: session, id: id, slots: element.role == .image ? [.fill, .border] : [.fill])
                 }
             case .image:
-                EmptyView()
+                PictureInspector(session: session, element: element)
             case .line:
                 BarInspector(session: session, element: element)
             case .chart:
@@ -142,6 +141,23 @@ private struct ButtonLookInspector: View {
     var body: some View {
         let id = element.id
         InspectorSection("Button") {
+            if id == .seekBack || id == .seekForward {
+                InspectorRow("Seconds", isSet: style.seconds != nil, reset: { button(\.seconds).wrappedValue = nil }) {
+                    let seconds = style.seconds ?? ButtonSpec.standardSeconds
+                    let value = Binding(get: { seconds }, set: { button(\.seconds).wrappedValue = ButtonSpec.secondsRange.clamp($0) })
+                    HStack(spacing: 6) {
+                        TextField("", value: value, format: .number.precision(.fractionLength(0)))
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 52)
+                        Stepper("", value: value, in: ButtonSpec.secondsRange, step: 5)
+                            .labelsHidden()
+                        Text("s").foregroundStyle(SettingsPalette.secondary)
+                    }
+                    .controlSize(.small)
+                    .help(id == .seekBack ? "How far back it jumps in the track or video" : "How far forward it jumps in the track or video")
+                }
+            }
             InspectorRow("Shape", isSet: style.shape != nil, reset: { button(\.shape).wrappedValue = nil }) {
                 OptionalChoice(value: button(\.shape), options: ButtonShapeChoice.allCases, title: \.title)
             }
@@ -163,6 +179,89 @@ private struct ButtonLookInspector: View {
                 .font(.caption)
                 .foregroundStyle(SettingsPalette.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// A picture (a cover, a photo): its corners, border, shadow, colours and opacity.
+private struct PictureInspector: View {
+    let session: EditorSession
+    let element: ElementSpec
+
+    private func image<Value: Equatable>(_ keyPath: WritableKeyPath<ImageStyle, Value>) -> Binding<Value> {
+        let base: WritableKeyPath<WidgetStyle, ImageStyle> = \.[element: element.id].image
+        return session.binding(for: base.appending(path: keyPath))
+    }
+
+    private var style: ImageStyle { session.style.elements[element.id]?.image ?? ImageStyle() }
+
+    var body: some View {
+        if session.widget?.kind == .shelf {
+            Text("Drawn as the shelf's file thumbnails: their place and size are set on the canvas.")
+                .font(.caption)
+                .foregroundStyle(SettingsPalette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            InspectorSection("Picture") {
+                InspectorRow("Corners", isSet: style.corners != nil, reset: { image(\.corners).wrappedValue = nil }) {
+                    Picker("", selection: Binding<String>(get: {
+                        switch style.corners {
+                        case nil: "auto"
+                        case .concentric?: "concentric"
+                        case .custom?: "custom"
+                        case .circle?: "circle"
+                        }
+                    }, set: { choice in
+                        image(\.corners).wrappedValue = switch choice {
+                        case "concentric": .concentric
+                        case "custom": .custom(8)
+                        case "circle": .circle
+                        default: nil
+                        }
+                    })) {
+                        Text("Automatic").tag("auto")
+                        Divider()
+                        Text("Like the Widget's").tag("concentric")
+                        Text("Radius").tag("custom")
+                        Text("Circle").tag("circle")
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                if case .custom(let radius)? = style.corners {
+                    InspectorRow("Radius", isSet: true, reset: { image(\.corners).wrappedValue = nil }) {
+                        OptionalSlider(value: Binding(get: { radius }, set: { image(\.corners).wrappedValue = $0.map(ImageCorners.custom) }),
+                                       range: ImageCorners.radiusRange, step: 1, standard: radius,
+                                       format: { "\(Int($0)) pt" }, session: session)
+                    }
+                }
+                InspectorRow("Border", isSet: style.borderWidth != nil, reset: { image(\.borderWidth).wrappedValue = nil }) {
+                    OptionalSlider(value: image(\.borderWidth), range: ImageStyle.borderRange, step: 0.5, standard: 0,
+                                   format: { $0.formatted(.number.precision(.fractionLength(0...1))) + " pt" }, session: session)
+                }
+                if (style.borderWidth ?? 0) > 0 {
+                    ColorRows(session: session, id: element.id, slots: [.border])
+                }
+                InspectorRow("Shadow", isSet: style.shadow != nil, reset: { image(\.shadow).wrappedValue = nil }) {
+                    OptionalSlider(value: image(\.shadow), range: ImageStyle.shadowRange, step: 1, standard: 0,
+                                   format: { "\(Int($0)) pt" }, session: session)
+                }
+                InspectorRow("Colours", isSet: style.saturation != nil, reset: { image(\.saturation).wrappedValue = nil }) {
+                    OptionalSlider(value: image(\.saturation), range: 0...1, step: 0.05, standard: 1,
+                                   format: { $0 <= 0.001 ? String(localized: "Black & White") : $0.formatted(.percent.precision(.fractionLength(0))) },
+                                   session: session)
+                }
+                InspectorRow("Opacity", isSet: style.opacity != nil, reset: { image(\.opacity).wrappedValue = nil }) {
+                    OptionalSlider(value: image(\.opacity), range: 0.1...1, step: 0.05, standard: 1,
+                                   format: { $0.formatted(.percent.precision(.fractionLength(0))) }, session: session)
+                }
+                if element.id == .artwork, !session.layoutState.isCustom {
+                    Text("Size L runs the cover out to the widget's edges.")
+                        .font(.caption)
+                        .foregroundStyle(SettingsPalette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 }
@@ -195,6 +294,13 @@ private struct BarInspector: View {
                 }
             }
             ColorRows(session: session, id: id, slots: [.fill, .track] + (style.knob != nil && !isSystemSlider ? [.knob] : []))
+            if id == .progress {
+                // The elapsed and remaining times under it.
+                InspectorRow("Time Colour", isSet: session.style.elements[id]?.colors[.primary] != nil,
+                             reset: { session.set(\WidgetStyle.[element: id].colors[.primary], to: nil) }) {
+                    OptionalColor(value: session.binding(for: \WidgetStyle.[element: id].colors[.primary]))
+                }
+            }
         }
     }
 }
@@ -829,6 +935,14 @@ extension ElementRole {
 /// With nothing picked: the widget's own look — colour, background, surface, layout, behaviour,
 /// formats.
 private struct WidgetLookInspector: View {
+    /// What a row above it does, in a sentence.
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(SettingsPalette.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     let session: EditorSession
     let widget: IslandWidget
 
@@ -982,20 +1096,25 @@ private struct WidgetLookInspector: View {
                 InspectorRow("Click", isSet: style.behaviour.tap != nil, reset: { behaviour(\.tap).wrappedValue = nil }) {
                     TapActionControl(tap: behaviour(\.tap))
                 }
-                InspectorRow("Only Active", isSet: style.behaviour.showsOnlyWhenActive != nil,
-                             reset: { behaviour(\.showsOnlyWhenActive).wrappedValue = nil }) {
-                    Toggle("", isOn: Binding(get: { style.behaviour.showsOnlyWhenActive == true },
-                                             set: { behaviour(\.showsOnlyWhenActive).wrappedValue = $0 ? true : nil }))
-                        .labelsHidden()
-                        .toggleStyle(.islandSwitch)
-                        .help("Shown on the island only while it has something to do (music, a timer, files)")
-                }
-                InspectorRow("Dim Inactive", isSet: style.behaviour.dimsWhenInactive != nil,
-                             reset: { behaviour(\.dimsWhenInactive).wrappedValue = nil }) {
-                    Toggle("", isOn: Binding(get: { style.behaviour.dimsWhenInactive == true },
-                                             set: { behaviour(\.dimsWhenInactive).wrappedValue = $0 ? true : nil }))
-                        .labelsHidden()
-                        .toggleStyle(.islandSwitch)
+                caption("What a click on the widget on the island does. Its Own: its buttons and controls work as they are. "
+                        + "Anything else makes the whole widget one button (opens an app, a link, a Shortcut or a page of the island).")
+                if let idle = kind.idleSituation {
+                    InspectorRow("Only Active", isSet: style.behaviour.showsOnlyWhenActive != nil,
+                                 reset: { behaviour(\.showsOnlyWhenActive).wrappedValue = nil }) {
+                        Toggle("", isOn: Binding(get: { style.behaviour.showsOnlyWhenActive == true },
+                                                 set: { behaviour(\.showsOnlyWhenActive).wrappedValue = $0 ? true : nil }))
+                            .labelsHidden()
+                            .toggleStyle(.islandSwitch)
+                    }
+                    caption("Leaves the widget off the island while \(idle); it comes back on its own when that changes.")
+                    InspectorRow("Dim Inactive", isSet: style.behaviour.dimsWhenInactive != nil,
+                                 reset: { behaviour(\.dimsWhenInactive).wrappedValue = nil }) {
+                        Toggle("", isOn: Binding(get: { style.behaviour.dimsWhenInactive == true },
+                                                 set: { behaviour(\.dimsWhenInactive).wrappedValue = $0 ? true : nil }))
+                            .labelsHidden()
+                            .toggleStyle(.islandSwitch)
+                    }
+                    caption("Keeps it on the island but faded while \(idle).")
                 }
                 InspectorRow("Haptic", isSet: style.behaviour.haptic != nil, reset: { behaviour(\.haptic).wrappedValue = nil }) {
                     Toggle("", isOn: Binding(get: { style.behaviour.haptic == true },
@@ -1003,6 +1122,7 @@ private struct WidgetLookInspector: View {
                         .labelsHidden()
                         .toggleStyle(.islandSwitch)
                 }
+                caption("A light tap felt on the trackpad when the widget is clicked (a Force Touch trackpad).")
             }
             let formats = kind.formatOptions
             if !formats.isEmpty {

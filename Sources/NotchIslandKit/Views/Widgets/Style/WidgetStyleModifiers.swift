@@ -188,6 +188,7 @@ private struct WidgetImage: ViewModifier {
         let image = element.image
         let shape = ImageCornerShape(corners: image.corners, concentric: corners.inner)
         content
+            .modifier(OptionalSaturation(saturation: image.saturation))
             .clipShape(shape)
             .overlay {
                 if let width = image.borderWidth, width > 0 {
@@ -195,6 +196,7 @@ private struct WidgetImage: ViewModifier {
                                  lineWidth: width)
                 }
             }
+            .modifier(OptionalShadow(radius: image.shadow))
             .opacity(image.opacity ?? 1)
             .offset(x: image.offsetX ?? 0, y: image.offsetY ?? 0)
     }
@@ -243,6 +245,26 @@ private struct WidgetButton: ViewModifier {
     @ViewBuilder private func styled(_ content: Content, look: ButtonLookChoice?, shape: ButtonShapeChoice?) -> some View {
         if look != nil || shape != nil || fill != nil || element.button.cornerRadius != nil {
             content.buttonStyle(WidgetButtonStyle())
+        } else {
+            content
+        }
+    }
+}
+
+private struct OptionalSaturation: ViewModifier {
+    let saturation: Double?
+
+    func body(content: Content) -> some View {
+        if let saturation, saturation < 1 { content.saturation(saturation) } else { content }
+    }
+}
+
+private struct OptionalShadow: ViewModifier {
+    let radius: Double?
+
+    func body(content: Content) -> some View {
+        if let radius, radius > 0 {
+            content.shadow(color: .black.opacity(0.45), radius: CGFloat(radius), y: CGFloat(radius) / 3)
         } else {
             content
         }

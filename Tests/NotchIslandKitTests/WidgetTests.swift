@@ -147,14 +147,14 @@ nonisolated let shelfID = WidgetID.legacy(.shelf)
             widget.options.remove(.artist)
             widget.sizes[.trackInfo] = .large
             widget.sizes[.artist] = .medium        // medium is the default: not stored
-            widget.sizes[.skipButtons] = .small    // not sizable: dropped
+            widget.sizes[.skipButtons] = .small
             widget.layout = .cover
             widget.background = .artwork
         }
         let decoded = try JSONDecoder().decode(WidgetBoard.self, from: JSONEncoder().encode(board))
         let nowPlaying = try #require(decoded.widget(nowPlayingID))
         #expect(!nowPlaying.shows(.artist))
-        #expect(nowPlaying.sizes == [.trackInfo: .large])
+        #expect(nowPlaying.sizes == [.trackInfo: .large, .skipButtons: .small])
         #expect(nowPlaying.layout == .cover && nowPlaying.background == .artwork)
     }
 

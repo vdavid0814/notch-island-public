@@ -194,7 +194,7 @@ nonisolated enum LayoutEdit {
         guard let index = layout.items.firstIndex(where: { $0.id == id }) else { return .front }
         let rect = layout.items[index].rect
         let over = layout.items.indices.contains { other in
-            other > index && overlaps(layout.items[other].rect, rect)
+            other > index && overlaps(layout.items[other].rect, rect, in: layout.authoredSize)
         }
         return over ? .behind : .front
     }
@@ -204,14 +204,20 @@ nonisolated enum LayoutEdit {
         reorder(ids, layer == .front ? .front : .back, in: &layout)
     }
 
-    /// Whether it lies on another element, or another on it.
-    static func overlapsAny(_ id: ElementID, in layout: CustomLayout) -> Bool {
-        guard let rect = layout.items.first(where: { $0.id == id })?.rect else { return false }
-        return layout.items.contains { $0.id != id && overlaps($0.rect, rect) }
+    /// The elements it lies on, or that lie on it, by more than a point each way (a hair's touch
+    /// shows nothing either way).
+    static func overlapping(_ id: ElementID, in layout: CustomLayout) -> [ElementID] {
+        guard let rect = layout.items.first(where: { $0.id == id })?.rect else { return [] }
+        return layout.items.filter { $0.id != id && overlaps($0.rect, rect, in: layout.authoredSize) }.map(\.id)
     }
 
-    static func overlaps(_ a: UnitRect, _ b: UnitRect) -> Bool {
-        min(a.x + a.width, b.x + b.width) - max(a.x, b.x) > 1e-6 && min(a.y + a.height, b.y + b.height) - max(a.y, b.y) > 1e-6
+    static func overlapsAny(_ id: ElementID, in layout: CustomLayout) -> Bool { !overlapping(id, in: layout).isEmpty }
+
+    /// Overlapping by more than a point each way (`size`: the layout's, in points).
+    static func overlaps(_ a: UnitRect, _ b: UnitRect, in size: CGSize = CGSize(width: 1_000_000, height: 1_000_000)) -> Bool {
+        let width = (min(a.x + a.width, b.x + b.width) - max(a.x, b.x)) * Double(size.width)
+        let height = (min(a.y + a.height, b.y + b.height) - max(a.y, b.y)) * Double(size.height)
+        return width > 1 && height > 1
     }
 
     // MARK: Flags
@@ -258,7 +264,8 @@ nonisolated enum LayoutEdit {
         for (size, variant) in layouts.variants {
             guard case .custom(var layout) = variant else { continue }
             if on {
-                let width = role == .text ? 0.5 : 0.35, height = role == .text ? 0.22 : 0.35
+                // A button about a round button's size; text a line across half the widget.
+                let width = role == .text ? 0.5 : role == .button ? 0.1 : 0.35, height = role == .text ? 0.22 : role == .button ? 0.25 : 0.35
                 for id in ids { place(id, at: freeSpot(width: width, height: height, in: layout), in: &layout) }
             } else {
                 hide(Set(ids), in: &layout)

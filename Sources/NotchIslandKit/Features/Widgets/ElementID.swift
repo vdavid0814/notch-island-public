@@ -40,6 +40,9 @@ nonisolated struct ElementID: RawRepresentable, Hashable, Codable, CodingKeyRepr
     static let progress = ElementID(rawValue: "progress")
     static let playbackButtons = ElementID(rawValue: "playbackButtons")
     static let skipButtons = ElementID(rawValue: "skipButtons")
+    /// Back and forward by some seconds (`ButtonSpec.seconds`).
+    static let seekBack = ElementID(rawValue: "seekBack")
+    static let seekForward = ElementID(rawValue: "seekForward")
     // Timer, stopwatch and the time.
     static let ruler = ElementID(rawValue: "ruler")
     static let readout = ElementID(rawValue: "readout")

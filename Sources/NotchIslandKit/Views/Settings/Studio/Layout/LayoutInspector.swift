@@ -15,7 +15,8 @@ struct FrameInspector: View {
         if let layout = session.drawnLayout, let item = layout.items.first(where: { $0.id == id }),
            let frame = session.elementFrame(id) {
             // Only where it lies on something (or something on it).
-            if LayoutEdit.overlapsAny(id, in: layout) {
+            let overlapping = LayoutEdit.overlapping(id, in: layout)
+            if !overlapping.isEmpty {
                 InspectorSection("Layer") {
                     Picker("", selection: Binding(get: { LayoutEdit.layer(of: id, in: layout) }, set: { layer in
                         withAnimation(Motion.content) { session.editLayout { LayoutEdit.setLayer(layer, [id], in: &$0) } }
@@ -25,7 +26,8 @@ struct FrameInspector: View {
                     .labelsHidden()
                     .choiceBar()
                     .fixedSize()
-                    Text("In Front: drawn over what it lies on. Behind: what it lies on covers it.")
+                    Text("It overlaps \(overlapping.compactMap { session.elementSpec($0)?.title }.formatted(.list(type: .and))). "
+                         + "In Front: drawn over them. Behind: they cover it.")
                         .font(.caption)
                         .foregroundStyle(SettingsPalette.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -257,6 +259,17 @@ struct CanvasLayoutBar: View {
                                  "moon.fill", "sun.max.fill"], id: \.self) { name in
                             Button { add(.symbol(name)) } label: { Label(name, systemImage: name) }
                         }
+                    }
+                    // The kind's own buttons that are off (Now Playing's seek buttons).
+                    let hidden = session.addableElements
+                    if !hidden.isEmpty {
+                        Divider()
+                        ForEach(hidden, id: \.id) { element in
+                            Button(element.title, systemImage: element.symbol) {
+                                withAnimation(Motion.content) { session.showElement(element.id) }
+                            }
+                        }
+                        Divider()
                     }
                     Button("Divider", systemImage: "minus") { add(.divider(.horizontal)) }
                     Button("Vertical Divider", systemImage: "line.diagonal") { add(.divider(.vertical)) }

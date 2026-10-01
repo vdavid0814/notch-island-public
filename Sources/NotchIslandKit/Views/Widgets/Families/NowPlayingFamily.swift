@@ -82,6 +82,11 @@ struct NowPlayingElement: View {
                     .controlSize(style.element(.playbackButtons)?.button.size.map { Metrics.Control.smaller($0.controlSize) }
                                  ?? Metrics.Control.smaller(.fitting(height: room.height)))
             }
+        case .seekBack, .seekForward:
+            if media.item != nil {
+                TransportSeek(forward: id == .seekForward, seconds: style.element(id)?.button.seconds ?? ButtonSpec.standardSeconds)
+                    .controlSize(style.controlSize(id, height: room.height))
+            }
         case .skipButtons.part("previous"), .skipButtons.part("next"):
             if media.item != nil {
                 TransportSkip(forward: id == .skipButtons.part("next"), looks: widget.plainButtons ? nil : widget.buttonLooks)
@@ -128,12 +133,17 @@ struct NowPlayingWidget: View {
     // The cover beside a column of title, artist, progress and controls. The cover is as tall as
     // the widget (its size element scales it down), and gives way when the text would be squeezed.
     private func beside(_ media: MediaController) -> some View {
-        let artworkSide = min(size.height * widget.size(of: .artwork).factor.clamped(to: 0.6...1), size.height)
-        let showsArtwork = widget.shows(.artwork) && size.width - artworkSide >= 110
+        // Large: the cover runs out to the widget's edges, in its corners (it cannot be taller than
+        // the widget inside the padding).
+        let bleeds = widget.size(of: .artwork) == .large
+        let padding = WidgetMetrics.padding(for: widget)
+        let artworkSide = bleeds ? size.height + 2 * padding : min(size.height * widget.size(of: .artwork).factor.clamped(to: 0.6...1), size.height)
+        let showsArtwork = widget.shows(.artwork) && size.width - (bleeds ? size.height : artworkSide) >= 110
         let spacing = size.height >= 90 ? Metrics.Spacing.large : Metrics.Spacing.medium
         return HStack(spacing: spacing) {
             if showsArtwork {
                 artwork(media, side: artworkSide)
+                    .modifier(EdgeBleed(isOn: bleeds, padding: padding, outer: corners.outer))
                     .ownDirection()
             }
             VStack(alignment: .leading, spacing: 0) {
@@ -141,6 +151,7 @@ struct NowPlayingWidget: View {
                 Spacer(minLength: Metrics.Spacing.xSmall)
                 if widget.shows(.progress), size.height >= 84, let item = media.item {
                     PlaybackScrubber(clock: media.clock, duration: item.duration, isPlaying: media.isPlaying)
+                        .environment(\.lineScale, widget.size(of: .progress).factor)
                         .editorElement(.progress, in: probe)
                 }
                 controls(media)
@@ -283,13 +294,14 @@ struct NowPlayingWidget: View {
 
     @ViewBuilder private func controls(_ media: MediaController) -> some View {
         if media.item != nil {
-            if widget.shows(.playbackButtons) || widget.shows(.skipButtons) {
+            if widget.shows(.playbackButtons) || widget.shows(.skipButtons) || seek(.seekBack) != nil || seek(.seekForward) != nil {
                 TransportControls(isPlaying: media.isPlaying,
                                   showsPlay: widget.shows(.playbackButtons),
                                   showsSkip: widget.shows(.skipButtons) && size.width >= 170,
-                                  looks: widget.plainButtons ? nil : widget.buttonLooks)
-                    .controlSize(WidgetType.controlSize(size.height < WidgetMetrics.singleRowHeight ? .small : .regular,
-                                                        widget.size(of: .playbackButtons)))
+                                  looks: widget.plainButtons ? nil : widget.buttonLooks,
+                                  playSize: widget.size(of: .playbackButtons), skipSize: widget.size(of: .skipButtons),
+                                  seekBack: seek(.seekBack), seekForward: seek(.seekForward))
+                    .controlSize(size.height < WidgetMetrics.singleRowHeight ? .small : .regular)
                     // Its own height; across, the room it is given (titled buttons that do not fit it
                     // show their symbols alone, `TransportControls`).
                     .fixedSize(horizontal: false, vertical: true)
@@ -298,6 +310,12 @@ struct NowPlayingWidget: View {
             NowPlayingOpenPlayer(capsule: size.width >= 240)
                 .buttonElement(.playbackButtons, in: probe)
         }
+    }
+
+    /// A seek button as the row shows it: switched on, and where the row has room for it.
+    private func seek(_ id: ElementID) -> TransportSeek.Setting? {
+        guard widget.shows(id), size.width >= 230 else { return nil }
+        return TransportSeek.Setting(seconds: style.element(id)?.button.seconds ?? ButtonSpec.standardSeconds, size: widget.size(of: id))
     }
 
     /// Title and artist sizes of their own (the style's) scaled down together to `room`, one over
@@ -361,6 +379,26 @@ struct NowPlayingArtwork: View {
         .frame(width: size.width, height: size.height)
         // Concentric with the widget already, wherever it sits (`ArtworkView`'s own shape).
         .widgetImage(.artwork, in: style)
+    }
+}
+
+/// The cover run out over the widget's padding to its top, bottom and leading edges, its leading
+/// corners the widget's own.
+private struct EdgeBleed: ViewModifier {
+    let isOn: Bool
+    let padding: CGFloat
+    let outer: RectangleCornerRadii
+
+    func body(content: Content) -> some View {
+        if isOn {
+            content
+                .clipShape(UnevenRoundedRectangle(topLeadingRadius: outer.topLeading, bottomLeadingRadius: outer.bottomLeading,
+                                                  bottomTrailingRadius: 0, topTrailingRadius: 0, style: .continuous))
+                .padding(.vertical, -padding)
+                .padding(.leading, -padding)
+        } else {
+            content
+        }
     }
 }
 

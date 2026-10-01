@@ -396,6 +396,22 @@ extension EditorSession {
         selection = [id]
     }
 
+    /// Buttons of the kind that are switched off and can be added from the canvas's Add menu.
+    var addableElements: [ElementSpec] {
+        guard let widget else { return [] }
+        return widget.kind.spec.elements.filter { $0.role == .button && !$0.defaultVisible && !widget.shows($0.id) }
+    }
+
+    /// One of the kind's elements switched on: on the widget (laid out freely, in a free spot), picked.
+    func showElement(_ id: ElementID) {
+        guard let element = widget?.kind.spec.element(id) else { return }
+        change(\IslandWidget.self) { widget in
+            widget.options.insert(id)
+            LayoutEdit.setShown(id, true, role: element.role, parts: element.parts, in: &widget.style.layout.arrangement)
+        }
+        selection = [id]
+    }
+
     /// The elements in the tray: hidden, or without room when the widget was unlocked.
     var trayElements: [ElementSpec] {
         guard let layout = drawnLayout, let widget else { return [] }

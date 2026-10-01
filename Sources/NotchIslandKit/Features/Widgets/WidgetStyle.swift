@@ -212,8 +212,13 @@ nonisolated struct ImageStyle: Codable, Hashable, Sendable {
     var borderWidth: Double?
     var contentMode: ImageContentMode?
     var opacity: Double?
+    /// A shadow under it, its blur in points (0 or nil: none).
+    var shadow: Double?
+    /// Its colours' strength: 0 is black and white, 1 as it is.
+    var saturation: Double?
 
     static let sizeRange: ClosedRange<Double> = 0.1...1
+    static let shadowRange: ClosedRange<Double> = 0...20
     static let offsetRange: ClosedRange<Double> = -40...40
     static let borderRange: ClosedRange<Double> = 0...6
 
@@ -231,6 +236,8 @@ nonisolated struct ImageStyle: Codable, Hashable, Sendable {
         borderWidth = c.lossy(Double.self, .borderWidth)
         contentMode = c.lossy(ImageContentMode.self, .contentMode)
         opacity = c.lossy(Double.self, .opacity)
+        shadow = c.lossy(Double.self, .shadow)
+        saturation = c.lossy(Double.self, .saturation)
     }
 
     mutating func sanitize() {
@@ -239,6 +246,8 @@ nonisolated struct ImageStyle: Codable, Hashable, Sendable {
         offsetX = offsetX.map(Self.offsetRange.clamp)
         offsetY = offsetY.map(Self.offsetRange.clamp)
         corners = corners?.sanitized
+        shadow = shadow.map(Self.shadowRange.clamp)
+        saturation = saturation.map(StyleRanges.unit.clamp)
         borderWidth = borderWidth.map(Self.borderRange.clamp)
         opacity = opacity.map(StyleRanges.unit.clamp)
     }
@@ -305,9 +314,13 @@ nonisolated struct ButtonSpec: Codable, Hashable, Sendable {
     var size: ControlSizeChoice?
     /// A rounded rectangle's corners, in points (nil: a quarter of its shorter side).
     var cornerRadius: Double?
+    /// A seek button's jump, in seconds (nil: `standardSeconds`).
+    var seconds: Double?
 
     static let spacingRange: ClosedRange<Double> = 0...24
     static let cornerRange: ClosedRange<Double> = 0...30
+    static let secondsRange: ClosedRange<Double> = 1...600
+    static let standardSeconds = 10.0
 
     init() {}
 
@@ -320,12 +333,14 @@ nonisolated struct ButtonSpec: Codable, Hashable, Sendable {
         iconOnly = c.lossy(Bool.self, .iconOnly)
         size = c.lossy(ControlSizeChoice.self, .size)
         cornerRadius = c.lossy(Double.self, .cornerRadius)
+        seconds = c.lossy(Double.self, .seconds)
     }
 
     mutating func sanitize() {
         tintStrength = tintStrength.map(StyleRanges.unit.clamp)
         spacing = spacing.map(Self.spacingRange.clamp)
         cornerRadius = cornerRadius.map(Self.cornerRange.clamp)
+        seconds = seconds.map(Self.secondsRange.clamp).map { $0.rounded() }
     }
 }
 

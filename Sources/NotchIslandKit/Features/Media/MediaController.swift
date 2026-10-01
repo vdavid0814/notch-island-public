@@ -117,6 +117,14 @@ import AppKit
         activeSource?.send(command)
     }
 
+    /// Back (negative) or forward by `seconds` from where the track is now, within the track.
+    func skip(by seconds: TimeInterval) {
+        guard let clock else { return }
+        var target = max(clock.position(at: .now) + seconds, 0)
+        if let duration = item?.duration, duration > 0 { target = min(target, max(duration - 1, 0)) }
+        send(.seek(target))
+    }
+
     /// Pulls the position once (the expanded card calls this when it appears).
     func refreshPosition() {
         guard isStarted, demo == nil else { return }

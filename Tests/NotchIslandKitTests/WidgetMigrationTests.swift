@@ -335,13 +335,16 @@ private func scratchDefaults() -> (UserDefaults, String) {
     }
 
     @Test func todaysElementsAreUnchanged() {
-        #expect(IslandWidgetKind.nowPlaying.options == [.artwork, .trackInfo, .artist, .progress, .playbackButtons, .skipButtons])
+        #expect(IslandWidgetKind.nowPlaying.options == [.artwork, .trackInfo, .artist, .progress, .playbackButtons, .skipButtons,
+                                                         .seekBack, .seekForward])
+        // The seek buttons are off until switched on.
+        #expect(IslandWidgetKind.nowPlaying.defaultOptions == [.artwork, .trackInfo, .artist, .progress, .playbackButtons, .skipButtons])
         #expect(IslandWidgetKind.timer.defaultOptions == [.ruler, .readout])
         #expect(IslandWidgetKind.stopwatch.defaultOptions == [.readout, .resetButton])
         // The switchable ones: those always drawn (a start button, a slider) have no switch.
         let sizable = IslandWidgetKind.allCases.flatMap { $0.spec.elements.filter { !$0.isSizable && !$0.isRequired }.map(\.id) }
         // The shelf's pictures and the battery's chart fill their room whatever their size: no S, M, L.
-        #expect(Set(sizable) == [.progress, .skipButtons, .addMinute, .timerSeconds, .timerHours, .resetButton, .shelfActions,
+        #expect(Set(sizable) == [.addMinute, .timerSeconds, .timerHours, .resetButton, .shelfActions,
                                  .previews, .chart])
         #expect(IslandWidgetKind.nowPlaying.spec.element(.skipButtons)?.parts == [ElementID(rawValue: "skipButtons.previous"),
                                                                                 ElementID(rawValue: "skipButtons.next")])
@@ -605,7 +608,7 @@ private func scratchDefaults() -> (UserDefaults, String) {
         #expect(layout.items[1].rect == UnitRect(x: 0.9, y: -0.5, width: 0.5, height: UnitRect.minimumSide).clamped)
         #expect(layout.items[1].rect.x == 0.9 && layout.items[1].rect.y == UnitRect.visible - UnitRect.minimumSide)
         // Every element of the kind is placed or parked; skip counts as placed through its part.
-        #expect(layout.parked == [.progress, .artist, .playbackButtons])
+        #expect(layout.parked == [.progress, .artist, .playbackButtons, .seekBack, .seekForward])
         #expect(Array(layout.decorations.keys) == [decoration])
     }
 

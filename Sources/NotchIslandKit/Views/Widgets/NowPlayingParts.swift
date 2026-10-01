@@ -12,6 +12,12 @@ struct TransportControls: View {
     /// not a closure: a closure never compares equal, so every re-render of the card rebuilt the
     /// buttons and set their interactive glass springing (see `PlayedLine`).
     var looks: [String: ButtonLook]?
+    /// Play's and the skip buttons' sizes (S, M, L), each from the row's control size.
+    var playSize: ElementSize = .medium
+    var skipSize: ElementSize = .medium
+    /// Back and forward by seconds, at the row's ends (nil: not shown).
+    var seekBack: TransportSeek.Setting?
+    var seekForward: TransportSeek.Setting?
 
     private func look(_ button: TransportButton) -> ButtonLook? {
         looks.map { $0[button.rawValue] ?? ButtonLook() }
@@ -42,6 +48,11 @@ struct TransportControls: View {
 
     private func row(titles: Bool) -> some View {
         HStack(spacing: Metrics.Spacing.large) {
+            if let seekBack {
+                TransportSeek(forward: false, seconds: seekBack.seconds)
+                    .buttonElement(.seekBack, in: probe)
+                    .controlSize(WidgetType.controlSize(controlSize, seekBack.size))
+            }
             if showsSkip {
                 Button {
                     model.media.send(.previous)
@@ -56,6 +67,7 @@ struct TransportControls: View {
                 .transportGlass(look(.previous), titled: titles && titled(.skipButtons.part("previous"), .skipButtons))
                 .help("Previous")
                 .buttonElement(.skipButtons.part("previous"), in: probe)
+                .controlSize(WidgetType.controlSize(controlSize, skipSize))
             }
 
             if showsPlay {
@@ -72,7 +84,7 @@ struct TransportControls: View {
                 // Tagged inside the size it is drawn at (a size up from its row): unlocked, it
                 // keeps that size.
                 .buttonElement(.playbackButtons, in: probe)
-                .controlSize(Metrics.Control.larger(controlSize))
+                .controlSize(Metrics.Control.larger(WidgetType.controlSize(controlSize, playSize)))
             }
 
             if showsSkip {
@@ -88,6 +100,12 @@ struct TransportControls: View {
                 .transportGlass(look(.next), titled: titles && titled(.skipButtons.part("next"), .skipButtons))
                 .help("Next")
                 .buttonElement(.skipButtons.part("next"), in: probe)
+                .controlSize(WidgetType.controlSize(controlSize, skipSize))
+            }
+            if let seekForward {
+                TransportSeek(forward: true, seconds: seekForward.seconds)
+                    .buttonElement(.seekForward, in: probe)
+                    .controlSize(WidgetType.controlSize(controlSize, seekForward.size))
             }
         }
         .islandButton(.circle)
@@ -117,6 +135,47 @@ struct TransportSkip: View {
         .help(forward ? "Next" : "Previous")
         .islandButton(.circle)
     }
+}
+
+/// Back or forward by some seconds within the track (`ButtonSpec.seconds`).
+struct TransportSeek: View {
+    struct Setting: Equatable {
+        var seconds: Double
+        var size: ElementSize = .medium
+    }
+
+    let forward: Bool
+    let seconds: Double
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.widgetStyle) private var style
+
+    /// The system's symbol with the seconds on it where it has one.
+    static func symbol(forward: Bool, seconds: Double) -> String {
+        let base = forward ? "goforward" : "gobackward"
+        let marked: Set<Int> = [5, 10, 15, 30, 45, 60, 75, 90]
+        return marked.contains(Int(seconds)) ? "\(base).\(Int(seconds))" : base
+    }
+
+    var body: some View {
+        let id: ElementID = forward ? .seekForward : .seekBack
+        let title = forward ? String(localized: "Forward \(Int(seconds)) Seconds") : String(localized: "Back \(Int(seconds)) Seconds")
+        Button {
+            model.media.skip(by: forward ? seconds : -seconds)
+        } label: {
+            Label(title, systemImage: Self.symbol(forward: forward, seconds: seconds))
+                .labelStyle(.iconOnly)
+        }
+        .widgetButton(id, in: style)
+        .transportGlass(nil)
+        .help(title)
+        .islandButton(.circle)
+    }
+}
+
+extension EnvironmentValues {
+    /// A line's thickness as much larger as its S, M or L (1 at M).
+    @Entry var lineScale: CGFloat = 1
 }
 
 extension View {
@@ -162,6 +221,8 @@ struct PlaybackScrubber: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.controlSize) private var controlSize
+    @Environment(\.widgetStyle) private var style
+    @Environment(\.widgetArtworkColor) private var artwork
     @State private var livePosition: TimeInterval = 0
     @State private var dragPosition: TimeInterval?
     /// Previews (Settings' widget gallery) show the position without ticking.
@@ -207,7 +268,7 @@ struct PlaybackScrubber: View {
             }
             // Follows the control size so the times keep their proportion to the line.
             .font((controlSize >= .large ? Font.callout : .footnote).weight(.medium).monospacedDigit())
-            .foregroundStyle(.secondary)
+            .foregroundStyle(style.element(.progress)?.colors[.primary]?.shapeStyle(artwork: artwork) ?? AnyShapeStyle(.secondary))
             .onChange(of: clock, initial: true) { livePosition = position(at: .now) }
         } else {
             Label("Live", systemImage: "dot.radiowaves.left.and.right")
@@ -248,10 +309,12 @@ struct ScrubTrack: View {
     @Environment(\.widgetStyle) private var style
     @Environment(\.widgetArtworkColor) private var artwork
     @Environment(\.widgetRenderMode) private var renderMode
+    /// The progress bar's S, M or L (`IslandWidget.sizes`).
+    @Environment(\.lineScale) private var lineScale
 
     var body: some View {
         let line = ResolvedLine(style.element(.progress))
-        let rest: CGFloat = line.thickness ?? (controlSize >= .large ? 7 : 6)
+        let rest: CGFloat = line.thickness ?? (controlSize >= .large ? 7 : 6) * lineScale
         let height = isHovering || isDragging ? rest + 4 : rest
         GeometryReader { proxy in
             let fraction = duration > 0 ? min(max(position / duration, 0), 1) : 0
