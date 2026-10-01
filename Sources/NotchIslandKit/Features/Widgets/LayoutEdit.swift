@@ -204,6 +204,12 @@ nonisolated enum LayoutEdit {
         reorder(ids, layer == .front ? .front : .back, in: &layout)
     }
 
+    /// Whether it lies on another element, or another on it.
+    static func overlapsAny(_ id: ElementID, in layout: CustomLayout) -> Bool {
+        guard let rect = layout.items.first(where: { $0.id == id })?.rect else { return false }
+        return layout.items.contains { $0.id != id && overlaps($0.rect, rect) }
+    }
+
     static func overlaps(_ a: UnitRect, _ b: UnitRect) -> Bool {
         min(a.x + a.width, b.x + b.width) - max(a.x, b.x) > 1e-6 && min(a.y + a.height, b.y + b.height) - max(a.y, b.y) > 1e-6
     }

@@ -182,8 +182,13 @@ private func describe(_ rect: CGRect?) -> String {
         let session = harness.session
         let type = try #require(session.textType(id))
         let line = WidgetTypography.lineHeight(type)
-        // Wider: only the width.
+        // Unlocked, text is exactly its lines' height (a handle never jumps on first touch).
         let start = try #require(harness.frame(id))
+        #expect(abs(start.height - TextFit.frameHeight(points: type.points, lines: session.textLines(id), spec: type)) < 0.5)
+        // A little into the next line: still one.
+        harness.resize(id, .bottom, by: CGSize(width: 0, height: line * 0.55))
+        #expect(session.textLines(id) == 1 && abs((harness.frame(id)?.height ?? 0) - start.height) < 0.5)
+        // Wider: only the width.
         harness.resize(id, .trailing, by: CGSize(width: 20, height: 0))
         let wider = try #require(harness.frame(id))
         #expect(abs(wider.width - start.width - 20) < 0.75)

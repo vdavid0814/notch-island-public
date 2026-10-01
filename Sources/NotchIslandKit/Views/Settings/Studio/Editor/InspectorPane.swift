@@ -199,16 +199,42 @@ private struct TextInspector: View {
         })
     }
 
+    /// A design and italic, as one choice of the Style menu.
+    private struct FontStyleTag: Hashable {
+        var design: FontDesignChoice?
+        var italic: Bool
+    }
+
+    /// The Style menu's choice: both written at once (one undo step).
+    private func setFontStyle(_ tag: FontStyleTag) {
+        var next = style
+        next.design = tag.design
+        next.italic = tag.italic ? true : nil
+        refitting(session.binding(for: \WidgetStyle.[element: element.id].text)).wrappedValue = next
+    }
+
     private var fontSection: some View {
         InspectorSection("Font") {
-            InspectorRow("Style", isSet: style.design != nil, reset: { refitting(text(\.design)).wrappedValue = nil }) {
-                OptionalChoice(value: refitting(text(\.design)), options: FontDesignChoice.allCases, title: \.title)
+            InspectorRow("Style", isSet: style.design != nil || style.italic != nil, reset: { setFontStyle(FontStyleTag(design: nil, italic: false)) }) {
+                // The design and italic in one menu.
+                Picker("", selection: Binding(get: {
+                    FontStyleTag(design: style.design ?? (style.italic == true ? .standard : nil), italic: style.italic == true)
+                }, set: setFontStyle)) {
+                    Text("Automatic").tag(FontStyleTag(design: nil, italic: false))
+                    Divider()
+                    ForEach(FontDesignChoice.allCases, id: \.self) { Text($0.title).tag(FontStyleTag(design: $0, italic: false)) }
+                    Divider()
+                    ForEach(FontDesignChoice.allCases, id: \.self) { design in
+                        Text(design == .standard ? String(localized: "Italic") : String(localized: "\(design.title) Italic"))
+                            .tag(FontStyleTag(design: design, italic: true))
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
             }
             InspectorRow("Weight", isSet: style.weight != nil, reset: { refitting(text(\.weight)).wrappedValue = nil }) {
                 OptionalChoice(value: refitting(text(\.weight)), options: FontWeightChoice.allCases, title: \.title)
-            }
-            InspectorRow("Italic", isSet: style.italic != nil, reset: { refitting(text(\.italic)).wrappedValue = nil }) {
-                OptionalSwitch(value: refitting(text(\.italic)))
             }
             if isFree, let points = session.textType(element.id)?.points {
                 InspectorRow("Size", isSet: false, reset: {}) {

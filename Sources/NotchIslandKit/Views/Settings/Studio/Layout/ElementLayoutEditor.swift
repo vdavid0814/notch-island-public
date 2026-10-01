@@ -77,6 +77,15 @@ struct ElementLayoutEditor: View {
             }
             if let drag {
                 if drag.handle != nil {
+                    // Where the pointer has it, faintly, when what lands differs (whole lines of text).
+                    if abs(drag.live.height - drag.landed.height) > 1 || abs(drag.live.width - drag.landed.width) > 1 {
+                        let live = geometry.canvasRect(drag.live)
+                        Rectangle()
+                            .strokeBorder(Color.islandAccent.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [2, 3]))
+                            .frame(width: max(live.width, 1), height: max(live.height, 1))
+                            .offset(x: live.minX, y: live.minY)
+                            .allowsHitTesting(false)
+                    }
                     // Where it lands: the element is drawn there too.
                     ResizeOutline(frame: geometry.canvasRect(drag.landed), cornerRadius: 0,
                                   badge: "\(Self.points(drag.landed.width)) × \(Self.points(drag.landed.height))",

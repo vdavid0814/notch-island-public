@@ -187,6 +187,30 @@ extension EditorSession {
     /// nothing has been measured yet.
     func makeDraft() -> LayoutDraft? {
         if let layoutDraft { return layoutDraft }
+        guard var draft = freshDraft(), let context = canvasContext else { return nil }
+        snugTexts(&draft.layout, in: context)
+        return draft
+    }
+
+    /// Text made exactly its lines' height in the type it is drawn in, about its middle (where its
+    /// letters are), its type and lines kept as its own: a handle then never jumps on first touch.
+    /// What is snug already is left as it is.
+    private func snugTexts(_ layout: inout CustomLayout, in context: CanvasContext) {
+        let unit = layoutUnit(layout, context)
+        for item in ResolvedArrangement.resolve(layout, size: context.size, padding: context.padding).items {
+            guard let type = textType(item.id), type.points > 0,
+                  let index = layout.items.firstIndex(where: { $0.id == item.id }) else { continue }
+            let lines = layout.items[index].lines ?? textLines(item.id)
+            let height = TextFit.frameHeight(points: type.points, lines: lines, spec: type)
+            guard layout.items[index].points == nil || layout.items[index].lines == nil || abs(height - item.frame.height) > 0.25 else { continue }
+            let rect = CGRect(x: item.frame.minX, y: item.frame.midY - height / 2, width: item.frame.width, height: height)
+            layout.items[index].rect = UnitRect(rect, in: context.size).clamped
+            layout.items[index].points = Double(type.points * unit)
+            layout.items[index].lines = lines
+        }
+    }
+
+    private func freshDraft() -> LayoutDraft? {
         guard supportsCustomLayout, let context = canvasContext, let sizeClass, context.size.width > 0, context.size.height > 0 else { return nil }
         var style = style
         let contentScale = CGFloat(style.layout.contentScale ?? 1)

@@ -31,6 +31,8 @@ import Testing
         #expect(LayoutEdit.layer(of: a, in: layout) == .behind)
         // Overlapping nothing, it is in front.
         #expect(LayoutEdit.layer(of: c, in: layout) == .front)
+        // The choice is offered only where it lies on something.
+        #expect(LayoutEdit.overlapsAny(a, in: layout) && LayoutEdit.overlapsAny(b, in: layout) && !LayoutEdit.overlapsAny(c, in: layout))
         LayoutEdit.setLayer(.front, [a], in: &layout)
         #expect(LayoutEdit.layer(of: a, in: layout) == .front && LayoutEdit.layer(of: b, in: layout) == .behind)
         LayoutEdit.setLayer(.behind, [a], in: &layout)

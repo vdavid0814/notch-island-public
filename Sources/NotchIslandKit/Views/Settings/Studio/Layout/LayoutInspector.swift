@@ -14,19 +14,22 @@ struct FrameInspector: View {
     var body: some View {
         if let layout = session.drawnLayout, let item = layout.items.first(where: { $0.id == id }),
            let frame = session.elementFrame(id) {
-            InspectorSection("Layer") {
-                Picker("", selection: Binding(get: { LayoutEdit.layer(of: id, in: layout) }, set: { layer in
-                    withAnimation(Motion.content) { session.editLayout { LayoutEdit.setLayer(layer, [id], in: &$0) } }
-                })) {
-                    ForEach(LayoutEdit.Layer.allCases, id: \.self) { Text($0.title).tag($0) }
+            // Only where it lies on something (or something on it).
+            if LayoutEdit.overlapsAny(id, in: layout) {
+                InspectorSection("Layer") {
+                    Picker("", selection: Binding(get: { LayoutEdit.layer(of: id, in: layout) }, set: { layer in
+                        withAnimation(Motion.content) { session.editLayout { LayoutEdit.setLayer(layer, [id], in: &$0) } }
+                    })) {
+                        ForEach(LayoutEdit.Layer.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
+                    .labelsHidden()
+                    .choiceBar()
+                    .fixedSize()
+                    Text("In Front: drawn over what it lies on. Behind: what it lies on covers it.")
+                        .font(.caption)
+                        .foregroundStyle(SettingsPalette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .labelsHidden()
-                .choiceBar()
-                .fixedSize()
-                Text("In Front: drawn over what it lies on. Behind: what it lies on covers it.")
-                    .font(.caption)
-                    .foregroundStyle(SettingsPalette.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             InspectorSection("Frame", trailing: AnyView(Text("in points").font(.caption).foregroundStyle(SettingsPalette.secondary))) {
                 HStack(spacing: 8) {

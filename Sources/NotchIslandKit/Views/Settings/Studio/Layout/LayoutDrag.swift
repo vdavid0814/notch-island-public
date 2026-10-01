@@ -26,6 +26,9 @@ struct LayoutDrag: Equatable {
         var lines: Int
         /// Made taller, it takes more lines (else larger type).
         var growsLines: Bool
+        /// The lines it has now in the drag: a new count is taken only once the pointer is well past
+        /// halfway into the next line, so the outline does not flicker between two.
+        var current: Int? = nil
     }
 }
 
@@ -116,11 +119,18 @@ extension EditorSession {
         let placement = layoutSnapper(layout, context: context, zoom: zoom).resize(
             id, from: original, to: drag.live, edges: edges, minimum: CGSize(width: 2, height: 2), keepsAspect: keeps,
             bounds: Self.unbounded, isInteractive: false, snapping: snapping)
+        var proposed = placement.rect, guides = placement.guides
+        if drag.text != nil, !keeps, handle.vertical != 0 {
+            // Its height is whole lines (or its type): the pointer's own, not snapped to a guide first.
+            proposed = CGRect(x: proposed.minX, y: drag.live.minY, width: proposed.width, height: drag.live.height)
+            guides = guides.filter { $0.axis == .vertical }
+        }
         // A tick as it snaps to a new line (not at every point it moves).
-        if !placement.guides.isEmpty, placement.guides != layoutGuides { SnapTick.perform() }
-        layoutGuides = placement.guides
+        if !guides.isEmpty, guides != layoutGuides { SnapTick.perform() }
+        layoutGuides = guides
         isLayoutRefused = false
-        let resized = Self.resized(from: original, to: placement.rect, vertical: handle.vertical, keepsShape: keeps, text: drag.text)
+        let resized = Self.resized(from: original, to: proposed, vertical: handle.vertical, keepsShape: keeps, text: drag.text)
+        if let lines = resized.lines { drag.text?.current = lines }
         // Laid out again, at once, wherever it lands on a new place.
         if resized.rect != drag.landed {
             drag.landed = resized.rect
@@ -145,7 +155,16 @@ extension EditorSession {
         } else if vertical != 0 {
             if text.growsLines {
                 let line = WidgetTypography.lineHeight(text.type)
-                if line > 0 { lines = ElementFrame.lineRange.clamp(Int((proposed.height / line).rounded())) }
+                if line > 0 {
+                    let asked = proposed.height / line
+                    let current = text.current ?? text.lines
+                    // Past halfway and a little more into another line (in either direction).
+                    if abs(asked - CGFloat(current)) >= Self.lineHysteresis {
+                        lines = ElementFrame.lineRange.clamp(Int(asked.rounded()))
+                    } else {
+                        lines = current
+                    }
+                }
             } else {
                 points = max(TextFit.points(forFrameHeight: proposed.height, lines: lines, spec: text.type), TextFit.minimumPoints)
             }
@@ -157,6 +176,9 @@ extension EditorSession {
         rect.size.height = height
         return ResizedElement(rect: rect, points: points, lines: lines)
     }
+
+    /// How far into another line (in lines) the pointer goes before the text takes it.
+    static let lineHysteresis: CGFloat = 0.65
 
     /// The draft takes a resized element: its rectangle, and text's type and lines.
     func draft(_ resized: ResizedElement, of id: ElementID, in context: CanvasContext) {
