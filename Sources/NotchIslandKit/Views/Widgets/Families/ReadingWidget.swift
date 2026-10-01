@@ -51,7 +51,9 @@ struct ReadingWidget: View {
     var body: some View {
         let showsValue = widget.shows(.value), showsCaption = widget.shows(.label), showsSymbol = widget.shows(.symbol)
         let caption = style.element(.label)?.text.labelOverride ?? reading.caption
-        let tall = size.height >= 56
+        // Over two rows when tall, unless the style's Direction says (Layout ▸ Direction).
+        let tall = style.layout.axis.map { $0 == .vertical } ?? (size.height >= 56)
+        let spacing = style.layout.spacing.map { CGFloat($0) }
         let inner = size.width - 8
         let lineFit = WidgetType.size(fittingLines: 1, in: tall ? size.height * 0.3 : size.height)
         let symbolFit = tall ? lineFit : WidgetType.size(fittingLines: 1, in: size.height) * 0.9
@@ -74,11 +76,17 @@ struct ReadingWidget: View {
             - (showsValue ? WidgetTypography.width(reading.widest ?? reading.value, style.drawnType(.value, valueType), scale: 2) + 6 : 0)
         let captionFit = min(lineFit, WidgetType.size(fitting: caption, in: tall ? inner - (showsSymbol ? symbolSize * 1.3 + 4 : 0) : beside,
                                                       weight: .medium))
-        let hasCaptionRoom = captionFit >= Self.smallestCaption
+        let captionFits = captionFit >= Self.smallestCaption
         let captionSize = style.textPoints(.label, auto: min(WidgetType.fitted(
             WidgetType.points(size.height, ratio: tall ? 0.16 : 0.34, min: 9, max: 13), fit: captionFit, widget.size(of: .label), floor: 8), captionFit),
                                            fit: captionFit)
         let captionType = Self.captionType.at(captionSize)
+        // On one row, a caption the style draws wider than its plain letters (more space between
+        // them, Expanded, capitals) is measured as drawn: drawn whole beside the value, it pushed
+        // the value and the symbol out of the widget. One no wider than plainly fits as measured.
+        let hasCaptionRoom = captionFits && (tall || style.element(.label) == nil
+            || WidgetTypography.width(caption, style.drawnType(.label, captionType), scale: 2)
+                <= max(beside, WidgetTypography.width(caption, captionType, scale: 2)) + 0.5)
 
         let value = Text(reading.value)
             .widgetTextElement(.value, valueType, fit: valueFit, in: style, probe: probe)
@@ -95,7 +103,7 @@ struct ReadingWidget: View {
             .foregroundStyle(.secondary)
         Group {
             if tall {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: stackAlignment.horizontal, spacing: spacing ?? 2) {
                     if showsSymbol || (showsCaption && hasCaptionRoom) {
                         HStack(spacing: 4) {
                             if showsSymbol { symbol }
@@ -104,21 +112,26 @@ struct ReadingWidget: View {
                     }
                     if showsValue { value }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: style.layout.alignment?.alignment ?? .bottomLeading)
             } else {
-                HStack(spacing: 6) {
+                HStack(alignment: stackAlignment.vertical, spacing: spacing ?? 6) {
+                    // The row's slack on the side the alignment leaves free (the value never takes it).
+                    if stackAlignment.horizontal != .leading { Spacer(minLength: 0) }
                     if showsSymbol { symbol }
                     if showsValue { value.layoutPriority(1) }
                     if showsCaption, hasCaptionRoom { captionText.fixedSize() }
-                    Spacer(minLength: 0)
+                    if stackAlignment.horizontal != .trailing { Spacer(minLength: 0) }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: style.layout.alignment?.alignment ?? .leading)
             }
         }
         .padding(.horizontal, 4)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(reading.spoken ?? "\(caption): \(reading.value)"))
     }
+
+    /// The style's alignment of the lines (Layout ▸ Alignment), the kind's leading otherwise.
+    private var stackAlignment: Alignment { style.layout.alignment?.alignment ?? .leading }
 
     /// Below this the caption is left out rather than drawn.
     static let smallestCaption: CGFloat = 8.5

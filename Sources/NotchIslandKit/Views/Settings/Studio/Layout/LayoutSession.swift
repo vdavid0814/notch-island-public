@@ -86,7 +86,10 @@ extension EditorSession {
 
     var supportsCustomLayout: Bool {
         guard let widget else { return false }
-        return widget.kind.spec.supportsCustomLayout && !WidgetMetrics.isRound(widget)
+        // A control drawn as its lone button keeps it (`ControlFamily.allowsCustomLayout`): Custom
+        // was offered and drew nothing new.
+        let loneButton = widget.kind.spec.family == .controls && widget.layout == .button
+        return widget.kind.spec.supportsCustomLayout && !WidgetMetrics.isRound(widget) && !loneButton
     }
 
     /// How the size on the canvas is laid out now.
@@ -111,16 +114,11 @@ extension EditorSession {
     }
 
     /// Where each placed element's rectangle is in the widget (points), back to front. In a custom
-    /// layout these are the rectangles; in an automatic one, the frames the canvas measured.
-    ///
-    /// An element drawn at a size of its own (a button, a line, a chart) is where it draws, not the
-    /// whole rectangle it has (`ElementFit`): picked, snapped to and resized by what is seen.
+    /// layout these are the rectangles — what the editor outlines, snaps and resizes, and what the
+    /// element is drawn in (text: its lines' height, its letters centred in it); in an automatic
+    /// one, the frames the canvas measured.
     var elementFrames: [(id: ElementID, frame: CGRect)] {
-        if let items = arrangedItems {
-            _ = fitsVersion
-            // Text by its letters (`TextInkModel`): outlined, picked and aligned by what is seen.
-            return items.map { ($0.id, textInk($0.id, in: $0.frame)?.ink(in: $0.frame) ?? hugged($0.id, $0.frame)) }
-        }
+        if let items = arrangedItems { return items.map { ($0.id, $0.frame) } }
         // Smallest last: drawn in front of what contains it, so a click picks it.
         return frames.sorted { $0.value.width * $0.value.height > $1.value.width * $1.value.height }.map { ($0.key, $0.value) }
     }
@@ -134,63 +132,33 @@ extension EditorSession {
         return ResolvedArrangement.resolve(layout, size: context.size, padding: context.padding, contentScale: scale).items
     }
 
-    /// A text element's letters in its rectangle, as the canvas measured them; nil for anything
-    /// else, or before it is measured. `rect`: its rectangle now (by default, where it is drawn).
-    func textInk(_ id: ElementID, in rect: CGRect? = nil) -> TextInkModel? {
-        guard elementSpec(id)?.role == .text, let letters = inks[id],
-              let rect = rect ?? arrangedItems?.first(where: { $0.id == id })?.frame else { return nil }
-        // The type it is drawn in now, as its letters were measured (what the probe keeps of the
-        // stacks' drawing can be older), its lines as many as its frame holds. A size set in the
-        // inspector holds whatever the rectangle.
-        let line = WidgetTypography.lineHeight(letters.type)
-        let lines = line > 0 ? max(1, Int((letters.box.height / line).rounded())) : 1
-        return TextInkModel(rect: rect, letters: letters, type: letters.type, lines: lines,
-                            isFixed: style.elements[id]?.text.points != nil)
+    // MARK: Text
+
+    /// A text element's type as the canvas drew it last (its size in canvas points); nil for
+    /// anything else, or before it is measured.
+    func textType(_ id: ElementID) -> TypeSpec? {
+        guard isText(id) else { return nil }
+        if let letters = inks[id] { return letters.type }
+        if case .text(let type, _, _)? = drawn[id] { return type }
+        return nil
     }
 
-    /// `rect` narrowed to what the element draws in it. `anchor` holds an edge where it is dragged
-    /// from (-1: the leading or top edge moved, so the other is held; 1: the trailing or bottom; 0:
-    /// the centre); by default it is centred, as it is drawn.
-    func hugged(_ id: ElementID, _ rect: CGRect, anchor: (x: Int, y: Int) = (0, 0)) -> CGRect {
-        let object: CGSize
-        // A lone button fills its rectangle: that is the object.
-        if widget?.kind.spec.filledButtons.contains(id) == true { return rect }
-        if let fit = fits.fit(id) {
-            object = fit.object(in: rect.size)
-        } else if let symbol = symbolObject(id, in: rect.size) {
-            object = symbol
-        } else {
-            return rect
-        }
-        let x = anchor.x < 0 ? rect.maxX - object.width : anchor.x > 0 ? rect.minX : rect.midX - object.width / 2
-        let y = anchor.y < 0 ? rect.maxY - object.height : anchor.y > 0 ? rect.minY : rect.midY - object.height / 2
-        return CGRect(x: x, y: y, width: object.width, height: object.height)
+    func isText(_ id: ElementID) -> Bool { elementSpec(id)?.role == .text }
+
+    /// The most lines a text element wraps to: the layout's, else the style's, else as drawn.
+    func textLines(_ id: ElementID) -> Int {
+        if let lines = layoutItem(id)?.lines { return lines }
+        if let lines = style.elements[id]?.text.lineLimit { return lines }
+        if case .text(_, let lines, _)? = drawn[id] { return max(lines, 1) }
+        return 1
     }
 
-    /// The proportions of what an element draws, where it cannot stretch (a symbol): a handle that
-    /// drags one side of it resizes the other with it. Nil for what stretches — a button takes any
-    /// proportions, and a side dragged changes that side alone.
-    func fixedAspect(_ id: ElementID) -> CGFloat? {
-        // Text keeps its own rule (`TextInkModel.resized`).
-        if textInk(id) != nil { return nil }
-        guard case .symbol(let symbol, _, _)? = drawn[id] else { return nil }
-        let unit = SymbolFit.size(symbol.name, points: 100, weight: symbol.weight, scale: 2)
-        return unit.height > 0 ? unit.width / unit.height : nil
-    }
+    /// Made taller by a handle, it takes more lines (else larger type).
+    func growsLines(_ id: ElementID) -> Bool { layoutItem(id)?.growsLines ?? true }
 
-    /// What a symbol draws in a rectangle of `size`: as large as fits it at its own proportions, or
-    /// its fixed size (never more than the rectangle).
-    private func symbolObject(_ id: ElementID, in size: CGSize) -> CGSize? {
-        guard case .symbol(let symbol, _, _)? = drawn[id] else { return nil }
-        let unit = SymbolFit.size(symbol.name, points: 100, weight: symbol.weight, scale: 2)
-        guard unit.width > 0, unit.height > 0, size.width > 0, size.height > 0 else { return nil }
-        if let points = style.elements[id]?.symbol.points {
-            let fixed = SymbolFit.size(symbol.name, points: CGFloat(points), weight: symbol.weight, scale: 2)
-            return CGSize(width: min(fixed.width, size.width), height: min(fixed.height, size.height))
-        }
-        let aspect = unit.width / unit.height
-        return size.width / size.height > aspect ? CGSize(width: size.height * aspect, height: size.height)
-                                                 : CGSize(width: size.width, height: size.width / aspect)
+    /// The layout's points per canvas point (the layout is stored at the island's standard scale).
+    func layoutUnit(_ layout: CustomLayout, _ context: CanvasContext) -> CGFloat {
+        context.size.height > 0 && layout.authoredSize.height > 0 ? layout.authoredSize.height / context.size.height : 1
     }
 
     /// The element of the layout drawn, if it is placed.
@@ -378,7 +346,8 @@ extension EditorSession {
     func addDecoration(_ decoration: Decoration) {
         guard let context = canvasContext else { return }
         let size: CGSize = switch decoration {
-        case .label: CGSize(width: min(64, context.size.width * 0.6), height: 18)
+        case .label: CGSize(width: min(64, context.size.width * 0.6),
+                            height: TextFit.frameHeight(points: CGFloat(LayoutEdit.labelPoints) * context.scale, spec: DecorationView.labelType))
         case .symbol: CGSize(width: 20, height: 20)
         case .divider(let axis): axis == .horizontal ? CGSize(width: context.size.width * 0.6, height: 1)
                                                     : CGSize(width: 1, height: context.size.height * 0.6)
@@ -430,113 +399,5 @@ extension Decoration {
         case .divider: [.fill]
         case .shape: [.fill, .border]
         }
-    }
-}
-
-/// Where a text element's letters are in its rectangle, from what the canvas measured as the drag
-/// began. The type is as large as the rectangle lets it be (`CustomLayoutPlanner.textPoints`, in
-/// quarter points); its frame is its lines' height, where it sat in the rectangle, as wide as its
-/// line (or the rectangle, where it fills it); its letters from the capitals' tops to the last
-/// baseline in that frame (`WidgetTypography.letters`), the one rule the canvas measures by too. The
-/// editor shows, snaps and drags text by its letters; what it stores is the rectangle they are
-/// drawn in (`rect(for:)`), so the type never shrinks to the letters and a drag shows exactly what
-/// is drawn.
-nonisolated struct TextInkModel: Equatable, Sendable {
-    /// Its rectangle and the text's own frame when measured, and the type drawn then.
-    var rect: CGRect
-    var box: CGRect
-    var type: TypeSpec
-    var lines: Int
-    /// A size of its own (the inspector's): the letters keep it whatever the rectangle.
-    var isFixed: Bool
-
-    init?(rect: CGRect, letters: TextLetters, type: TypeSpec, lines: Int, isFixed: Bool) {
-        guard rect.height > 0, letters.box.width > 0, letters.box.height > 0, type.points > 0 else { return nil }
-        self.rect = rect
-        box = letters.box
-        self.type = type
-        self.lines = max(lines, 1)
-        self.isFixed = isFixed
-    }
-
-    /// How much wider a line is at `points` than as measured: in proportion but for the font's
-    /// optical sizes, measured on a sample of letters and figures.
-    private func widthScale(_ points: CGFloat) -> CGFloat {
-        guard points != type.points else { return 1 }
-        let sample = "Hamburgefonstiv 0123456789:%"
-        let now = WidgetTypography.width(sample, type, scale: 2), then = WidgetTypography.width(sample, type.at(points), scale: 2)
-        return now > 0 ? then / now : points / type.points
-    }
-
-    /// Its frame's height at `points`: its lines, less what SwiftUI's frame falls short of them
-    /// (as measured), so it sits in its rectangle as it did.
-    private func boxHeight(_ points: CGFloat) -> CGFloat {
-        guard points != type.points else { return box.height }
-        let short = TextFit.frameHeight(points: type.points, lines: lines, spec: type) - box.height
-        return max(TextFit.frameHeight(points: points, lines: lines, spec: type) - short, 1)
-    }
-
-    /// Where across the rectangle's room the text's frame sits (0 leading, ½ centred, 1 trailing).
-    private var anchorX: CGFloat {
-        let room = rect.width - box.width
-        return room > 0.5 ? min(max((box.minX - rect.minX) / room, 0), 1) : 0
-    }
-
-    private var anchorY: CGFloat {
-        let room = rect.height - box.height
-        return room > 0.5 ? min(max((box.minY - rect.minY) / room, 0), 1) : 0
-    }
-
-    /// The type drawn in a rectangle `height` tall: as measured in its own height (the size it was
-    /// unlocked at holds there, `ElementFrame.points`), else the largest its lines fit.
-    func points(forHeight height: CGFloat) -> CGFloat {
-        if isFixed || abs(height - rect.height) < 0.01 { return type.points }
-        return max(CustomLayoutPlanner.textPoints(height: height, lines: lines, spec: type), TextFit.minimumPoints)
-    }
-
-    /// The text's frame in a rectangle `rect`.
-    private func box(in rect: CGRect) -> (CGRect, TypeSpec) {
-        let points = points(forHeight: rect.height)
-        let spec = type.at(points)
-        let height = boxHeight(points)
-        let width = min(box.width * widthScale(points), rect.width)
-        return (CGRect(x: rect.minX + anchorX * (rect.width - width), y: rect.minY + anchorY * (rect.height - height),
-                       width: width, height: height), spec)
-    }
-
-    /// Where the letters are in a rectangle `rect`.
-    func ink(in rect: CGRect) -> CGRect {
-        let (box, spec) = box(in: rect)
-        return WidgetTypography.letters(inBox: box, spec)
-    }
-
-    /// The rectangle a handle dragged to `proposed` (the letters' outline there) asks for. Its top,
-    /// bottom or a corner sets the type (in quarter points) and the rectangle's width follows the
-    /// letters, its room as much larger; a side alone sets the rectangle's width — room for a longer
-    /// line, never narrower than the letters. The edges not dragged hold their letters where they are.
-    /// `horizontal`, `vertical`: the side dragged (-1 leading or top, 1 trailing or bottom, 0 neither).
-    func resized(horizontal: Int, vertical: Int, to proposed: CGRect) -> CGRect {
-        let start = ink(in: rect)
-        var height = rect.height
-        if vertical != 0, !isFixed, start.height > 0 {
-            let asked = type.points * proposed.height / start.height
-            let points = max((asked / TextFit.step).rounded() * TextFit.step, TextFit.minimumPoints)
-            if points != type.points { height = TextFit.frameHeight(points: points, lines: lines, spec: type) }
-        }
-        let points = points(forHeight: height)
-        let letters = box.width * widthScale(points)
-        let room = max(rect.width - box.width, 0) * points / type.points
-        var width = letters + room
-        if vertical == 0 {
-            // A side alone: room for a longer line.
-            if horizontal < 0 { width = max(width - (proposed.minX - start.minX), letters) }
-            if horizontal > 0 { width = max(width + (proposed.maxX - start.maxX), letters) }
-        }
-        // The side not dragged held (a corner scales it as a whole, from the corner opposite).
-        let minX = horizontal < 0 ? rect.maxX - width : horizontal > 0 ? rect.minX : rect.midX - width / 2
-        // Down: the letters' baseline held where the top is dragged, their top otherwise.
-        let placed = ink(in: CGRect(x: minX, y: 0, width: width, height: height))
-        let minY = vertical < 0 ? start.maxY - placed.maxY : start.minY - placed.minY
-        return CGRect(x: minX, y: minY, width: width, height: height)
     }
 }

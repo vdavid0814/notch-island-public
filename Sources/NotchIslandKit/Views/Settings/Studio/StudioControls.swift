@@ -267,3 +267,16 @@ struct TintSwatch: View {
             .contentShape(Circle())
     }
 }
+
+extension IslandWidgetKind {
+    /// What the accent colours in this kind: its buttons, bars and rings where it has any it
+    /// colours, else the Colour and Gradient backgrounds alone (it changed nothing on a plate).
+    var accentPurpose: String {
+        let colours: Set<IslandWidgetKind> = [.nowPlaying, .timer, .stopwatch, .shortcut, .volume, .brightness, .keyboardBrightness,
+                                              .wifi, .bluetooth, .darkMode, .nightShift, .keepAwake, .microphone, .outputMute,
+                                              .trueTone, .stageManager, .lowPowerMode]
+        return colours.contains(self)
+            ? "Its buttons, bars and rings, and the Colour and Gradient backgrounds."
+            : "The Colour and Gradient backgrounds (this widget has no buttons, bars or rings it colours)."
+    }
+}

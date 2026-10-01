@@ -28,6 +28,19 @@ struct TransportControls: View {
     @Environment(\.widgetStyle) private var style
 
     var body: some View {
+        // Titles where the style asks for them and the row holds them; their symbols alone where
+        // it does not (titled, the row ran past the widget's edge).
+        if titled(.skipButtons, .skipButtons.part("previous"), .skipButtons.part("next")) || titled(.playbackButtons) {
+            ViewThatFits(in: .horizontal) {
+                row(titles: true).fixedSize()
+                row(titles: false).fixedSize()
+            }
+        } else {
+            row(titles: true).fixedSize()
+        }
+    }
+
+    private func row(titles: Bool) -> some View {
         HStack(spacing: Metrics.Spacing.large) {
             if showsSkip {
                 Button {
@@ -36,10 +49,11 @@ struct TransportControls: View {
                     Label("Previous", systemImage: "backward.fill")
                         // A little more room around the skip glyphs inside their circles.
                         .imageScale(.small)
+                        .iconOnly(!titles)
                 }
                 .widgetButton(.skipButtons.part("previous"), in: style)
                 .widgetButton(.skipButtons, in: style)
-                .transportGlass(look(.previous), titled: titled(.skipButtons.part("previous"), .skipButtons))
+                .transportGlass(look(.previous), titled: titles && titled(.skipButtons.part("previous"), .skipButtons))
                 .help("Previous")
                 .buttonElement(.skipButtons.part("previous"), in: probe)
             }
@@ -50,9 +64,10 @@ struct TransportControls: View {
                 } label: {
                     Label(isPlaying ? "Pause" : "Play", systemImage: isPlaying ? "pause.fill" : "play.fill")
                         .contentTransition(.symbolEffect(.replace))
+                        .iconOnly(!titles)
                 }
                 .widgetButton(.playbackButtons, in: style)
-                .transportGlass(look(.playPause), titled: titled(.playbackButtons))
+                .transportGlass(look(.playPause), titled: titles && titled(.playbackButtons))
                 .help(isPlaying ? "Pause" : "Play")
                 // Tagged inside the size it is drawn at (a size up from its row): unlocked, it
                 // keeps that size.
@@ -66,10 +81,11 @@ struct TransportControls: View {
                 } label: {
                     Label("Next", systemImage: "forward.fill")
                         .imageScale(.small)
+                        .iconOnly(!titles)
                 }
                 .widgetButton(.skipButtons.part("next"), in: style)
                 .widgetButton(.skipButtons, in: style)
-                .transportGlass(look(.next), titled: titled(.skipButtons.part("next"), .skipButtons))
+                .transportGlass(look(.next), titled: titles && titled(.skipButtons.part("next"), .skipButtons))
                 .help("Next")
                 .buttonElement(.skipButtons.part("next"), in: probe)
             }
@@ -241,11 +257,12 @@ struct ScrubTrack: View {
             let fraction = duration > 0 ? min(max(position / duration, 0), 1) : 0
             ZStack(alignment: .leading) {
                 line.barShape(height: height).fill(line.trackStyle(.white.opacity(0.22), artwork: artwork))
-                if renderMode == .canvas {
+                if renderMode == .canvas || line.mode == .gradient {
                     // A picture of the line where it stands, as its layer draws it: drawn off
-                    // screen too (the Customize transition's snapshot), which a layer is not.
+                    // screen too (the Customize transition's snapshot), which a layer is not. A
+                    // gradient too: the layer draws one colour.
                     line.barShape(height: height)
-                        .fill(line.fillColor(value: fraction, artwork: artwork) ?? .white)
+                        .fill(line.fillStyle(value: fraction, artwork: artwork) ?? AnyShapeStyle(.white))
                         .opacity(0.9)
                         .frame(width: PlayedLineView.width(fraction, in: proxy.size.width, height: height))
                 } else {
@@ -413,5 +430,12 @@ final class PlayedLineView: NSView {
     /// A capsule never narrower than it is tall.
     nonisolated static func width(_ fraction: Double, in width: CGFloat, height: CGFloat) -> CGFloat {
         max(height, width * CGFloat(fraction))
+    }
+}
+
+extension View {
+    /// The symbol alone, over whatever label style the button's style sets (it is nearer).
+    @ViewBuilder func iconOnly(_ on: Bool) -> some View {
+        if on { labelStyle(.iconOnly) } else { self }
     }
 }

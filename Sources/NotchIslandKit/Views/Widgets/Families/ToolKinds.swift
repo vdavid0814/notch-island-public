@@ -213,8 +213,8 @@ struct ClipboardWidget: View {
 
     var body: some View {
         let wanted = min(widget.config.count ?? 3, 5)
-        let rowHeight: CGFloat = size.height < 56 ? size.height : max(min(size.height / CGFloat(wanted), 30), 20)
-        let rows = max(min(wanted, Int(size.height / rowHeight)), 1)
+        let rowHeight: CGFloat = size.height < 56 ? max(size.height, 1) : max(min(size.height / CGFloat(wanted), 30), 20)
+        let rows = max(min(wanted, Int(max(size.height, 0) / rowHeight)), 1)
         let items: [ClipboardItem] = isPreview
             ? Self.samples.prefix(rows).map { ClipboardItem(text: $0, copied: Date()) }
             : Array(model.clipboard.items.prefix(rows))

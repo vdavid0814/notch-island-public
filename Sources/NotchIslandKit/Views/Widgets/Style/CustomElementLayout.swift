@@ -45,8 +45,11 @@ struct ArrangedFamily<Family: View & WidgetFamilyElements>: View {
             let whole = CGSize(width: size.width + 2 * padding, height: size.height + 2 * padding)
             let scale = model.layout.scale.factor
             if case .custom(let layout, _) = layouts.resolve(LayoutClass(size: whole, scale: scale)) {
-                let arrangement = ResolvedArrangement.resolve(layout, size: whole, padding: padding,
+                var arrangement = ResolvedArrangement.resolve(layout, size: whole, padding: padding,
                                                               contentScale: CGFloat(widget.style.layout.contentScale ?? 1))
+                // What the widget does not show is not drawn, wherever its rectangle is (an element
+                // switched off by the options alone, before the outline's eye parked it too).
+                let _ = arrangement.items.removeAll { !$0.id.isCustom && !widget.showsElementOrPart($0.id) }
                 // `widget` is already as drawn (`drawn(_:size:scale:)`): planned at the sizes the
                 // elements were unlocked at.
                 let input = PlanInput(widget: widget, size: whole, scale: scale, displayScale: displayScale)
@@ -408,6 +411,8 @@ nonisolated struct ResolvedArrangement: Equatable, Sendable {
         var aspect: CGFloat? = nil
         /// The type or symbol size it was unlocked at (`ElementFrame.points`), as drawn here.
         var points: CGFloat? = nil
+        /// Text: the most lines it wraps to (`ElementFrame.lines`).
+        var lines: Int? = nil
 
         /// Its rectangle, or where a reflow stretched it one way, the largest of its own proportions
         /// inside it: a lone button keeps its shape in another widget's size.
@@ -452,7 +457,8 @@ nonisolated struct ResolvedArrangement: Equatable, Sendable {
             }
             return Item(id: placed.id, frame: CGRect(x: snapped(placed.frame.minX), y: snapped(placed.frame.minY),
                                                      width: snapped(placed.frame.width), height: snapped(placed.frame.height)),
-                        natural: natural, isProportional: isProportional, aspect: aspect, points: points)
+                        natural: natural, isProportional: isProportional, aspect: aspect, points: points,
+                        lines: authored[placed.id]?.lines)
         }
         let resolved = ResolvedArrangement(items: items)
         cache.withLock { $0[key] = resolved }
@@ -475,8 +481,9 @@ nonisolated struct ResolvedArrangement: Equatable, Sendable {
 /// The sizes of a custom layout's elements, from their rectangles: the same `WidgetPlan` a kind's
 /// planner gives, so the editor's size ranges and clamp badges work alike.
 ///
-/// - Text fills its frame: the largest size whose lines fit its height (`TextFit.points(forFrameHeight:)`);
-///   a fixed size is drawn exactly, or clamped to that and flagged.
+/// - Text is drawn at its own size (`ElementFrame.points`, or the style's) exactly: its rectangle is
+///   its lines' height, and what is too long for it is cut or shrunk (`TextStyle.truncation`). Text
+///   without a size of its own fills its frame: the largest size whose lines fit its height.
 /// - A symbol is the largest that fits its rectangle; a fixed one is clamped and flagged the same way.
 /// - Anything else (a button, a line, an image) takes its rectangle.
 /// - An element without a rectangle is not drawn (it did not fit when unlocked, or was parked).
@@ -499,13 +506,19 @@ nonisolated struct CustomLayoutPlanner: Sendable {
 
     private func plan(_ demand: ElementDemand, in frame: CGRect) -> ElementPlan {
         let fixed: CGFloat? = if case .fixed(let points) = demand.size { CGFloat(points) } else { nil }
-        let room: CGFloat
+        var room: CGFloat
         var type: TypeSpec?
         var lines = 1
         var symbol: SymbolSpec?
         switch demand.content {
-        case .text(_, let spec, let limit):
+        case .text(let samples, let spec, let limit):
             room = Self.textPoints(height: frame.height, lines: limit, spec: spec)
+            if let fixed {
+                // Its own size, whatever the rectangle: the editor keeps the rectangle its lines' height.
+                return ElementPlan(points: fixed, range: TextFit.minimumPoints...max(fixed, room, TextFit.minimumPoints), size: frame.size,
+                                   variant: 0, isClamped: false, type: spec, lines: limit)
+            }
+            if limit == 1, let sample = samples.first { room = Self.widened(room, sample: sample, spec: spec, width: frame.width, scale: displayScale) }
             (type, lines) = (spec, limit)
         case .symbol(let name, let weight):
             room = SymbolFit.maxPoints(name, weight: weight, room: frame.size, scale: displayScale) ?? 0
@@ -521,6 +534,24 @@ nonisolated struct CustomLayoutPlanner: Sendable {
         let points = fixed.map { $0 <= room + slack ? $0 : room } ?? room
         return ElementPlan(points: points, range: TextFit.minimumPoints...max(room, TextFit.minimumPoints), size: frame.size,
                            variant: 0, isClamped: fixed.map { points < $0 } ?? false, type: type, lines: lines, symbol: symbol)
+    }
+
+    /// `points` made smaller as far as the style's wider letters (more space between them, Expanded,
+    /// capitals) would no longer fit `width` where the plain letters do: a "5:00" with 10 pt between
+    /// its letters read "5 : …". Text no wider than it is plainly (or the kind's own) is left as it
+    /// is, so a layout just unlocked draws what it drew.
+    static func widened(_ points: CGFloat, sample: String, spec: TypeSpec, width: CGFloat, scale: CGFloat) -> CGFloat {
+        guard !sample.isEmpty, width > 0 else { return points }
+        var plain = spec
+        plain.tracking = min(spec.tracking, 0)
+        plain.textCase = .asIs
+        if spec.width == .expanded { plain.width = .standard }
+        let allowed = max(width, WidgetTypography.width(sample, plain.at(points), scale: scale))
+        var fitted = points
+        while fitted > TextFit.minimumPoints, WidgetTypography.width(sample, spec.at(fitted), scale: scale) > allowed + 0.5 {
+            fitted -= TextFit.step
+        }
+        return fitted
     }
 
     /// The size text takes from a frame of `height`.
@@ -541,15 +572,22 @@ extension IslandWidget {
         let padding = WidgetMetrics.padding(for: self)
         let whole = CGSize(width: size.width + 2 * padding, height: size.height + 2 * padding)
         guard case .custom(let layout, _) = layouts.resolve(LayoutClass(size: whole, scale: scale)),
-              layout.items.contains(where: { $0.points != nil }) else { return self }
+              layout.items.contains(where: { $0.points != nil || $0.lines != nil }) else { return self }
         let arrangement = ResolvedArrangement.resolve(layout, size: whole, padding: padding,
                                                       contentScale: CGFloat(style.layout.contentScale ?? 1))
         var widget = self
         for item in arrangement.items {
-            guard let points = item.points else { continue }
             // By its role; one the kind does not name gets both, and draws with the one it reads.
             let role = widget.kind.spec.element(item.id)?.role
-            if role != .symbol, widget.style.elements[item.id]?.text.points == nil {
+            let isText = role == .text || role == nil && layout.decorations[item.id]?.text != nil
+            if let lines = item.lines, isText {
+                widget.style.elements[item.id, default: ElementStyle()].text.lineLimit = lines
+            }
+            guard let points = item.points else { continue }
+            // Text: its own size in this layout, over the style's (a resize sets it).
+            if isText {
+                widget.style.elements[item.id, default: ElementStyle()].text.points = Double(points)
+            } else if role != .symbol, widget.style.elements[item.id]?.text.points == nil {
                 widget.style.elements[item.id, default: ElementStyle()].text.points = Double(points)
             }
             if role == .symbol || role == nil, widget.style.elements[item.id]?.symbol.points == nil {

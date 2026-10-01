@@ -68,34 +68,39 @@ nonisolated enum LayoutEdit {
 
     // MARK: Frames
 
-    /// The element's rectangle (clamped into the widget); nothing for one not placed.
+    /// The element's rectangle (no smaller than the least, some of it over the widget); nothing for
+    /// one not placed. Its type stays as it is: a resize sets that itself (`setText`).
     static func setRect(_ rect: UnitRect, of id: ElementID, in layout: inout CustomLayout) {
         guard let index = layout.items.firstIndex(where: { $0.id == id }) else { return }
-        let rect = rect.clamped
-        // Made taller or shorter, its type follows its rectangle from now on.
-        if abs(rect.height - layout.items[index].rect.height) > 0.0005 { layout.items[index].points = nil }
-        layout.items[index].rect = rect
+        layout.items[index].rect = rect.clamped
     }
 
-    /// The picked elements moved by a fraction of the widget, together: as far as the one nearest
-    /// an edge can go, so they keep their places among themselves. Locked ones stay.
+    /// A text element's type size and lines in this layout (nil leaves one as it is).
+    static func setText(points: Double? = nil, lines: Int? = nil, of id: ElementID, in layout: inout CustomLayout) {
+        guard let index = layout.items.firstIndex(where: { $0.id == id }) else { return }
+        if let points { layout.items[index].points = max(points, Double(TextFit.minimumPoints)) }
+        if let lines { layout.items[index].lines = ElementFrame.lineRange.clamp(lines) }
+    }
+
+    static func setGrowsLines(_ grows: Bool, _ ids: Set<ElementID>, in layout: inout CustomLayout) {
+        for index in layout.items.indices where ids.contains(layout.items[index].id) { layout.items[index].growsLines = grows }
+    }
+
+    /// The picked elements moved by a fraction of the widget, together.
     static func move(_ ids: Set<ElementID>, dx: Double, dy: Double, in layout: inout CustomLayout) {
-        let moving = layout.items.filter { ids.contains($0.id) && !$0.locked }
-        guard !moving.isEmpty else { return }
-        let dx = min(max(dx, -(moving.map(\.rect.x).min() ?? 0)), 1 - (moving.map { $0.rect.x + $0.rect.width }.max() ?? 1))
-        let dy = min(max(dy, -(moving.map(\.rect.y).min() ?? 0)), 1 - (moving.map { $0.rect.y + $0.rect.height }.max() ?? 1))
-        for index in layout.items.indices where ids.contains(layout.items[index].id) && !layout.items[index].locked {
+        for index in layout.items.indices where ids.contains(layout.items[index].id) {
             layout.items[index].rect.x += dx
             layout.items[index].rect.y += dy
+            layout.items[index].rect = layout.items[index].rect.clamped
         }
     }
 
     static func align(_ ids: Set<ElementID>, _ alignment: Alignment, in layout: inout CustomLayout) {
-        let picked = layout.items.filter { ids.contains($0.id) && !$0.locked }
+        let picked = layout.items.filter { ids.contains($0.id) }
         guard !picked.isEmpty else { return }
         // One alone: to the widget.
         let frame = picked.count == 1 ? UnitRect(x: 0, y: 0, width: 1, height: 1) : union(picked.map(\.rect))
-        for index in layout.items.indices where ids.contains(layout.items[index].id) && !layout.items[index].locked {
+        for index in layout.items.indices where ids.contains(layout.items[index].id) {
             var rect = layout.items[index].rect
             switch alignment {
             case .left: rect.x = frame.x
@@ -113,7 +118,7 @@ nonisolated enum LayoutEdit {
     static func distribute(_ ids: Set<ElementID>, _ axis: Distribution, in layout: inout CustomLayout) {
         func low(_ rect: UnitRect) -> Double { axis == .horizontal ? rect.x : rect.y }
         func length(_ rect: UnitRect) -> Double { axis == .horizontal ? rect.width : rect.height }
-        let picked = layout.items.filter { ids.contains($0.id) && !$0.locked }.sorted { low($0.rect) < low($1.rect) }
+        let picked = layout.items.filter { ids.contains($0.id) }.sorted { low($0.rect) < low($1.rect) }
         guard picked.count >= 3, let first = picked.first, let last = picked.last else { return }
         let span = low(last.rect) + length(last.rect) - low(first.rect)
         let gap = (span - picked.map { length($0.rect) }.reduce(0, +)) / Double(picked.count - 1)
@@ -177,6 +182,32 @@ nonisolated enum LayoutEdit {
         layout.items = items
     }
 
+    /// Where an element lies among those it overlaps: over all of them, or under one.
+    nonisolated enum Layer: String, Sendable, CaseIterable {
+        case front, behind
+
+        var title: String { self == .front ? String(localized: "In Front") : String(localized: "Behind") }
+    }
+
+    /// In front when it is drawn over everything its rectangle overlaps (or overlaps nothing).
+    static func layer(of id: ElementID, in layout: CustomLayout) -> Layer {
+        guard let index = layout.items.firstIndex(where: { $0.id == id }) else { return .front }
+        let rect = layout.items[index].rect
+        let over = layout.items.indices.contains { other in
+            other > index && overlaps(layout.items[other].rect, rect)
+        }
+        return over ? .behind : .front
+    }
+
+    /// In front: drawn over everything; behind: under everything (the picture it lies on covers it).
+    static func setLayer(_ layer: Layer, _ ids: Set<ElementID>, in layout: inout CustomLayout) {
+        reorder(ids, layer == .front ? .front : .back, in: &layout)
+    }
+
+    static func overlaps(_ a: UnitRect, _ b: UnitRect) -> Bool {
+        min(a.x + a.width, b.x + b.width) - max(a.x, b.x) > 1e-6 && min(a.y + a.height, b.y + b.height) - max(a.y, b.y) > 1e-6
+    }
+
     // MARK: Flags
 
     static func setLocked(_ locked: Bool, _ ids: Set<ElementID>, in layout: inout CustomLayout) {
@@ -213,19 +244,43 @@ nonisolated enum LayoutEdit {
     /// every size's custom layout: off, it goes to the tray, as Delete sends it; on, it comes back
     /// on the widget — one never laid out there, in the middle, `role`'s size — so a switch turned
     /// on always shows it.
-    static func setShown(_ id: ElementID, _ on: Bool, role: ElementRole, in arrangement: inout ElementArrangement?) {
+    static func setShown(_ id: ElementID, _ on: Bool, role: ElementRole, parts: [ElementID] = [],
+                         in arrangement: inout ElementArrangement?) {
         guard case .custom(var layouts)? = arrangement else { return }
+        // An element laid out as its parts (Now Playing's previous and next) is its parts there.
+        let ids = parts.isEmpty ? [id] : parts
         for (size, variant) in layouts.variants {
             guard case .custom(var layout) = variant else { continue }
             if on {
                 let width = role == .text ? 0.5 : 0.35, height = role == .text ? 0.22 : 0.35
-                place(id, at: UnitRect(x: (1 - width) / 2, y: (1 - height) / 2, width: width, height: height), in: &layout)
+                for id in ids { place(id, at: freeSpot(width: width, height: height, in: layout), in: &layout) }
             } else {
-                hide([id], in: &layout)
+                hide(Set(ids), in: &layout)
             }
             layouts.variants[size] = .custom(layout)
         }
         arrangement = .custom(layouts)
+    }
+
+    /// Elements whose own size changed (a button given its label, another shape…) measured again
+    /// in every size's custom layout: the size they had where they were unlocked no longer holds them.
+    static func remeasure(_ ids: Set<ElementID>, in arrangement: inout ElementArrangement?) {
+        guard !ids.isEmpty, case .custom(var layouts)? = arrangement else { return }
+        for (size, variant) in layouts.variants {
+            guard case .custom(var layout) = variant else { continue }
+            for index in layout.items.indices where ids.contains(layout.items[index].id) { layout.items[index].natural = nil }
+            layouts.variants[size] = .custom(layout)
+        }
+        arrangement = .custom(layouts)
+    }
+
+    /// The buttons whose look changed from `before` (label, shape, size…) measured again: their own
+    /// size changed with it.
+    static func remeasureButtons(changedFrom before: WidgetStyle, in style: inout WidgetStyle) {
+        let changed = Set(before.elements.keys).union(style.elements.keys).filter {
+            before.elements[$0]?.button != style.elements[$0]?.button
+        }
+        remeasure(changed, in: &style.layout.arrangement)
     }
 
     /// An element made smaller or larger by its size (Settings' Elements: S, M, L), in every size's
@@ -237,13 +292,48 @@ nonisolated enum LayoutEdit {
         for (size, variant) in layouts.variants {
             guard case .custom(var layout) = variant, let index = layout.items.firstIndex(where: { $0.id == id }) else { continue }
             let rect = layout.items[index].rect
-            let width = min(rect.width * factor, 1), height = min(rect.height * factor, 1)
+            let width = rect.width * factor, height = rect.height * factor
             layout.items[index].rect = UnitRect(x: rect.x + (rect.width - width) / 2, y: rect.y + (rect.height - height) / 2,
                                                 width: width, height: height).clamped
-            layout.items[index].points = nil
+            layout.items[index].points = layout.items[index].points.map { $0 * factor }
             layouts.variants[size] = .custom(layout)
         }
         arrangement = .custom(layouts)
+    }
+
+    /// Where an element shown again goes: a rectangle of about that size inside the padding that
+    /// covers nothing placed, as near the middle as there is one (smaller where none of the full
+    /// size is free); the one covering least where every place covers something.
+    static func freeSpot(width: Double, height: Double, in layout: CustomLayout) -> UnitRect {
+        let padding = layout.authoredPadding ?? 0
+        let insetX = layout.authoredSize.width > 0 ? min(Double(padding / layout.authoredSize.width), 0.25) : 0
+        let insetY = layout.authoredSize.height > 0 ? min(Double(padding / layout.authoredSize.height), 0.25) : 0
+        let others = layout.items.map(\.rect)
+        func covered(_ rect: UnitRect) -> Double {
+            others.reduce(0) { sum, other in
+                let w = min(rect.x + rect.width, other.x + other.width) - max(rect.x, other.x)
+                let h = min(rect.y + rect.height, other.y + other.height) - max(rect.y, other.y)
+                return sum + max(w, 0) * max(h, 0)
+            }
+        }
+        var best: (rect: UnitRect, covered: Double, distance: Double)?
+        for factor in [1.0, 0.75, 0.5] {
+            let w = min(width * factor, 1 - 2 * insetX), h = min(height * factor, 1 - 2 * insetY)
+            let steps = 20
+            for i in 0...steps {
+                for j in 0...steps {
+                    let x = insetX + (1 - 2 * insetX - w) * Double(i) / Double(steps)
+                    let y = insetY + (1 - 2 * insetY - h) * Double(j) / Double(steps)
+                    let rect = UnitRect(x: x, y: y, width: w, height: h)
+                    let area = covered(rect)
+                    let distance = abs(x + w / 2 - 0.5) + abs(y + h / 2 - 0.5)
+                    if let current = best, (current.covered, current.distance) <= (area, distance) { continue }
+                    best = (rect, area, distance)
+                }
+            }
+            if let best, best.covered < 1e-9 { return best.rect }
+        }
+        return best?.rect ?? UnitRect(x: (1 - width) / 2, y: (1 - height) / 2, width: width, height: height)
     }
 
     /// An element of the tray placed on the widget at `rect`, in front.
@@ -252,6 +342,9 @@ nonisolated enum LayoutEdit {
         layout.parked.removeAll { $0 == id }
         layout.items.append(ElementFrame(id: id, rect: rect.clamped))
     }
+
+    /// A new label's type size, in the layout's points.
+    static let labelPoints = 13.0
 
     /// A new decoration at `rect`, in front; its id.
     @discardableResult
@@ -264,6 +357,8 @@ nonisolated enum LayoutEdit {
         }
         if case .shape(.circle) = decoration { frame.keepsAspect = true }
         if case .symbol = decoration { frame.keepsAspect = true }
+        // A label: one line of its own type (`DecorationView.labelType`, in the layout's points).
+        if case .label = decoration { (frame.points, frame.lines) = (Self.labelPoints, 1) }
         layout.items.append(frame)
         return id
     }

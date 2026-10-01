@@ -141,14 +141,43 @@ import SwiftUI
             // Only Esc in the panel itself: in a popover it closes the popover first.
             guard event.keyCode == 53, let self, self.model.island.presentation.isSettings,
                   event.window === self.panel else { return event }
+            // A popover open over Settings is not key (it took no keystroke yet), so its Esc lands
+            // here: it is the popover's, not Settings'.
+            if let popover = self.ownWindows(excludingPanel: true).first(where: { String(describing: type(of: $0)).contains("Popover") }) {
+                popover.makeKey()
+                popover.sendEvent(event)
+                return nil
+            }
             self.model.controller.closeSettings()
             return nil
         }
-        // A global monitor sees only clicks in other apps' windows: exactly the clicks outside.
+        // A global monitor sees clicks in other apps' windows: the clicks outside. Not only those:
+        // while the app is not active (Settings opened from the island's gear: the panel never
+        // activates it), a click in one of its popovers — a colour's tab, Delete Page… — is reported
+        // here too, and so is one that a see-through pixel of the panel let pass. Judged by where it
+        // landed: on the island or one of our own windows, it is ours.
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
-            guard let self, !self.model.assistant.isAwaitingFileAccess else { return }
+            guard let self, !self.model.assistant.isAwaitingFileAccess,
+                  !self.isOverOwnUI(NSEvent.mouseLocation) else { return }
             self.model.controller.closeKeyboardOverlay()
         }
+    }
+
+    /// Our visible windows that take clicks (popovers, menus, the colour panel…), the panel too
+    /// unless excluded. Overlays that let every click through (the anchor's, the cards') are not.
+    private func ownWindows(excludingPanel: Bool) -> [NSWindow] {
+        NSApp.windows.filter { window in
+            window.isVisible && !window.ignoresMouseEvents && !(excludingPanel && window === panel)
+        }
+    }
+
+    /// `point` (screen coordinates) is on the island as it is drawn, or on another of our windows.
+    private func isOverOwnUI(_ point: NSPoint) -> Bool {
+        if let panel, let hostingView, panel.isVisible,
+           hostingView.islandRect.contains(panel.convertPoint(fromScreen: point)) {
+            return true
+        }
+        return ownWindows(excludingPanel: true).contains { $0.frame.contains(point) }
     }
 
     /// One of our own windows that comes and goes over the panel: a popover, a menu, a sheet or an

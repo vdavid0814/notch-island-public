@@ -39,7 +39,7 @@ nonisolated enum BatterySpecs {
             symbol: "chart.bar.fill", iconColors: green, category: .battery, family: .battery,
             minimumSize: GridSize(width: 3, height: 1), defaultSize: GridSize(width: 4, height: 2),
             maximumSize: GridSize(width: 12, height: 3),
-            elements: [ElementSpec(.chart, "Chart", symbol: "chart.bar", role: .chart, priority: 100, isBlock: true)]
+            elements: [ElementSpec(.chart, "Chart", symbol: "chart.bar", role: .chart, priority: 100, isSizable: false, isBlock: true)]
                 + ElementSpec.reading(["100%"], caption: "Today").filter { $0.id != .symbol },
             isAvailable: { BatteryAvailability.hasBattery }
         ),

@@ -340,7 +340,9 @@ private func scratchDefaults() -> (UserDefaults, String) {
         #expect(IslandWidgetKind.stopwatch.defaultOptions == [.readout, .resetButton])
         // The switchable ones: those always drawn (a start button, a slider) have no switch.
         let sizable = IslandWidgetKind.allCases.flatMap { $0.spec.elements.filter { !$0.isSizable && !$0.isRequired }.map(\.id) }
-        #expect(Set(sizable) == [.progress, .skipButtons, .addMinute, .timerSeconds, .timerHours, .resetButton, .shelfActions])
+        // The shelf's pictures and the battery's chart fill their room whatever their size: no S, M, L.
+        #expect(Set(sizable) == [.progress, .skipButtons, .addMinute, .timerSeconds, .timerHours, .resetButton, .shelfActions,
+                                 .previews, .chart])
         #expect(IslandWidgetKind.nowPlaying.spec.element(.skipButtons)?.parts == [ElementID(rawValue: "skipButtons.previous"),
                                                                                 ElementID(rawValue: "skipButtons.next")])
     }
@@ -486,8 +488,8 @@ private func scratchDefaults() -> (UserDefaults, String) {
         var stray = ElementStyle()
         stray.text.italic = true
         style.elements[.percentage] = stray                              // Now Playing has no percentage
-        style.elements[.trackInfo]?.text.points = 400
-        style.elements[.trackInfo]?.text.lineLimit = 9
+        style.elements[.trackInfo]?.text.points = 900
+        style.elements[.trackInfo]?.text.lineLimit = 40
         style.elements[.trackInfo]?.text.labelOverride = "   "
         style.elements[.trackInfo]?.colors[.primary] = .rgb(IslandTheme.RGB(red: 2, green: -1, blue: 0.5), alpha: 3)
         style.layout.order = [.percentage, .artwork, .artwork]
@@ -497,7 +499,8 @@ private func scratchDefaults() -> (UserDefaults, String) {
         style.sanitize(for: .nowPlaying)
         #expect(Set(style.elements.keys) == [.trackInfo, .artwork])
         let text = style.elements[.trackInfo]!.text
-        #expect(text.points == 96 && text.lineLimit == 3 && text.labelOverride == nil)
+        #expect(text.points == TextStyle.pointRange.upperBound && text.lineLimit == TextStyle.lineLimitRange.upperBound
+                && text.labelOverride == nil)
         #expect(style.elements[.trackInfo]!.colors[.primary] == .rgb(IslandTheme.RGB(red: 1, green: 0, blue: 0.5), alpha: 1))
         #expect(style.layout.order == [.artwork] && style.layout.contentScale == 1.5)
         #expect(style.behaviour.tap == .standard && style.format.percentDecimals == 2)
@@ -598,7 +601,9 @@ private func scratchDefaults() -> (UserDefaults, String) {
         layout.sanitize(for: IslandWidgetKind.nowPlaying.spec, standardPadding: WidgetMetrics.padding)
 
         #expect(layout.items.map(\.id) == [.artwork, .trackInfo, ElementID.skipButtons.part("next"), decoration])
-        #expect(layout.items[1].rect == UnitRect(x: 0.5, y: 0, width: 0.5, height: UnitRect.minimumSide))
+        // Some of it over the widget, no thinner than the least: it may reach past the widget's edges.
+        #expect(layout.items[1].rect == UnitRect(x: 0.9, y: -0.5, width: 0.5, height: UnitRect.minimumSide).clamped)
+        #expect(layout.items[1].rect.x == 0.9 && layout.items[1].rect.y == UnitRect.visible - UnitRect.minimumSide)
         // Every element of the kind is placed or parked; skip counts as placed through its part.
         #expect(layout.parked == [.progress, .artist, .playbackButtons])
         #expect(Array(layout.decorations.keys) == [decoration])

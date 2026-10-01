@@ -59,7 +59,8 @@ struct WidgetsSettingsPage: View {
                     }
                     .animation(.spring(duration: 0.35, bounce: 0.12), value: selection)
                     .animation(.spring(duration: 0.35, bounce: 0.12), value: group.count >= 2)
-                    .animation(.spring(duration: 0.35, bounce: 0.12), value: model.studio.mode)
+                    // Faded out while the stage switches modes (`WidgetStudio.switchMode`).
+                    .opacity(model.studio.contentOpacity)
                 }
                 .padding(.horizontal, 28)
                 .padding(.top, 10)
@@ -238,9 +239,8 @@ private struct StudioStage: View {
                 }
                 Spacer(minLength: 0)
                 // What the stage edits: the widgets, the top bar, or the panel's size and grid.
-                Picker("Edit", selection: Binding(get: { model.studio.mode }, set: { mode in
-                    withAnimation(.spring(duration: 0.35, bounce: 0.12)) { model.studio.mode = mode }
-                })) {
+                Picker("Edit", selection: Binding(get: { model.studio.pendingMode ?? model.studio.mode },
+                                                  set: { model.studio.switchMode(to: $0) })) {
                     ForEach(WidgetStudio.Mode.allCases) { Text($0.title).tag($0) }
                 }
                 .choiceBar()
@@ -525,7 +525,8 @@ private struct WidgetInspector: View {
                 }
             }
             LabeledSetting("Accent Colour") {
-                TintWell(selection: widget.tint, automaticHint: kind == .nowPlaying ? "from the artwork" : "the system's accent") { tint in
+                TintWell(selection: widget.tint, automaticHint: kind == .nowPlaying ? "from the artwork" : "the system's accent",
+                         purpose: kind.accentPurpose) { tint in
                     withAnimation(Motion.content) { model.editedWidgets.update(id) { $0.tint = tint } }
                 }
             }
@@ -643,7 +644,7 @@ private struct ElementRow: View {
                 change { widget in
                     if new { widget.options.insert(option) } else { widget.options.remove(option) }
                     // Laid out freely: on the widget or in its tray with it.
-                    LayoutEdit.setShown(option, new, role: element.role, in: &widget.style.layout.arrangement)
+                    LayoutEdit.setShown(option, new, role: element.role, parts: element.parts, in: &widget.style.layout.arrangement)
                 }
             }))
             .toggleStyle(.switch)

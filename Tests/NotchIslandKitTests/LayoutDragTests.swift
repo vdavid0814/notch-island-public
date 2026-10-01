@@ -145,37 +145,73 @@ private func describe(_ rect: CGRect?) -> String {
         }
     }
 
-    /// Text drawn smaller than its type because its line is wider than its rectangle
-    /// (`minimumScaleFactor`): how much smaller only SwiftUI knows, so the letters are foreseen to
-    /// a point, and once resized it draws at its own size and does not come back to the squeezed one.
-    private func isSqueezed(_ harness: CanvasHarness, _ id: ElementID) -> Bool {
-        guard let letters = harness.session.inks[id] else { return false }
-        let natural = NSHostingView(rootView: Text("0").font(letters.type.font).fixedSize()).fittingSize.height
-        return letters.box.height < natural - 0.5
-    }
-
+    /// Every element is drawn exactly where its resize showed it; a button's side changes that side
+    /// alone; text made wider or narrower keeps its type; anything but text comes back when dragged back.
     @Test(arguments: names) func resizedElementsLandWhereTheDragShowedAndComeBack(_ name: String) throws {
         let harness = try unlocked(name)
         for id in harness.session.elementFrames.map(\.id) {
             for (handle, delta) in [(ResizeHandle.bottom, CGSize(width: 0, height: -3)), (.trailing, CGSize(width: -4, height: 0)),
                                     (.bottomTrailing, CGSize(width: -4, height: -3))] {
                 guard let start = harness.frame(id) else { continue }
-                let squeezed = isSqueezed(harness, id)
+                let type = harness.session.textType(id)
                 let landed = harness.resize(id, handle, by: delta)
                 let after = harness.frame(id)
-                #expect(close(after, landed, squeezed ? 1.25 : 0.75), "\(name) \(id.rawValue) \(handle): landed \(describe(landed)), drawn \(describe(after))")
+                #expect(close(after, landed), "\(name) \(id.rawValue) \(handle): landed \(describe(landed)), drawn \(describe(after))")
+                if let type, handle == .trailing, let now = harness.session.textType(id) {
+                    #expect(abs(now.points - type.points) < 0.05, "\(name) \(id.rawValue): \(type.points) pt → \(now.points) pt as it was made narrower")
+                }
                 // A button's side changes that side alone.
                 if harness.session.widget?.kind.spec.filledButtons.contains(id) == true, let after, handle != .bottomTrailing {
                     if handle.vertical == 0 { #expect(abs(after.height - start.height) < 0.75, "\(name) \(id.rawValue): taller as it was made wider") }
                     if handle.horizontal == 0 { #expect(abs(after.width - start.width) < 0.75, "\(name) \(id.rawValue): wider as it was made taller") }
                 }
-                guard let resized = after, !squeezed else { continue }
+                guard let resized = after, type == nil else { continue }
                 // Back by the same handle.
                 harness.resize(id, handle, by: CGSize(width: handle.horizontal == 0 ? 0 : start.maxX - resized.maxX,
                                                       height: handle.vertical == 0 ? 0 : start.maxY - resized.maxY))
                 #expect(close(harness.frame(id), start, 1), "\(name) \(id.rawValue) \(handle): back at \(describe(harness.frame(id))), was \(describe(start))")
             }
         }
+    }
+
+    /// Text resized: wider, the same type and height; taller, more lines (or, not growing lines,
+    /// larger type); kept in shape, its type scales with it. Its rectangle is always its lines' height.
+    @Test func textIsResizedByLinesAndType() throws {
+        let harness = try unlocked("nowPlaying-7x3")
+        let id = ElementID.artist
+        let session = harness.session
+        let type = try #require(session.textType(id))
+        let line = WidgetTypography.lineHeight(type)
+        // Wider: only the width.
+        let start = try #require(harness.frame(id))
+        harness.resize(id, .trailing, by: CGSize(width: 20, height: 0))
+        let wider = try #require(harness.frame(id))
+        #expect(abs(wider.width - start.width - 20) < 0.75)
+        #expect(abs(wider.height - TextFit.frameHeight(points: type.points, lines: 1, spec: type)) < 0.5)
+        #expect(abs((session.textType(id)?.points ?? 0) - type.points) < 0.05)
+        // Taller by a line: two lines, its type as it was, its top held.
+        harness.resize(id, .bottom, by: CGSize(width: 0, height: line))
+        let taller = try #require(harness.frame(id))
+        #expect(session.textLines(id) == 2)
+        #expect(abs(taller.height - TextFit.frameHeight(points: type.points, lines: 2, spec: type)) < 0.5)
+        #expect(abs(taller.minY - wider.minY) < 0.5)
+        #expect(abs((session.textType(id)?.points ?? 0) - type.points) < 0.05)
+        // Not growing lines: taller makes larger type.
+        session.editLayout { LayoutEdit.setGrowsLines(false, [id], in: &$0) }
+        harness.render()
+        harness.resize(id, .bottom, by: CGSize(width: 0, height: taller.height))
+        let larger = try #require(session.textType(id))
+        #expect(session.textLines(id) == 2 && larger.points > type.points * 1.6)
+        // Kept in shape: a corner scales its type with it.
+        session.editLayout { LayoutEdit.setKeepsAspect(true, [id], in: &$0) }
+        harness.render()
+        let before = try #require(harness.frame(id))
+        harness.resize(id, .bottomTrailing, by: CGSize(width: before.width * 0.5, height: before.height * 0.5))
+        let scaled = try #require(session.textType(id))
+        #expect(abs(scaled.points / larger.points - 1.5) < 0.05, "\(larger.points) → \(scaled.points)")
+        // Nothing holds it inside the widget.
+        harness.resize(id, .bottomTrailing, by: CGSize(width: harness.size.width * 2, height: harness.size.height * 2))
+        #expect((harness.frame(id)?.maxX ?? 0) > harness.size.width)
     }
 }
 

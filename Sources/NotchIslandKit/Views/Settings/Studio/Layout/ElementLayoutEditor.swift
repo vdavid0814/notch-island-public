@@ -2,15 +2,15 @@ import AppKit
 import SwiftUI
 
 /// Over the widget on the Customize canvas: its elements picked (a click, ⇧/⌘-click, a marquee),
-/// dragged to move and resized by eight handles on the grid inside the widget. Drawn outside the
-/// magnification, so its handles and one-point lines stay crisp at every zoom.
+/// dragged to move and resized by their handles — four corners for one that keeps its shape, eight
+/// otherwise. Drawn outside the magnification, so its handles and one-point lines stay crisp at
+/// every zoom.
 ///
 /// The first drag of a widget still laid out by its kind unlocks it where its elements are drawn
-/// (one undo step, with the drag). A move only moves; a resize lays the content out again at each
-/// new place it lands on, at once, so the element is always the size its outline shows. Everything lands on the
-/// grid's lines, the widget's edges, centre and padding line, and the other elements' edges and
-/// centres (`InnerSnapper`); ⌘ turns that off. What is drawn while dragging is where the element
-/// lands — snapped, kept inside the widget and above its least size — never a frame it cannot take.
+/// (one undo step, with the drag). The outline is the element's rectangle, and it is drawn there at
+/// once as it is dragged (`LayoutDrag`). Everything lands on the grid's lines, the widget's edges,
+/// centre and padding line, and the other elements' edges and centres (`InnerSnapper`); ⌘ turns
+/// that off. Nothing limits how large an element is made or where it goes.
 struct ElementLayoutEditor: View {
     let session: EditorSession
     let geometry: CanvasGeometry
@@ -38,7 +38,7 @@ struct ElementLayoutEditor: View {
                 .gesture(dragGesture(frames: frames))
                 .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
                     switch phase {
-                    case .active(let location): session.hover = element(at: location, frames: frames, includingLocked: false)
+                    case .active(let location): session.hover = element(at: location, frames: frames)
                     case .ended: session.hover = nil
                     }
                 }
@@ -62,20 +62,8 @@ struct ElementLayoutEditor: View {
                let frame = frames.first(where: { $0.id == hover })?.frame {
                 outline(geometry.canvasRect(frame), width: 1, color: .white.opacity(0.85))
             }
-            ForEach(frames.filter { session.selection.contains($0.id) }, id: \.id) { item in
-                let isLocked = session.layoutItem(item.id)?.locked == true
-                outline(geometry.canvasRect(item.frame), width: 1.5,
-                        color: session.isLayoutRefused && drag?.starts[item.id] != nil ? .red : Color.islandAccent)
-                    .overlay(alignment: .topLeading) {
-                        if isLocked {
-                            Image(systemName: "lock.fill")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(Color.onIslandAccent)
-                                .padding(3)
-                                .background(Color.islandAccent, in: Circle())
-                                .offset(x: geometry.canvasRect(item.frame).minX - 8, y: geometry.canvasRect(item.frame).minY - 8)
-                        }
-                    }
+            ForEach(frames.filter { session.selection.contains($0.id) && drag?.handle == nil }, id: \.id) { item in
+                outline(geometry.canvasRect(item.frame), width: 1.5, color: Color.islandAccent)
             }
             // The landing place's guides, across the widget.
             ForEach(session.layoutGuides, id: \.self) { guide in
@@ -90,9 +78,9 @@ struct ElementLayoutEditor: View {
             if let drag {
                 if drag.handle != nil {
                     // Where it lands: the element is drawn there too.
-                    ResizeOutline(frame: geometry.canvasRect(drag.landed), cornerRadius: 3,
+                    ResizeOutline(frame: geometry.canvasRect(drag.landed), cornerRadius: 0,
                                   badge: "\(Self.points(drag.landed.width)) × \(Self.points(drag.landed.height))",
-                                  badgeAtBottom: geometry.canvasRect(drag.landed).minY < 30, isValid: !session.isLayoutRefused)
+                                  badgeAtBottom: geometry.canvasRect(drag.landed).minY < 30, isValid: true)
                 } else if drag.starts.count == 1 {
                     SpacingMarks(rect: drag.landed, others: frames.filter { drag.starts[$0.id] == nil }.map(\.frame),
                                  size: geometry.widgetSize, geometry: geometry)
@@ -106,14 +94,14 @@ struct ElementLayoutEditor: View {
                     .offset(x: marquee.minX, y: marquee.minY)
                     .allowsHitTesting(false)
             }
-            // One element picked: its eight handles.
+            // One element picked: its four corners when it keeps its shape, else eight handles.
             if let id = session.selectedElement, state != .unsupported, let frame = frames.first(where: { $0.id == id })?.frame,
-               session.layoutItem(id)?.locked != true, drag?.handle == nil || drag?.starts[id] != nil {
+               drag?.handle == nil || drag?.starts[id] != nil {
                 let rect = geometry.canvasRect(drag?.handle != nil ? (drag?.landed ?? frame) : frame)
-                let handles = rect.width < 28 || rect.height < 28 ? ResizeHandle.corners : ResizeHandle.allCases
+                let handles = session.layoutItem(id)?.keepsAspect == true ? ResizeHandle.corners : ResizeHandle.allCases
                 ForEach(handles, id: \.self) { handle in
                     LayoutHandle(pointer: handle.pointer)
-                        .position(handle.position(on: rect.insetBy(dx: -2, dy: -2)))
+                        .position(handle.position(on: rect))
                         .gesture(resizeGesture(id, handle: handle, frames: frames))
                 }
             }
@@ -125,29 +113,27 @@ struct ElementLayoutEditor: View {
 
     private static func points(_ value: CGFloat) -> String { String(format: "%g", Double((value * 2).rounded() / 2)) }
 
+    /// On the element's edges exactly: the line straddles them.
     private func outline(_ rect: CGRect, width: CGFloat, color: Color) -> some View {
-        RoundedRectangle(cornerRadius: 3, style: .continuous)
+        Rectangle()
             .strokeBorder(color, lineWidth: width)
-            .frame(width: rect.width + 4, height: rect.height + 4)
-            .offset(x: rect.minX - 2, y: rect.minY - 2)
+            .frame(width: rect.width + width, height: rect.height + width)
+            .offset(x: rect.minX - width / 2, y: rect.minY - width / 2)
             .allowsHitTesting(false)
     }
 
     // MARK: Picking
 
-    /// The element under a point of the canvas: the one drawn in front; a locked one only when asked.
-    private func element(at location: CGPoint, frames: [(id: ElementID, frame: CGRect)], includingLocked: Bool) -> ElementID? {
+    /// The element under a point of the canvas: the one drawn in front.
+    private func element(at location: CGPoint, frames: [(id: ElementID, frame: CGRect)]) -> ElementID? {
         let point = geometry.widgetPoint(location)
         let slack = 2 / geometry.zoom
-        return frames.last { item in
-            item.frame.insetBy(dx: -slack, dy: -slack).contains(point) && (includingLocked || session.layoutItem(item.id)?.locked != true)
-        }?.id
+        return frames.last { $0.frame.insetBy(dx: -slack, dy: -slack).contains(point) }?.id
     }
 
     private func pick(at location: CGPoint, frames: [(id: ElementID, frame: CGRect)]) {
         let modifiers = NSEvent.modifierFlags
-        // ⌥: also what is locked.
-        guard let id = element(at: location, frames: frames, includingLocked: modifiers.contains(.option)) else {
+        guard let id = element(at: location, frames: frames) else {
             session.selection = []
             return
         }
@@ -167,7 +153,7 @@ struct ElementLayoutEditor: View {
                 if drag == nil, marquee == nil {
                     // On an element: it moves (with the others picked, if it is one of them). Beside them: a marquee.
                     if session.layoutState != .unsupported,
-                       let id = element(at: value.startLocation, frames: frames, includingLocked: false) {
+                       let id = element(at: value.startLocation, frames: frames) {
                         beginMove(id)
                     } else {
                         marquee = .zero
@@ -217,13 +203,11 @@ struct ElementLayoutEditor: View {
 
     private func finish() {
         if let marquee {
-            // Everything the marquee touches (⌥: also what is locked); ⇧ and ⌘ add to what is picked.
+            // Everything the marquee touches; ⇧ and ⌘ add to what is picked.
             let modifiers = NSEvent.modifierFlags
             let area = CGRect(origin: geometry.widgetPoint(marquee.origin),
                               size: CGSize(width: marquee.width / geometry.zoom, height: marquee.height / geometry.zoom))
-            let touched = session.elementFrames.filter { item in
-                item.frame.intersects(area) && (modifiers.contains(.option) || session.layoutItem(item.id)?.locked != true)
-            }.map(\.id)
+            let touched = session.elementFrames.filter { $0.frame.intersects(area) }.map(\.id)
             if marquee.width > 2 || marquee.height > 2 {
                 session.selection = modifiers.contains(.shift) || modifiers.contains(.command) ? session.selection.union(touched) : Set(touched)
             }

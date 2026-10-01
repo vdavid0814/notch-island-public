@@ -48,7 +48,8 @@ struct BatteryElement: View {
                             percentSize: widget.size(of: .percentage))
             } else {
                 BatteryGlyph(level: state.level, isCharging: state.isCharging, tint: state.tint, showsPercentage: inside,
-                             height: min(room.height, room.width / 2.2))
+                             height: min(room.height, room.width / 2.2), fillColor: style.batteryFill, bodyColor: style.batteryBody,
+                             numberType: style.batteryNumberType)
             }
         case (.battery, .percentage):
             Text(state.hasBattery ? IslandFormat.percent(Double(state.level) / 100) : "—")
@@ -133,10 +134,11 @@ struct BatteryWidget: View {
         let time = widget.shows(.timeRemaining) && (size.width >= 110 || tall) ? Self.remaining(state) : nil
         // Beside the battery (or the percentage), the time left takes what the other leaves.
         let share: CGFloat = time == nil || tall ? 1 : 0.5
-        let glyphHeight = WidgetType.fitted(
+        let glyphFit = min((size.width - 8) * share / 2.35, size.height * (tall ? 0.5 : 0.8))
+        // Its own size (the style's points: the battery's height) up to what the room gives.
+        let glyphHeight = style.symbolPoints(.batteryGlyph, auto: WidgetType.fitted(
             WidgetType.points(size.height, ratio: tall ? 0.3 : 0.5, min: 11, max: 34),
-            fit: min((size.width - 8) * share / 2.35, size.height * (tall ? 0.5 : 0.8)),
-            widget.size(of: .batteryGlyph), floor: 9)
+            fit: glyphFit, widget.size(of: .batteryGlyph), floor: 9), fit: glyphFit)
         let percentText = state.hasBattery ? IslandFormat.percent(Double(state.level) / 100) : "—"
         let percentFit = min(WidgetType.size(fitting: "100%", in: (size.width - 8) * share, weight: .semibold, rounded: true,
                                              monospacedDigits: true),
@@ -155,7 +157,8 @@ struct BatteryWidget: View {
         return layout {
             if widget.shows(.batteryGlyph) {
                 BatteryGlyph(level: state.level, isCharging: state.isCharging, tint: state.tint,
-                             showsPercentage: widget.shows(.percentage), height: glyphHeight)
+                             showsPercentage: widget.shows(.percentage), height: glyphHeight, fillColor: style.batteryFill,
+                             bodyColor: style.batteryBody, numberType: style.batteryNumberType)
                     .ownDirection()
                     .editorElement(.batteryGlyph, in: probe)
             } else if widget.shows(.percentage) {
@@ -183,5 +186,19 @@ struct BatteryWidget: View {
         guard let minutes = state.minutesRemaining, minutes > 0 else { return nil }
         let text = Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes], width: .narrow))
         return String(localized: "\(text) left")
+    }
+}
+
+extension ResolvedWidgetStyle {
+    /// The battery's charge and empty body in the style's colours (its Colour and Second Colour).
+    var batteryFill: Color? { element(.batteryGlyph)?.colors[.primary]?.color(artwork: nil) }
+    var batteryBody: Color? { element(.batteryGlyph)?.colors[.secondary]?.color(artwork: nil) }
+
+    /// The percentage cut out of the battery in the style's design, weight, width and italic; nil
+    /// keeps the menu bar's semibold.
+    var batteryNumberType: TypeSpec? {
+        guard let text = element(.percentage)?.text,
+              text.design != nil || text.weight != nil || text.italic != nil || text.width != nil else { return nil }
+        return TypeSpec(points: 13, weight: .semibold, monospacedDigits: true).applying(text)
     }
 }

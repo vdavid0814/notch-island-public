@@ -224,7 +224,7 @@ struct LevelRing: View {
             Circle().stroke(ring.trackStyle(.white.opacity(0.16), artwork: artwork), lineWidth: line)
             Circle()
                 .trim(from: 0, to: value)
-                .stroke(ring.fillColor(value: value, artwork: artwork).map(AnyShapeStyle.init) ?? AnyShapeStyle(.tint),
+                .stroke(ring.fillStyle(value: value, artwork: artwork, ring: true) ?? AnyShapeStyle(.tint),
                         style: StrokeStyle(lineWidth: line, lineCap: ring.cap?.lineCap ?? .round))
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 0) {

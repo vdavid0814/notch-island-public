@@ -141,7 +141,7 @@ private struct StatRing: View {
             Circle().stroke(ring.trackStyle(.white.opacity(0.14), artwork: artwork), lineWidth: line)
             Circle()
                 .trim(from: 0, to: value)
-                .stroke(ring.fillColor(value: value, artwork: artwork) ?? StatTint.color(value),
+                .stroke(ring.fillStyle(value: value, artwork: artwork, ring: true) ?? AnyShapeStyle(StatTint.color(value)),
                         style: StrokeStyle(lineWidth: line, lineCap: ring.cap?.lineCap ?? .round))
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 0) {
@@ -182,7 +182,7 @@ private struct StatBar: View {
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     bar.barShape(height: proxy.size.height).fill(bar.trackStyle(.white.opacity(0.14), artwork: artwork))
-                    bar.barShape(height: proxy.size.height).fill(bar.fillColor(value: value, artwork: artwork) ?? StatTint.color(value))
+                    bar.barShape(height: proxy.size.height).fill(bar.fillStyle(value: value, artwork: artwork) ?? AnyShapeStyle(StatTint.color(value)))
                         .frame(width: max(proxy.size.height, proxy.size.width * value))
                 }
             }

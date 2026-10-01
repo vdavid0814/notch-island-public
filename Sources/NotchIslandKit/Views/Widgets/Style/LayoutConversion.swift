@@ -19,12 +19,15 @@ nonisolated enum LayoutConversion {
         /// The style laid out freely at `size`'s class with this layout, and those sizes fixed.
         func apply(to style: inout WidgetStyle, size: CGSize, scale: CGFloat) {
             let sizeClass = LayoutClass(size: size, scale: scale)
-            // The sizes as drawn go with the elements placed (`ElementFrame.points`); one drawn in
+            // The sizes as drawn go with the elements placed (`ElementFrame.points`), in the layout's
+            // own units like its rectangles and `natural` (the island's scale divided out): a reflow
+            // multiplies them by the scale again. Stored as drawn, an island not at its standard
+            // size drew every text smaller once unlocked (0.8× at Small), cut short. One drawn in
             // another's frame (the artist on the title's line) keeps its size in the style.
             var layout = layout
             for index in layout.items.indices {
                 let id = layout.items[index].id
-                if let drawn = points[id] ?? symbolPoints[id] { layout.items[index].points = Double(drawn) }
+                if let drawn = points[id] ?? symbolPoints[id] { layout.items[index].points = Double(drawn / max(scale, 0.01)) }
             }
             let placed = Set(layout.items.map(\.id))
             style.layout.arrangement = .custom(CustomLayouts(authored: sizeClass, variants: [sizeClass: .custom(layout)]))

@@ -145,16 +145,16 @@ private struct SyntheticElement: View {
         #expect(unlocked.layout.authoredPadding == 6)
     }
 
-    /// A fixed size its frame cannot take is drawn as large as fits, and flagged.
-    @Test func fixedTextTooTallForItsFrameIsClampedAndFlagged() {
+    /// Text's own size is drawn exactly, whatever its rectangle: the editor keeps the rectangle its
+    /// lines' height, and what does not fit is cut or shrunk as it is drawn.
+    @Test func fixedTextIsDrawnAtItsOwnSize() {
         let arrangement = ResolvedArrangement(items: [.init(id: .value, frame: CGRect(x: 6, y: 6, width: 120, height: 20))])
         let demand = ElementDemand(id: .value, content: .text(samples: ["72%"], type: TypeSpec(points: 0), lines: 1), design: 20,
                                    size: .fixed(40), priority: 90)
         let plan = CustomLayoutPlanner(arrangement: arrangement, displayScale: 2).plan([demand, ElementDemand(id: .label, content: .box(.zero),
                                                                                                design: 0, size: .auto(.medium), priority: 1)])
         let value = plan.elements[.value]
-        #expect(value?.isClamped == true && (value?.points ?? 99) < 40)
-        #expect(TextFit.frameHeight(points: value?.points ?? 0, spec: TypeSpec(points: 0)) <= 20)
+        #expect(value?.isClamped == false && value?.points == 40)
         #expect(plan.hidden[.label] == .noRoom)
     }
 

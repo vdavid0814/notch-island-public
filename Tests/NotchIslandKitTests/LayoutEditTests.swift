@@ -14,44 +14,27 @@ import Testing
 
     private func rect(_ layout: CustomLayout, _ id: ElementID) -> UnitRect { layout.items.first { $0.id == id }!.rect }
 
-    /// Text is shown, snapped and dragged by its letters, but what is stored is the rectangle they
-    /// are drawn in: letters moved or scaled map back to a rectangle whose letters are exactly there.
-    @Test func textIsResizedByItsLettersAndStoredAsItsRectangle() throws {
-        let type = TypeSpec(points: 20, weight: .semibold)
-        let line = TextFit.frameHeight(points: 20, spec: type)
-        let rect = CGRect(x: 10, y: 20, width: 120, height: line)
-        // A line of its own width, centred in a wider rectangle.
-        let box = CGRect(x: 40, y: 20, width: 60, height: line)
-        let letters = TextLetters(box: box, ink: WidgetTypography.letters(inBox: box, type), type: type)
-        let text = try #require(TextInkModel(rect: rect, letters: letters, type: type, lines: 1, isFixed: false))
-        // Where it was measured: exactly there.
-        #expect(text.ink(in: rect) == letters.ink)
-        // Its bottom dragged down: a larger type in quarter points, its top held, its rectangle as
-        // much wider about its middle.
-        var taller = letters.ink
-        taller.size.height *= 2
-        let stored = text.resized(horizontal: 0, vertical: 1, to: taller)
-        let drawn = text.ink(in: stored)
-        let points = text.points(forHeight: stored.height)
-        #expect((points / TextFit.step).rounded() * TextFit.step == points && points > 36 && points < 44)
-        #expect(abs(drawn.minY - taller.minY) < 0.01 && abs(drawn.height - taller.height) < 1)
-        #expect(abs(stored.midX - rect.midX) < 0.01 && stored.width > rect.width * 1.8)
-        // Its top dragged: the baseline held.
-        var raised = letters.ink
-        raised.origin.y -= 6
-        raised.size.height += 6
-        #expect(abs(text.ink(in: text.resized(horizontal: 0, vertical: -1, to: raised)).maxY - letters.ink.maxY) < 0.01)
-        // A side: the same type, room for a longer line, never narrower than the letters.
-        var wider = letters.ink
-        wider.size.width += 30
-        let roomier = text.resized(horizontal: 1, vertical: 0, to: wider)
-        #expect(roomier.height == rect.height && abs(roomier.width - (rect.width + 30)) < 0.01 && roomier.minX == rect.minX)
-        var narrower = letters.ink
-        narrower.size.width -= 200
-        #expect(abs(text.resized(horizontal: 1, vertical: 0, to: narrower).width - letters.ink.width) < 0.01)
-        // A size set in the inspector holds: only the place changes.
-        let fixed = try #require(TextInkModel(rect: rect, letters: letters, type: type, lines: 1, isFixed: true))
-        #expect(fixed.ink(in: fixed.resized(horizontal: 0, vertical: 1, to: taller)).height == letters.ink.height)
+    /// An element may be made as large as wanted and reach past the widget's edges; some of it
+    /// always stays over the widget.
+    @Test func rectanglesAreNotHeldInsideTheWidget() {
+        let large = UnitRect(x: -0.5, y: -0.2, width: 3, height: 2).clamped
+        #expect(large.width == 3 && large.height == 2 && large.x == -0.5 && large.y == -0.2)
+        let away = UnitRect(x: 5, y: -9, width: 0.2, height: 0.2).clamped
+        #expect(away.x == 1 - UnitRect.visible && away.y == UnitRect.visible - 0.2)
+    }
+
+    /// In front: over everything it overlaps; behind: under it.
+    @Test func anElementsLayerIsWhetherItLiesOverWhatItOverlaps() {
+        var layout = layout([(a, UnitRect(x: 0, y: 0, width: 0.5, height: 1)), (b, UnitRect(x: 0.2, y: 0.2, width: 0.2, height: 0.2)),
+                             (c, UnitRect(x: 0.7, y: 0, width: 0.2, height: 0.2))])
+        #expect(LayoutEdit.layer(of: b, in: layout) == .front)
+        #expect(LayoutEdit.layer(of: a, in: layout) == .behind)
+        // Overlapping nothing, it is in front.
+        #expect(LayoutEdit.layer(of: c, in: layout) == .front)
+        LayoutEdit.setLayer(.front, [a], in: &layout)
+        #expect(LayoutEdit.layer(of: a, in: layout) == .front && LayoutEdit.layer(of: b, in: layout) == .behind)
+        LayoutEdit.setLayer(.behind, [a], in: &layout)
+        #expect(layout.items.first?.id == a)
     }
 
     /// An element's switch keeps a custom layout in step: off, it goes to the tray in every size's
@@ -76,6 +59,44 @@ import Testing
         var automatic: ElementArrangement? = nil
         LayoutEdit.setShown(.trackInfo, true, role: .text, in: &automatic)
         #expect(automatic == nil)
+    }
+
+    /// Shown again, an element goes where nothing is: not on the readout across the middle.
+    @Test func anElementShownAgainGoesWhereNothingIs() {
+        let readout = UnitRect(x: 0.1, y: 0.3, width: 0.8, height: 0.4)
+        let free = LayoutEdit.freeSpot(width: 0.35, height: 0.35, in: layout([(a, readout)]))
+        let w = min(free.x + free.width, readout.x + readout.width) - max(free.x, readout.x)
+        let h = min(free.y + free.height, readout.y + readout.height) - max(free.y, readout.y)
+        #expect(w <= 1e-9 || h <= 1e-9)
+        #expect(free.x >= 0 && free.y >= 0 && free.x + free.width <= 1 + 1e-9 && free.y + free.height <= 1 + 1e-9)
+        // Nothing placed: the middle.
+        let middle = LayoutEdit.freeSpot(width: 0.5, height: 0.22, in: layout([]))
+        #expect(near(middle.x, 0.25) && near(middle.y, 0.39))
+    }
+
+    /// An element laid out as its parts (Now Playing's previous and next) is switched as its parts:
+    /// both to the tray, both back, side by side rather than one on the other.
+    @Test func anElementOfPartsIsSwitchedAsItsParts() {
+        let previous = ElementID.skipButtons.part("previous"), next = ElementID.skipButtons.part("next")
+        let size = LayoutClass(height: .short, aspect: .wide)
+        var arrangement: ElementArrangement? = .custom(CustomLayouts(authored: size, variants: [size: .custom(layout([
+            (previous, UnitRect(x: 0.1, y: 0.6, width: 0.2, height: 0.3)), (next, UnitRect(x: 0.7, y: 0.6, width: 0.2, height: 0.3)),
+        ]))]))
+        func current() -> CustomLayout? {
+            guard case .custom(let all)? = arrangement, case .custom(let layout)? = all.variants[size] else { return nil }
+            return layout
+        }
+        LayoutEdit.setShown(.skipButtons, false, role: .button, parts: [previous, next], in: &arrangement)
+        #expect(current()?.items.isEmpty == true)
+        #expect(Set(current()?.parked ?? []) == [previous, next])
+        LayoutEdit.setShown(.skipButtons, true, role: .button, parts: [previous, next], in: &arrangement)
+        let items = current()?.items ?? []
+        #expect(Set(items.map(\.id)) == [previous, next])
+        #expect(!items.contains { $0.id == .skipButtons })
+        if items.count == 2 {
+            let a = items[0].rect, b = items[1].rect
+            #expect(a.x + a.width <= b.x + 1e-9 || b.x + b.width <= a.x + 1e-9 || a.y + a.height <= b.y + 1e-9 || b.y + b.height <= a.y + 1e-9)
+        }
     }
 
     private func near(_ x: Double, _ y: Double) -> Bool { abs(x - y) < 1e-9 }
@@ -138,25 +159,14 @@ import Testing
         #expect(order([d], .forward) == [a, b, c, d] && order([a], .backward) == [a, b, c, d])
     }
 
-    @Test func movingKeepsThePickedTogetherInsideTheWidget() {
+    /// Moved together by the same, past the widget's edge if wanted; some of each stays over it.
+    @Test func movingKeepsThePickedTogether() {
         var layout = layout([(a, UnitRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2)), (b, UnitRect(x: 0.6, y: 0.5, width: 0.3, height: 0.3))])
-        LayoutEdit.move([a, b], dx: 0.5, dy: 0.5, in: &layout)
-        // As far as the one nearest the edge goes: 0.1 right, 0.2 down, both by the same.
-        #expect(near(rect(layout, b).x, 0.7) && near(rect(layout, a).x, 0.2))
-        #expect(near(rect(layout, b).y, 0.7) && near(rect(layout, a).y, 0.3))
-        LayoutEdit.move([a], dx: -1, dy: -1, in: &layout)
-        #expect(near(rect(layout, a).x, 0) && near(rect(layout, a).y, 0))
-    }
-
-    @Test func aLockedElementStaysWhereItIs() {
-        var layout = layout([(a, UnitRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2)), (b, UnitRect(x: 0.5, y: 0.5, width: 0.2, height: 0.2))])
-        LayoutEdit.setLocked(true, [a], in: &layout)
-        let locked = rect(layout, a)
-        LayoutEdit.move([a, b], dx: 0.1, dy: 0.1, in: &layout)
-        LayoutEdit.align([a, b], .left, in: &layout)
-        #expect(rect(layout, a) == locked)
-        #expect(near(rect(layout, b).y, 0.6))
-        #expect(layout.items.first { $0.id == a }?.locked == true)
+        LayoutEdit.move([a, b], dx: 0.2, dy: 0.1, in: &layout)
+        #expect(near(rect(layout, b).x, 0.8) && near(rect(layout, a).x, 0.3))
+        #expect(near(rect(layout, b).y, 0.6) && near(rect(layout, a).y, 0.2))
+        LayoutEdit.move([a], dx: -5, dy: -5, in: &layout)
+        #expect(near(rect(layout, a).x, UnitRect.visible - 0.2) && near(rect(layout, a).y, UnitRect.visible - 0.2))
     }
 
     @Test func hidingParksTheKindsOwnAndRemovesADecoration() {
@@ -170,8 +180,8 @@ import Testing
         // Back from the tray, in front.
         LayoutEdit.place(a, at: UnitRect(x: 0.9, y: 0.9, width: 0.3, height: 0.3), in: &layout)
         #expect(layout.parked.isEmpty && layout.items.map(\.id) == [a])
-        // Inside the widget.
-        #expect(near(rect(layout, a).x, 0.7) && near(rect(layout, a).y, 0.7))
+        // Where it was put: it may reach past the widget's edge.
+        #expect(near(rect(layout, a).x, 0.9) && near(rect(layout, a).y, 0.9))
         LayoutEdit.place(a, at: UnitRect(x: 0, y: 0, width: 0.1, height: 0.1), in: &layout)
         #expect(layout.items.count == 1)
     }

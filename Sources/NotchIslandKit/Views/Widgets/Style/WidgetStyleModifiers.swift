@@ -128,7 +128,12 @@ private struct WidgetText: ViewModifier {
             .transformEnvironment(\.lineLimit) { if let limit = text.lineLimit { $0 = limit } }
             .transformEnvironment(\.truncationMode) { if let mode = text.truncation?.truncationMode { $0 = mode } }
             .transformEnvironment(\.minimumScaleFactor) { factor in
-                if text.truncation == .shrink { factor = 0.6 } else if text.points != nil, plan == nil { factor = 1 }
+                if plan != nil, let truncation = text.truncation {
+                    // Laid out freely and told what to do when too long for its rectangle: shrink as
+                    // far as it must, or be cut — its rectangle's height never changes. Not told, as
+                    // the kind draws it (so a layout just unlocked draws what it drew).
+                    factor = truncation == .shrink ? 0.05 : 1
+                } else if text.truncation == .shrink { factor = 0.6 } else if text.points != nil, plan == nil { factor = 1 }
             }
             .modifier(OptionalForeground(primary: element.colors[.primary]?.shapeStyle(artwork: artwork)))
             .opacity(text.opacity ?? 1)
@@ -333,6 +338,21 @@ struct ResolvedLine: Equatable {
     func fillColor(value: Double, artwork: Color?) -> Color? {
         if mode == .valueScale, case .valueScale(let scale)? = fill { return scale.color(value) }
         return fill?.color(artwork: artwork, value: value)
+    }
+
+    /// The fill as drawn: Gradient from Fill to Fill End along the line (around a ring), else its
+    /// one colour (`fillColor`). The end alone fades from its own colour; nil: the kind's.
+    func fillStyle(value: Double, artwork: Color?, ring: Bool = false) -> AnyShapeStyle? {
+        guard mode == .gradient else { return fillColor(value: value, artwork: artwork).map(AnyShapeStyle.init) }
+        let start = fill?.color(artwork: artwork, value: value)
+        let end = fillEnd?.color(artwork: artwork, value: value)
+        guard let from = start ?? end.map({ $0.opacity(0.35) }) else { return nil }
+        let to = end ?? from.opacity(0.35)
+        if ring {
+            return AnyShapeStyle(AngularGradient(colors: [from, to], center: .center, startAngle: .degrees(0),
+                                                 endAngle: .degrees(360 * max(value, 0.02))))
+        }
+        return AnyShapeStyle(LinearGradient(colors: [from, to], startPoint: .leading, endPoint: .trailing))
     }
 
     /// The track: its colour at its opacity, or the kind's `standard`.

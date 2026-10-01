@@ -344,8 +344,8 @@ struct UpNextWidget: View {
 
     @ViewBuilder private func list(_ events: [CalendarEvent]) -> some View {
         let wanted = widget.config.count ?? 2
-        let rowHeight: CGFloat = size.height < 56 ? size.height : max(min(size.height / CGFloat(wanted), 34), 22)
-        let rows = max(min(wanted, Int(size.height / rowHeight)), 1)
+        let rowHeight: CGFloat = size.height < 56 ? max(size.height, 1) : max(min(size.height / CGFloat(wanted), 34), 22)
+        let rows = max(min(wanted, Int(max(size.height, 0) / rowHeight)), 1)
         let shown = Array(events.prefix(rows))
         let format = WidgetFormat(style.format, locale: locale, timeZone: timeZone)
         if shown.isEmpty {

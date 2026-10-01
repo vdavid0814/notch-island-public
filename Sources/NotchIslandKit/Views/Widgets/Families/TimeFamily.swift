@@ -80,7 +80,7 @@ struct TimeElement: View {
         let alignment = style.element(id)?.text.alignment?.frameAlignment ?? .leading
         switch (widget.kind, id) {
         case (.dateTime, .readout):
-            Text(date, format: format.time)
+            Text(format.time(date))
                 .widgetText(.readout, DateTimeWidget.timeType.at(planned?.points ?? 24), in: style)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
@@ -172,7 +172,7 @@ struct DateTimeWidget: View {
                                         fit: dateFit)
         let (timeFit, timeSize) = timeSizes(timeText, tall: tall, showsDate: showsDate, dateSize: dateSize)
         let timeType = Self.timeType.at(timeSize)
-        let time = Text(date, format: format.time).widgetText(.readout, timeType, in: style)
+        let time = Text(format.time(date)).widgetText(.readout, timeType, in: style)
         let dateType = Self.dateType.at(dateSize)
         // The longest date that fits: "Thursday, 24 September", "Thu, 24 Sep", "24" — or the
         // style's own template.

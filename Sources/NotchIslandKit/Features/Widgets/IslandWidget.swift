@@ -87,6 +87,13 @@ nonisolated struct IslandWidget: Sendable, Codable, Hashable, Identifiable {
         options.contains(element) || kind.spec.element(element)?.isRequired == true
     }
 
+    /// Whether an element or one of its parts (Now Playing's previous button…) is drawn: only one
+    /// with a switch is left out, while it is off; a part goes with the element it belongs to.
+    func showsElementOrPart(_ id: ElementID) -> Bool {
+        let owner = kind.spec.elements.first(where: { $0.parts.contains(id) })?.id ?? id
+        return !kind.options.contains(owner) || options.contains(owner)
+    }
+
     func size(of element: ElementID) -> ElementSize { sizes[element] ?? .medium }
 
     /// Drawn on a plate (plain, tinted or the artwork), or straight on the island.

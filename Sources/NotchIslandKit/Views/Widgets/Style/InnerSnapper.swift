@@ -122,7 +122,8 @@ nonisolated struct InnerSnapper {
         switch role {
         case .text:
             CGSize(width: 12, height: TextFit.frameHeight(points: TextFit.minimumPoints, spec: TypeSpec(points: TextFit.minimumPoints)))
-        case .symbol: CGSize(width: 8, height: 8)
+        // A glyph that still reads.
+        case .symbol: CGSize(width: 10, height: 10)
         case .button: CGSize(width: Metrics.Control.height(.mini), height: Metrics.Control.height(.mini))
         case .image, .chart, .feature: CGSize(width: 16, height: 16)
         case .line: CGSize(width: 2, height: 2)

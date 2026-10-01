@@ -66,11 +66,13 @@ struct InspectorPane: View {
     private var footer: some View {
         HStack(spacing: 8) {
             if let id = session.selectedElement {
-                Button("Reset Element") { withAnimation(Motion.content) { session.resetElement(id) } }
+                // At once: animated, the inspector's rows for the old look and the new one were drawn
+                // over each other while they faded (and the outline lagged a frame behind).
+                Button("Reset Element") { session.resetElement(id) }
                     .disabled(session.style.elements[id] == nil && session.widget?.sizes[id] == nil)
             }
             Spacer(minLength: 0)
-            Button("Reset Widget", role: .destructive) { withAnimation(Motion.content) { session.resetWidget() } }
+            Button("Reset Widget", role: .destructive) { session.resetWidget() }
         }
         .controlSize(.small)
         .padding(.horizontal, 16)
@@ -89,32 +91,27 @@ private struct ElementInspector: View {
     var body: some View {
         let id = element.id
         VStack(alignment: .leading, spacing: 12) {
-            if !element.isRequired, widget.kind.options.contains(id) {
-                InspectorRow("Shown", isSet: false, reset: {}) {
-                    Toggle("", isOn: Binding(get: { widget.shows(id) }, set: { on in
-                        withAnimation(Motion.content) {
-                            session.change(\IslandWidget.self) { widget in
-                                if on { widget.options.insert(id) } else { widget.options.remove(id) }
-                                // Laid out freely: on the widget or in its tray with it.
-                                LayoutEdit.setShown(id, on, role: element.role, in: &widget.style.layout.arrangement)
-                            }
-                        }
-                    }))
-                    .labelsHidden()
-                    .toggleStyle(.islandSwitch)
-                }
-            }
+            // An added divider or shape: a box filled with a colour, whatever its role.
+            let isBox = widget.style.layout.arrangement?.decoration(id).map(\.isBox) ?? false
             switch element.role {
             case .text:
                 TextInspector(session: session, widget: widget, element: element)
             case .symbol:
                 SymbolInspector(session: session, widget: widget, element: element)
+            case .image where isBox, .line where isBox:
+                InspectorSection(element.role == .image ? "Shape" : "Divider") {
+                    ColorRows(session: session, id: id, slots: element.role == .image ? [.fill, .border] : [.fill])
+                }
             case .image:
-                ImageInspector(session: session, element: element)
+                EmptyView()
             case .line, .chart:
-                LineInspector(session: session, element: element)
+                InspectorSection("Colours") {
+                    ColorRows(session: session, id: id, slots: element.colorSlots.filter { $0 != .fillEnd })
+                }
             case .button:
-                ButtonInspector(session: session, element: element)
+                InspectorSection("Button") {
+                    ColorRows(session: session, id: id, slots: [.tint])
+                }
             case .feature:
                 if element.isBlock {
                     Text("Drawn as one piece: its place and size are set on the canvas.")
@@ -122,7 +119,7 @@ private struct ElementInspector: View {
                         .foregroundStyle(SettingsPalette.secondary)
                 }
             }
-            // Laid out freely, its rectangle is its size.
+            // Laid out by the kind, S, M and L; laid out freely, its rectangle is its size.
             if element.isSizable, element.role != .text, element.role != .symbol, !session.layoutState.isCustom {
                 SizeChips(session: session, widget: widget, id: id)
             }
@@ -165,49 +162,123 @@ private struct TextInspector: View {
 
     private var style: TextStyle { session.style.elements[element.id]?.text ?? TextStyle() }
 
+    /// The battery's percentage drawn inside it, cut out of it: its type is all that applies (its
+    /// size is the battery's, its colour the hole's).
+    private var isCutOut: Bool { widget.kind == .battery && element.id == .percentage && widget.shows(.batteryGlyph) }
+
+    /// Laid out freely: its size and lines are its rectangle's (`ElementFrame.points`, `lines`).
+    private var isFree: Bool { session.layoutItem(element.id) != nil }
+
     var body: some View {
         let id = element.id
-        InspectorSection("Size") {
-            TextSizeControl(session: session, widget: widget, id: id)
+        if isCutOut {
+            fontSection
+            Text("Drawn inside the battery: its size follows the battery, and its colour is the battery's own.")
+                .font(.caption)
+                .foregroundStyle(SettingsPalette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            if !isFree {
+                InspectorSection("Size") {
+                    TextSizeControl(session: session, widget: widget, id: id)
+                }
+            }
+            textSection(id)
+            fontSection
         }
+    }
+
+    /// A change of the font: laid out freely, its rectangle made its lines' height in the new one.
+    private func refitting<Value: Equatable>(_ binding: Binding<Value>) -> Binding<Value> {
+        Binding(get: { binding.wrappedValue }, set: { value in
+            let before = session.textType(element.id)
+            binding.wrappedValue = value
+            if isFree, let before {
+                session.refitText(element.id, type: before.applying(session.style.elements[element.id]?.text ?? TextStyle()))
+            }
+        })
+    }
+
+    private var fontSection: some View {
         InspectorSection("Font") {
-            InspectorRow("Design", isSet: style.design != nil, reset: { text(\.design).wrappedValue = nil }) {
-                OptionalChoice(value: text(\.design), options: FontDesignChoice.allCases, title: \.title)
+            InspectorRow("Style", isSet: style.design != nil, reset: { refitting(text(\.design)).wrappedValue = nil }) {
+                OptionalChoice(value: refitting(text(\.design)), options: FontDesignChoice.allCases, title: \.title)
             }
-            InspectorRow("Weight", isSet: style.weight != nil, reset: { text(\.weight).wrappedValue = nil }) {
-                OptionalChoice(value: text(\.weight), options: FontWeightChoice.allCases, title: \.title)
+            InspectorRow("Weight", isSet: style.weight != nil, reset: { refitting(text(\.weight)).wrappedValue = nil }) {
+                OptionalChoice(value: refitting(text(\.weight)), options: FontWeightChoice.allCases, title: \.title)
             }
-            InspectorRow("Width", isSet: style.width != nil, reset: { text(\.width).wrappedValue = nil }) {
-                OptionalChoice(value: text(\.width), options: FontWidthChoice.allCases, title: \.title)
+            InspectorRow("Italic", isSet: style.italic != nil, reset: { refitting(text(\.italic)).wrappedValue = nil }) {
+                OptionalSwitch(value: refitting(text(\.italic)))
             }
-            InspectorRow("Italic", isSet: style.italic != nil, reset: { text(\.italic).wrappedValue = nil }) {
-                OptionalSwitch(value: text(\.italic))
+            if isFree, let points = session.textType(element.id)?.points {
+                InspectorRow("Size", isSet: false, reset: {}) {
+                    let shown = (Double(points) * 4).rounded() / 4
+                    let size = Binding(get: { shown }, set: { value in
+                        if abs(value - shown) >= 0.25 { withAnimation(Motion.content) { session.setTextPoints(CGFloat(value), of: element.id) } }
+                    })
+                    HStack(spacing: 6) {
+                        TextField("", value: size, format: .number.precision(.fractionLength(0...2)))
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 56)
+                        Stepper("", value: size, step: 1)
+                            .labelsHidden()
+                        Text("pt").foregroundStyle(SettingsPalette.secondary)
+                    }
+                    .controlSize(.small)
+                }
             }
-            InspectorRow("Digits", isSet: style.monospacedDigits != nil, reset: { text(\.monospacedDigits).wrappedValue = nil }) {
-                Picker("", selection: text(\.monospacedDigits)) {
-                    Text("Automatic").tag(Bool?.none)
-                    Text("One Width").tag(Bool?.some(true))
-                    Text("Proportional").tag(Bool?.some(false))
+            if !isCutOut {
+                InspectorRow("Colour", isSet: session.style.elements[element.id]?.colors[.primary] != nil,
+                             reset: { session.set(\WidgetStyle.[element: element.id].colors[.primary], to: nil) }) {
+                    OptionalColor(value: session.binding(for: \WidgetStyle.[element: element.id].colors[.primary]))
+                }
+            }
+        }
+    }
+
+    private func textSection(_ id: ElementID) -> some View {
+        InspectorSection("Text") {
+            if element.acceptsLabel {
+                InspectorRow("Wording", isSet: style.labelOverride != nil, reset: { text(\.labelOverride).wrappedValue = nil }) {
+                    OptionalTextField(value: text(\.labelOverride), prompt: element.samples.first ?? element.title)
+                }
+            }
+            InspectorRow("Most Lines", isSet: isFree ? session.layoutItem(id)?.lines != nil : style.lineLimit != nil, reset: {
+                if isFree { withAnimation(Motion.content) { session.setTextLines(1, of: id) } } else { text(\.lineLimit).wrappedValue = nil }
+            }) {
+                let lines = isFree ? session.textLines(id) : style.lineLimit ?? 1
+                Stepper(value: Binding(get: { lines }, set: { value in
+                    if isFree { withAnimation(Motion.content) { session.setTextLines(value, of: id) } } else { text(\.lineLimit).wrappedValue = value }
+                }), in: ElementFrame.lineRange) {
+                    Text("\(lines)").monospacedDigit()
+                }
+                .controlSize(.small)
+                .help("The most lines it wraps to: its frame is that many lines tall, the text centred in it")
+            }
+            InspectorRow("Too Long", isSet: style.truncation != nil, reset: { text(\.truncation).wrappedValue = nil }) {
+                Picker("", selection: Binding<Bool>(get: { style.truncation == .shrink }, set: { shrinks in
+                    text(\.truncation).wrappedValue = shrinks ? .shrink : .tail
+                })) {
+                    Text("Cut").tag(false)
+                    Text("Shrink").tag(true)
                 }
                 .labelsHidden()
+                .choiceBar()
+                .controlSize(.small)
                 .fixedSize()
+                .help("Cut: ends in “…”. Shrink: smaller letters, the frame's height kept.")
             }
-        }
-        InspectorSection("Text") {
-            InspectorRow("Colour", isSet: session.style.elements[id]?.colors[.primary] != nil,
-                         reset: { session.set(\WidgetStyle.[element: id].colors[.primary], to: nil) }) {
-                OptionalColor(value: session.binding(for: \WidgetStyle.[element: id].colors[.primary]))
-            }
-            InspectorRow("Opacity", isSet: style.opacity != nil, reset: { text(\.opacity).wrappedValue = nil }) {
-                OptionalSlider(value: text(\.opacity), range: 0.1...1, step: 0.05, standard: 1,
-                               format: { $0.formatted(.percent.precision(.fractionLength(0))) }, session: session)
-            }
-            InspectorRow("Letters", isSet: style.tracking != nil, reset: { text(\.tracking).wrappedValue = nil }) {
-                OptionalSlider(value: text(\.tracking), range: TextStyle.trackingRange, step: 0.1, standard: 0,
-                               format: { $0.formatted(.number.precision(.fractionLength(1))) + " pt" }, session: session)
-            }
-            InspectorRow("Case", isSet: style.textCase != nil, reset: { text(\.textCase).wrappedValue = nil }) {
-                OptionalChoice(value: text(\.textCase), options: TextCaseChoice.allCases, title: \.title)
+            if isFree {
+                InspectorRow("Adds Lines", isSet: session.layoutItem(id)?.growsLines != nil,
+                             reset: { session.editLayout { LayoutEdit.setGrowsLines(true, [id], in: &$0) } }) {
+                    Toggle("", isOn: Binding(get: { session.growsLines(id) }, set: { on in
+                        session.editLayout { LayoutEdit.setGrowsLines(on, [id], in: &$0) }
+                    }))
+                    .labelsHidden()
+                    .toggleStyle(.islandSwitch)
+                    .help("On: made taller by a handle, it takes more lines. Off: its letters grow instead.")
+                }
             }
             InspectorRow("Alignment", isSet: style.alignment != nil, reset: { text(\.alignment).wrappedValue = nil }) {
                 Picker("", selection: text(\.alignment)) {
@@ -220,24 +291,6 @@ private struct TextInspector: View {
                 .choiceBar()
                 .controlSize(.small)
                 .fixedSize()
-            }
-            InspectorRow("Lines", isSet: style.lineLimit != nil, reset: { text(\.lineLimit).wrappedValue = nil }) {
-                Picker("", selection: text(\.lineLimit)) {
-                    Text("Auto").tag(Int?.none)
-                    ForEach(Array(TextStyle.lineLimitRange), id: \.self) { Text("\($0)").tag(Optional($0)) }
-                }
-                .labelsHidden()
-                .choiceBar()
-                .controlSize(.small)
-                .fixedSize()
-            }
-            InspectorRow("Too Long", isSet: style.truncation != nil, reset: { text(\.truncation).wrappedValue = nil }) {
-                OptionalChoice(value: text(\.truncation), options: TruncationChoice.allCases, title: \.title)
-            }
-            if element.acceptsLabel {
-                InspectorRow("Wording", isSet: style.labelOverride != nil, reset: { text(\.labelOverride).wrappedValue = nil }) {
-                    OptionalTextField(value: text(\.labelOverride), prompt: element.samples.first ?? element.title)
-                }
             }
         }
     }
@@ -356,27 +409,23 @@ private struct SymbolInspector: View {
 
     var body: some View {
         let id = element.id
-        InspectorSection("Size") {
-            TextSizeControl(session: session, widget: widget, id: id, isSymbol: true)
+        // Laid out freely, it is as large as its rectangle holds.
+        if session.layoutItem(id) == nil {
+            InspectorSection("Size") {
+                TextSizeControl(session: session, widget: widget, id: id, isSymbol: true)
+            }
         }
+        // The battery is drawn, not a symbol: its colours are all that apply.
+        let isDrawn = widget.kind == .battery && id == .batteryGlyph
         InspectorSection("Symbol") {
-            InspectorRow("Weight", isSet: style.weight != nil, reset: { symbol(\.weight).wrappedValue = nil }) {
-                OptionalChoice(value: symbol(\.weight), options: FontWeightChoice.allCases, title: \.title)
+            if !isDrawn {
+                InspectorRow("Weight", isSet: style.weight != nil, reset: { symbol(\.weight).wrappedValue = nil }) {
+                    OptionalChoice(value: symbol(\.weight), options: FontWeightChoice.allCases, title: \.title)
+                }
             }
-            InspectorRow("Rendering", isSet: style.rendering != nil, reset: { symbol(\.rendering).wrappedValue = nil }) {
-                OptionalChoice(value: symbol(\.rendering), options: SymbolRenderingChoice.allCases, title: \.title)
-            }
-            InspectorRow("Filled", isSet: style.filled != nil, reset: { symbol(\.filled).wrappedValue = nil }) {
-                OptionalSwitch(value: symbol(\.filled))
-            }
-            ColorRows(session: session, id: id, slots: element.colorSlots.filter { $0 != .backing })
-            InspectorRow("Backing", isSet: style.backing != nil, reset: { symbol(\.backing).wrappedValue = nil }) {
-                OptionalChoice(value: symbol(\.backing), options: SymbolBacking.allCases.filter { $0 != .none }, title: \.title,
-                               automatic: "None")
-            }
-            if style.backing != nil, element.colorSlots.contains(.backing) {
-                ColorRows(session: session, id: id, slots: [.backing])
-            }
+            ColorRows(session: session, id: id, slots: element.colorSlots.filter { slot in
+                slot != .backing && (slot != .secondary || isDrawn || style.rendering == .palette)
+            })
         }
     }
 }
@@ -395,6 +444,20 @@ private struct ImageInspector: View {
     private var style: ImageStyle { session.style.elements[element.id]?.image ?? ImageStyle() }
 
     var body: some View {
+        let kind = session.widget?.kind
+        if kind == .shelf {
+            // The files' own thumbnails, drawn as the shelf draws them.
+            Text("Drawn as the shelf's file thumbnails: their place and size are set on the canvas.")
+                .font(.caption)
+                .foregroundStyle(SettingsPalette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            pictureSection(fills: kind != .nowPlaying)
+        }
+    }
+
+    /// `fills`: Fill or Fit is offered (a cover always fills its square).
+    private func pictureSection(fills: Bool) -> some View {
         InspectorSection("Picture") {
             InspectorRow("Corners", isSet: style.corners != nil, reset: { image(\.corners).wrappedValue = nil }) {
                 Picker("", selection: Binding<String>(get: {
@@ -449,8 +512,45 @@ private struct ImageInspector: View {
                                    format: { "\(Int($0)) pt" }, session: session)
                 }
             }
-            InspectorRow("Fill", isSet: style.contentMode != nil, reset: { image(\.contentMode).wrappedValue = nil }) {
-                OptionalChoice(value: image(\.contentMode), options: ImageContentMode.allCases, title: \.title)
+            if fills {
+                InspectorRow("Fill", isSet: style.contentMode != nil, reset: { image(\.contentMode).wrappedValue = nil }) {
+                    OptionalChoice(value: image(\.contentMode), options: ImageContentMode.allCases, title: \.title)
+                }
+            }
+        }
+    }
+}
+
+// MARK: Divider and shape
+
+/// An added divider or shape (`DecorationView`): its fill, a shape's border, how strongly it is drawn.
+private struct BoxInspector: View {
+    let session: EditorSession
+    let element: ElementSpec
+
+    private func image<Value: Equatable>(_ keyPath: WritableKeyPath<ImageStyle, Value>) -> Binding<Value> {
+        let base: WritableKeyPath<WidgetStyle, ImageStyle> = \.[element: element.id].image
+        return session.binding(for: base.appending(path: keyPath))
+    }
+
+    private var style: ImageStyle { session.style.elements[element.id]?.image ?? ImageStyle() }
+
+    var body: some View {
+        let isShape = element.role == .image
+        InspectorSection(isShape ? "Shape" : "Divider") {
+            ColorRows(session: session, id: element.id, slots: [.fill])
+            if isShape {
+                InspectorRow("Border", isSet: style.borderWidth != nil, reset: { image(\.borderWidth).wrappedValue = nil }) {
+                    OptionalSlider(value: image(\.borderWidth), range: ImageStyle.borderRange, step: 0.5, standard: 0,
+                                   format: { $0.formatted(.number.precision(.fractionLength(0...1))) + " pt" }, session: session)
+                }
+                if (style.borderWidth ?? 0) > 0 {
+                    ColorRows(session: session, id: element.id, slots: [.border])
+                }
+            }
+            InspectorRow("Opacity", isSet: style.opacity != nil, reset: { image(\.opacity).wrappedValue = nil }) {
+                OptionalSlider(value: image(\.opacity), range: 0.1...1, step: 0.05, standard: 1,
+                               format: { $0.formatted(.percent.precision(.fractionLength(0))) }, session: session)
             }
         }
     }
@@ -469,18 +569,39 @@ private struct LineInspector: View {
 
     private var style: LineStyle { session.style.elements[element.id]?.line ?? LineStyle() }
 
+    /// The battery's chart: bars, filled. A level's slider (not its ring): the system's slider,
+    /// which takes a colour alone.
+    private var isBars: Bool { session.widget?.kind == .batteryChart && element.id == .chart }
+    private var isSlider: Bool {
+        guard element.id == .levelSlider, let widget = session.widget else { return false }
+        if let frame = session.elementFrame(.levelSlider) { return frame.width >= frame.height * 1.6 }
+        return widget.layout != .ring
+    }
+
     var body: some View {
-        InspectorSection(element.role == .chart ? "Chart" : "Line") {
-            InspectorRow("Thickness", isSet: style.thickness != nil, reset: { line(\.thickness).wrappedValue = nil }) {
-                OptionalSlider(value: line(\.thickness), range: LineStyle.thicknessRange, step: 0.5, standard: 4,
-                               format: { $0.formatted(.number.precision(.fractionLength(0...1))) + " pt" }, session: session)
+        if isSlider {
+            InspectorSection("Line") {
+                ColorRows(session: session, id: element.id, slots: [.fill])
             }
-            InspectorRow("Ends", isSet: style.cap != nil, reset: { line(\.cap).wrappedValue = nil }) {
-                OptionalChoice(value: line(\.cap), options: LineCapChoice.allCases, title: \.title)
+        } else {
+            lineSection
+        }
+    }
+
+    private var lineSection: some View {
+        InspectorSection(element.role == .chart ? "Chart" : "Line") {
+            if !isBars {
+                InspectorRow("Thickness", isSet: style.thickness != nil, reset: { line(\.thickness).wrappedValue = nil }) {
+                    OptionalSlider(value: line(\.thickness), range: LineStyle.thicknessRange, step: 0.5, standard: 4,
+                                   format: { $0.formatted(.number.precision(.fractionLength(0...1))) + " pt" }, session: session)
+                }
+                InspectorRow("Ends", isSet: style.cap != nil, reset: { line(\.cap).wrappedValue = nil }) {
+                    OptionalChoice(value: line(\.cap), options: LineCapChoice.allCases, title: \.title)
+                }
             }
             // How it is filled (one colour, a gradient, by its value); the colours are the rows under it.
             InspectorRow("Fill Style", isSet: style.fill != nil, reset: { line(\.fill).wrappedValue = nil }) {
-                OptionalChoice(value: line(\.fill), options: LineFill.allCases, title: \.title)
+                OptionalChoice(value: line(\.fill), options: isBars ? [.solid, .gradient] : LineFill.allCases, title: \.title)
             }
             switch style.fill {
             case .valueScale?:
@@ -501,10 +622,12 @@ private struct LineInspector: View {
             default:
                 ColorRows(session: session, id: element.id, slots: [.fill])
             }
-            ColorRows(session: session, id: element.id, slots: [.track])
-            InspectorRow("Track", isSet: style.trackOpacity != nil, reset: { line(\.trackOpacity).wrappedValue = nil }) {
-                OptionalSlider(value: line(\.trackOpacity), range: 0...1, step: 0.05, standard: 0.16,
-                               format: { $0.formatted(.percent.precision(.fractionLength(0))) }, session: session)
+            if !isBars {
+                ColorRows(session: session, id: element.id, slots: [.track])
+                InspectorRow("Track", isSet: style.trackOpacity != nil, reset: { line(\.trackOpacity).wrappedValue = nil }) {
+                    OptionalSlider(value: line(\.trackOpacity), range: 0...1, step: 0.05, standard: 0.16,
+                                   format: { $0.formatted(.percent.precision(.fractionLength(0))) }, session: session)
+                }
             }
         }
     }
@@ -637,7 +760,8 @@ private struct WidgetLookInspector: View {
         let style = session.style
         VStack(alignment: .leading, spacing: 12) {
             InspectorSection("Accent Colour") {
-                TintWell(selection: widget.tint, automaticHint: kind == .nowPlaying ? "from the artwork" : "the system's accent") { tint in
+                TintWell(selection: widget.tint, automaticHint: kind == .nowPlaying ? "from the artwork" : "the system's accent",
+                         purpose: kind.accentPurpose) { tint in
                     withAnimation(Motion.content) { session.change(\IslandWidget.tint) { $0.tint = tint } }
                 }
             }
@@ -728,11 +852,15 @@ private struct WidgetLookInspector: View {
                     }
                 }
                 InspectorRow("Padding", isSet: style.layout.padding != nil, reset: { layout(\.padding).wrappedValue = nil }) {
-                    OptionalSlider(value: layout(\.padding), range: LayoutStyle.paddingRange, step: 1,
+                    // No more than the widget's size leaves room for (`WidgetMetrics.maximumPadding`).
+                    OptionalSlider(value: layout(\.padding), range: 0...Double(WidgetMetrics.maximumPadding(for: widget)), step: 1,
                                    standard: Double(WidgetMetrics.standardPadding(for: kind)), format: { "\(Int($0)) pt" }, session: session)
                 }
                 InspectorRow("Scale", isSet: style.layout.contentScale != nil, reset: { layout(\.contentScale).wrappedValue = nil }) {
-                    OptionalSlider(value: layout(\.contentScale), range: LayoutStyle.contentScaleRange, step: 0.05, standard: 1,
+                    // Laid out freely, nothing is drawn past its rectangle: no larger than 100%.
+                    OptionalSlider(value: layout(\.contentScale),
+                                   range: style.layout.arrangement.isCustom ? LayoutStyle.contentScaleRange.lowerBound...1
+                                                                             : LayoutStyle.contentScaleRange, step: 0.05, standard: 1,
                                    format: { $0.formatted(.percent.precision(.fractionLength(0))) }, session: session)
                 }
                 if kind.spec.stacksElements {
@@ -950,10 +1078,11 @@ extension IslandWidgetKind {
         case .analogClock, .monthCalendar: []
         case .upNext: [.clock]
         case .countdown: [.duration]
-        case .battery, .batteryTime: [.percent, .duration]
-        case .batteryHealth, .volume, .brightness, .keyboardBrightness, .systemStats, .airPodsBattery: [.percent]
+        // Whole percentages (a charge, a health, AirPods) have no decimals to show.
+        case .battery, .batteryTime: [.duration]
+        case .volume, .brightness, .keyboardBrightness, .systemStats: [.percent]
         case .batteryTemperature: [.temperature]
-        case .uptime: [.duration, .temperature]
+        case .uptime: [.duration]
         default: []
         }
     }

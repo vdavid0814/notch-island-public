@@ -14,7 +14,7 @@ nonisolated enum ToolSpecs {
             elements: [
                 // Previews 22 pt tall at least, which a widget 56 pt tall gives.
                 ElementSpec(.previews, "File previews", symbol: "photo.on.rectangle", role: .image, priority: 50,
-                            minRoom: MinRoom(height: 56), isBlock: true),
+                            minRoom: MinRoom(height: 56), isSizable: false, isBlock: true),
                 ElementSpec(.shelfCount, "Item count", symbol: "number", role: .text,
                             samples: ["Drop files here", "Drop files", "Drop", "99 items"], priority: 90),
                 ElementSpec(.shelfActions, "AirDrop and Clear buttons", symbol: "square.and.arrow.up", role: .button,
@@ -41,7 +41,7 @@ nonisolated enum ToolSpecs {
                                                acceptsLabel: true)],
                         sizes: (GridSize(width: 1, height: 1), GridSize(width: 2, height: 1), GridSize(width: 4, height: 2))),
         .appLauncher: tool("App Launcher", "Up to eight apps, a click away.", symbol: "square.grid.2x2.fill",
-                           elements: [ElementSpec(.appIcons, "Apps", symbol: "square.grid.2x2", role: .feature, priority: 100, isBlock: true,
+                           elements: [ElementSpec(.appIcons, "Apps", symbol: "square.grid.2x2", role: .feature, priority: 100, isSizable: false, isBlock: true,
                                                   isRequired: true)],
                            sizes: (GridSize(width: 1, height: 1), GridSize(width: 3, height: 1), GridSize(width: 12, height: 2)),
                            customLayout: false),

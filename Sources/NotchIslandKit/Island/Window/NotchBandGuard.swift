@@ -266,7 +266,13 @@ private final class BandCoverPanel: NSPanel {
 
     override func sendEvent(_ event: NSEvent) {
         switch event.type {
-        case .leftMouseDown, .rightMouseDown, .otherMouseDown: onMouseDown?()
+        // Only a press on the strip itself: while the app is not active, a press in one of its
+        // popovers over Settings can be handed to this window too (measured, Oct 2026).
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            if NSRect(origin: .zero, size: frame.size).contains(event.locationInWindow),
+               frame.contains(NSEvent.mouseLocation) {
+                onMouseDown?()
+            }
         default: break
         }
         super.sendEvent(event)

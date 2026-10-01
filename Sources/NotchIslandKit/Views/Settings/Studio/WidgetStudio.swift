@@ -44,8 +44,49 @@ import SwiftUI
     /// Raised to have the Widgets page scroll its stage into view (a widget about to fly from it).
     var stageScrollRequest = 0
 
+    /// The mode picked and on its way in (`switchMode`): the picker shows it at once.
+    var pendingMode: Mode?
+    /// The Widgets page's content under the stage: faded out while the mode switches.
+    var contentOpacity: Double = 1
+    @ObservationIgnored private var switching: Task<Void, Never>?
+
     /// Frames and views for the transition, written from layout callbacks.
     @ObservationIgnored let probe = StudioProbe()
+
+    /// To another mode, without a stutter. Building a mode's page and laying Settings out again
+    /// takes one frame of ~100 ms whatever is done (measured: ~35 ms the page under the stage, the
+    /// rest the stage and the scroll view); a spring over it ran at 30 fps after that frame. So the
+    /// picker moves at once, the content fades out, the switch lands while nothing moves (the long
+    /// frame is not seen), and the new content fades in: opacity only, no layout, every frame cheap.
+    @MainActor func switchMode(to target: Mode) {
+        guard target != (pendingMode ?? mode) else { return }
+        switching?.cancel()
+        guard target != mode else {
+            // Back to the mode still shown, before it went.
+            pendingMode = nil
+            withAnimation(.easeOut(duration: Self.fadeIn)) { contentOpacity = 1 }
+            return
+        }
+        pendingMode = target
+        withAnimation(.easeIn(duration: Self.fadeOut)) { contentOpacity = 0 }
+        switching = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.fadeOut))
+            guard let self, !Task.isCancelled else { return }
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            withTransaction(instant) {
+                self.mode = target
+                self.pendingMode = nil
+            }
+            // After the long frame: a fade started before it would be half over when it ends.
+            try? await Task.sleep(for: .milliseconds(30))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: Self.fadeIn)) { self.contentOpacity = 1 }
+        }
+    }
+
+    private static let fadeOut: TimeInterval = 0.12
+    private static let fadeIn: TimeInterval = 0.2
 }
 
 /// Where the transition flies from, and who flies it. Plain storage, not observed: writing it must

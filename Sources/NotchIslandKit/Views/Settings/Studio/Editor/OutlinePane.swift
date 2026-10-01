@@ -49,9 +49,13 @@ struct OutlinePane: View {
                           isModified: widget.style.elements[id] != nil || widget.sizes[id] != nil,
                           visibility: switchable ? widget.shows(id) : nil,
                           toggleVisibility: {
+                              // As the inspector's Shown: laid out freely, onto the widget or into its tray
+                              // with it (the options alone left a hidden element drawn).
                               withAnimation(Motion.content) {
-                                  session.change(\IslandWidget.options) { widget in
-                                      if widget.options.contains(id) { widget.options.remove(id) } else { widget.options.insert(id) }
+                                  session.change(\IslandWidget.self) { widget in
+                                      let on = !widget.options.contains(id)
+                                      if on { widget.options.insert(id) } else { widget.options.remove(id) }
+                                      LayoutEdit.setShown(id, on, role: element.role, parts: element.parts, in: &widget.style.layout.arrangement)
                                   }
                               }
                           }) {
@@ -74,6 +78,10 @@ struct OutlinePane: View {
             Button("Paste Style", systemImage: "doc.on.clipboard") { withAnimation(Motion.content) { session.pasteStyle() } }
                 .keyboardShortcut("v", modifiers: [.command, .option])
                 .help("Give it a copied look: each element takes the look of the one like it (⌥⌘V)")
+                .disabled(!session.canPasteStyle)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            session.refreshPasteAvailability()
         }
         .labelStyle(.titleOnly)
         .controlSize(.small)

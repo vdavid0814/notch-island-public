@@ -157,10 +157,12 @@ struct BatteryChartElement: View {
     /// Samples in a picture that reads nothing.
     private var isPreview: Bool { isPicture && !readsLive }
     @Environment(\.widgetArtworkColor) private var artwork
+    @Environment(\.widgetStyle) private var style
 
     var body: some View {
         let battery = model.battery
         var settings = model.preferences.battery
+        let colors = colors(settings)
         // A widget has no room for the page's captions: the shapes alone, and the hours where it is tall.
         let _ = settings.showsCaptions = false
         let showsHours = size.height >= 60
@@ -169,12 +171,19 @@ struct BatteryChartElement: View {
         let start = Date(timeIntervalSinceReferenceDate: (Date().timeIntervalSinceReferenceDate / bucket).rounded(.down) * bucket)
         PanelTimelineView(.periodic(from: start, by: bucket)) { _ in
             BatteryChartPlot(geometry: battery.chartGeometry(range: settings.range, style: settings.style, size: plot),
-                             settings: settings, colors: BatteryChartColors(settings, artwork: artwork), size: plot,
+                             settings: settings, colors: colors, size: plot,
                              showsHours: showsHours)
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .whileShown { if !isPreview { battery.acquire(.history) } } stop: { if !isPreview { battery.release(.history) } }
         .accessibilityLabel("Battery chart")
+    }
+
+    /// The page's colours, with the widget's own fill (its Chart colour, or gradient) for the level.
+    private func colors(_ settings: BatteryDisplaySettings) -> BatteryChartColors {
+        var colors = BatteryChartColors(settings, artwork: artwork)
+        if let fill = ResolvedLine(style.element(.chart)).fillStyle(value: 1, artwork: artwork) { colors.normal = fill }
+        return colors
     }
 }
 

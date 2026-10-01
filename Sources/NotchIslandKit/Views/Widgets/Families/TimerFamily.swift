@@ -127,17 +127,14 @@ struct TimerWidget: View {
                     // One size for every part of the time. (A shrink-to-fit on the row shrank each
                     // part on its own — a big "0" beside a small ":05:00".) The size is measured to
                     // fit; the smaller ones only catch a measurement that came out short.
-                    Group {
-                        if style.isFixed(.readout) {
-                            // The style's size, drawn as set (it is never more than the row takes).
-                            readout(points: points, fit: fit)
-                        } else {
-                            ViewThatFits(in: .horizontal) {
-                                readout(points: points, fit: fit)
-                                readout(points: points * 0.85, fit: fit)
-                                readout(points: points * 0.7, fit: fit)
-                            }
-                        }
+                    // The style's size is drawn as set where it fits; wide type (Expanded, wide
+                    // letter spacing) the fit does not measure steps down rather than spill.
+                    ViewThatFits(in: .horizontal) {
+                        readout(points: points, fit: fit)
+                        readout(points: points * 0.85, fit: fit)
+                        readout(points: points * 0.7, fit: fit)
+                        readout(points: points * 0.55, fit: fit)
+                        readout(points: points * 0.4, fit: fit)
                     }
                     .foregroundStyle(accent.opacity(timers.countdown.isPaused ? 0.55 : 1))
                     .ownDirection()

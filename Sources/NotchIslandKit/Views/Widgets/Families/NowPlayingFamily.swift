@@ -43,8 +43,9 @@ struct NowPlayingElement: View {
             let titleType = NowPlayingWidget.titleType.at(planned?.points ?? 14)
             Group {
                 if widget.shows(.artist), plan?.elements[.artist] == nil, let artistPoints = style.element(.artist)?.text.points {
-                    // The artist not placed on its own: on the title's line, as the one-line layout draws them.
-                    let artistType = NowPlayingWidget.artistType.at(CGFloat(artistPoints))
+                    // The artist not placed on its own: on the title's line, as the one-line layout draws them —
+                    // no larger than the title the line is planned for (larger, it ran out of its frame).
+                    let artistType = NowPlayingWidget.artistType.at(min(CGFloat(artistPoints), titleType.points))
                     (Text.widgetRun(NowPlayingWidget.title(media.item), .trackInfo, titleType, style: style, artwork: artwork) + Text("  ")
                         + Text.widgetRun(NowPlayingWidget.subtitle(media.item), .artist, artistType, color: AnyShapeStyle(.secondary),
                                          style: style, artwork: artwork))
@@ -136,7 +137,7 @@ struct NowPlayingWidget: View {
                     .ownDirection()
             }
             VStack(alignment: .leading, spacing: 0) {
-                titles(media.item, room: size.height, compact: size.height < 70)
+                titles(media.item, room: size.height, compact: size.height < 70, textRoom: besideTextRoom(media))
                 Spacer(minLength: Metrics.Spacing.xSmall)
                 if widget.shows(.progress), size.height >= 84, let item = media.item {
                     PlaybackScrubber(clock: media.clock, duration: item.duration, isPlaying: media.isPlaying)
@@ -205,6 +206,15 @@ struct NowPlayingWidget: View {
             .editorElement(.artwork, in: probe)
     }
 
+    /// The height the title and the artist share beside the cover: what the progress line and the
+    /// buttons under them leave (about their heights at the column's control size).
+    private func besideTextRoom(_ media: MediaController) -> CGFloat {
+        var reserved = Metrics.Spacing.xSmall
+        if widget.shows(.progress), size.height >= 84, media.item != nil { reserved += 31 }
+        if media.item != nil, widget.shows(.playbackButtons) || widget.shows(.skipButtons) { reserved += 26 + Metrics.Spacing.xSmall }
+        return max(size.height - reserved, 0)
+    }
+
     /// The title's type (semibold) and the artist's, at a size set where they are drawn.
     static let titleType = TypeSpec(points: 14, weight: .semibold)
     static let artistType = TypeSpec(points: 12)
@@ -212,13 +222,19 @@ struct NowPlayingWidget: View {
     /// Title over artist, each sized from the room and its element size, one line each (shrinking a
     /// little before it truncates). In a compact spot the artist joins the title's line. A fixed
     /// size (the style's) is drawn as set, never taller than the line the room gives it.
-    @ViewBuilder private func titles(_ item: NowPlayingItem?, room: CGFloat, compact: Bool) -> some View {
+    /// `textRoom`: the height title and artist share one over the other, where sizes of their own
+    /// would together run past it (each up to its line, a 96 pt title pushed the buttons out).
+    @ViewBuilder private func titles(_ item: NowPlayingItem?, room: CGFloat, compact: Bool, textRoom: CGFloat? = nil) -> some View {
         let lineFit = WidgetType.size(fittingLines: 1, in: compact ? size.height : room * 0.4)
-        let titleType = Self.titleType.at(style.textPoints(
-            .trackInfo, auto: WidgetType.points(room, ratio: 0.12, min: 12, max: 20, widget.size(of: .trackInfo)), fit: lineFit))
-        let artistType = Self.artistType.at(style.textPoints(
-            .artist, auto: WidgetType.points(room, ratio: 0.1, min: 11, max: 16, widget.size(of: .artist)), fit: lineFit))
         let showsTitle = widget.shows(.trackInfo), showsArtist = widget.shows(.artist)
+        let (titlePoints, artistPoints) = shared(
+            title: style.textPoints(.trackInfo, auto: WidgetType.points(room, ratio: 0.12, min: 12, max: 20, widget.size(of: .trackInfo)),
+                                    fit: lineFit),
+            artist: style.textPoints(.artist, auto: WidgetType.points(room, ratio: 0.1, min: 11, max: 16, widget.size(of: .artist)),
+                                     fit: lineFit),
+            in: compact ? nil : textRoom, both: showsTitle && showsArtist)
+        let titleType = Self.titleType.at(titlePoints)
+        let artistType = Self.artistType.at(artistPoints)
         if compact {
             // Both on one line when they fit, each a run in its own type; else the title alone (the
             // artist gives way first).
@@ -274,12 +290,27 @@ struct NowPlayingWidget: View {
                                   looks: widget.plainButtons ? nil : widget.buttonLooks)
                     .controlSize(WidgetType.controlSize(size.height < WidgetMetrics.singleRowHeight ? .small : .regular,
                                                         widget.size(of: .playbackButtons)))
-                    .fixedSize()
+                    // Its own height; across, the room it is given (titled buttons that do not fit it
+                    // show their symbols alone, `TransportControls`).
+                    .fixedSize(horizontal: false, vertical: true)
             }
         } else if size.width >= 150 {
             NowPlayingOpenPlayer(capsule: size.width >= 240)
                 .buttonElement(.playbackButtons, in: probe)
         }
+    }
+
+    /// Title and artist sizes of their own (the style's) scaled down together to `room`, one over
+    /// the other; the kind's own sizes as they are.
+    private func shared(title: CGFloat, artist: CGFloat, in room: CGFloat?, both: Bool) -> (CGFloat, CGFloat) {
+        guard let room, style.isFixed(.trackInfo) || style.isFixed(.artist) else { return (title, artist) }
+        let titleHeight = TextFit.frameHeight(points: title, lines: 1, spec: Self.titleType.at(title))
+        let artistHeight = both ? TextFit.frameHeight(points: artist, lines: 1, spec: Self.artistType.at(artist)) : 0
+        let total = titleHeight + artistHeight + (both ? Metrics.Spacing.xxSmall : 0)
+        guard total > room, total > 0 else { return (title, artist) }
+        let factor = max(room - (both ? Metrics.Spacing.xxSmall : 0), 0) / (titleHeight + artistHeight)
+        return (max((title * factor * 4).rounded(.down) / 4, TextFit.minimumPoints),
+                max((artist * factor * 4).rounded(.down) / 4, TextFit.minimumPoints))
     }
 
     private func title(_ item: NowPlayingItem?) -> String { Self.title(item) }

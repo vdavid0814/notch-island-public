@@ -137,9 +137,9 @@ nonisolated struct TextStyle: Codable, Hashable, Sendable {
     /// The user's own wording in place of the element's (a label, a name).
     var labelOverride: String?
 
-    static let pointRange: ClosedRange<Double> = 6...96
+    static let pointRange: ClosedRange<Double> = 6...400
     static let trackingRange: ClosedRange<Double> = -2...10
-    static let lineLimitRange = 1...3
+    static let lineLimitRange = 1...12
     static let labelLimit = 60
 
     init() {}

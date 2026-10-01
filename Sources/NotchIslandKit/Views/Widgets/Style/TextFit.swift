@@ -3,9 +3,9 @@ import Synchronization
 
 /// The largest type that fits a room, and the height a text frame of a type size takes.
 nonisolated enum TextFit {
-    /// The range the engine sets type in (the style's fixed sizes).
+    /// The range the engine fits type in (a size set by the user may be larger: `TextStyle.pointRange`).
     static let minimumPoints = CGFloat(TextStyle.pointRange.lowerBound)
-    static let maximumPoints = CGFloat(TextStyle.pointRange.upperBound)
+    static let maximumPoints: CGFloat = 96
     /// Sizes are set in quarter points.
     static let step: CGFloat = 0.25
 

@@ -13,16 +13,22 @@ struct BatteryGlyph: View {
     let tint: StatusTint
     var showsPercentage = true
     var height: CGFloat = 13
+    /// A widget's own colours for the charge and the empty body (its style's), and the type of the
+    /// percentage cut out of it (the style's design, weight, italic).
+    var fillColor: Color? = nil
+    var bodyColor: Color? = nil
+    var numberType: TypeSpec? = nil
 
     var body: some View {
         let level = min(max(level, 0), 100)
         let width = (height * 2.2).rounded()
         let radius = height * 0.3
-        let fill: AnyShapeStyle = tint == .charging ? AnyShapeStyle(.white) : tint.style
+        let fill: AnyShapeStyle = fillColor.map { AnyShapeStyle($0) } ?? (tint == .charging ? AnyShapeStyle(.white) : tint.style)
+        let empty: AnyShapeStyle = bodyColor.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.white.opacity(0.35))
         HStack(spacing: height * 0.1) {
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(.white.opacity(0.35))
+                    .fill(empty)
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(fill)
                     .frame(width: max(level == 0 ? 0 : height * 0.35, width * CGFloat(level) / 100))
@@ -45,7 +51,7 @@ struct BatteryGlyph: View {
             .clipShape(.rect(cornerRadius: radius, style: .continuous))
             .compositingGroup()
             UnevenRoundedRectangle(bottomTrailingRadius: height * 0.14, topTrailingRadius: height * 0.14)
-                .fill(level >= 99 ? fill : AnyShapeStyle(.white.opacity(0.35)))
+                .fill(level >= 99 ? fill : empty)
                 .frame(width: max(1.5, height * 0.12), height: height * 0.36)
         }
         .animation(Motion.content, value: level)
@@ -57,7 +63,7 @@ struct BatteryGlyph: View {
     /// The percentage at its natural size (never truncated), in the menu bar's semibold.
     private func number(_ level: Int, width: Font.Width) -> some View {
         Text("\(level)")
-            .font(.system(size: height * 0.9, weight: .semibold).monospacedDigit())
+            .font(numberType.map { WidgetTypography.font($0.at(height * 0.9)) } ?? .system(size: height * 0.9, weight: .semibold).monospacedDigit())
             .tracking(-height * 0.02)
             .fontWidth(width)
             .lineLimit(1)

@@ -211,6 +211,9 @@ struct ShelfWidget: View {
 
 /// One button: Siri in the notch (the assistant).
 struct AssistantWidget: View {
+    /// The user's wording, else Siri's name.
+    private var name: String { style.element(.assistantLabel)?.text.labelOverride ?? "Siri" }
+
     let widget: IslandWidget
     let size: CGSize
 
@@ -225,7 +228,7 @@ struct AssistantWidget: View {
         let showsLabel = widget.shows(.assistantLabel)
         let iconSide = tall ? min(size.height * 0.4, 40) : min(size.height * 0.6, 22)
         let labelFit = min(WidgetType.size(fittingLines: 1, in: tall ? size.height - iconSide * 1.2 - Metrics.Spacing.small : size.height),
-                           WidgetType.size(fitting: "Siri", in: tall ? size.width - 8 : size.width - iconSide * 1.3 - Metrics.Spacing.small - 8,
+                           WidgetType.size(fitting: name, in: tall ? size.width - 8 : size.width - iconSide * 1.3 - Metrics.Spacing.small - 8,
                                            weight: .semibold))
         let labelSize = style.textPoints(.assistantLabel, auto: WidgetType.fitted(WidgetType.points(size.height, ratio: tall ? 0.16 : 0.4,
                                                                                                     min: 11, max: 17),
@@ -240,14 +243,14 @@ struct AssistantWidget: View {
                     VStack(spacing: Metrics.Spacing.small) {
                         Image(systemName: "siri").font(.system(size: min(size.height * 0.4, 40)))
                         if showsLabel {
-                            Text("Siri").widgetTextElement(.assistantLabel, label, fit: labelFit, in: style, probe: probe)
+                            Text(name).widgetTextElement(.assistantLabel, label, fit: labelFit, in: style, probe: probe)
                         }
                     }
                 } else {
                     HStack(spacing: Metrics.Spacing.small) {
                         Image(systemName: "siri").font(.system(size: min(size.height * 0.6, 22)))
                         if showsLabel, size.width >= 70 {
-                            Text("Siri").widgetTextElement(.assistantLabel, label, fit: labelFit, in: style, probe: probe)
+                            Text(name).widgetTextElement(.assistantLabel, label, fit: labelFit, in: style, probe: probe)
                         }
                     }
                 }

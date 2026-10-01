@@ -239,7 +239,7 @@ struct TopBarInspector: View {
                 Button("New Page", systemImage: "plus") {
                     guard let page = model.addPage() else { return }
                     model.studio.page = page
-                    withAnimation(.spring(duration: 0.35, bounce: 0.12)) { model.studio.mode = .widgets }
+                    model.studio.switchMode(to: .widgets)
                 }
                 .controlSize(.small)
                 .disabled(header.customPages.count >= CustomPage.limit)

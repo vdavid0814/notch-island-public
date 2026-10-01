@@ -55,6 +55,7 @@ import SwiftUI
         fits = ElementFitStore { [weak self] in
             Task { @MainActor in self?.fitsVersion &+= 1 }
         }
+        refreshPasteAvailability()
     }
 
     /// The widget as stored; nil once it is gone (removed elsewhere).
@@ -95,6 +96,8 @@ import SwiftUI
         after.id = before.id
         after.kind = before.kind
         after.frame = before.frame
+        // A button's look changes its size: laid out freely, it is measured again.
+        LayoutEdit.remeasureButtons(changedFrom: before.style, in: &after.style)
         after.sanitize()
         guard after != before else { return }
         history.record(before, property: property)
@@ -117,8 +120,11 @@ import SwiftUI
         restore(next)
     }
 
+    /// The snapshot's look; its place on the board too where only a step that moved the widget
+    /// (Make Room) left it elsewhere and it still fits there.
     private func restore(_ snapshot: IslandWidget) {
         publishAvailability()
+        if let frame = widget?.frame, snapshot.frame != frame { _ = store.setFrame(snapshot.frame, for: widgetID) }
         store.update(widgetID) { widget in
             let frame = widget.frame
             widget = snapshot
@@ -141,7 +147,7 @@ import SwiftUI
     }
 
     /// One cell larger on the board, wider first, then taller, where there is room: for a size the
-    /// room caps ("Make Room"). False when no larger size fits.
+    /// room caps ("Make Room"), as a step Undo takes back. False when no larger size fits.
     @discardableResult
     func makeRoom() -> Bool {
         guard let widget else { return false }
@@ -153,6 +159,8 @@ import SwiftUI
         where size.width <= upper.width && size.height <= upper.height {
             if let rect = board.placement(for: widget.kind, size: size, near: widget.frame, excluding: widget.id),
                store.setFrame(rect, for: widget.id) {
+                history.record(widget, property: \IslandWidget.frame)
+                publishAvailability()
                 return true
             }
         }
@@ -190,9 +198,17 @@ import SwiftUI
         guard let widget, let data = try? JSONEncoder().encode(CopiedStyle(widget)) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setData(data, forType: Self.pasteboardType)
+        refreshPasteAvailability()
     }
 
-    var canPasteStyle: Bool { NSPasteboard.general.availableType(from: [Self.pasteboardType]) != nil }
+    /// A copied style is on the pasteboard (Paste Style is offered): looked at when the editor
+    /// opens, after Copy Style and whenever the app comes forward.
+    private(set) var canPasteStyle = false
+
+    func refreshPasteAvailability() {
+        let available = NSPasteboard.general.availableType(from: [Self.pasteboardType]) != nil
+        if available != canPasteStyle { canPasteStyle = available }
+    }
 
     /// Takes a copied style: the widget's own parts as they were, each element's by its role (a
     /// title's type goes to this kind's first text, and so on), what this kind lacks left out.
@@ -213,8 +229,14 @@ nonisolated struct CopiedStyle: Codable, Sendable {
     var format: FormatStyle
     var padding: Double?
     var spacing: Double?
+    var alignment: NinePointAlignment?
+    var axis: LayoutAxis?
+    var contentScale: Double?
     /// Per role, the elements' styles in the order the kind draws them.
     var roles: [String: [ElementStyle]]
+    /// Per role, the elements' S/M/L sizes in the same order (nil is medium). Absent from styles
+    /// copied before it was kept.
+    var sizes: [String: [ElementSize?]]?
 
     init(_ widget: IslandWidget) {
         tint = widget.tint
@@ -225,11 +247,17 @@ nonisolated struct CopiedStyle: Codable, Sendable {
         format = widget.style.format
         padding = widget.style.layout.padding
         spacing = widget.style.layout.spacing
+        alignment = widget.style.layout.alignment
+        axis = widget.style.layout.axis
+        contentScale = widget.style.layout.contentScale
         var roles: [String: [ElementStyle]] = [:]
+        var sizes: [String: [ElementSize?]] = [:]
         for element in widget.kind.spec.elements {
             roles[element.role.rawValue, default: []].append(widget.style.elements[element.id] ?? ElementStyle())
+            sizes[element.role.rawValue, default: []].append(widget.sizes[element.id])
         }
         self.roles = roles
+        self.sizes = sizes
     }
 
     func apply(to widget: inout IslandWidget) {
@@ -243,11 +271,15 @@ nonisolated struct CopiedStyle: Codable, Sendable {
         widget.style.format = format
         widget.style.layout.padding = padding
         widget.style.layout.spacing = spacing
+        widget.style.layout.alignment = alignment
+        widget.style.layout.axis = axis
+        widget.style.layout.contentScale = contentScale
         var next: [String: Int] = [:]
         for element in widget.kind.spec.elements {
             let role = element.role.rawValue
             let index = next[role, default: 0]
             next[role] = index + 1
+            if let sizes = sizes?[role], index < sizes.count { widget.sizes[element.id] = sizes[index] }
             guard let styles = roles[role], index < styles.count else { continue }
             let style = styles[index]
             widget.style.elements[element.id] = style == ElementStyle() ? nil : style

@@ -63,8 +63,19 @@ nonisolated enum WidgetTypography {
                 NSFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector,
             ]]])
         }
-        return NSFont(descriptor: descriptor, size: spec.points) ?? base
+        let font = NSFont(descriptor: descriptor, size: spec.points) ?? base
+        // A design without an italic (SF Rounded, the island's figures) ignores the trait: slanted
+        // as the system slants a font it has no italic of, else Italic changed nothing.
+        if spec.italic, !font.fontDescriptor.symbolicTraits.contains(.italic) {
+            // A unit matrix with the slant only: the size stays the font's own.
+            var slant = CGAffineTransform(a: 1, b: 0, c: Self.syntheticSlant, d: 1, tx: 0, ty: 0)
+            return CTFontCreateWithFontDescriptor(font.fontDescriptor as CTFontDescriptor, spec.points, &slant) as NSFont
+        }
+        return font
     }
+
+    /// The slant of a synthesized italic (about 12°).
+    static let syntheticSlant: CGFloat = 0.21
 
     static func font(_ spec: TypeSpec) -> Font { Font(nsFont(spec) as CTFont) }
 

@@ -84,11 +84,16 @@ struct DesktopBackdrop: View {
     var body: some View {
         Color.clear
             .overlay {
-                // Drawn at once while the picture loads, and in its place if there is none.
-                switch style {
-                case .checkerboard: Checkerboard()
-                case .systemLight: DefaultWallpaper(light: true)
-                case .system, .desktop: DefaultWallpaper(light: false)
+                // Drawn at once while the picture loads, and in its place if there is none. Not
+                // under a loaded picture: a Canvas is drawn on the CPU again at every change of
+                // size (the stage switching modes), unseen.
+                if style == .checkerboard {
+                    Checkerboard()
+                } else if picture == nil {
+                    DefaultWallpaper(light: style == .systemLight)
+                        // Gone once the picture has faded in over it.
+                        .transition(.asymmetric(insertion: .identity,
+                                                removal: .opacity.animation(.linear(duration: 0.01).delay(0.25))))
                 }
             }
             // Top-aligned: a preview is the top of a screen, under its menu bar.

@@ -5,41 +5,37 @@ import SwiftUI
 // frame (in points of the widget, as the canvas's size badge reads), what holds it when the widget is resized, its order; the
 // commands for several picked at once; the grid's density; and what can be added.
 
-/// One placed element: its frame in points, its pins, aspect, lock and order.
+/// One placed element: whether it lies over what it overlaps or under it, its frame in points, and
+/// whether it keeps its shape as it is resized.
 struct FrameInspector: View {
     let session: EditorSession
     let id: ElementID
 
     var body: some View {
         if let layout = session.drawnLayout, let item = layout.items.first(where: { $0.id == id }),
-           let frame = session.elementFrame(id), let size = session.canvasContext?.size {
+           let frame = session.elementFrame(id) {
+            InspectorSection("Layer") {
+                Picker("", selection: Binding(get: { LayoutEdit.layer(of: id, in: layout) }, set: { layer in
+                    withAnimation(Motion.content) { session.editLayout { LayoutEdit.setLayer(layer, [id], in: &$0) } }
+                })) {
+                    ForEach(LayoutEdit.Layer.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .choiceBar()
+                .fixedSize()
+                Text("In Front: drawn over what it lies on. Behind: what it lies on covers it.")
+                    .font(.caption)
+                    .foregroundStyle(SettingsPalette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             InspectorSection("Frame", trailing: AnyView(Text("in points").font(.caption).foregroundStyle(SettingsPalette.secondary))) {
                 HStack(spacing: 8) {
-                    pointField("X", frame.minX) { value in set(frame, in: size) { $0.origin.x = value } }
-                    pointField("Y", frame.minY) { value in set(frame, in: size) { $0.origin.y = value } }
+                    pointField("X", frame.minX) { value in set(frame) { $0.origin.x = value } }
+                    pointField("Y", frame.minY) { value in set(frame) { $0.origin.y = value } }
                 }
                 HStack(spacing: 8) {
-                    pointField("W", frame.width) { value in set(frame, in: size) { $0.size.width = max(value, 1) } }
-                    pointField("H", frame.height) { value in set(frame, in: size) { $0.size.height = max(value, 1) } }
-                }
-                .disabled(item.locked)
-                InspectorRow("Align", isSet: false, reset: {}) {
-                    AlignButtons { alignment in session.editLayout { LayoutEdit.align([id], alignment, in: &$0) } }
-                        .disabled(item.locked)
-                }
-                InspectorRow("Order", isSet: false, reset: {}) {
-                    OrderButtons { order in session.editLayout { LayoutEdit.reorder([id], order, in: &$0) } }
-                }
-            }
-            InspectorSection("When the Widget Is Resized") {
-                HStack(alignment: .top, spacing: 14) {
-                    PinPicker(pinX: item.pinX, pinY: item.pinY) { x, y in
-                        session.editLayout { LayoutEdit.setPins(x: x, y: y, [id], in: &$0) }
-                    }
-                    VStack(alignment: .leading, spacing: 6) {
-                        axisMenu("Width", pin: item.pinX) { pin in session.editLayout { LayoutEdit.setPins(x: pin, [id], in: &$0) } }
-                        axisMenu("Height", pin: item.pinY) { pin in session.editLayout { LayoutEdit.setPins(y: pin, [id], in: &$0) } }
-                    }
+                    pointField("W", frame.width) { value in set(frame) { $0.size.width = max(value, 1) } }
+                    pointField("H", frame.height) { value in set(frame) { $0.size.height = max(value, 1) } }
                 }
                 InspectorRow("Keep Shape", isSet: item.keepsAspect, reset: { session.editLayout { LayoutEdit.setKeepsAspect(false, [id], in: &$0) } }) {
                     Toggle("", isOn: Binding(get: { item.keepsAspect }, set: { on in
@@ -47,31 +43,23 @@ struct FrameInspector: View {
                     }))
                     .labelsHidden()
                     .toggleStyle(.islandSwitch)
-                    .help("Its width and height keep their proportion (hold ⇧ while resizing for once)")
+                    .help("On: four corner handles, and it grows and shrinks as a whole. Off: eight handles (hold ⇧ to keep its shape once).")
                 }
-                InspectorRow("Locked", isSet: item.locked, reset: { session.editLayout { LayoutEdit.setLocked(false, [id], in: &$0) } }) {
-                    Toggle("", isOn: Binding(get: { item.locked }, set: { on in
-                        session.editLayout { LayoutEdit.setLocked(on, [id], in: &$0) }
-                    }))
-                    .labelsHidden()
-                    .toggleStyle(.islandSwitch)
-                    .help("Not moved by a drag or the arrow keys; ⌥-click picks it")
-                }
+                Text(item.keepsAspect ? "Resized from its four corners, as a whole."
+                                      : "Resized by eight handles: its width and height change on their own.")
+                    .font(.caption)
+                    .foregroundStyle(SettingsPalette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    /// The frame, in the widget's points at the size on the canvas, changed and kept inside the widget.
-    private func set(_ frame: CGRect, in size: CGSize, _ edit: (inout CGRect) -> Void) {
+    /// The frame typed in, in the widget's points at the size on the canvas: text by the same rule
+    /// as a handle dragged to it (`EditorSession.setFrame`).
+    private func set(_ frame: CGRect, _ edit: (inout CGRect) -> Void) {
         var rect = frame
         edit(&rect)
-        rect.size.width = min(rect.width, size.width)
-        rect.size.height = min(rect.height, size.height)
-        rect.origin.x = min(max(rect.minX, 0), size.width - rect.width)
-        rect.origin.y = min(max(rect.minY, 0), size.height - rect.height)
-        withAnimation(Motion.content) {
-            session.editLayout { LayoutEdit.setRect(UnitRect(rect, in: size), of: id, in: &$0) }
-        }
+        withAnimation(Motion.content) { session.setFrame(rect, of: id) }
     }
 
     private func pointField(_ title: String, _ value: CGFloat, set: @escaping (CGFloat) -> Void) -> some View {
@@ -92,90 +80,6 @@ struct FrameInspector: View {
             Stepper("", value: Binding(get: { shown }, set: { set(CGFloat($0)) }), step: 1)
                 .labelsHidden()
                 .controlSize(.small)
-        }
-    }
-
-    /// Keeps its size (held where the pin picker says), stretches, or scales with the widget.
-    private func axisMenu(_ title: String, pin: Pin, set: @escaping (Pin) -> Void) -> some View {
-        HStack(spacing: 6) {
-            Text(title).font(.caption).foregroundStyle(SettingsPalette.secondary).frame(width: 40, alignment: .leading)
-            Picker(title, selection: Binding(get: { AxisMode(pin) }, set: { mode in
-                switch mode {
-                case .fixed: set(pin == .stretch || pin == .scale ? .center : pin)
-                case .stretch: set(.stretch)
-                case .scale: set(.scale)
-                }
-            })) {
-                ForEach(AxisMode.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            .labelsHidden()
-            .controlSize(.small)
-            .fixedSize()
-        }
-    }
-
-    private enum AxisMode: CaseIterable {
-        case scale, fixed, stretch
-
-        init(_ pin: Pin) {
-            switch pin {
-            case .scale: self = .scale
-            case .stretch: self = .stretch
-            case .leading, .center, .trailing: self = .fixed
-            }
-        }
-
-        var title: String {
-            switch self {
-            case .scale: String(localized: "Scales")
-            case .fixed: String(localized: "Keeps Size")
-            case .stretch: String(localized: "Stretches")
-            }
-        }
-    }
-}
-
-/// Where an element that keeps its size is held as the widget grows: nine places.
-private struct PinPicker: View {
-    let pinX: Pin
-    let pinY: Pin
-    let set: (Pin, Pin) -> Void
-
-    private static let pins: [Pin] = [.leading, .center, .trailing]
-
-    var body: some View {
-        VStack(spacing: 3) {
-            ForEach(Self.pins, id: \.self) { y in
-                HStack(spacing: 3) {
-                    ForEach(Self.pins, id: \.self) { x in
-                        let isOn = (pinX == x || !Self.pins.contains(pinX)) && (pinY == y || !Self.pins.contains(pinY))
-                            && (Self.pins.contains(pinX) || Self.pins.contains(pinY))
-                        Button {
-                            // An axis that stretches or scales keeps doing so.
-                            set(Self.pins.contains(pinX) ? x : pinX, Self.pins.contains(pinY) ? y : pinY)
-                        } label: {
-                            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                .fill(isOn ? Color.islandAccent : .white.opacity(0.14))
-                                .frame(width: 16, height: 16)
-                                .contentShape(.rect)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Held \(title(y, vertical: true)) \(title(x, vertical: false))")
-                        .accessibilityLabel("Pin \(title(y, vertical: true)) \(title(x, vertical: false))")
-                        .accessibilityAddTraits(isOn ? .isSelected : [])
-                    }
-                }
-            }
-        }
-        .padding(5)
-        .background(.white.opacity(0.05), in: .rect(cornerRadius: 7, style: .continuous))
-    }
-
-    private func title(_ pin: Pin, vertical: Bool) -> String {
-        switch pin {
-        case .leading: vertical ? "top" : "left"
-        case .center: vertical ? "middle" : "centre"
-        default: vertical ? "bottom" : "right"
         }
     }
 }
@@ -246,14 +150,8 @@ struct ArrangeInspector: View {
                 InspectorRow("Order", isSet: false, reset: {}) {
                     OrderButtons { order in session.editLayout { LayoutEdit.reorder(ids, order, in: &$0) } }
                 }
-                HStack(spacing: 8) {
-                    let allLocked = ids.allSatisfy { session.layoutItem($0)?.locked == true }
-                    Button(allLocked ? "Unlock" : "Lock", systemImage: allLocked ? "lock.open" : "lock") {
-                        session.editLayout { LayoutEdit.setLocked(!allLocked, ids, in: &$0) }
-                    }
-                    Button("Hide", systemImage: "eye.slash") { withAnimation(Motion.content) { session.hideSelection() } }
-                }
-                .controlSize(.small)
+                Button("Hide", systemImage: "eye.slash") { withAnimation(Motion.content) { session.hideSelection() } }
+                    .controlSize(.small)
             }
             .disabled(!canArrange)
         }

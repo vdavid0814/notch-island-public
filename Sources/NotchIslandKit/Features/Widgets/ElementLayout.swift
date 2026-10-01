@@ -211,9 +211,15 @@ nonisolated struct ElementFrame: Codable, Hashable, Sendable {
     /// takes its size from its rectangle. Not the style's: a fixed size there held it, and every
     /// size laid out by the kind, at that size.
     var points: Double?
+    /// Text: the most lines it wraps to here; its rectangle is that many lines tall. Nil: one.
+    var lines: Int?
+    /// Text: made taller by a handle, it takes more lines (on, nil) or larger type (off).
+    var growsLines: Bool?
+
+    static let lineRange = 1...12
 
     init(id: ElementID, rect: UnitRect, pinX: Pin = .scale, pinY: Pin = .scale, locked: Bool = false, keepsAspect: Bool = false,
-         natural: CGSize? = nil, points: Double? = nil) {
+         natural: CGSize? = nil, points: Double? = nil, lines: Int? = nil, growsLines: Bool? = nil) {
         self.id = id
         self.rect = rect
         self.pinX = pinX
@@ -222,6 +228,8 @@ nonisolated struct ElementFrame: Codable, Hashable, Sendable {
         self.keepsAspect = keepsAspect
         self.natural = natural
         self.points = points
+        self.lines = lines
+        self.growsLines = growsLines
     }
 
     init(from decoder: any Decoder) throws {
@@ -234,6 +242,8 @@ nonisolated struct ElementFrame: Codable, Hashable, Sendable {
         keepsAspect = c.lossy(Bool.self, .keepsAspect) ?? false
         natural = c.lossy(CGSize.self, .natural).flatMap { $0.width > 0 && $0.height > 0 ? $0 : nil }
         points = c.lossy(Double.self, .points).flatMap { $0 > 0 ? $0 : nil }
+        lines = c.lossy(Int.self, .lines).map(Self.lineRange.clamp)
+        growsLines = c.lossy(Bool.self, .growsLines)
     }
 }
 
@@ -247,21 +257,28 @@ nonisolated enum Pin: String, Codable, Hashable, Sendable, CaseIterable {
     case scale
 }
 
-/// A rectangle in fractions of the widget (0…1 on each axis).
+/// A rectangle in fractions of the widget (0…1 on each axis inside it; an element may reach past
+/// its edges, where the widget clips it).
 nonisolated struct UnitRect: Codable, Hashable, Sendable {
     /// The smallest side, as a fraction.
-    static let minimumSide = 0.02
+    static let minimumSide = 0.005
+    /// The largest side: no limit the user meets (the widget clips what lies outside it).
+    static let maximumSide = 20.0
+    /// How much of it stays over the widget, so it can always be picked again.
+    static let visible = 0.02
 
     var x: Double
     var y: Double
     var width: Double
     var height: Double
 
-    /// Inside the widget, and no smaller than the minimum.
+    /// No smaller than the minimum, and some of it over the widget.
     var clamped: UnitRect {
-        let range = Self.minimumSide...1
-        let width = range.clamp(width), height = range.clamp(height)
-        return UnitRect(x: (0...(1 - width)).clamp(x), y: (0...(1 - height)).clamp(y), width: width, height: height)
+        let range = Self.minimumSide...Self.maximumSide
+        let width = range.clamp(width.isFinite ? width : 1), height = range.clamp(height.isFinite ? height : 1)
+        let x = x.isFinite ? x : 0, y = y.isFinite ? y : 0
+        return UnitRect(x: ((Self.visible - width)...(1 - Self.visible)).clamp(x),
+                        y: ((Self.visible - height)...(1 - Self.visible)).clamp(y), width: width, height: height)
     }
 }
 
@@ -319,6 +336,14 @@ nonisolated extension Decoration {
 
     var text: String? {
         if case .label(let text) = self { text } else { nil }
+    }
+
+    /// A divider or a shape: a box the fill colour fills.
+    var isBox: Bool {
+        switch self {
+        case .divider, .shape: true
+        case .label, .symbol: false
+        }
     }
 }
 

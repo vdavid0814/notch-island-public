@@ -11,8 +11,16 @@ nonisolated enum WidgetMetrics {
     /// Inside the widget: the style's (Customize), else tighter without a plate (nothing to keep
     /// off the edge) and for Control Center's controls, whose button should fill a one-cell widget.
     static func padding(for widget: IslandWidget) -> CGFloat {
-        if let padding = widget.style.layout.padding { return CGFloat(padding) }
+        if let padding = widget.style.layout.padding { return min(CGFloat(padding), maximumPadding(for: widget)) }
         return widget.background == .none ? 2 : standardPadding(for: widget.kind)
+    }
+
+    /// The most padding the widget's size leaves room for: 8 pt a row (or column), at most the
+    /// style's range. More left a one-row widget no room at all, its elements gone and a list's
+    /// rows divided by zero.
+    static func maximumPadding(for widget: IslandWidget) -> CGFloat {
+        let cells = CGFloat(min(widget.frame.width, widget.frame.height))
+        return min(8 * max(cells, 1), CGFloat(LayoutStyle.paddingRange.upperBound))
     }
 
     /// A kind's padding on its plate.
