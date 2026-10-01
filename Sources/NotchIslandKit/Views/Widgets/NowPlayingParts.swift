@@ -34,15 +34,16 @@ struct TransportControls: View {
     @Environment(\.widgetStyle) private var style
 
     var body: some View {
-        // Titles where the style asks for them and the row holds them; their symbols alone where
-        // it does not (titled, the row ran past the widget's edge).
         // What does not fit the room gives way, never widening the widget past its edge: the titles
-        // first (their symbols alone), then the seek buttons.
+        // first (their symbols alone), then the room between the buttons, then a size of them; the
+        // seek buttons, switched on, go only where even that does not fit.
         if seekBack != nil || seekForward != nil
             || titled(.skipButtons, .skipButtons.part("previous"), .skipButtons.part("next")) || titled(.playbackButtons) {
             ViewThatFits(in: .horizontal) {
                 row(titles: true, seeks: true).fixedSize()
                 row(titles: false, seeks: true).fixedSize()
+                row(titles: false, seeks: true, tight: 1).fixedSize()
+                row(titles: false, seeks: true, tight: 2).fixedSize()
                 row(titles: false, seeks: false).fixedSize()
             }
         } else {
@@ -50,8 +51,10 @@ struct TransportControls: View {
         }
     }
 
-    private func row(titles: Bool, seeks: Bool) -> some View {
-        HStack(spacing: Metrics.Spacing.large) {
+    /// `tight`: 1, the buttons closer together; 2, also a size smaller.
+    private func row(titles: Bool, seeks: Bool, tight: Int = 0) -> some View {
+        let controlSize = tight >= 2 ? Metrics.Control.smaller(self.controlSize) : self.controlSize
+        return HStack(spacing: tight >= 1 ? Metrics.Spacing.small : Metrics.Spacing.large) {
             if seeks, let seekBack {
                 TransportSeek(forward: false, seconds: seekBack.seconds)
                     .buttonElement(.seekBack, in: probe)
