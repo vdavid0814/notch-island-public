@@ -27,11 +27,25 @@ import Foundation
     func store(for page: ExpandedPage) -> WidgetStore {
         guard page.isBoard else { return home }
         if let store = stores[page] { return store }
+        if page == .battery { relayBatteryPage() }
         let store = WidgetStore(defaults: defaults, instances: instances, key: Self.key(for: page),
                                 seed: Self.seed(for: page, grid: home.board.grid))
         store.keeping = { [weak self] in self?.allIDs ?? store.ids }
         stores[page] = store
         return store
+    }
+
+    /// The battery page laid out as the iPhone's Battery Usage (0.7.2), once: the board it had is
+    /// kept aside (`….v1backup`) and the page starts from the new seed.
+    private func relayBatteryPage() {
+        let key = Self.key(for: .battery)
+        let marker = key + ".layout"
+        guard defaults.integer(forKey: marker) < 2 else { return }
+        if let old = defaults.data(forKey: key) {
+            defaults.set(old, forKey: key + ".v1backup")
+            defaults.removeObject(forKey: key)
+        }
+        defaults.set(2, forKey: marker)
     }
 
     /// The board a widget is on, among the pages made so far.
@@ -92,12 +106,24 @@ import Foundation
         return WidgetBoard(widgets: [timer], grid: grid)
     }
 
-    /// The battery page as it was: its level and time left, health and cycles, the charger down the
-    /// left; the day's chart over the rest.
+    /// The battery page, laid out as the iPhone's Battery Usage: the last days' use down the left,
+    /// the picked day's chart with its screen time under it in the middle, the level, the last
+    /// charge and the health down the right. On a smaller board, the level, health and cycles
+    /// beside the day's chart, as before.
     nonisolated static func batterySeed(grid: BoardGrid) -> WidgetBoard {
         func widget(_ kind: IslandWidgetKind, _ column: Int, _ row: Int, _ width: Int, _ height: Int) -> IslandWidget {
             IslandWidget(kind: kind, frame: GridRect(column: column, row: row, width: width, height: height), options: kind.defaultOptions,
                          id: WidgetID(name: "notchisland.page.battery." + kind.rawValue))
+        }
+        if grid.columns >= 12, grid.rows >= 3 {
+            return WidgetBoard(widgets: [
+                widget(.batteryUsage, 0, 0, 4, 3),
+                widget(.batteryChart, 4, 0, 5, 2),
+                widget(.batteryScreenTime, 4, 2, 5, 1),
+                widget(.battery, 9, 0, 3, 1),
+                widget(.batteryLastCharge, 9, 1, 3, 1),
+                widget(.batteryHealth, 9, 2, 3, 1),
+            ], grid: grid)
         }
         let left = 4
         let chartHeight = min(grid.rows, IslandWidgetKind.batteryChart.spec.maximumSize.height)

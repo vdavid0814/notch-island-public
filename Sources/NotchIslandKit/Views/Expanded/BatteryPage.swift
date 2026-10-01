@@ -6,7 +6,8 @@ import SwiftUI
 extension BatteryChartColors {
     /// The chart's colours as the settings have them.
     init(_ settings: BatteryDisplaySettings, artwork: Color?) {
-        self.init(normal: Self.resolve(settings.normalColor, .white, artwork: artwork),
+        // The iPhone's grey bars.
+        self.init(normal: Self.resolve(settings.normalColor, Color(white: 0.62), artwork: artwork),
                   charging: Self.resolve(settings.chargingColor, .green, artwork: artwork),
                   low: Self.resolve(settings.lowColor, .red, artwork: artwork))
     }
@@ -95,13 +96,16 @@ struct BatteryChartPlot: View {
         if settings.shadesDisplayOff {
             ChartShape(path: geometry.displayOff).fill(.white.opacity(0.06))
         }
-        ChartShape(path: geometry.axis).stroke(.white.opacity(0.18), style: StrokeStyle(lineWidth: 0.5, dash: [2, 2]))
+        ChartShape(path: geometry.axis).stroke(.white.opacity(0.16), style: StrokeStyle(lineWidth: 0.5, dash: [1.5, 2.5]))
         if settings.showsGaps {
             ChartShape(path: geometry.gaps).stroke(.white.opacity(0.2), lineWidth: 1)
         }
         switch geometry.style {
         case .bars, .area:
             let opacity = geometry.style == .area ? 0.55 : 1
+            // Charging: a faint column up to full behind the bar, a cap along the top of the run.
+            ChartShape(path: geometry.chargingBand).fill(colors.charging).opacity(0.18)
+            ChartShape(path: geometry.chargingCap).fill(colors.charging)
             ChartShape(path: geometry.level).fill(colors.normal).opacity(opacity)
             ChartShape(path: geometry.charging).fill(colors.charging).opacity(opacity)
             ChartShape(path: geometry.low).fill(colors.low).opacity(opacity)

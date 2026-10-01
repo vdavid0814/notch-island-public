@@ -12,8 +12,25 @@ enum BatteryReadings {
                                         minutesRemaining: 72, isLowPowerMode: false)
     static let sampleDetails = BatteryDetails.demo(power: sampleState)
 
-    static func reading(_ kind: IslandWidgetKind, state: PowerState, details: BatteryDetails?, format: WidgetFormat) -> WidgetReading {
+    /// Charged to 100 % yesterday evening, for the pictures.
+    static var sampleLastCharge: BatteryLastCharge {
+        BatteryLastCharge(level: 100, date: Calendar.autoupdatingCurrent.startOfDay(for: Date()).addingTimeInterval(-5.5 * 3600))
+    }
+
+    static func reading(_ kind: IslandWidgetKind, state: PowerState, details: BatteryDetails?, format: WidgetFormat,
+                        lastCharge: BatteryLastCharge? = nil) -> WidgetReading {
         switch kind {
+        case .batteryLastCharge:
+            guard let lastCharge else {
+                return WidgetReading("—", caption: String(localized: "Last Charged"), symbol: "battery.100percent.bolt", widest: format.percent(1))
+            }
+            let calendar = Calendar.autoupdatingCurrent
+            let time = lastCharge.date.formatted(.dateTime.hour().minute())
+            let when = calendar.isDateInToday(lastCharge.date) ? String(localized: "Today, \(time)")
+                : calendar.isDateInYesterday(lastCharge.date) ? String(localized: "Yesterday, \(time)")
+                : lastCharge.date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+            return WidgetReading(format.percent(Double(lastCharge.level) / 100), caption: String(localized: "Last Charged · \(when)"),
+                                 symbol: "battery.100percent.bolt", tint: .green, widest: format.percent(1))
         case .batteryTime:
             if state.isCharging {
                 let minutes = details?.minutesToFull ?? state.minutesRemaining
@@ -91,10 +108,13 @@ private struct BatteryFigureSource<Content: View>: View {
     var body: some View {
         let battery = model.battery
         let format = WidgetFormat(style.format, locale: locale)
-        let lease: BatteryCenter.Lease = kind == .batteryPower ? .power : .details
+        // The last charge is the history's; the others are the details'.
+        let lease: BatteryCenter.Lease = kind == .batteryPower ? .power : kind == .batteryLastCharge ? .history : .details
         let reading = isPreview
-            ? BatteryReadings.reading(kind, state: BatteryReadings.sampleState, details: BatteryReadings.sampleDetails, format: format)
-            : BatteryReadings.reading(kind, state: model.power.state, details: battery.details, format: format)
+            ? BatteryReadings.reading(kind, state: BatteryReadings.sampleState, details: BatteryReadings.sampleDetails, format: format,
+                                      lastCharge: BatteryReadings.sampleLastCharge)
+            : BatteryReadings.reading(kind, state: model.power.state, details: battery.details, format: format,
+                                      lastCharge: battery.lastCharge)
         content(reading)
             .whileShown { if !isPreview { battery.acquire(lease) } } stop: { if !isPreview { battery.release(lease) } }
     }
@@ -139,8 +159,16 @@ private struct BatteryChartSource<Content: View>: View {
     var body: some View {
         let state = isPreview ? BatteryReadings.sampleState : model.power.state
         let format = WidgetFormat(style.format, locale: locale)
+        // A past day picked on Daily Usage: its name, and the level it ended at.
+        if !isPreview, let day = model.battery.pickedDay() {
+            let end = model.battery.history?.records.last { $0.kind.carriesLevel && $0.date < day.addingTimeInterval(86_400) }
+            content(WidgetReading(end.map { format.percent(Double($0.level) / 100) } ?? "—",
+                                  caption: day.formatted(.dateTime.weekday(.wide).month().day()),
+                                  symbol: "calendar", widest: format.percent(1)))
+        } else {
         content(WidgetReading(format.percent(Double(state.level) / 100), caption: model.preferences.battery.range.title,
                               symbol: state.isCharging ? "bolt.fill" : "battery.75percent", widest: format.percent(1)))
+        }
     }
 }
 
@@ -163,14 +191,16 @@ struct BatteryChartElement: View {
         let battery = model.battery
         var settings = model.preferences.battery
         let colors = colors(settings)
-        // A widget has no room for the page's captions: the shapes alone, and the hours where it is tall.
-        let _ = settings.showsCaptions = false
+        // The percentages beside it where it is wide, the hours under it where it is tall.
+        let _ = settings.showsCaptions = size.width >= 220 && size.height >= 60
         let showsHours = size.height >= 60
-        let plot = CGSize(width: max(size.width, 0), height: max(size.height - (showsHours ? BatteryChartPlot.hoursHeight : 0), 0))
+        let plot = CGSize(width: max(size.width - (settings.showsCaptions ? BatteryChartPlot.percentWidth : 0), 0),
+                          height: max(size.height - (showsHours ? BatteryChartPlot.hoursHeight : 0), 0))
+        let day = isPreview ? nil : battery.pickedDay()
         let bucket = settings.range.bucketSeconds
         let start = Date(timeIntervalSinceReferenceDate: (Date().timeIntervalSinceReferenceDate / bucket).rounded(.down) * bucket)
         PanelTimelineView(.periodic(from: start, by: bucket)) { _ in
-            BatteryChartPlot(geometry: battery.chartGeometry(range: settings.range, style: settings.style, size: plot),
+            BatteryChartPlot(geometry: battery.chartGeometry(range: settings.range, style: settings.style, size: plot, day: day),
                              settings: settings, colors: colors, size: plot,
                              showsHours: showsHours)
         }

@@ -109,14 +109,18 @@ private func today(_ hour: Int, _ minute: Int = 0) -> Date {
 // MARK: - The page as a board
 
 @Suite struct BatteryBoardTests {
-    /// The battery page's board starts as the page was: the level, health, cycles and the charger
-    /// down the left, the chart over the rest; every widget placed, none parked.
+    /// The battery page's board starts as the iPhone's Battery Usage where the board is 12 × 3 or
+    /// more (Daily Usage, the chart, Screen Activity, the level, the last charge, the health), as
+    /// the page was on a smaller one; every widget placed, none parked.
     @Test(arguments: [BoardGrid.standard, BoardGrid(columns: 16, rows: 3, gap: 8), BoardGrid(columns: 12, rows: 2, gap: 8)])
     func itStartsAsThePageWas(grid: BoardGrid) {
         let board = WidgetPages.batterySeed(grid: grid)
         #expect(board.parked.isEmpty)
         #expect(board.widgets.map(\.kind).contains(.batteryChart) && board.widgets.map(\.kind).contains(.battery))
-        #expect(board.widgets.contains { $0.kind == .charger } == (grid.rows >= 3))
+        let usage = grid.columns >= 12 && grid.rows >= 3
+        #expect(board.widgets.contains { $0.kind == .batteryUsage } == usage)
+        #expect(board.widgets.contains { $0.kind == .batteryScreenTime } == usage)
+        #expect(board.widgets.contains { $0.kind == .charger } == (!usage && grid.rows >= 3))
     }
 
     @Test(arguments: [BoardGrid.standard, BoardGrid(columns: 16, rows: 3, gap: 8)])
@@ -145,9 +149,10 @@ private func today(_ hour: Int, _ minute: Int = 0) -> Date {
         #expect(spans(.gap) == [today(0, 40)...today(7, 10)])
         #expect(spans(.charging) == [today(9, 30)...today(10, 40), today(17)...today(18, 30)])
         #expect(spans(.displayOff) == [today(0, 30)...today(0, 40), today(12, 40)...today(13, 20)])
-        #expect(model.buckets.count == 96)
+        #expect(model.buckets.count == 24)
         #expect(model.buckets.filter { $0.start >= demoNow }.allSatisfy { $0.level == nil })
-        #expect(model.buckets.contains { $0.isGap } && model.buckets.contains { $0.isDisplayOff })
+        // An hour a bar: the sleep is a gap; lunch's 40 minutes off are less than half of either hour.
+        #expect(model.buckets.contains { $0.isGap })
         #expect(model.buckets.contains { ($0.level ?? 100) < 20 && !$0.isCharging })
         #expect(model.ticks.count == 5)
     }

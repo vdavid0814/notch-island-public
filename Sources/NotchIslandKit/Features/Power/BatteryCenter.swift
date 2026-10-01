@@ -29,6 +29,10 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
     private(set) var history: BatteryHistorySnapshot?
     /// Known once the history is loaded.
     private(set) var lastCharge: BatteryLastCharge?
+    /// The day picked on Daily Usage (its midnight): the chart and Screen Activity show it too.
+    /// Nil: today.
+    var selectedDay: Date?
+    @ObservationIgnored private var usageCache: (version: Int, today: Date, days: [BatteryUsageDay])?
 
     static let detailsInterval: TimeInterval = 30
     static let powerInterval: TimeInterval = 5
@@ -207,8 +211,35 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
 
     // MARK: Chart
 
+    /// The last eight days' use, oldest first, for this history (built when it changes or the day
+    /// turns). Needs a `.history` lease; empty before the history is loaded.
+    func usageDays(now: Date = Date(), calendar: Calendar = .autoupdatingCurrent) -> [BatteryUsageDay] {
+        guard let history else { return [] }
+        let today = calendar.startOfDay(for: now)
+        // The current day's screen time grows with the clock: kept for a minute at most.
+        if let cache = usageCache, cache.version == history.version, cache.today == today,
+           now.timeIntervalSince(cachedAt) < 60 {
+            return cache.days
+        }
+        let days = BatteryUsage.days(records: history.records, now: now, calendar: calendar)
+        usageCache = (history.version, today, days)
+        cachedAt = now
+        return days
+    }
+
+    @ObservationIgnored private var cachedAt = Date.distantPast
+
+    /// The picked day, if it is one of the eight still in the history; nil for today.
+    func pickedDay(calendar: Calendar = .autoupdatingCurrent, now: Date = Date()) -> Date? {
+        guard let selectedDay else { return nil }
+        let today = calendar.startOfDay(for: now)
+        guard selectedDay < today, selectedDay >= today.addingTimeInterval(-BatteryHistory.retention) else { return nil }
+        return selectedDay
+    }
+
     private nonisolated struct ChartKey: Hashable, Sendable {
         var range: BatteryChartRange
+        var day: Date?
         var style: BatteryChartStyle
         var width: Double
         var height: Double
@@ -224,8 +255,9 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
     /// The chart's shapes for this history version, size, range and style; read from a view's
     /// body. A missing or stale one is built off the main thread and published when ready,
     /// meanwhile the previous one (or nil) is returned. Needs a `.history` lease.
-    func chartGeometry(range: BatteryChartRange, style: BatteryChartStyle, size: CGSize) -> BatteryChartGeometry? {
-        let key = ChartKey(range: range, style: style, width: size.width, height: size.height)
+    /// `day`: a past day's midnight to show instead of the range (Daily Usage's pick).
+    func chartGeometry(range: BatteryChartRange, style: BatteryChartStyle, size: CGSize, day: Date? = nil) -> BatteryChartGeometry? {
+        let key = ChartKey(range: range, day: day, style: style, width: size.width, height: size.height)
         let entry = charts[key]
         guard let history, size.width > 0, size.height > 0 else { return entry?.geometry }
         let now = Date()
@@ -234,7 +266,9 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
             building.insert(key)
             let calendar = Calendar.autoupdatingCurrent
             Task.detached(priority: .userInitiated) { [weak self] in
-                let model = BatteryChartModel(records: history.records, range: range, now: now, calendar: calendar)
+                let interval = day.map { calendar.dateInterval(of: .day, for: $0) ?? DateInterval(start: $0, duration: 86_400) }
+                let model = BatteryChartModel(records: history.records, range: day == nil ? range : .today, now: now,
+                                              calendar: calendar, interval: interval)
                 let geometry = BatteryChartGeometry(model: model, style: style, size: size)
                 await self?.store(ChartEntry(version: history.version, bucket: bucket, geometry: geometry), for: key)
             }

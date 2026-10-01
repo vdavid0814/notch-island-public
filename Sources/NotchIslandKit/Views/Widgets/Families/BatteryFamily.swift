@@ -9,7 +9,9 @@ struct BatteryFamily: View, WidgetFamilyElements {
         switch widget.kind {
         case .battery: BatteryWidget(widget: widget, size: size)
         case .batteryChart: BatteryChartWidget(widget: widget, size: size)
-        case .batteryTime, .batteryHealth, .batteryCycles, .batteryPower, .batteryTemperature, .charger:
+        case .batteryUsage: BatteryUsageWidget(widget: widget, size: size)
+        case .batteryScreenTime: BatteryScreenTimeWidget(widget: widget, size: size)
+        case .batteryLastCharge, .batteryTime, .batteryHealth, .batteryCycles, .batteryPower, .batteryTemperature, .charger:
             BatteryFigureWidget(widget: widget, size: size)
         default: WidgetPlaceholder(kind: widget.kind, size: size)
         }

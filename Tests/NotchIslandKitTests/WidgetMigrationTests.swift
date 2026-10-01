@@ -299,7 +299,7 @@ private func scratchDefaults() -> (UserDefaults, String) {
 
 @Suite struct WidgetSpecTests {
     @Test func everyKindHasASpecFromItsFamily() {
-        #expect(IslandWidgetKind.allCases.count == 57)
+        #expect(IslandWidgetKind.allCases.count == 60)
         // Every kind is built: none is a placeholder.
         #expect(IslandWidgetKind.allCases.filter { !$0.spec.isImplemented }.isEmpty)
         for family in WidgetFamily.allCases {
@@ -321,10 +321,11 @@ private func scratchDefaults() -> (UserDefaults, String) {
         // kinds that need nothing are offered everywhere.
         let offered = IslandWidgetKind.allCases.filter(\.isOffered)
         let battery: Set<IslandWidgetKind> = [.batteryTime, .batteryHealth, .batteryCycles, .batteryChart, .batteryPower,
-                                              .batteryTemperature, .charger, .lowPowerMode]
+                                              .batteryTemperature, .charger, .lowPowerMode, .batteryUsage, .batteryScreenTime,
+                                              .batteryLastCharge]
         let needsTheMac: Set<IslandWidgetKind> = battery.union([.trueTone, .appsLauncher, .missionControl, .showDesktop])
         #expect(Set(offered).isSuperset(of: Set(IslandWidgetKind.allCases).subtracting(needsTheMac)))
-        #expect(offered.count >= 57 - needsTheMac.count && offered.count <= 57)
+        #expect(offered.count >= 60 - needsTheMac.count && offered.count <= 60)
         // The battery's widgets come and go together with the battery (the temperature's with its sensor).
         let hasBattery = BatteryAvailability.hasBattery
         for kind in battery.subtracting([.batteryTemperature]) { #expect(kind.isOffered == hasBattery, "\(kind)") }

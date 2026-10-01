@@ -388,7 +388,7 @@ private let t0: UInt32 = 1_790_000_000
         return calendar
     }
 
-    @Test func todayHasAQuarterHourBucketPerClockQuarterAcrossDST() {
+    @Test func todayHasAnHourBucketPerClockHourAcrossDST() {
         let budapest = calendar("Europe/Budapest")
         // 25 October 2026: clocks go back from 03:00 to 02:00.
         let autumn = budapest.date(from: DateComponents(year: 2026, month: 10, day: 25, hour: 0))!
@@ -398,13 +398,13 @@ private let t0: UInt32 = 1_790_000_000
             BatteryRecord(date: autumn.addingTimeInterval(4 * 3600), state: reading(70), kind: .sample),
         ]
         let model = BatteryChartModel(records: records, range: .today, now: noon, calendar: budapest)
-        #expect(model.buckets.count == 100)
+        #expect(model.buckets.count == 25)
         #expect(model.buckets.first?.start == autumn)
         #expect(model.buckets.last?.end == autumn.addingTimeInterval(25 * 3600))
-        #expect(model.buckets.allSatisfy { $0.end.timeIntervalSince($0.start) == 900 })
-        #expect(model.buckets[0].level.map { $0 > 89 && $0 < 90 } == true, "on the way from 90 to 70")
-        #expect(model.buckets[15].level == 70, "the bucket ending when the 70 % reading came")
-        #expect(model.buckets[60].level == nil, "the future")
+        #expect(model.buckets.allSatisfy { $0.end.timeIntervalSince($0.start) == 3600 })
+        #expect(model.buckets[0].level.map { $0 > 85 && $0 < 86 } == true, "on the way from 90 to 70")
+        #expect(model.buckets[3].level == 70, "the bucket ending when the 70 % reading came")
+        #expect(model.buckets[15].level == nil, "the future")
         // Ticks on the clock's 0, 6, 12, 18 and 24 h: 06:00 is 7 hours after midnight today.
         #expect(model.ticks.map { $0.timeIntervalSince(autumn) / 3600 } == [0, 7, 13, 19, 25])
 
@@ -412,7 +412,7 @@ private let t0: UInt32 = 1_790_000_000
         let spring = budapest.date(from: DateComponents(year: 2026, month: 3, day: 29, hour: 0))!
         let springModel = BatteryChartModel(records: records, range: .today, now: spring.addingTimeInterval(3600),
                                             calendar: budapest)
-        #expect(springModel.buckets.count == 92)
+        #expect(springModel.buckets.count == 23)
     }
 
     @Test func rollingRangesEndAtTheNextLocalBoundary() {
@@ -420,11 +420,12 @@ private let t0: UInt32 = 1_790_000_000
         let midnight = kathmandu.date(from: DateComponents(year: 2026, month: 9, day: 29, hour: 0))!
         let now = midnight.addingTimeInterval(10 * 3600 + 20 * 60)
         let day = BatteryChartRange.last24Hours.interval(now: now, calendar: kathmandu)
-        #expect(day.end == midnight.addingTimeInterval(10 * 3600 + 30 * 60))
+        // An hour a bar: the next local hour; two for two days.
+        #expect(day.end == midnight.addingTimeInterval(11 * 3600))
         #expect(day.duration == 86_400)
         let twoDays = BatteryChartModel(records: [], range: .last48Hours, now: now, calendar: kathmandu)
-        #expect(twoDays.interval.end == midnight.addingTimeInterval(10.5 * 3600))
-        #expect(twoDays.buckets.count == 96)
+        #expect(twoDays.interval.end == midnight.addingTimeInterval(12 * 3600))
+        #expect(twoDays.buckets.count == 24)
     }
 
     @Test func aLongSleepIsAGapAndChargingAndDisplayOffAreSegments() {
@@ -453,12 +454,14 @@ private let t0: UInt32 = 1_790_000_000
         #expect(model.segments[0].points.last?.level == 80, "the level before the sleep holds until it")
         #expect(model.segments[3].points.first?.level == 60, "the line restarts at the wake")
 
-        #expect(model.buckets[10].isGap)                  // 02:30
-        #expect(model.buckets[10].level == nil)
-        #expect(model.buckets[6].isDisplayOff)            // 01:30
-        #expect(!model.buckets[10].isDisplayOff, "the displays' stretch ends where the sleep starts")
-        #expect(model.buckets[21].isCharging)             // 05:15
-        #expect(model.buckets[27].level == 75)            // 06:45, held since 06:00
+        // An hour a bar.
+        #expect(model.buckets.count == 24)
+        #expect(model.buckets[2].isGap)                   // 02:00–03:00
+        #expect(model.buckets[2].level == nil)
+        #expect(model.buckets[1].isDisplayOff)            // 01:00–02:00, off from 01:30
+        #expect(!model.buckets[2].isDisplayOff, "the displays' stretch ends where the sleep starts")
+        #expect(model.buckets[5].isCharging)              // 05:00–06:00
+        #expect(model.buckets[6].level == 75)             // 06:00–07:00, held since 06:00
 
         for style in BatteryChartStyle.allCases {
             let geometry = BatteryChartGeometry(model: model, style: style, size: CGSize(width: 300, height: 100))
@@ -649,5 +652,57 @@ private let t0: UInt32 = 1_790_000_000
         #expect(unknown.chargeWatts == nil)
         let estimated = BatteryDetails(properties: onBattery, adapter: nil, power: reading(98, minutes: 410))
         #expect(estimated.minutesToEmpty == 410)
+    }
+}
+
+/// Daily Usage: what each day used on battery, its screen time, and how a day compares.
+@Suite struct BatteryUsageTests {
+    private func calendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    private func state(_ level: Int, charging: Bool = false) -> PowerState {
+        PowerState(hasBattery: true, level: level, isCharging: charging, isPluggedIn: charging, isCharged: false,
+                   minutesRemaining: nil, isLowPowerMode: false)
+    }
+
+    @Test func eachDayCountsWhatItUsedOnBatteryAndItsScreenTime() {
+        let utc = calendar()
+        let today = utc.date(from: DateComponents(year: 2026, month: 9, day: 30))!
+        func at(_ day: Int, _ hours: Double) -> Date { today.addingTimeInterval(Double(day) * 86_400 + hours * 3600) }
+        let records = [
+            BatteryRecord(date: at(-1, 8), state: state(100), kind: .appStart),
+            BatteryRecord(date: at(-1, 12), state: state(60), kind: .sample),
+            // Charged back: not use.
+            BatteryRecord(date: at(-1, 13), state: state(90, charging: true), kind: .sample),
+            BatteryRecord(date: at(-1, 14), state: state(90), kind: .sample),
+            BatteryRecord(date: at(-1, 18), state: state(70), kind: .sample),
+            BatteryRecord(date: at(0, 9), state: state(65), kind: .sample),
+            BatteryRecord(date: at(0, 10), state: state(65), kind: .displayOff),
+            BatteryRecord(date: at(0, 11), state: state(65), kind: .displayOn),
+            BatteryRecord(date: at(0, 12), state: state(50), kind: .sample),
+        ]
+        let days = BatteryUsage.days(records: records, now: at(0, 12), calendar: utc)
+        #expect(days.count == 8 && days.last?.day == today)
+        #expect(days[6].used == 60)     // 100 → 60, then 90 → 70
+        #expect(days[7].used == 20)     // 70 → 65 overnight, read today; 65 → 50
+        #expect(days.prefix(6).allSatisfy { !$0.hasData && $0.used == 0 })
+        // Today: from midnight to noon, the displays off from 10 to 11.
+        #expect(days[7].screenIdle == 3600 && days[7].screenActive == 11 * 3600)
+    }
+
+    @Test func aDayComparesWithTheOthers() {
+        let day = { (offset: Int, used: Double) in
+            BatteryUsageDay(day: Date(timeIntervalSince1970: Double(offset) * 86_400), used: used, screenActive: 0, screenIdle: 0, hasData: true)
+        }
+        var days = [day(0, 60), day(1, 64), day(2, 58), day(3, 62), day(4, 30)]
+        let today = days[4].day
+        #expect(BatteryUsage.comparison(days[0], among: days, today: today) == .similar)
+        days[3].used = 95
+        #expect(BatteryUsage.comparison(days[3], among: days, today: today) == .more)
+        #expect(BatteryUsage.comparison(days[4], among: days, today: today) == .less)
+        #expect(BatteryUsage.comparison(days[0], among: Array(days.prefix(2)), today: today) == nil, "one other day is too few")
     }
 }

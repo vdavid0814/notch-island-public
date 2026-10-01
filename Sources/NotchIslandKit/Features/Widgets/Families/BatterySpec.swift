@@ -34,6 +34,26 @@ nonisolated enum BatterySpecs {
                                     samples: ["88 °C"], isAvailable: { BatteryAvailability.hasTemperature }),
         .charger: figure("Charger", "The charger's power and whether it is charging.", symbol: "powerplug.fill",
                          samples: ["888 W", "Not Charging"]),
+        .batteryLastCharge: figure("Last Charge", "The level the battery was last charged to, and when.",
+                                   symbol: "battery.100percent.bolt", samples: ["100%", "Yesterday, 18:30"]),
+        .batteryUsage: WidgetKindSpec(
+            title: "Daily Usage", summary: "How much battery each of the last days used, like the iPhone's Battery Usage.",
+            symbol: "chart.bar.xaxis", iconColors: green, category: .battery, family: .battery,
+            minimumSize: GridSize(width: 3, height: 2), defaultSize: GridSize(width: 4, height: 3),
+            maximumSize: GridSize(width: 8, height: 3),
+            elements: [ElementSpec(.chart, "Chart", symbol: "chart.bar", role: .chart, priority: 100, isSizable: false, isBlock: true)],
+            isAvailable: { BatteryAvailability.hasBattery },
+            supportsCustomLayout: false
+        ),
+        .batteryScreenTime: WidgetKindSpec(
+            title: "Screen Activity", summary: "How long the displays were on and off today (or the day picked on Daily Usage).",
+            symbol: "display", iconColors: green, category: .battery, family: .battery,
+            minimumSize: GridSize(width: 2, height: 1), defaultSize: GridSize(width: 4, height: 1),
+            maximumSize: GridSize(width: 8, height: 2),
+            elements: [ElementSpec(.chart, "Times", symbol: "clock", role: .feature, priority: 100, isSizable: false, isBlock: true)],
+            isAvailable: { BatteryAvailability.hasBattery },
+            supportsCustomLayout: false
+        ),
         .batteryChart: WidgetKindSpec(
             title: "Battery Chart", summary: "Today's charge level, like the iPhone's battery chart.",
             symbol: "chart.bar.fill", iconColors: green, category: .battery, family: .battery,

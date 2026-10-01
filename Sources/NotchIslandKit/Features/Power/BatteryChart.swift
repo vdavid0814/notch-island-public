@@ -4,8 +4,8 @@ import SwiftUI
 nonisolated enum BatteryChartRange: String, CaseIterable, Codable, Sendable {
     case today, last24Hours, last48Hours
 
-    /// iPhone's: a quarter of an hour, half an hour for two days.
-    var bucketSeconds: TimeInterval { self == .last48Hours ? 1800 : 900 }
+    /// iPhone's: an hour a bar, two for two days.
+    var bucketSeconds: TimeInterval { self == .last48Hours ? 7200 : 3600 }
 
     /// Hours between two axis ticks, on the clock's multiples (0, 6, 12, 18).
     var tickHours: Int { self == .last48Hours ? 12 : 6 }
@@ -107,10 +107,11 @@ nonisolated struct BatteryChartModel: Sendable, Equatable {
     /// Axis ticks on the clock's multiples of `range.tickHours`, both ends included.
     var ticks: [Date]
 
-    init(records: [BatteryRecord], range: BatteryChartRange, now: Date, calendar: Calendar) {
+    /// `interval`: another stretch than the range's (a past day, picked on Daily Usage).
+    init(records: [BatteryRecord], range: BatteryChartRange, now: Date, calendar: Calendar, interval: DateInterval? = nil) {
         self.range = range
         self.now = now
-        let interval = range.interval(now: now, calendar: calendar)
+        let interval = interval ?? range.interval(now: now, calendar: calendar)
         self.interval = interval
         let visibleEnd = min(interval.end, now)
 
@@ -283,6 +284,10 @@ nonisolated struct BatteryChartGeometry: Sendable {
     /// where the level is under it. Bars and areas of the three never overlap (each is filled in
     /// its own colour); the line's lie on the whole line.
     var low: Path
+    /// Bars only: a faint full-height column behind each charging bar, and a cap at the top of
+    /// each run of them (the iPhone's), to fill.
+    var chargingBand: Path
+    var chargingCap: Path
     /// Diagonal hatching over the gaps, to stroke.
     var gaps: Path
     /// Full-height bands where the displays were off.
@@ -302,26 +307,45 @@ nonisolated struct BatteryChartGeometry: Sendable {
         }
         func y(_ level: Double) -> CGFloat { size.height * (1 - CGFloat(min(max(level, 0), 100)) / 100) }
 
-        var level = Path(), charging = Path(), low = Path()
+        var level = Path(), charging = Path(), low = Path(), chargingBand = Path(), chargingCap = Path()
         let lowLevel = Double(PowerState.lowLevel)
         switch style {
         case .bars:
+            // The iPhone's: bars a little apart, their tops rounded; a charging run behind a faint
+            // column and under a cap along the top.
+            var run: (start: CGFloat, end: CGFloat)?
+            func closeRun() {
+                guard let current = run else { return }
+                let cap = CGRect(x: current.start, y: 0, width: max(current.end - current.start, 0), height: min(3, size.height * 0.04))
+                chargingCap.addRoundedRect(in: cap, cornerSize: CGSize(width: cap.height / 2, height: cap.height / 2), style: .continuous)
+                run = nil
+            }
             for bucket in model.buckets {
-                guard let value = bucket.level, !bucket.isGap else { continue }
+                guard let value = bucket.level, !bucket.isGap else {
+                    closeRun()
+                    continue
+                }
                 let left = x(bucket.start), right = x(bucket.end)
-                let inset = min((right - left) * 0.15, 1.5)
-                let rect = CGRect(x: left + inset, y: y(value), width: max(right - left - 2 * inset, 0),
-                                  height: size.height - y(value))
-                let radius = min(rect.width / 2, 1.5)
-                let corner = CGSize(width: radius, height: radius)
+                let inset = min((right - left) * 0.18, 2)
+                let rect = CGRect(x: left + inset, y: y(max(value, 2)), width: max(right - left - 2 * inset, 0),
+                                  height: size.height - y(max(value, 2)))
+                let radius = min(rect.width * 0.3, 3, rect.height / 2)
+                let radii = RectangleCornerRadii(topLeading: radius, bottomLeading: 0, bottomTrailing: 0, topTrailing: radius)
                 if bucket.isCharging {
-                    charging.addRoundedRect(in: rect, cornerSize: corner, style: .continuous)
-                } else if value < lowLevel {
-                    low.addRoundedRect(in: rect, cornerSize: corner, style: .continuous)
+                    charging.addRoundedRect(in: rect, cornerRadii: radii, style: .continuous)
+                    chargingBand.addRoundedRect(in: CGRect(x: rect.minX, y: 0, width: rect.width, height: size.height),
+                                                cornerRadii: radii, style: .continuous)
+                    run = (run?.start ?? rect.minX, rect.maxX)
                 } else {
-                    level.addRoundedRect(in: rect, cornerSize: corner, style: .continuous)
+                    closeRun()
+                    if value < lowLevel {
+                        low.addRoundedRect(in: rect, cornerRadii: radii, style: .continuous)
+                    } else {
+                        level.addRoundedRect(in: rect, cornerRadii: radii, style: .continuous)
+                    }
                 }
             }
+            closeRun()
         case .area, .line:
             // On battery, the columns where the level is below the line: the area under the level
             // there, or the level line itself, goes to `low`.
@@ -364,6 +388,8 @@ nonisolated struct BatteryChartGeometry: Sendable {
         self.level = level
         self.charging = charging
         self.low = low
+        self.chargingBand = chargingBand
+        self.chargingCap = chargingCap
 
         var gaps = Path(), displayOff = Path()
         for segment in model.segments {

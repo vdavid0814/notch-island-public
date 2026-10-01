@@ -38,6 +38,8 @@ nonisolated enum IslandWidgetKind: String, Sendable, Codable, CaseIterable, Iden
     // the gallery and never placed on a board by the app.
     // Battery.
     case batteryTime, batteryHealth, batteryCycles, batteryChart, batteryPower, batteryTemperature, charger
+    /// The iPhone's Battery Usage: the last days' use, the displays' time, the last charge.
+    case batteryUsage, batteryScreenTime, batteryLastCharge
     // Controls.
     case soundOutput, outputMute, trueTone, stageManager, lowPowerMode, screenMirroring, missionControl
     case showDesktop, appsLauncher, characterViewer, displaySleep
