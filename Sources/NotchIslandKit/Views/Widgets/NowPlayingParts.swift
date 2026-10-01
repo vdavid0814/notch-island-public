@@ -36,19 +36,23 @@ struct TransportControls: View {
     var body: some View {
         // Titles where the style asks for them and the row holds them; their symbols alone where
         // it does not (titled, the row ran past the widget's edge).
-        if titled(.skipButtons, .skipButtons.part("previous"), .skipButtons.part("next")) || titled(.playbackButtons) {
+        // What does not fit the room gives way, never widening the widget past its edge: the titles
+        // first (their symbols alone), then the seek buttons.
+        if seekBack != nil || seekForward != nil
+            || titled(.skipButtons, .skipButtons.part("previous"), .skipButtons.part("next")) || titled(.playbackButtons) {
             ViewThatFits(in: .horizontal) {
-                row(titles: true).fixedSize()
-                row(titles: false).fixedSize()
+                row(titles: true, seeks: true).fixedSize()
+                row(titles: false, seeks: true).fixedSize()
+                row(titles: false, seeks: false).fixedSize()
             }
         } else {
-            row(titles: true).fixedSize()
+            row(titles: true, seeks: false).fixedSize()
         }
     }
 
-    private func row(titles: Bool) -> some View {
+    private func row(titles: Bool, seeks: Bool) -> some View {
         HStack(spacing: Metrics.Spacing.large) {
-            if let seekBack {
+            if seeks, let seekBack {
                 TransportSeek(forward: false, seconds: seekBack.seconds)
                     .buttonElement(.seekBack, in: probe)
                     .controlSize(WidgetType.controlSize(controlSize, seekBack.size))
@@ -102,7 +106,7 @@ struct TransportControls: View {
                 .buttonElement(.skipButtons.part("next"), in: probe)
                 .controlSize(WidgetType.controlSize(controlSize, skipSize))
             }
-            if let seekForward {
+            if seeks, let seekForward {
                 TransportSeek(forward: true, seconds: seekForward.seconds)
                     .buttonElement(.seekForward, in: probe)
                     .controlSize(WidgetType.controlSize(controlSize, seekForward.size))

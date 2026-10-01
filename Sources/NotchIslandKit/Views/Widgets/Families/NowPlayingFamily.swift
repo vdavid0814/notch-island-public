@@ -312,9 +312,9 @@ struct NowPlayingWidget: View {
         }
     }
 
-    /// A seek button as the row shows it: switched on, and where the row has room for it.
+    /// A seek button as the row offers it: switched on (the row drops it where it has no room).
     private func seek(_ id: ElementID) -> TransportSeek.Setting? {
-        guard widget.shows(id), size.width >= 230 else { return nil }
+        guard widget.shows(id) else { return nil }
         return TransportSeek.Setting(seconds: style.element(id)?.button.seconds ?? ButtonSpec.standardSeconds, size: widget.size(of: id))
     }
 
