@@ -60,67 +60,101 @@ struct BatteryUsageWidget: View {
             // The iPhone's: blue, orange where the day used more than usual (or the widget's Chart colour).
             let accent = ResolvedLine(style.element(.chart)).fillColor(value: 1, artwork: artwork)
                 ?? (comparison == .more ? Color.orange : Color.blue)
-            let showsTitle = widget.shows(.label), showsValue = widget.shows(.value), showsChart = widget.shows(.chart)
-            let title = style.element(.label)?.text.labelOverride ?? String(localized: "Daily Usage")
-            // Without the chart, the words take the room.
-            let showsSentence = (size.height >= 130 || !showsChart && size.height >= 60) && size.width >= 170
-            // Low: the title, the percentage and the day on one line, smaller, so the bars keep their room.
-            let compact = size.height < 110 && showsChart
-            let dayName = picked.map { $0.day == today ? String(localized: "Today") : $0.day.formatted(.dateTime.weekday(.abbreviated).month().day()) }
-            VStack(alignment: .leading, spacing: compact ? 2 : 4) {
-                if compact {
-                    HStack(alignment: .firstTextBaseline, spacing: 5) {
-                        if showsTitle {
-                            Text(title)
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(titleColor(comparison == .more ? accent : nil))
-                        }
-                        Spacer(minLength: 4)
-                        if showsValue, let picked {
-                            Text(IslandFormat.percent(picked.used / 100))
-                                .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
-                                .foregroundStyle(accent)
-                            Text(dayName ?? "")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(.secondary)
-                        }
+            let showsChart = widget.shows(.chart)
+            let header = DailyUsageHeader(
+                title: widget.shows(.label) ? style.element(.label)?.text.labelOverride ?? String(localized: "Daily Usage") : nil,
+                titleColor: titleColor(comparison == .more ? accent : nil),
+                sentence: picked.map { BatteryUsage.sentence(comparison, day: $0.day, isToday: $0.day == today) },
+                value: widget.shows(.value) ? picked.map { IslandFormat.percent($0.used / 100) } : nil,
+                day: picked.map { $0.day == today ? String(localized: "Today") : $0.day.formatted(.dateTime.weekday(.abbreviated).month().day()) },
+                accent: accent)
+            // With the chart, the words take no more than part of the widget (the bars the rest);
+            // without it, all of it. The sentence only where the widget is tall, or has no chart.
+            let headerRoom = showsChart ? max(size.height * (size.height >= 130 ? 0.5 : 0.3), 14) : size.height
+            let sentence = !showsChart || size.height >= 130
+            VStack(alignment: .leading, spacing: 3) {
+                // The largest that fits its room: smaller type first, then without the sentence, then
+                // all on one line — never past the widget's edge.
+                ViewThatFits(in: .vertical) {
+                    if sentence {
+                        header.stacked(scale: 1, sentence: true)
+                        header.stacked(scale: 0.85, sentence: true)
+                        header.stacked(scale: 0.72, sentence: true)
                     }
-                    .lineLimit(1)
-                } else {
-                    if showsTitle {
-                        Text(title)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(titleColor(comparison == .more ? accent : nil))
-                    }
-                    if showsSentence, let picked {
-                        Text(BatteryUsage.sentence(comparison, day: picked.day, isToday: picked.day == today))
-                            .font(.system(size: 12, weight: .semibold))
-                            .lineLimit(3)
-                            .minimumScaleFactor(0.85)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if showsValue, let picked {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(IslandFormat.percent(picked.used / 100))
-                                .font(.system(size: size.height >= 140 ? 22 : 17, weight: .semibold, design: .rounded).monospacedDigit())
-                                .foregroundStyle(accent)
-                            Text(dayName ?? "")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.secondary)
-                        }
-                        .lineLimit(1)
-                    }
+                    header.stacked(scale: 1, sentence: false)
+                    header.line(scale: 1)
+                    header.line(scale: 0.8)
                 }
+                .frame(maxHeight: headerRoom, alignment: .topLeading)
                 if showsChart {
                     DailyUsageBars(days: days, picked: picked?.day, accent: accent, today: today, pick: pick)
                         .frame(maxHeight: .infinity)
-                        .layoutPriority(-1)
-                } else {
-                    Spacer(minLength: 0)
                 }
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
+            // The last word: nothing drawn past the widget's edge, whatever its size.
+            .clipped()
             .editorElement(.chart, in: probe)
+        }
+    }
+}
+
+/// Daily Usage's words: the percentage and the day on top, the title, then the sentence — stacked at
+/// a scale of their type, with or without the sentence, or all on one line (`BatteryUsageWidget`
+/// takes the largest that fits).
+private struct DailyUsageHeader {
+    var title: String?
+    var titleColor: AnyShapeStyle
+    var sentence: String?
+    var value: String?
+    var day: String?
+    var accent: Color
+
+    func stacked(scale: CGFloat, sentence showsSentence: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2 * scale) {
+            figure(scale: scale)
+            if let title {
+                Text(title)
+                    .font(.system(size: 10 * scale, weight: .semibold))
+                    .foregroundStyle(titleColor)
+                    .lineLimit(1)
+            }
+            if showsSentence, let sentence {
+                Text(sentence)
+                    .font(.system(size: 11 * scale, weight: .semibold))
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    func line(scale: CGFloat) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            figure(scale: scale)
+            Spacer(minLength: 4)
+            if let title {
+                Text(title)
+                    .font(.system(size: 10 * scale, weight: .semibold))
+                    .foregroundStyle(titleColor)
+                    .minimumScaleFactor(0.7)
+            }
+        }
+        .lineLimit(1)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private func figure(scale: CGFloat) -> some View {
+        if let value {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(value)
+                    .font(.system(size: 13 * scale, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(accent)
+                Text(day ?? "")
+                    .font(.system(size: 9 * scale, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .lineLimit(1)
         }
     }
 }
