@@ -41,7 +41,12 @@ nonisolated enum BatterySpecs {
             symbol: "chart.bar.xaxis", iconColors: green, category: .battery, family: .battery,
             minimumSize: GridSize(width: 3, height: 2), defaultSize: GridSize(width: 4, height: 3),
             maximumSize: GridSize(width: 8, height: 3),
-            elements: [ElementSpec(.chart, "Chart", symbol: "chart.bar", role: .chart, priority: 100, isSizable: false, isBlock: true)],
+            elements: [
+                ElementSpec(.label, "Title", symbol: "textformat", role: .text, samples: ["Daily Usage"], priority: 40,
+                            isSizable: false, acceptsLabel: true),
+                ElementSpec(.value, "Percentage", symbol: "percent", role: .text, samples: ["100%"], priority: 90, isSizable: false),
+                ElementSpec(.chart, "Chart", symbol: "chart.bar", role: .chart, priority: 100, isSizable: false, isBlock: true),
+            ],
             isAvailable: { BatteryAvailability.hasBattery },
             supportsCustomLayout: false
         ),
@@ -50,7 +55,8 @@ nonisolated enum BatterySpecs {
             symbol: "display", iconColors: green, category: .battery, family: .battery,
             minimumSize: GridSize(width: 2, height: 1), defaultSize: GridSize(width: 4, height: 1),
             maximumSize: GridSize(width: 8, height: 2),
-            elements: [ElementSpec(.chart, "Times", symbol: "clock", role: .feature, priority: 100, isSizable: false, isBlock: true)],
+            elements: [ElementSpec(.chart, "Times", symbol: "clock", role: .feature, priority: 100, isSizable: false, isBlock: true,
+                                   isRequired: true)],
             isAvailable: { BatteryAvailability.hasBattery },
             supportsCustomLayout: false
         ),

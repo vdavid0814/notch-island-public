@@ -345,7 +345,7 @@ private func scratchDefaults() -> (UserDefaults, String) {
         // The switchable ones: those always drawn (a start button, a slider) have no switch.
         let sizable = IslandWidgetKind.allCases.flatMap { $0.spec.elements.filter { !$0.isSizable && !$0.isRequired }.map(\.id) }
         // The shelf's pictures and the battery's chart fill their room whatever their size: no S, M, L.
-        #expect(Set(sizable) == [.addMinute, .timerSeconds, .timerHours, .resetButton, .shelfActions,
+        #expect(Set(sizable) == [.label, .value, .addMinute, .timerSeconds, .timerHours, .resetButton, .shelfActions,
                                  .previews, .chart])
         #expect(IslandWidgetKind.nowPlaying.spec.element(.skipButtons)?.parts == [ElementID(rawValue: "skipButtons.previous"),
                                                                                 ElementID(rawValue: "skipButtons.next")])

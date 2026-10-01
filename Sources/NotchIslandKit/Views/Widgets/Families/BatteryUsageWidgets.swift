@@ -60,18 +60,23 @@ struct BatteryUsageWidget: View {
             // The iPhone's: blue, orange where the day used more than usual (or the widget's Chart colour).
             let accent = ResolvedLine(style.element(.chart)).fillColor(value: 1, artwork: artwork)
                 ?? (comparison == .more ? Color.orange : Color.blue)
-            let showsSentence = size.height >= 130 && size.width >= 170
+            let showsTitle = widget.shows(.label), showsValue = widget.shows(.value), showsChart = widget.shows(.chart)
+            let title = style.element(.label)?.text.labelOverride ?? String(localized: "Daily Usage")
+            // Without the chart, the words take the room.
+            let showsSentence = (size.height >= 130 || !showsChart && size.height >= 60) && size.width >= 170
             // Low: the title, the percentage and the day on one line, smaller, so the bars keep their room.
-            let compact = size.height < 110
+            let compact = size.height < 110 && showsChart
             let dayName = picked.map { $0.day == today ? String(localized: "Today") : $0.day.formatted(.dateTime.weekday(.abbreviated).month().day()) }
             VStack(alignment: .leading, spacing: compact ? 2 : 4) {
                 if compact {
                     HStack(alignment: .firstTextBaseline, spacing: 5) {
-                        Text("Daily Usage")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(comparison == .more ? AnyShapeStyle(accent) : AnyShapeStyle(.secondary))
+                        if showsTitle {
+                            Text(title)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(titleColor(comparison == .more ? accent : nil))
+                        }
                         Spacer(minLength: 4)
-                        if let picked {
+                        if showsValue, let picked {
                             Text(IslandFormat.percent(picked.used / 100))
                                 .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
                                 .foregroundStyle(accent)
@@ -82,9 +87,11 @@ struct BatteryUsageWidget: View {
                     }
                     .lineLimit(1)
                 } else {
-                    Text("Daily Usage")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(comparison == .more ? AnyShapeStyle(accent) : AnyShapeStyle(.secondary))
+                    if showsTitle {
+                        Text(title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(titleColor(comparison == .more ? accent : nil))
+                    }
                     if showsSentence, let picked {
                         Text(BatteryUsage.sentence(comparison, day: picked.day, isToday: picked.day == today))
                             .font(.system(size: 12, weight: .semibold))
@@ -92,7 +99,7 @@ struct BatteryUsageWidget: View {
                             .minimumScaleFactor(0.85)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    if let picked {
+                    if showsValue, let picked {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(IslandFormat.percent(picked.used / 100))
                                 .font(.system(size: size.height >= 140 ? 22 : 17, weight: .semibold, design: .rounded).monospacedDigit())
@@ -104,13 +111,26 @@ struct BatteryUsageWidget: View {
                         .lineLimit(1)
                     }
                 }
-                DailyUsageBars(days: days, picked: picked?.day, accent: accent, today: today, pick: pick)
-                    .frame(maxHeight: .infinity)
-                    .layoutPriority(-1)
+                if showsChart {
+                    DailyUsageBars(days: days, picked: picked?.day, accent: accent, today: today, pick: pick)
+                        .frame(maxHeight: .infinity)
+                        .layoutPriority(-1)
+                } else {
+                    Spacer(minLength: 0)
+                }
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
             .editorElement(.chart, in: probe)
         }
+    }
+}
+
+extension BatteryUsageWidget {
+    /// The title's colour: the widget's (its Title colour), else the day's accent where it used
+    /// more than usual, else secondary.
+    fileprivate func titleColor(_ accent: Color?) -> AnyShapeStyle {
+        if let set = style.element(.label)?.colors[.primary]?.shapeStyle(artwork: artwork) { return set }
+        return accent.map(AnyShapeStyle.init) ?? AnyShapeStyle(.secondary)
     }
 }
 
@@ -125,65 +145,56 @@ private struct DailyUsageBars: View {
     var body: some View {
         // Out of 100 %, as the iPhone's (a day of more than one charge reaches the top).
         let top = 100.0
-        // Sized by the room it is given alone: nothing in it may push the widget taller.
-        GeometryReader { whole in
-        let showsPercent = whole.size.height >= 46
-        let labels: CGFloat = whole.size.height >= 40 ? 12 : 10
-        HStack(alignment: .top, spacing: 4) {
-            GeometryReader { proxy in
-                let plot = max(proxy.size.height - labels, 1)
-                let slot = proxy.size.width / CGFloat(max(days.count, 1))
-                ZStack(alignment: .topLeading) {
-                    // 0, 50 and 100 %.
-                    ForEach([0.0, 50, 100], id: \.self) { value in
-                        Path { path in
-                            let y = plot * (1 - CGFloat(value / top))
-                            path.move(to: CGPoint(x: 0, y: y))
-                            path.addLine(to: CGPoint(x: proxy.size.width, y: y))
-                        }
-                        .stroke(.white.opacity(0.16), style: StrokeStyle(lineWidth: 0.5, dash: [1.5, 2.5]))
+        // Sized by the room it is given alone: nothing in it may push the widget taller. The
+        // percentages sit at their lines on the right, in the plot's own height.
+        GeometryReader { proxy in
+            let labels: CGFloat = proxy.size.height >= 40 ? 12 : 10
+            let percentWidth: CGFloat = 24
+            let plot = max(proxy.size.height - labels, 1)
+            let width = max(proxy.size.width - percentWidth - 2, 1)
+            let slot = width / CGFloat(max(days.count, 1))
+            ZStack(alignment: .topLeading) {
+                ForEach([0.0, 50, 100], id: \.self) { value in
+                    let y = plot * (1 - CGFloat(value / top))
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: y))
+                        path.addLine(to: CGPoint(x: width, y: y))
                     }
-                    ForEach(Array(days.enumerated()), id: \.element.day) { index, day in
-                        let isPicked = day.day == picked
-                        let height = max(plot * CGFloat(min(day.used / top, 1)), day.hasData ? 2 : 0)
-                        let width = max(slot * 0.62, 2)
-                        UnevenRoundedRectangle(topLeadingRadius: min(width * 0.3, 3), topTrailingRadius: min(width * 0.3, 3),
-                                               style: .continuous)
-                            .fill(isPicked ? AnyShapeStyle(accent) : AnyShapeStyle(Color(white: 0.62)))
-                            .frame(width: width, height: height)
-                            .offset(x: slot * CGFloat(index) + (slot - width) / 2, y: plot - height)
-                        Text(day.day.formatted(.dateTime.weekday(.narrow)))
-                            .font(.system(size: labels - 3, weight: isPicked ? .semibold : .regular))
-                            .foregroundStyle(isPicked ? AnyShapeStyle(accent) : AnyShapeStyle(.tertiary))
-                            .frame(width: slot)
-                            .offset(x: slot * CGFloat(index), y: plot + 2)
-                        // The whole column picks the day.
-                        Color.clear
-                            .contentShape(.rect)
-                            .frame(width: slot, height: proxy.size.height)
-                            .offset(x: slot * CGFloat(index))
-                            .onTapGesture { pick(day.day) }
-                            .accessibilityElement()
-                            .accessibilityLabel(Text("\(day.day.formatted(.dateTime.weekday(.wide))): \(IslandFormat.percent(day.used / 100))"))
-                            .accessibilityAddTraits(.isButton)
-                    }
+                    .stroke(.white.opacity(0.16), style: StrokeStyle(lineWidth: 0.5, dash: [1.5, 2.5]))
+                    Text(verbatim: IslandFormat.percent(value / 100))
+                        .font(.system(size: min(8, max(plot / 5, 6))).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .frame(width: percentWidth, alignment: .trailing)
+                        // Beside its line, kept inside the plot at the top and the bottom.
+                        .position(x: proxy.size.width - percentWidth / 2, y: min(max(y, 5), plot - 4))
+                }
+                ForEach(Array(days.enumerated()), id: \.element.day) { index, day in
+                    let isPicked = day.day == picked
+                    let height = max(plot * CGFloat(min(day.used / top, 1)), day.hasData ? 2 : 0)
+                    let barWidth = max(slot * 0.62, 2)
+                    UnevenRoundedRectangle(topLeadingRadius: min(barWidth * 0.3, 3), topTrailingRadius: min(barWidth * 0.3, 3),
+                                           style: .continuous)
+                        .fill(isPicked ? AnyShapeStyle(accent) : AnyShapeStyle(Color(white: 0.62)))
+                        .frame(width: barWidth, height: height)
+                        .offset(x: slot * CGFloat(index) + (slot - barWidth) / 2, y: plot - height)
+                    Text(day.day.formatted(.dateTime.weekday(.narrow)))
+                        .font(.system(size: labels - 3, weight: isPicked ? .semibold : .regular))
+                        .foregroundStyle(isPicked ? AnyShapeStyle(accent) : AnyShapeStyle(.tertiary))
+                        .frame(width: slot)
+                        .offset(x: slot * CGFloat(index), y: plot + 2)
+                    // The whole column picks the day.
+                    Color.clear
+                        .contentShape(.rect)
+                        .frame(width: slot, height: proxy.size.height)
+                        .offset(x: slot * CGFloat(index))
+                        .onTapGesture { pick(day.day) }
+                        .accessibilityElement()
+                        .accessibilityLabel(Text("\(day.day.formatted(.dateTime.weekday(.wide))): \(IslandFormat.percent(day.used / 100))"))
+                        .accessibilityAddTraits(.isButton)
                 }
             }
-            if showsPercent {
-                VStack(alignment: .trailing, spacing: 0) {
-                    Text(verbatim: IslandFormat.percent(top / 100))
-                    Spacer(minLength: 0)
-                    Text(verbatim: IslandFormat.percent(top / 200))
-                    Spacer(minLength: 0)
-                    Text(verbatim: IslandFormat.percent(0))
-                }
-                .font(.system(size: 8).monospacedDigit())
-                .foregroundStyle(.tertiary)
-                .padding(.bottom, labels - 4)
-                .fixedSize(horizontal: true, vertical: false)
-                .frame(height: whole.size.height)
-            }
-        }
         }
     }
 }
