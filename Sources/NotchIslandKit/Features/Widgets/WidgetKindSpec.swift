@@ -139,8 +139,9 @@ nonisolated enum ElementRole: String, Sendable, CaseIterable {
         case .text: [.primary]
         case .symbol: [.primary, .secondary, .backing]
         case .image: [.border]
-        case .line, .chart: [.fill, .fillEnd, .track]
-        case .button: [.tint]
+        case .line: [.fill, .fillEnd, .track, .knob]
+        case .chart: [.fill, .fillEnd, .track]
+        case .button: [.tint, .primary]
         case .feature: []
         }
     }

@@ -104,14 +104,14 @@ private struct ElementInspector: View {
                 }
             case .image:
                 EmptyView()
-            case .line, .chart:
+            case .line:
+                BarInspector(session: session, element: element)
+            case .chart:
                 InspectorSection("Colours") {
                     ColorRows(session: session, id: id, slots: element.colorSlots.filter { $0 != .fillEnd })
                 }
             case .button:
-                InspectorSection("Button") {
-                    ColorRows(session: session, id: id, slots: [.tint])
-                }
+                ButtonLookInspector(session: session, element: element)
             case .feature:
                 if element.isBlock {
                     Text("Drawn as one piece: its place and size are set on the canvas.")
@@ -123,6 +123,78 @@ private struct ElementInspector: View {
             if element.isSizable, element.role != .text, element.role != .symbol, !session.layoutState.isCustom {
                 SizeChips(session: session, widget: widget, id: id)
             }
+        }
+    }
+}
+
+/// A button: its shape, material, corners, and the colours of its face and its icon.
+private struct ButtonLookInspector: View {
+    let session: EditorSession
+    let element: ElementSpec
+
+    private func button<Value: Equatable>(_ keyPath: WritableKeyPath<ButtonSpec, Value>) -> Binding<Value> {
+        let base: WritableKeyPath<WidgetStyle, ButtonSpec> = \.[element: element.id].button
+        return session.binding(for: base.appending(path: keyPath))
+    }
+
+    private var style: ButtonSpec { session.style.elements[element.id]?.button ?? ButtonSpec() }
+
+    var body: some View {
+        let id = element.id
+        InspectorSection("Button") {
+            InspectorRow("Shape", isSet: style.shape != nil, reset: { button(\.shape).wrappedValue = nil }) {
+                OptionalChoice(value: button(\.shape), options: ButtonShapeChoice.allCases, title: \.title)
+            }
+            if style.shape == .roundedRectangle {
+                InspectorRow("Corners", isSet: style.cornerRadius != nil, reset: { button(\.cornerRadius).wrappedValue = nil }) {
+                    OptionalSlider(value: button(\.cornerRadius), range: ButtonSpec.cornerRange, step: 1, standard: 8,
+                                   format: { "\(Int($0)) pt" }, session: session)
+                }
+            }
+            InspectorRow("Material", isSet: style.look != nil, reset: { button(\.look).wrappedValue = nil }) {
+                OptionalChoice(value: button(\.look), options: ButtonLookChoice.allCases, title: \.title)
+            }
+            ColorRows(session: session, id: id, slots: [.tint])
+            InspectorRow("Icon Colour", isSet: session.style.elements[id]?.colors[.primary] != nil,
+                         reset: { session.set(\WidgetStyle.[element: id].colors[.primary], to: nil) }) {
+                OptionalColor(value: session.binding(for: \WidgetStyle.[element: id].colors[.primary]))
+            }
+            Text("Glass: the island's clear glass. Tinted Glass: glass filled with the button colour. Solid: a flat face. Outline: a line around it. None: the icon alone.")
+                .font(.caption)
+                .foregroundStyle(SettingsPalette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// A bar: the shape of its ends, the knob where its fill ends, and its colours.
+private struct BarInspector: View {
+    let session: EditorSession
+    let element: ElementSpec
+
+    private func line<Value: Equatable>(_ keyPath: WritableKeyPath<LineStyle, Value>) -> Binding<Value> {
+        let base: WritableKeyPath<WidgetStyle, LineStyle> = \.[element: element.id].line
+        return session.binding(for: base.appending(path: keyPath))
+    }
+
+    private var style: LineStyle { session.style.elements[element.id]?.line ?? LineStyle() }
+
+    /// A level's slider is the system's: its ends and knob are its own.
+    private var isSystemSlider: Bool { element.id == .levelSlider }
+
+    var body: some View {
+        let id = element.id
+        InspectorSection("Bar") {
+            InspectorRow("Ends", isSet: style.cap != nil, reset: { line(\.cap).wrappedValue = nil }) {
+                OptionalChoice(value: line(\.cap), options: LineCapChoice.allCases, title: \.title)
+            }
+            if !isSystemSlider {
+                InspectorRow("Knob", isSet: style.knob != nil, reset: { line(\.knob).wrappedValue = nil }) {
+                    OptionalChoice(value: line(\.knob), options: KnobShape.allCases.filter { $0 != .none }, title: \.title,
+                                   automatic: "None")
+                }
+            }
+            ColorRows(session: session, id: id, slots: [.fill, .track] + (style.knob != nil && !isSystemSlider ? [.knob] : []))
         }
     }
 }
@@ -732,7 +804,8 @@ extension ColorSlot {
         case .track: "Track Colour"
         case .backing: "Backing Colour"
         case .border: "Border Colour"
-        case .tint: "Tint"
+        case .tint: "Button Colour"
+        case .knob: "Knob Colour"
         }
     }
 }

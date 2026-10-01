@@ -227,9 +227,12 @@ private struct WidgetButton: ViewModifier {
         let tint = element.colors[.tint]?.color(artwork: artwork).map { $0.opacity(button.tintStrength ?? 1) }
         // Its title shown: a capsule, whatever shape it had (a circle holds a symbol alone).
         let shape = button.iconOnly == false && button.shape != .roundedRectangle ? ButtonShapeChoice.capsule : button.shape
+        let icon = element.colors[.primary]?.color(artwork: artwork)
         styled(content, look: button.look, shape: shape)
             // Said nearest the button: over a Now Playing button's colour and the island's look.
-            .buttonAppearance(look: button.look, shape: shape, tint: tint)
+            .buttonAppearance(look: button.look, shape: shape, tint: tint, radius: button.cornerRadius.map { CGFloat($0) }, icon: icon)
+            // For a button whose own style draws it (not ours): its label's colour from outside.
+            .modifier(OptionalForeground(primary: icon.map(AnyShapeStyle.init)))
             .modifier(OptionalTint(color: tint))
             .modifier(OptionalLabelStyle(iconOnly: button.iconOnly))
             .transformEnvironment(\.controlSize) { if let size = button.size { $0 = size.controlSize } }
@@ -238,7 +241,7 @@ private struct WidgetButton: ViewModifier {
     /// Drawn as said (`WidgetButtonStyle`) where the style picks a look or a shape: a button the
     /// island does not style itself takes it too. Otherwise the button's own style, in its colour.
     @ViewBuilder private func styled(_ content: Content, look: ButtonLookChoice?, shape: ButtonShapeChoice?) -> some View {
-        if look != nil || shape != nil || fill != nil {
+        if look != nil || shape != nil || fill != nil || element.button.cornerRadius != nil {
             content.buttonStyle(WidgetButtonStyle())
         } else {
             content
@@ -307,6 +310,8 @@ struct ResolvedLine: Equatable {
     var track: StyleColor?
     var trackOpacity: Double?
     var mode: LineFill?
+    var knob: KnobShape?
+    var knobFill: StyleColor?
 
     init(_ element: ElementStyle?) {
         let line = element?.line ?? LineStyle()
@@ -317,6 +322,8 @@ struct ResolvedLine: Equatable {
         track = element?.colors[.track]
         trackOpacity = line.trackOpacity
         mode = line.fill
+        knob = line.knob
+        knobFill = element?.colors[.knob]
     }
 
     /// A straight line's ends as a part of its thickness: round (the kinds' own capsule), square

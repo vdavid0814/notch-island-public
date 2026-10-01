@@ -265,10 +265,17 @@ struct ScrubTrack: View {
                         .fill(line.fillStyle(value: fraction, artwork: artwork) ?? AnyShapeStyle(.white))
                         .opacity(0.9)
                         .frame(width: PlayedLineView.width(fraction, in: proxy.size.width, height: height))
+                    if let knob = line.knobShape {
+                        LineKnob(shape: knob, thickness: height, color: line.knobColor(artwork: artwork))
+                            .position(x: KnobShape.centre(fraction, in: proxy.size.width, thickness: height), y: height / 2)
+                            .frame(height: height)
+                    }
                 } else {
+                    // The knob moves with the line, in its layer.
                     PlayedLine(fraction: fraction, rate: duration > 0 ? rate / duration : 0,
                                opacity: isDragging ? 1 : 0.9, rounding: line.endRounding,
-                               color: line.fillColor(value: fraction, artwork: artwork).map { NSColor($0).cgColor } ?? PlayedLineView.white)
+                               color: line.fillColor(value: fraction, artwork: artwork).map { NSColor($0).cgColor } ?? PlayedLineView.white,
+                               knob: line.knobShape, knobColor: NSColor(line.knobColor(artwork: artwork)).cgColor)
                 }
             }
             .frame(height: height)
@@ -318,6 +325,9 @@ struct PlayedLine: NSViewRepresentable {
     var rounding: CGFloat = 0.5
     /// Set on the layer when it changes, not per frame.
     let color: CGColor
+    /// A knob where the line ends (`LineStyle.knob`), moved by the same animation.
+    var knob: KnobShape? = nil
+    var knobColor: CGColor = PlayedLineView.white
 
     /// In the kept, hidden panel the line waits: its animation had the window server update it
     /// twice a second for as long as the panel was kept, unseen.
@@ -327,12 +337,15 @@ struct PlayedLine: NSViewRepresentable {
 
     func updateNSView(_ view: PlayedLineView, context: Context) {
         view.rounding = rounding
+        view.setKnob(knob, color: knobColor)
         view.update(fraction: fraction, rate: rate, opacity: opacity, color: color, isPaused: isHidden)
     }
 }
 
 final class PlayedLineView: NSView {
     private let fill = CALayer()
+    private let knobLayer = CALayer()
+    private var knob: KnobShape?
     private var color: CGColor?
     /// Its ends' rounding, a part of its height.
     var rounding: CGFloat = 0.5 {
@@ -356,6 +369,25 @@ final class PlayedLineView: NSView {
         wantsLayer = true
         fill.anchorPoint = CGPoint(x: 0, y: 0.5)
         layer?.addSublayer(fill)
+        knobLayer.shadowColor = NSColor.black.cgColor
+        knobLayer.shadowOpacity = 0.35
+        knobLayer.shadowRadius = 1.5
+        knobLayer.shadowOffset = CGSize(width: 0, height: -0.5)
+        knobLayer.isHidden = true
+        layer?.addSublayer(knobLayer)
+        layer?.masksToBounds = false
+    }
+
+    /// The knob's shape and colour (nil: none).
+    func setKnob(_ knob: KnobShape?, color: CGColor) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        knobLayer.backgroundColor = color
+        CATransaction.commit()
+        guard knob != self.knob else { return }
+        self.knob = knob
+        knobLayer.isHidden = knob == nil
+        needsLayout = true
     }
 
     @available(*, unavailable)
@@ -403,6 +435,15 @@ final class PlayedLineView: NSView {
         fill.cornerRadius = height * rounding
         fill.position = CGPoint(x: 0, y: height / 2)
         fill.bounds = CGRect(x: 0, y: 0, width: Self.width(now, in: width, height: height), height: height)
+        knobLayer.removeAnimation(forKey: Self.animationKey)
+        if let knob {
+            let size = knob.size(thickness: height)
+            knobLayer.bounds = CGRect(origin: .zero, size: size)
+            knobLayer.cornerRadius = knob.cornerRadius(size)
+            knobLayer.shadowPath = CGPath(roundedRect: knobLayer.bounds, cornerWidth: knobLayer.cornerRadius,
+                                          cornerHeight: knobLayer.cornerRadius, transform: nil)
+            knobLayer.position = CGPoint(x: KnobShape.centre(now, in: width, thickness: height), y: height / 2)
+        }
         if rate > 0, now < 1, width > 0, !isPaused {
             // A step every half second (a longer one only on tracks over twenty minutes, where a
             // step is still a fraction of a point), as discrete keyframes: the render server draws a
@@ -423,6 +464,20 @@ final class PlayedLineView: NSView {
             animation.isRemovedOnCompletion = false
             fill.bounds.size.width = Self.width(1, in: width, height: height)
             fill.add(animation, forKey: Self.animationKey)
+            if knob != nil {
+                // The same steps, its centre at the fill's end.
+                let moves = CAKeyframeAnimation(keyPath: "position.x")
+                moves.values = (0..<steps).map {
+                    NSNumber(value: Double(KnobShape.centre(min(now + rate * step * Double($0), 1), in: width, thickness: height)))
+                }
+                moves.keyTimes = animation.keyTimes
+                moves.calculationMode = .discrete
+                moves.duration = duration
+                moves.fillMode = .forwards
+                moves.isRemovedOnCompletion = false
+                knobLayer.position.x = KnobShape.centre(1, in: width, thickness: height)
+                knobLayer.add(moves, forKey: Self.animationKey)
+            }
         }
         CATransaction.commit()
     }

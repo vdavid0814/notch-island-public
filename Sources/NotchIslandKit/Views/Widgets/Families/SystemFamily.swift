@@ -184,6 +184,10 @@ private struct StatBar: View {
                     bar.barShape(height: proxy.size.height).fill(bar.trackStyle(.white.opacity(0.14), artwork: artwork))
                     bar.barShape(height: proxy.size.height).fill(bar.fillStyle(value: value, artwork: artwork) ?? AnyShapeStyle(StatTint.color(value)))
                         .frame(width: max(proxy.size.height, proxy.size.width * value))
+                    if let knob = bar.knobShape {
+                        LineKnob(shape: knob, thickness: proxy.size.height, color: bar.knobColor(artwork: artwork))
+                            .position(x: KnobShape.centre(value, in: proxy.size.width, thickness: proxy.size.height), y: proxy.size.height / 2)
+                    }
                 }
             }
             .frame(height: bar.thickness ?? max(4, textSize * 0.45))

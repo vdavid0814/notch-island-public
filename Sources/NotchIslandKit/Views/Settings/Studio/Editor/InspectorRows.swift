@@ -311,9 +311,22 @@ extension ButtonLookChoice {
     var title: String {
         switch self {
         case .glass: "Glass"
-        case .prominent: "Prominent"
-        case .plain: "Plain"
-        case .bordered: "Bordered"
+        case .prominent: "Tinted Glass"
+        case .solid: "Solid"
+        case .bordered: "Outline"
+        case .plain: "None"
+        }
+    }
+}
+
+extension KnobShape {
+    var title: String {
+        switch self {
+        case .none: "None"
+        case .circle: "Circle"
+        case .pill: "Pill"
+        case .square: "Square"
+        case .line: "Line"
         }
     }
 }

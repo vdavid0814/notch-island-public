@@ -171,13 +171,15 @@ extension EnvironmentValues {
 /// shorter side. The island's glass, the canvas's drawing of it (and a picture's plain fill) alike;
 /// a bordered button is flat and outlined; a plain button keeps no face.
 struct FilledButtonStyle: ButtonStyle {
-    enum Face { case glass, prominent, plain, bordered }
+    enum Face { case glass, prominent, solid, plain, bordered }
 
     let size: CGSize
     var face: Face = .glass
     var shape: ButtonShapeChoice = .capsule
     /// The face's colour (a Now Playing button's look, the element's).
     var tint: Color? = nil
+    /// A rounded rectangle's corners (nil: a quarter of its shorter side).
+    var radius: CGFloat? = nil
 
     @Environment(\.widgetRenderMode) private var renderMode
     @Environment(\.isWidgetPreview) private var isPreview
@@ -186,7 +188,8 @@ struct FilledButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let side = min(size.width, size.height)
         // A circle when square (as the island's round buttons), a capsule otherwise.
-        let outline = shape == .roundedRectangle ? AnyShape(RoundedRectangle(cornerRadius: side * 0.25, style: .continuous)) : AnyShape(Capsule())
+        let outline = shape == .roundedRectangle ? AnyShape(RoundedRectangle(cornerRadius: radius ?? side * 0.25, style: .continuous))
+            : AnyShape(Capsule())
         let label = configuration.label
             .font(.system(size: max(side * 0.4, 6), weight: .semibold))
             .foregroundStyle(face == .prominent ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
@@ -199,6 +202,8 @@ struct FilledButtonStyle: ButtonStyle {
             switch face {
             case .plain:
                 label
+            case .solid:
+                label.background(outline.fill(tint ?? Color(white: 0.3)))
             case .bordered:
                 label.background {
                     outline.fill(tint?.opacity(0.35) ?? .white.opacity(0.08))

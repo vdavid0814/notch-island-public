@@ -194,11 +194,14 @@ struct GlassButtonPicture: ButtonStyle {
     let shape: ButtonShapeChoice
     /// The face's colour (a Now Playing button's look, the element's); nil is the plain glass, or the tint.
     var fill: Color?
+    /// A rounded rectangle's corners (nil: its own).
+    var radius: CGFloat?
 
-    init(look: ButtonLookChoice, shape: ButtonShapeChoice, fill: Color? = nil) {
+    init(look: ButtonLookChoice, shape: ButtonShapeChoice, fill: Color? = nil, radius: CGFloat? = nil) {
         self.look = look
         self.shape = shape
         self.fill = fill
+        self.radius = radius
     }
 
     init(prominent: Bool, shape: ButtonShapeChoice, fill: Color? = nil) {
@@ -230,9 +233,11 @@ struct GlassButtonPicture: ButtonStyle {
         case .plain: EmptyView()
         // Flat and outlined, as the system's bordered button: not glass.
         case .bordered: ButtonFace(shape: shape, fill: AnyShapeStyle(fill?.opacity(0.35) ?? .white.opacity(0.08)),
-                                   stroke: fill ?? .white.opacity(0.35))
+                                   stroke: fill ?? .white.opacity(0.35), radius: radius)
+        case .solid: ButtonFace(shape: shape, fill: AnyShapeStyle(fill ?? Color(white: 0.3)), radius: radius)
         case .glass, .prominent:
-            ButtonFace(shape: shape, fill: fill.map(AnyShapeStyle.init) ?? (prominent ? AnyShapeStyle(.tint) : AnyShapeStyle(.white.opacity(0.14))))
+            ButtonFace(shape: shape, fill: fill.map(AnyShapeStyle.init) ?? (prominent ? AnyShapeStyle(.tint) : AnyShapeStyle(.white.opacity(0.14))),
+                       radius: radius)
         }
     }
 

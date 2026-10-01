@@ -259,6 +259,8 @@ nonisolated struct LineStyle: Codable, Hashable, Sendable {
     var ringClockwise: Bool?
     /// Drawn as this many segments (1: one continuous line).
     var segments: Int?
+    /// A knob where the fill ends (a bar's): its shape; nil, none. Its colour is the `knob` slot.
+    var knob: KnobShape?
 
     static let thicknessRange: ClosedRange<Double> = 1...16
     static let lengthRange: ClosedRange<Double> = 0.1...1
@@ -277,6 +279,7 @@ nonisolated struct LineStyle: Codable, Hashable, Sendable {
         ringStart = c.lossy(Double.self, .ringStart)
         ringClockwise = c.lossy(Bool.self, .ringClockwise)
         segments = c.lossy(Int.self, .segments)
+        knob = c.lossy(KnobShape.self, .knob)
     }
 
     mutating func sanitize() {
@@ -300,8 +303,11 @@ nonisolated struct ButtonSpec: Codable, Hashable, Sendable {
     var iconOnly: Bool?
     /// The system's control size (nil: the one the widget's room gives it).
     var size: ControlSizeChoice?
+    /// A rounded rectangle's corners, in points (nil: a quarter of its shorter side).
+    var cornerRadius: Double?
 
     static let spacingRange: ClosedRange<Double> = 0...24
+    static let cornerRange: ClosedRange<Double> = 0...30
 
     init() {}
 
@@ -313,11 +319,13 @@ nonisolated struct ButtonSpec: Codable, Hashable, Sendable {
         spacing = c.lossy(Double.self, .spacing)
         iconOnly = c.lossy(Bool.self, .iconOnly)
         size = c.lossy(ControlSizeChoice.self, .size)
+        cornerRadius = c.lossy(Double.self, .cornerRadius)
     }
 
     mutating func sanitize() {
         tintStrength = tintStrength.map(StyleRanges.unit.clamp)
         spacing = spacing.map(Self.spacingRange.clamp)
+        cornerRadius = cornerRadius.map(Self.cornerRange.clamp)
     }
 }
 
@@ -472,6 +480,8 @@ nonisolated enum ColorSlot: String, Codable, CodingKeyRepresentable, Hashable, S
     case border
     /// A button's glass.
     case tint
+    /// A bar's knob (`LineStyle.knob`).
+    case knob
 }
 
 /// A colour a style sets.
@@ -545,7 +555,10 @@ nonisolated enum LinePlacement: String, Codable, Hashable, Sendable, CaseIterabl
 nonisolated enum LineCapChoice: String, Codable, Hashable, Sendable, CaseIterable { case round, butt, square }
 /// One colour, a gradient from `fill` to `fillEnd`, or the value's colour (`ValueScale`).
 nonisolated enum LineFill: String, Codable, Hashable, Sendable, CaseIterable { case solid, gradient, valueScale }
-nonisolated enum ButtonLookChoice: String, Codable, Hashable, Sendable, CaseIterable { case glass, prominent, plain, bordered }
+/// A button's material: clear glass, glass filled with its colour, a flat solid face, an outline, none.
+nonisolated enum ButtonLookChoice: String, Codable, Hashable, Sendable, CaseIterable { case glass, prominent, solid, bordered, plain }
+/// The knob on a bar where its fill ends.
+nonisolated enum KnobShape: String, Codable, Hashable, Sendable, CaseIterable { case none, circle, pill, square, line }
 nonisolated enum ButtonShapeChoice: String, Codable, Hashable, Sendable, CaseIterable { case circle, capsule, roundedRectangle }
 nonisolated enum ControlSizeChoice: String, Codable, Hashable, Sendable, CaseIterable { case mini, small, regular, large }
 nonisolated enum NinePointAlignment: String, Codable, Hashable, Sendable, CaseIterable {
