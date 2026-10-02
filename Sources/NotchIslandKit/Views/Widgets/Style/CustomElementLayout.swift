@@ -43,7 +43,7 @@ struct ArrangedFamily<Family: View & WidgetFamilyElements>: View {
         if case .custom(let layouts) = widget.style.layout.arrangement, family.allowsCustomLayout(size) {
             let padding = WidgetMetrics.padding(for: widget)
             let whole = CGSize(width: size.width + 2 * padding, height: size.height + 2 * padding)
-            let scale = model.layout.scale.factor
+            let scale = model.layout.factor
             if case .custom(let layout, _) = layouts.resolve(LayoutClass(size: whole, scale: scale)) {
                 var arrangement = ResolvedArrangement.resolve(layout, size: whole, padding: padding,
                                                               contentScale: CGFloat(widget.style.layout.contentScale ?? 1))

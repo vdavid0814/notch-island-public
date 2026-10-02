@@ -72,6 +72,7 @@ import os
         wantsRunning = false
         restart?.cancel()
         restart = nil
+        failedAttempts = 0
         if isRunning {
             isRunning = false
             generation &+= 1
@@ -86,12 +87,14 @@ import os
         switch report {
         case .installed:
             Log.levels.notice("media key tap armed — system HUD suppressed")
+            failedAttempts = 0
             state = .active
         case .failed:
             Log.levels.error("media key tap could not be created")
             isRunning = false
             shared.end()
             state = .failed("The media-key event tap could not be created.")
+            scheduleRetry()
         case .ended:
             Log.levels.error("media key tap run loop ended unexpectedly")
             isRunning = false
@@ -99,6 +102,34 @@ import os
             state = .failed("The media-key event tap stopped unexpectedly.")
             scheduleRestart()
         }
+    }
+
+    /// macOS refuses a tap for a moment after the screen is unlocked (seen in reports: every start
+    /// within a second of `screenUnlocked` failed): tried again after 1, 3 and 8 s.
+    private var failedAttempts = 0
+    static let retryDelays: [Duration] = [.seconds(1), .seconds(3), .seconds(8)]
+
+    private func scheduleRetry() {
+        guard wantsRunning, restart == nil, failedAttempts < Self.retryDelays.count else { return }
+        let delay = Self.retryDelays[failedAttempts]
+        failedAttempts += 1
+        restart = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, !Task.isCancelled else { return }
+            self.restart = nil
+            guard self.wantsRunning, !self.isRunning else { return }
+            Log.levels.notice("media key tap: trying again")
+            self.start()
+        }
+    }
+
+    /// A permission changed: a failed tap gets a fresh set of attempts.
+    func retryIfFailed() {
+        guard wantsRunning, !isRunning, case .failed = state else { return }
+        restart?.cancel()
+        restart = nil
+        failedAttempts = 0
+        start()
     }
 
     /// One restart a second after an unexpected end, at most once per `restartInterval`, so a tap

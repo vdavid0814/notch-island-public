@@ -316,4 +316,16 @@ import Testing
         #expect(release.diskImage.absoluteString == "https://example.com/NotchIsland.dmg")
         #expect((try? AppUpdater.release(from: ["assets": []], tag: "v1")) == nil)
     }
+
+    @Test func aCopyThatCannotBeReadIsNotInstalled() {
+        let missing = URL(fileURLWithPath: "/nonexistent/NotchIsland.app")
+        #expect(AppUpdater.verify(missing, version: "9.9") != .sameSigner)
+    }
+
+    @Test func aRunningDiskImageInstallsIntoApplications() {
+        #expect(AppUpdater.installLocation(bundle: URL(fileURLWithPath: "/Volumes/NotchIsland/NotchIsland.app")).path
+                == "/Applications/NotchIsland.app")
+        #expect(AppUpdater.installLocation(bundle: URL(fileURLWithPath: "/private/var/folders/x/AppTranslocation/y/d/NotchIsland.app")).path
+                == "/Applications/NotchIsland.app")
+    }
 }

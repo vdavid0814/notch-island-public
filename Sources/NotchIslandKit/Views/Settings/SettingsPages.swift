@@ -600,7 +600,20 @@ struct SiriSettingsPage: View {
         Form {
             Section {
                 Toggle(isOn: $preferences.commandSpaceOpensSiri) {
-                    InfoLabel("Open Spotlight with \(siri.shortcut.title)", "Spotlight opens in the notch instead of the system's search window. Needs Accessibility, which lets NotchIsland see the shortcut before the system does.")
+                    InfoLabel("Open Spotlight with \(siri.shortcut.title)", "Spotlight opens in the notch instead of the system's search window. Needs Accessibility and Input Monitoring, which let NotchIsland see the shortcut before the system does (About ▸ Permissions).")
+                }
+                if preferences.commandSpaceOpensSiri, case .failed(let reason) = model.commandSpaceState {
+                    LabeledContent {
+                        Button("Show Permissions") { model.settingsPane = .about }
+                    } label: {
+                        StatusLabel(title: reason, tone: .attention)
+                    }
+                } else if preferences.commandSpaceOpensSiri, case .needsPermission = model.commandSpaceState {
+                    LabeledContent {
+                        Button("Show Permissions") { model.settingsPane = .about }
+                    } label: {
+                        StatusLabel(title: String(localized: "Accessibility access needed"), tone: .attention)
+                    }
                 }
                 Picker(selection: $preferences.siri.shortcut) {
                     ForEach(SiriShortcut.allCases) { Text($0.title).tag($0) }
@@ -805,14 +818,18 @@ struct SiriSettingsPage: View {
 // MARK: - About
 
 /// The app, what it may access (and why), and its data.
-/// The newest version: looked up when About opens, downloaded into Downloads and opened with a
-/// click; the user drags it onto Applications (`AppUpdater`).
+/// The newest version: looked up when About opens; one click downloads it, checks it, installs it
+/// in place and reopens NotchIsland (`AppUpdater`).
 private struct UpdateSection: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let updater = model.updater
         Section {
+            if let from = updater.updatedFrom {
+                Label("Updated from \(from) to \(updater.current). Your settings and permissions were kept.", systemImage: "sparkles")
+                    .foregroundStyle(.primary)
+            }
             switch updater.state {
             case .idle, .checking:
                 HStack(spacing: 8) {
@@ -827,33 +844,49 @@ private struct UpdateSection: View {
                         .foregroundStyle(.primary)
                 }
             case .available(let release):
-                LabeledContent {
-                    Button("Download Update") { Task { await updater.download(release) } }
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(.defaultAction)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Version \(release.version) is available").font(.headline)
-                        Text("You have \(updater.current).").foregroundStyle(SettingsPalette.secondary)
-                    }
-                }
-                if !release.notes.isEmpty {
-                    DisclosureGroup("What's New") {
-                        Text(Self.notes(release.notes))
+                HStack(alignment: .center, spacing: 14) {
+                    AppMark(side: 44)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("NotchIsland \(release.version) is available").font(.headline)
+                        Text("You have \(updater.current). It installs itself and reopens in a few seconds; settings and permissions stay.")
                             .font(.callout)
                             .foregroundStyle(SettingsPalette.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 12)
+                    Button("Update Now") { Task { await updater.install(release) } }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(.vertical, 4)
+                notes(release)
+            case .downloading(let release, let progress):
+                progressRow(title: "Downloading \(release.version)…", progress: progress,
+                            detail: progress.map { "\(Int(($0 * 100).rounded())) %" })
+            case .installing(let release, let step):
+                progressRow(title: "Installing \(release.version)", progress: nil, detail: step)
+            case .relaunching(let release):
+                progressRow(title: "\(release.version) is installed", progress: 1, detail: String(localized: "Reopening NotchIsland…"))
+            case .differentSigner(let release, _):
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("\(release.version) is signed differently from this copy", systemImage: "exclamationmark.shield.fill")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text("It is intact and comes from NotchIsland's GitHub releases, but macOS will see it as a new app: Accessibility, Input Monitoring and the others have to be allowed again after it opens (About shows each one).")
+                        .font(.callout)
+                        .foregroundStyle(SettingsPalette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Spacer()
+                        Button("Cancel") { updater.cancel() }
+                        Button("Install Anyway") { Task { await updater.installAnyway() } }
+                            .buttonStyle(.borderedProminent)
                     }
                 }
-            case .downloading(let release):
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Downloading version \(release.version)…").foregroundStyle(SettingsPalette.secondary)
-                }
-            case .ready(let release, let file):
+            case .manual(let release, let file):
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Version \(release.version) is downloaded and open in Finder.").font(.headline)
+                    Text("\(release.version) could not replace this copy, so it is open in Finder.").font(.headline)
                     Text("1. Quit NotchIsland.\n2. In the Finder window, drag NotchIsland onto Applications and choose Replace.\n3. Open NotchIsland from Applications.")
                         .foregroundStyle(SettingsPalette.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -876,9 +909,41 @@ private struct UpdateSection: View {
         } header: {
             Text("Updates")
         } footer: {
-            Text("The update is downloaded from NotchIsland's GitHub releases into your Downloads folder. macOS checks it as any download.")
+            Text("Downloaded from NotchIsland's GitHub releases. Before installing, NotchIsland checks that the new copy is intact and signed exactly as this one, which is what lets macOS keep its permissions.")
         }
         .task { if updater.state == .idle { await updater.check() } }
+    }
+
+    private func progressRow(title: String, progress: Double?, detail: String?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title).font(.headline)
+                Spacer()
+                if let detail {
+                    Text(detail)
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(SettingsPalette.secondary)
+                }
+            }
+            if let progress {
+                ProgressView(value: progress).progressViewStyle(.linear)
+            } else {
+                ProgressView().progressViewStyle(.linear)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder private func notes(_ release: AppUpdater.Release) -> some View {
+        if !release.notes.isEmpty {
+            DisclosureGroup("What's New") {
+                Text(Self.notes(release.notes))
+                    .font(.callout)
+                    .foregroundStyle(SettingsPalette.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+        }
     }
 
     /// The release notes, Markdown as far as a text view shows it (bold, links), headings as bold
@@ -899,15 +964,8 @@ struct AboutSettingsPage: View {
 
     static let markSide: CGFloat = 72
 
-    /// Privacy & Security ▸ Automation, where Music/Spotify access is granted or revoked.
-    private static let automationSettingsURL =
-        URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
-
     var body: some View {
         let count = model.shelf.items.count
-        let trusted = model.permissions.accessibilityTrusted
-        let media = SettingsFormat.mediaStatus(model.media.status, enabled: model.preferences.showNowPlaying)
-        let keys = SettingsFormat.interceptionStatus(model.levels.interception)
         Form {
             Section {
                 HStack(alignment: .top, spacing: 16) {
@@ -929,29 +987,7 @@ struct AboutSettingsPage: View {
 
             FeedbackSection()
 
-            Section {
-                PermissionRow(title: "Accessibility", detail: "⌘Space for Spotlight, and replacing the volume and brightness HUD.",
-                              systemImage: "accessibility", tint: .blue,
-                              status: trusted ? "Allowed" : "Not allowed", tone: trusted ? .ok : .attention) {
-                    if !trusted {
-                        Button("Allow…") { model.permissions.promptOrOpenAccessibilitySettings() }
-                    }
-                }
-                PermissionRow(title: "Now Playing", detail: media.detail,
-                              systemImage: "play.circle.fill", tint: .pink, status: media.title, tone: media.tone) {
-                    if case .on(_, .some) = model.media.status, model.preferences.showNowPlaying {
-                        Link("Automation…", destination: Self.automationSettingsURL)
-                    }
-                }
-                PermissionRow(title: "Volume and Brightness Keys", detail: keys.detail,
-                              systemImage: "keyboard.fill", tint: .gray, status: keys.title, tone: keys.tone) {}
-                PermissionRow(title: "Bluetooth", detail: "Only the Bluetooth widget reads it, to show and switch Bluetooth.",
-                              systemImage: "wave.3.right", tint: .blue, status: "Asked when first used", tone: .neutral) {}
-            } header: {
-                Text("Permissions")
-            } footer: {
-                Text("NotchIsland works without any of these; each one turns on the feature it names.")
-            }
+            PermissionsSection()
 
             DiagnosticsSection()
 
@@ -986,36 +1022,6 @@ struct AboutSettingsPage: View {
                 }
             }
         }
-    }
-}
-
-/// A permission: its tile, what it is for, its status, and the button that fixes it.
-private struct PermissionRow<Action: View>: View {
-    let title: String
-    let detail: String
-    let systemImage: String
-    let tint: Color
-    let status: String
-    let tone: SettingsFormat.Tone
-    @ViewBuilder var action: Action
-
-    var body: some View {
-        HStack(spacing: 12) {
-            SettingsTile(systemImage: systemImage, tint: tint, side: 28)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(SettingsPalette.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 12)
-            action
-            StatusLabel(title: status, tone: tone)
-                .font(.callout)
-                .fixedSize()
-        }
-        .padding(.vertical, 2)
     }
 }
 

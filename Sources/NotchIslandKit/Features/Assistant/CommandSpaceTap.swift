@@ -20,7 +20,21 @@ import os
 
     private let shared = CommandSpaceTapShared()
     private var generation: UInt64 = 0
+    /// A tap thread is out (starting or installed). Not "working": see `state`.
     private(set) var isRunning = false
+    /// What the tap really does: `.active` only once the thread has installed it, `.failed` when
+    /// macOS refused it (Input Monitoring off, or right after unlocking the screen).
+    private(set) var state: InterceptionState = .off {
+        didSet { if state != oldValue { onStateChange?(state) } }
+    }
+    var onStateChange: ((InterceptionState) -> Void)?
+    /// Set between `start()` and `stop()`: the owner wants the tap, even while it is retried.
+    private var wantsRunning = false
+    private var retry: Task<Void, Never>?
+    private var failedAttempts = 0
+    /// After a refused tap: tried again this long after each failure, then left failed (a later
+    /// start, an unlock or a permission granted tries again).
+    nonisolated static let retryDelays: [Duration] = [.seconds(1), .seconds(3), .seconds(8)]
 
     /// The space bar (`kVK_Space`).
     nonisolated static let spaceKeyCode: Int64 = 49
@@ -32,7 +46,12 @@ import os
 
     /// Idempotent. Without Accessibility nothing is created (the tap could not swallow anything).
     func start() {
-        guard !isRunning, AXIsProcessTrusted() else { return }
+        wantsRunning = true
+        guard !isRunning else { return }
+        guard AXIsProcessTrusted() else {
+            state = .needsPermission
+            return
+        }
         isRunning = true
         generation &+= 1
         let generation = generation
@@ -40,8 +59,11 @@ import os
         let deliver: @Sendable () -> Void = { [weak self] in
             Task { @MainActor in self?.onPress?() }
         }
+        let report: @Sendable (Bool) -> Void = { [weak self] installed in
+            Task { @MainActor in self?.received(installed: installed, generation: generation) }
+        }
         let thread = Thread { [shared] in
-            CommandSpaceTapThread.run(generation: generation, shared: shared, deliver: deliver)
+            CommandSpaceTapThread.run(generation: generation, shared: shared, deliver: deliver, report: report)
         }
         thread.name = "com.davidvarga.notchisland.commandspace"
         thread.qualityOfService = .userInteractive
@@ -51,11 +73,50 @@ import os
 
     /// Idempotent.
     func stop() {
+        wantsRunning = false
+        retry?.cancel()
+        retry = nil
+        failedAttempts = 0
+        state = .off
         guard isRunning else { return }
         isRunning = false
         generation &+= 1
         shared.end()
         Log.app.notice("⌘Space tap stopped")
+    }
+
+    private func received(installed: Bool, generation: UInt64) {
+        guard generation == self.generation, isRunning else { return }
+        if installed {
+            failedAttempts = 0
+            state = .active
+            return
+        }
+        isRunning = false
+        shared.end()
+        state = .failed(CGPreflightListenEventAccess()
+            ? "macOS refused the keyboard event tap."
+            : "Input Monitoring is not allowed, so macOS refused the keyboard event tap.")
+        guard wantsRunning, retry == nil, failedAttempts < Self.retryDelays.count else { return }
+        let delay = Self.retryDelays[failedAttempts]
+        failedAttempts += 1
+        retry = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, !Task.isCancelled else { return }
+            self.retry = nil
+            guard self.wantsRunning, !self.isRunning else { return }
+            Log.app.notice("⌘Space tap: trying again")
+            self.start()
+        }
+    }
+
+    /// A permission changed or the screen was unlocked: a failed tap gets a fresh set of attempts.
+    func retryIfFailed() {
+        guard wantsRunning, !isRunning else { return }
+        retry?.cancel()
+        retry = nil
+        failedAttempts = 0
+        start()
     }
 
     /// The decision for one key event. Pure, for tests: Space with exactly the chosen modifier
@@ -195,7 +256,8 @@ nonisolated private final class CommandSpaceTapSession {
 }
 
 nonisolated private enum CommandSpaceTapThread {
-    static func run(generation: UInt64, shared: CommandSpaceTapShared, deliver: @escaping @Sendable () -> Void) {
+    static func run(generation: UInt64, shared: CommandSpaceTapShared, deliver: @escaping @Sendable () -> Void,
+                    report: @escaping @Sendable (Bool) -> Void) {
         let session = CommandSpaceTapSession(deliver: deliver, shared: shared)
         let callback: CGEventTapCallBack = { _, type, event, refcon in
             guard let refcon else { return Unmanaged.passUnretained(event) }
@@ -217,6 +279,7 @@ nonisolated private enum CommandSpaceTapThread {
                 userInfo: Unmanaged.passUnretained(session).toOpaque()
             ) else {
                 Log.app.error("⌘Space tap could not be created")
+                report(false)
                 return
             }
             guard let flagsPort = CGEvent.tapCreate(
@@ -229,6 +292,7 @@ nonisolated private enum CommandSpaceTapThread {
             ) else {
                 CFMachPortInvalidate(port)
                 Log.app.error("⌘Space modifier tap could not be created")
+                report(false)
                 return
             }
             guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0),
@@ -247,6 +311,7 @@ nonisolated private enum CommandSpaceTapThread {
             CGEvent.tapEnable(tap: port, enable: false)
             CGEvent.tapEnable(tap: flagsPort, enable: true)
             session.updateArming(flags: CGEventSource.flagsState(.combinedSessionState))
+            report(true)
             // No timeout: a finite one would wake this thread periodically forever.
             while shared.isActive(generation) {
                 let result = CFRunLoopRunInMode(.defaultMode, .greatestFiniteMagnitude, false)

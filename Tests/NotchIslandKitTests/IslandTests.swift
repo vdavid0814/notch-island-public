@@ -663,3 +663,52 @@ import Testing
         #expect(view.region == CGRect(x: 10, y: 0, width: 240, height: 28))
     }
 }
+
+// MARK: - MacBook display profiles
+
+@Suite struct DisplayProfileTests {
+    private func metrics(points: CGSize, panel: CGSize, builtin: Bool = true) -> NotchMetrics {
+        NotchMetrics.derive(displayID: 1, screenFrame: CGRect(origin: .zero, size: points), safeAreaTop: 32,
+                            auxiliaryTopLeftWidth: (points.width - 185) / 2, auxiliaryTopRightWidth: (points.width - 185) / 2,
+                            menuBarThickness: 24, physicalSize: panel, isBuiltin: builtin)
+    }
+
+    @Test func eachNotchedMacBookIsRecognised() {
+        for profile in DisplayProfile.allCases {
+            #expect(DisplayProfile.matching(physicalSize: profile.panelSize, isBuiltin: true) == profile)
+        }
+        // CGDisplayScreenSize on the reference 13.6-inch Air.
+        #expect(DisplayProfile.matching(physicalSize: CGSize(width: 290.29, height: 188.69), isBuiltin: true) == .air13)
+    }
+
+    @Test func otherScreensAreLeftAlone() {
+        // An external 27-inch display, and a MacBook-sized panel that is not built in.
+        #expect(DisplayProfile.factor(for: metrics(points: CGSize(width: 2560, height: 1440), panel: CGSize(width: 597, height: 336), builtin: false)) == 1)
+        #expect(DisplayProfile.factor(for: metrics(points: CGSize(width: 1512, height: 982), panel: DisplayProfile.pro14.panelSize, builtin: false)) == 1)
+        #expect(DisplayProfile.factor(for: nil) == 1)
+    }
+
+    @Test func theReferenceMacKeepsItsSize() {
+        #expect(DisplayProfile.factor(for: metrics(points: CGSize(width: 1280, height: 832), panel: DisplayProfile.air13.panelSize)) == 1)
+    }
+
+    @Test func largerDensitiesDrawTheIslandLarger() {
+        // 14-inch Pro at 1512 × 982: 5.0 pt/mm against the reference's 4.41.
+        let pro14 = DisplayProfile.factor(for: metrics(points: CGSize(width: 1512, height: 982), panel: DisplayProfile.pro14.panelSize))
+        #expect(abs(pro14 - 1.134) < 0.005)
+        let pro16 = DisplayProfile.factor(for: metrics(points: CGSize(width: 1728, height: 1117), panel: DisplayProfile.pro16.panelSize))
+        #expect(abs(pro16 - 1.134) < 0.005)
+        let air15 = DisplayProfile.factor(for: metrics(points: CGSize(width: 1710, height: 1112), panel: DisplayProfile.air15.panelSize))
+        #expect(abs(air15 - 1.188) < 0.005)
+    }
+
+    @Test func theFactorScalesTheOpenPanelOnly() {
+        let notch = CGSize(width: 185, height: 32)
+        let plain = IslandLayout(notch: notch, scale: .standard, screen: CGSize(width: 1512, height: 982))
+        var scaled = plain
+        scaled.display = 1.134
+        #expect(scaled.size(for: .compact(.nowPlaying)) == plain.size(for: .compact(.nowPlaying)))
+        #expect(scaled.size(for: .expanded(.home)).width == (600 * 1.134).rounded())
+        #expect(scaled.size(for: .expanded(.home)).height == 32 + (160 * 1.134).rounded())
+    }
+}

@@ -9,6 +9,11 @@ import ApplicationServices
 /// whenever the Accessibility list changes) and re-reads `AXIsProcessTrusted()`.
 @Observable final class PermissionCenter {
     private(set) var accessibilityTrusted = false
+    /// Input Monitoring (`ListenEvent`): on macOS 27 a keyboard event tap (⌘Space) is refused
+    /// without it, even with Accessibility allowed (seen in reports).
+    private(set) var inputMonitoringAllowed = false
+    /// Accessibility or Input Monitoring changed: refused key taps are tried again.
+    @ObservationIgnored var onChange: (() -> Void)?
 
     /// Gaps between the re-reads that follow a notification (so: at 0 s, 0.5 s and 2 s). The trust
     /// flag lands asynchronously: TCC posts first and the process's cached answer catches up a moment
@@ -43,9 +48,67 @@ import ApplicationServices
     /// Re-reads the trust flag now (Settings calls this when it appears).
     func refresh() {
         let trusted = AXIsProcessTrusted()
-        guard trusted != accessibilityTrusted else { return }
-        accessibilityTrusted = trusted
-        Log.system.notice("accessibility trusted: \(trusted, privacy: .public)")
+        let listens = CGPreflightListenEventAccess()
+        guard trusted != accessibilityTrusted || listens != inputMonitoringAllowed else { return }
+        if trusted != accessibilityTrusted {
+            accessibilityTrusted = trusted
+            Log.system.notice("accessibility trusted: \(trusted, privacy: .public)")
+        }
+        if listens != inputMonitoringAllowed {
+            inputMonitoringAllowed = listens
+            Log.system.notice("input monitoring allowed: \(listens, privacy: .public)")
+        }
+        onChange?()
+    }
+
+    @ObservationIgnored private var hasRequestedListening = false
+
+    /// Input Monitoring: macOS's own prompt the first time in a launch (it also puts NotchIsland in
+    /// the list, switched off), the pane after that.
+    func requestInputMonitoring() {
+        refresh()
+        guard !inputMonitoringAllowed else { return }
+        if !hasRequestedListening {
+            hasRequestedListening = true
+            if CGRequestListenEventAccess() { refresh(); return }
+        }
+        PermissionKind.inputMonitoring.openSettings()
+    }
+
+    /// macOS's Input Monitoring prompt, once per launch, when ⌘Space was refused for want of it.
+    /// Never opens System Settings by itself.
+    func promptInputMonitoringOnce() {
+        refresh()
+        guard !inputMonitoringAllowed, !hasRequestedListening else { return }
+        hasRequestedListening = true
+        _ = CGRequestListenEventAccess()
+        Log.system.notice("input monitoring prompt shown")
+    }
+
+    /// Forgets what macOS stored for NotchIsland under `kind` (`tccutil reset`), so an entry left
+    /// by an older copy, switched on but not matching this one, is gone; then asks again.
+    func reset(_ kind: PermissionKind) async {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return }
+        let service = kind.tccService
+        let status = await Task.detached { () -> Int32 in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            process.arguments = ["reset", service, bundleID]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            do { try process.run() } catch { return -1 }
+            process.waitUntilExit()
+            return process.terminationStatus
+        }.value
+        Log.system.notice("permission reset \(service, privacy: .public): \(status, privacy: .public)")
+        hasPrompted = false
+        hasRequestedListening = false
+        refresh()
+        switch kind {
+        case .accessibility: requestAccessibility()
+        case .inputMonitoring: requestInputMonitoring()
+        default: kind.openSettings()
+        }
     }
 
     /// Shows the system "allow Accessibility" prompt, at most once per launch: a dialog that returns

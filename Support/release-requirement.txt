@@ -1,0 +1,1 @@
+identifier "com.davidvarga.notchisland" and anchor apple generic and certificate leaf[subject.CN] = "Apple Development: david.varga0814@icloud.com (Y542H874DJ)" and certificate 1[field.1.2.840.113635.100.6.2.1] /* exists */

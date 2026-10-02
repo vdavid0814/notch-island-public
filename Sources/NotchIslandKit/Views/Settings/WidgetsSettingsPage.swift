@@ -344,7 +344,7 @@ private struct StageIsland: View {
                     .padding(.horizontal, split.contentInset)
             }
             .frame(width: size.width, height: size.height)
-            .controlSize(Metrics.controlSize(forScale: layout.scale.factor))
+            .controlSize(Metrics.controlSize(forScale: layout.factor))
             .islandSurfaceShade(style, solidDepth: layout.notch.height, in: shape)
             .islandGlass(in: shape)
         }

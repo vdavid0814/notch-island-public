@@ -23,7 +23,7 @@ struct ExpandedView: View {
             outerInset: Metrics.Expanded.horizontalInset,
             clearance: Metrics.notchClearance
         )
-        let scale = layout.scale.factor
+        let scale = layout.factor
         // As the header's picker lists the pages, the next one comes in from its side (Reduce
         // Motion: a cross-fade).
         let forward = page == shownPage ? slidForward : Self.isForward(from: shownPage ?? page, to: page, in: model.pickerPages)

@@ -36,7 +36,7 @@ struct IslandWidgetView: View {
         let padding = WidgetMetrics.padding(for: given)
         let inner = CGSize(width: max(0, size.width - 2 * padding), height: max(0, size.height - 2 * padding))
         // In a custom layout, with the sizes its elements were unlocked at (`drawn(in:scale:)`).
-        let widget = given.drawn(in: inner, scale: model.layout.scale.factor)
+        let widget = given.drawn(in: inner, scale: model.layout.factor)
         let isSingleRow = inner.height < WidgetMetrics.singleRowHeight
         let accent = accent(widget)
         let style = ResolvedWidgetStyle.resolve(widget.style)

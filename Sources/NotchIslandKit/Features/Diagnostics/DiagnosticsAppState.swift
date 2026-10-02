@@ -26,6 +26,8 @@ enum DiagnosticsAppState {
             section.add("Display", metrics.displayID)
             section.add("Notch", "\(DiagnosticsFormat.rect(metrics.notchRect)), physical: \(metrics.isPhysical)")
             section.add("Screen", DiagnosticsFormat.rect(metrics.screenFrame))
+            let profile = DisplayProfile.matching(physicalSize: metrics.physicalSize, isBuiltin: metrics.isBuiltin)
+            section.add("Display profile", "\(profile?.name ?? "none") · panel \(Int(metrics.physicalSize.width.rounded()))×\(Int(metrics.physicalSize.height.rounded())) mm, built-in: \(metrics.isBuiltin), factor \(String(format: "%.3f", DisplayProfile.factor(for: metrics)))")
         } else {
             section.add("Display", "none (no screen to anchor on)")
         }
@@ -33,6 +35,7 @@ enum DiagnosticsAppState {
         section.add("Scale", String(describing: model.preferences.scale))
         section.add("Applied features", model.diagnosticsFeatureState)
         section.add("⌘Space tap running", model.diagnosticsCommandSpaceTapRunning)
+        section.add("⌘Space tap state", String(describing: model.commandSpaceState))
         section.add("Hidden for full-screen video", model.hidesForFullscreenVideo)
         return section
     }

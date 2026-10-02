@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.7.3 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.7.3.1 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -18,11 +18,34 @@ events, volume/brightness and dropped files live there the rest of the time.
 For older versions, see the **[Releases page](https://github.com/vdavid0814/notch-island-public/releases)**.
 How much energy each animation and the idle state take, measured before and after the latest energy work:
 **[docs/ENERGY-LOG.md](docs/ENERGY-LOG.md)**, and the tests behind it with their results:
-**[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also in the .dmg and inside the app).
+**[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.7.3.1
+
+Updates that keep your permissions, every permission explained, and the island sized for each
+MacBook's screen.
+
+- **Updates install themselves**: Settings ▸ About ▸ **Update Now** downloads the new version,
+  checks that it is intact and signed exactly like the copy you have, puts it in its place and
+  reopens NotchIsland. No disk image, no dragging, and Accessibility, Input Monitoring and the
+  others stay allowed. (From this version on: this one is installed the old way.)
+- **Permissions, one by one**: About lists every permission on its own row. Open one to see each
+  feature it turns on and whether that feature works right now, where its switch is in System
+  Settings, step by step, and **Allow…** / **Reset…** (for a switch that is on but belongs to an
+  older copy).
+- **⌘Space on macOS 27**: it also needs **Input Monitoring**; NotchIsland now asks for it, says so
+  in Settings ▸ Spotlight when it is missing, and diagnostics no longer report it as running when
+  macOS refused it.
+- **Volume and brightness keys after unlocking**: if macOS refuses the key tap right after the screen
+  is unlocked, it is tried again after 1, 3 and 8 seconds instead of staying off until a restart.
+- **Every notched MacBook**: the 13.6" and 15.3" Air and the 14.2" and 16.2" Pro are recognised by
+  their panel, and the open island is drawn at the same physical size on each (the 14" and 16" Pro
+  about 13 % larger in points). External displays are unchanged.
+- **A nicer disk image**: a dark window with an arrow onto Applications.
 
 ## What's new in v0.7.3
 
@@ -174,7 +197,7 @@ another energy round.
   - Not met yet, and written down: the first search after a launch (the new sources: +18 %), fast
     repeated opening of the panel and Siri, and Settings, still far above 30. Every number, what
     changed and what was tried and left out: [docs/ENERGY-LOG.md](docs/ENERGY-LOG.md) and
-    [docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md) (also in the .dmg and inside the app).
+    [docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md) (also inside the app).
 
 ## What's new in v0.5.1
 
@@ -190,7 +213,7 @@ Less energy for the same island: every animation looks and moves as before.
 - **About 10 MB less memory** at rest.
 - The measurements, before and after, and the tests behind them ship with every copy:
   [docs/ENERGY-LOG.md](docs/ENERGY-LOG.md) and [docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)
-  (also in the .dmg and inside the app).
+  (also inside the app).
 
 ## What's new in v0.5
 
@@ -555,9 +578,12 @@ volume/brightness Minimal for 1.5 s, AirPods card 5 s.
    notarized by Apple. Click **Done**, then open **System Settings → Privacy &
    Security**, scroll down and click **Open Anyway** next to NotchIsland, and
    confirm. This is needed only once.
-5. Grant what it asks for: **Accessibility** (for the ⌘Space Siri and the
-   volume/brightness HUD), **Automation** for Music or Spotify (Now Playing) and
-   **System Audio Recording** (the equalizer that follows the music).
+5. Grant what it asks for: **Accessibility** and **Input Monitoring** (for ⌘Space
+   and the volume/brightness HUD), **Automation** for Music or Spotify (Now Playing)
+   and **System Audio Recording** (the equalizer that follows the music). Settings ▸
+   About ▸ Permissions shows each one, what it turns on and where its switch is.
+6. Later versions install themselves from Settings ▸ About ▸ **Update Now**, keeping
+   your settings and permissions.
 
 Needs a MacBook with a notch (Apple silicon) and **macOS 27** or later.
 All releases: [Releases](https://github.com/vdavid0814/notch-island-public/releases).

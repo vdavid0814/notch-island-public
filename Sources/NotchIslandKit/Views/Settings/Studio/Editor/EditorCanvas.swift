@@ -142,7 +142,7 @@ struct CanvasWidget: View {
                 .environment(\.elementFitStore, session.fits)
                 .environment(\.widgetReadsLive, true)
                 .environment(\.widgetBoard, WidgetBoardShape(grid: board, cornerRadius: ConcentricGeometry.boardCornerRadius(model.layout)))
-                .controlSize(Metrics.controlSize(forScale: model.layout.scale.factor))
+                .controlSize(Metrics.controlSize(forScale: model.layout.factor))
                 .environment(\.colorScheme, .dark)
                 .scaleEffect(zoom, anchor: .topLeading)
                 .frame(width: size.width * zoom, height: size.height * zoom, alignment: .topLeading)
@@ -177,7 +177,7 @@ extension CanvasWidget {
     /// and the widget as its stacks draw it now.
     fileprivate func context(_ widget: IslandWidget) -> CanvasContext {
         let padding = WidgetMetrics.padding(for: widget)
-        let scale = model.layout.scale.factor
+        let scale = model.layout.factor
         let contentScale = CGFloat(widget.style.layout.contentScale ?? 1)
         return CanvasContext(size: size, padding: padding, scale: scale, displayScale: displayScale) { [weak probe, size, displayScale] in
             probe?.unlock(size: size, padding: padding, scale: scale, displayScale: displayScale, contentScale: contentScale)

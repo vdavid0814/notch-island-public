@@ -72,7 +72,7 @@ nonisolated enum BoardSizing {
         // The insets around the board are the same at any size: the island is as much larger.
         let wanted = CGSize(width: (target.width + island.width - board.width).rounded(),
                             height: (target.height + island.height - board.height).rounded())
-        let f = layout.scale.factor
+        let f = layout.factor
         let base = max(layout.notch.width + IslandLayout.expandedExtraWidth, IslandLayout.expandedMinimumWidth) * f
         var next = panel
         next.widthFactor = PanelSettings.widthRange.clamp(Double(wanted.width / base))
@@ -85,7 +85,7 @@ nonisolated enum BoardSizing {
     /// How far the panel's proportions may go on this screen: their ranges, no further than the
     /// screen lets the panel grow (past that a slider would move and nothing change).
     static func factorRanges(_ layout: IslandLayout) -> (width: ClosedRange<Double>, height: ClosedRange<Double>) {
-        let f = layout.scale.factor
+        let f = layout.factor
         let base = max(layout.notch.width + IslandLayout.expandedExtraWidth, IslandLayout.expandedMinimumWidth) * f
         let limit = layout.maximumExpandedSize
         let width = min(PanelSettings.widthRange.upperBound, Double(limit.width / base))

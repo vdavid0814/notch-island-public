@@ -8,6 +8,10 @@ nonisolated struct NotchMetrics: Sendable, Equatable {
     /// Global AppKit coordinates (bottom-left origin), flush with the screen top.
     let notchRect: CGRect
     let isPhysical: Bool
+    /// The panel's size in millimetres (zero when unknown) and whether it is the Mac's own screen:
+    /// together they name the MacBook model (`DisplayProfile`).
+    var physicalSize: CGSize = .zero
+    var isBuiltin = false
 
     var notchSize: CGSize { notchRect.size }
 
@@ -29,7 +33,9 @@ nonisolated struct NotchMetrics: Sendable, Equatable {
         safeAreaTop: CGFloat,
         auxiliaryTopLeftWidth: CGFloat?,
         auxiliaryTopRightWidth: CGFloat?,
-        menuBarThickness: CGFloat
+        menuBarThickness: CGFloat,
+        physicalSize: CGSize = .zero,
+        isBuiltin: Bool = false
     ) -> NotchMetrics {
         if safeAreaTop > 0, let left = auxiliaryTopLeftWidth, let right = auxiliaryTopRightWidth {
             let gap = screenFrame.width - left - right
@@ -41,7 +47,8 @@ nonisolated struct NotchMetrics: Sendable, Equatable {
                     width: gap,
                     height: safeAreaTop
                 )
-                return NotchMetrics(displayID: displayID, screenFrame: screenFrame, notchRect: rect, isPhysical: true)
+                return NotchMetrics(displayID: displayID, screenFrame: screenFrame, notchRect: rect, isPhysical: true,
+                                    physicalSize: physicalSize, isBuiltin: isBuiltin)
             }
         }
         let height = max(menuBarThickness, minimumSynthesizedHeight)
@@ -51,7 +58,8 @@ nonisolated struct NotchMetrics: Sendable, Equatable {
             width: synthesizedWidth,
             height: height
         )
-        return NotchMetrics(displayID: displayID, screenFrame: screenFrame, notchRect: rect, isPhysical: false)
+        return NotchMetrics(displayID: displayID, screenFrame: screenFrame, notchRect: rect, isPhysical: false,
+                            physicalSize: physicalSize, isBuiltin: isBuiltin)
     }
 }
 
@@ -60,13 +68,16 @@ nonisolated struct NotchMetrics: Sendable, Equatable {
         guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
             return nil
         }
+        let displayID = CGDirectDisplayID(number.uint32Value)
         return NotchMetrics.derive(
-            displayID: CGDirectDisplayID(number.uint32Value),
+            displayID: displayID,
             screenFrame: screen.frame,
             safeAreaTop: screen.safeAreaInsets.top,
             auxiliaryTopLeftWidth: screen.auxiliaryTopLeftArea?.width,
             auxiliaryTopRightWidth: screen.auxiliaryTopRightArea?.width,
-            menuBarThickness: NSStatusBar.system.thickness
+            menuBarThickness: NSStatusBar.system.thickness,
+            physicalSize: CGDisplayScreenSize(displayID),
+            isBuiltin: CGDisplayIsBuiltin(displayID) != 0
         )
     }
 

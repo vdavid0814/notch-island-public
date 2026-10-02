@@ -463,7 +463,7 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
             .environment(\.widgetRenderMode, .canvas)
             .environment(\.widgetBoard, WidgetBoardShape(grid: model.editedWidgets.board.grid,
                                                          cornerRadius: ConcentricGeometry.boardCornerRadius(model.layout)))
-            .controlSize(Metrics.controlSize(forScale: model.layout.scale.factor))
+            .controlSize(Metrics.controlSize(forScale: model.layout.factor))
             .environment(\.colorScheme, .dark)
             .environment(model)
         let renderer = ImageRenderer(content: content)

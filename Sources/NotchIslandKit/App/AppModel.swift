@@ -46,6 +46,8 @@ import Observation
     /// The coming events, read only while a widget or Spotlight shows them.
     let calendar = CalendarService()
     @ObservationIgnored private let commandSpaceTap = CommandSpaceTap()
+    /// Whether ⌘Space is really caught (About ▸ Permissions shows it).
+    private(set) var commandSpaceState: InterceptionState = .off
     let permissions = PermissionCenter()
     let activity = SystemActivity()
     let haptics: Haptics
@@ -61,7 +63,8 @@ import Observation
     /// the panel); the window controller observes it to re-stage the panel when any changes.
     var layout: IslandLayout {
         IslandLayout(notch: metrics?.notchSize ?? Self.fallbackNotchSize, scale: preferences.scale,
-                     screen: metrics?.screenFrame.size ?? .zero, siri: preferences.siri.layout, panel: preferences.panel.layout)
+                     screen: metrics?.screenFrame.size ?? .zero, siri: preferences.siri.layout, panel: preferences.panel.layout,
+                     display: DisplayProfile.factor(for: metrics))
     }
 
     /// The panel's pages on this Mac with these settings: the shelf while it is on, the battery page
@@ -214,6 +217,17 @@ import Observation
             }
         }
         commandSpaceTap.setModifiers(preferences.siri.shortcut.modifiers)
+        commandSpaceTap.onStateChange = { [weak self] state in
+            guard let self else { return }
+            self.commandSpaceState = state
+            // Refused for want of Input Monitoring (macOS 27): its own prompt, once.
+            if case .failed = state, !CGPreflightListenEventAccess() { self.permissions.promptInputMonitoringOnce() }
+        }
+        // A permission allowed (or the list changed): refused key taps get another try.
+        permissions.onChange = { [weak self] in
+            self?.commandSpaceTap.retryIfFailed()
+            self?.levels.retryInterception()
+        }
         // Like the system's ⌘Space: opens Siri, and closes it again.
         commandSpaceTap.onPress = { [weak self] in
             guard let self else { return }
@@ -264,6 +278,16 @@ import Observation
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(20))
             self?.liquidCard.prewarm()
+        }
+
+        // Just updated and a permission in use is missing (a copy signed differently): About shows
+        // which one, instead of features that silently do nothing.
+        if updater.updatedFrom != nil {
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(3))
+                guard let self, self.isRunning, self.permissionsNeedAttention else { return }
+                self.controller.openSettings(pane: .about)
+            }
         }
 
         // Siri's app icons are kept on disk for the next launch (a test run keeps none).
@@ -493,9 +517,16 @@ import Observation
         windowController.logState()
     }
 
+    /// A feature that is on cannot work for want of Accessibility or Input Monitoring.
+    var permissionsNeedAttention: Bool {
+        let prefs = preferences
+        let needsTrust = prefs.commandSpaceOpensSiri || prefs.replaceSystemHUD || prefs.anchorEnabled
+        return (needsTrust && !permissions.accessibilityTrusted) || (prefs.commandSpaceOpensSiri && !permissions.inputMonitoringAllowed)
+    }
+
     /// For diagnostics reports: the feature state last applied, and whether ⌘Space is listened for.
     var diagnosticsFeatureState: String { appliedFeatures.map { String(describing: $0) } ?? "stopped" }
-    var diagnosticsCommandSpaceTapRunning: Bool { commandSpaceTap.isRunning }
+    var diagnosticsCommandSpaceTapRunning: Bool { commandSpaceState == .active }
     /// The applied features want the ⌘Space tap (so a stopped tap is a problem).
     var diagnosticsCommandSpaceWanted: Bool { appliedFeatures?.commandSpace ?? false }
 

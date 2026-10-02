@@ -130,6 +130,9 @@ import Observation
 
     /// Replace the system HUD by intercepting the media keys. Arms the tap only while running and
     /// trusted for Accessibility; otherwise `interception` reports `.needsPermission` / `.off`.
+    /// A permission changed: a refused key tap is tried again.
+    func retryInterception() { interceptor.retryIfFailed() }
+
     func setInterceptionEnabled(_ enabled: Bool) {
         wantsInterception = enabled
         updateInterception()

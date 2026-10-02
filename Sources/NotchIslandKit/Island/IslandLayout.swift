@@ -49,6 +49,12 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     var siri = SiriLayout()
     /// The open panel's width and board height (Settings ▸ Widgets ▸ Size).
     var panel = PanelLayout()
+    /// The MacBook screen's own factor (`DisplayProfile`): 1 on the reference Mac and on any
+    /// screen that is not a known MacBook panel.
+    var display: CGFloat = 1
+
+    /// Everything the open island scales by: the user's size times the screen's.
+    var factor: CGFloat { scale.factor * display }
 
     /// The same island with other panel proportions: a draft the Size editor shows while dragging.
     func replacing(panel: PanelLayout) -> IslandLayout {
@@ -68,7 +74,7 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     /// Size), each in steps of `step` and within its range — and no further than the screen lets
     /// the panel grow, so a factor never runs on past the size it still changes.
     func panel(forExpandedSize size: CGSize, step: Double = PanelSettings.step) -> PanelSettings {
-        let f = scale.factor
+        let f = factor
         let base = max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f
         let limit = maximumExpandedSize
         // The nearest step; at the screen's limit the first step that reaches it.
@@ -212,7 +218,7 @@ nonisolated struct IslandLayout: Sendable, Equatable {
                 height: notch.height + Self.bannerDetailHeight
             )
         case .expanded:
-            let f = scale.factor
+            let f = factor
             let screen = screen == .zero ? Self.fallbackScreen : screen
             // Scaled lengths are rounded so glass edges stay on the pixel grid at every scale.
             let width = (max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f * panel.widthFactor).rounded()
@@ -229,7 +235,7 @@ nonisolated struct IslandLayout: Sendable, Equatable {
                            Self.settingsMaximum.height)
             return CGSize(width: width.rounded(), height: notch.height + page.rounded())
         case .assistant(let room):
-            let f = scale.factor
+            let f = factor
             let screen = screen == .zero ? Self.fallbackScreen : screen
             // The user's rows and columns scale the defaults (7 list rows, a 9 × 4 gallery).
             let list = (Self.assistantPageHeight * f * CGFloat(siri.listRows) / 7).rounded()
@@ -277,7 +283,7 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         case .banner(.levelCovering): Self.coveringBottomRadius
         case .banner(.airPods) where Self.coversAirPodsCard: SystemVolumeCard.Kind.airPods.radius
         case .banner: 24
-        case .expanded, .assistant, .settings: 30 * scale.factor
+        case .expanded, .assistant, .settings: 30 * factor
         }
     }
 
