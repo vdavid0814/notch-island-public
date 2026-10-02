@@ -113,8 +113,13 @@ struct AnchorSizeEditor: View {
         let screenSize = CGSize(width: screen.frame.width * scale, height: screen.frame.height * scale)
         let band = screen.band * scale
         let window = CGSize(width: current.width * scale, height: current.height * scale)
+        // As `AnchorStageLayout`: under the window a slim bar and the picture as high as it allows;
+        // beside the notch the picture where the window is and the band above it black.
+        let barHeight = onTop && bar == .belowWindow ? AnchorStageLayout.barHeight * scale : 0
+        let top = onTop ? max(0, band - barHeight) : band
         let stage = CGRect(x: (screenSize.width - window.width) / 2 - AnchorStageLayout.shoulder * scale, y: onTop ? 0 : band,
-                           width: window.width + 2 * AnchorStageLayout.shoulder * scale, height: window.height + (onTop ? band : 0))
+                           width: window.width + 2 * AnchorStageLayout.shoulder * scale,
+                           height: onTop ? top + window.height + barHeight : window.height)
         return ZStack(alignment: .topLeading) {
             // The desktop, the menu bar and the notch.
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -131,14 +136,14 @@ struct AnchorSizeEditor: View {
             }
             windowPicture(window)
                 .shadow(color: .black.opacity(onTop ? 0 : 0.35), radius: 4, y: 2)
-                .offset(x: stage.minX + AnchorStageLayout.shoulder * scale, y: stage.minY)
+                .offset(x: stage.minX + AnchorStageLayout.shoulder * scale, y: top)
             // The notch; with the name and Release beside it, as wide as those.
             let notch = (screen.notch.width + (onTop && bar == .menuBar ? 2 * Self.earWidth : 0)) * scale
             UnevenRoundedRectangle(bottomLeadingRadius: 4, bottomTrailingRadius: 4, style: .continuous)
                 .fill(.black)
                 .frame(width: notch, height: band)
                 .offset(x: (screenSize.width - notch) / 2)
-            handles(stage: stage, band: band)
+            handles(stage: stage, windowBottom: top + window.height)
         }
         .frame(width: screenSize.width, height: screenSize.height, alignment: .topLeading)
         .clipShape(.rect(cornerRadius: 10, style: .continuous))
@@ -165,9 +170,8 @@ struct AnchorSizeEditor: View {
     }
 
     /// The sides (together) and the bottom edge.
-    private func handles(stage: CGRect, band: CGFloat) -> some View {
+    private func handles(stage: CGRect, windowBottom: CGFloat) -> some View {
         let scale = scale
-        let windowBottom = stage.maxY - (onTop ? band : 0)
         return ZStack(alignment: .topLeading) {
             ForEach([-1.0, 1.0], id: \.self) { side in
                 Capsule()

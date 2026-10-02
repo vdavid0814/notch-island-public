@@ -36,6 +36,9 @@ import SwiftUI
     @ObservationIgnored private var isPaused = false
     @ObservationIgnored private var isReduced = false
     @ObservationIgnored private var bar: AnchorBarPlacement = .belowWindow
+    /// How far the island reaches out beside the notch on each side right now (its compact ears,
+    /// with what is playing): the name and Release move out past it.
+    @ObservationIgnored private var islandReach: CGFloat = 0
     @ObservationIgnored private var held: WindowAnchor.Held?
     @ObservationIgnored private var screen: AnchorScreen?
     /// A sheet or another window of the app lies over the stage.
@@ -91,6 +94,13 @@ import SwiftUI
         if isShowing { reconcile() }
     }
 
+    /// The island's compact ears came or went: the name and Release beside the notch make room.
+    func setIslandReach(_ reach: CGFloat) {
+        guard reach != islandReach else { return }
+        islandReach = reach
+        if isShowing, bar == .menuBar { reconcile() }
+    }
+
     /// Low Power Mode or a low battery: fewer frames.
     func setReduced(_ reduced: Bool) {
         guard reduced != isReduced else { return }
@@ -129,7 +139,7 @@ import SwiftUI
     }
 
     private func layout(_ held: WindowAnchor.Held) -> AnchorStageLayout? {
-        screen.map { AnchorStageLayout(screen: $0, rest: held.rest) }
+        screen.map { AnchorStageLayout(screen: $0, rest: held.rest, placement: bar) }
     }
 
     private func reconcile() {
@@ -258,7 +268,8 @@ import SwiftUI
         let app = NSRunningApplication(processIdentifier: held.window.pid)
         panel.stage.onRelease = { [weak self] in self?.onRelease?() }
         panel.stage.configure(layout: layout, target: StageTarget(pid: held.window.pid, windowID: held.window.windowID ?? 0),
-                              appName: app?.localizedName ?? "", icon: app?.icon, notch: notchRect(screen, in: layout), placement: bar)
+                              appName: app?.localizedName ?? "", icon: app?.icon, notch: notchRect(screen, in: layout), placement: bar,
+                              islandReach: islandReach)
         let top = NSScreen.screens.first?.frame.maxY ?? 0
         let frame = CGRect(x: layout.frame.minX, y: top - layout.frame.maxY, width: layout.frame.width, height: layout.frame.height)
         if panel.frame != frame { panel.setFrame(frame, display: false) }
@@ -414,7 +425,7 @@ final class StageView: NSView {
     override var isFlipped: Bool { true }
 
     func configure(layout: AnchorStageLayout, target: StageTarget, appName: String, icon: NSImage?, notch: CGRect,
-                   placement: AnchorBarPlacement) {
+                   placement: AnchorBarPlacement, islandReach: CGFloat = 0) {
         self.target = target
         if layout != self.layout {
             self.layout = layout
@@ -433,18 +444,23 @@ final class StageView: NSView {
         let bar = host(self.bar, StageBar(appName: appName, icon: icon, release: release))
         self.bar = bar
         bar.frame = layout.chin
-        bar.isHidden = placement != .belowWindow
-        let leading = host(leadingEar, StageEar(side: .leading, appName: appName, icon: icon, release: release))
-        let trailing = host(trailingEar, StageEar(side: .trailing, appName: appName, icon: icon, release: release))
+        bar.isHidden = placement != .belowWindow || layout.chin.height == 0
+        // Past the island's own ears when they are out (what is playing beside the notch): the
+        // notch reads as widened by them, the name and Release just outside.
+        let reach = islandReach
+        let leading = host(leadingEar, StageEar(side: .leading, appName: appName, icon: icon, inset: reach, release: release))
+        let trailing = host(trailingEar, StageEar(side: .trailing, appName: appName, icon: icon, inset: reach, release: release))
         leadingEar = leading
         trailingEar = trailing
-        let room = max(0, (layout.copy.width - notch.width) / 2 - 16)
-        let leadingWidth = min(leading.fittingSize.width.rounded(.up) - StageEar.underNotch, room)
-        let trailingWidth = min(trailing.fittingSize.width.rounded(.up) - StageEar.underNotch, room)
+        // Measured from the content (a hosting view with no sizing options reports no fitting size).
+        let room = max(0, (layout.copy.width - notch.width) / 2)
+        let height = max(notch.height, layout.band)
+        let leadingWidth = min(StageEar.width(side: .leading, appName: appName, hasIcon: icon != nil, inset: reach), room)
+        let trailingWidth = min(StageEar.width(side: .trailing, appName: appName, hasIcon: icon != nil, inset: reach), room)
         // Each reaches under the notch (behind its rounded bottom corners), so no title bar shows between.
         let under = StageEar.underNotch
-        leading.frame = CGRect(x: notch.minX - leadingWidth, y: 0, width: leadingWidth + under, height: notch.height)
-        trailing.frame = CGRect(x: notch.maxX - under, y: 0, width: trailingWidth + under, height: notch.height)
+        leading.frame = CGRect(x: notch.minX + under - leadingWidth, y: 0, width: leadingWidth, height: height)
+        trailing.frame = CGRect(x: notch.maxX - under, y: 0, width: trailingWidth, height: height)
         leading.isHidden = placement != .menuBar
         trailing.isHidden = placement != .menuBar
     }
@@ -607,41 +623,69 @@ struct StageEar: View {
 
     /// How far each reaches under the notch.
     static let underNotch: CGFloat = 10
+    /// Between the notch (or the island's ears) and the content, and at the outer end.
+    static let innerPadding: CGFloat = 10
+    static let outerPadding: CGFloat = 12
+    static let nameFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
+    static let releaseFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
+    static let iconSide: CGFloat = 15
+    static let spacing: CGFloat = 6
 
     let side: Side
     let appName: String
     let icon: NSImage?
+    /// Kept clear next to the notch: the island's ears, when they are out.
+    var inset: CGFloat = 0
     let release: () -> Void
+
+    /// The whole ear's width, `underNotch` included: what its content needs, measured as drawn.
+    static func width(side: Side, appName: String, hasIcon: Bool, inset: CGFloat) -> CGFloat {
+        let content: CGFloat
+        switch side {
+        case .leading:
+            let name = (appName as NSString).size(withAttributes: [.font: nameFont]).width
+            content = (hasIcon ? iconSide + spacing : 0) + name
+        case .trailing:
+            let title = (String(localized: "Release") as NSString).size(withAttributes: [.font: releaseFont]).width
+            content = 14 + 5 + title
+        }
+        return (underNotch + inset + innerPadding + content + outerPadding).rounded(.up)
+    }
 
     var body: some View {
         Group {
             switch side {
             case .leading:
-                HStack(spacing: 6) {
+                HStack(spacing: Self.spacing) {
                     if let icon {
                         Image(nsImage: icon)
                             .resizable()
-                            .frame(width: 15, height: 15)
+                            .frame(width: Self.iconSide, height: Self.iconSide)
                     }
                     Text(appName)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(Font(Self.nameFont))
                         .foregroundStyle(.white.opacity(0.8))
                         .lineLimit(1)
+                        .fixedSize()
                 }
             case .trailing:
                 Button(action: release) {
-                    Label("Release", systemImage: "rectangle.topthird.inset.filled")
-                        .labelStyle(.titleAndIcon)
-                        .font(.system(size: 11, weight: .semibold))
+                    HStack(spacing: 5) {
+                        Image(systemName: "rectangle.topthird.inset.filled")
+                            .frame(width: 14)
+                        Text("Release").fixedSize()
+                    }
+                    .font(Font(Self.releaseFont))
+                    .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.white.opacity(0.75))
                 .help("Let the window go")
             }
         }
-        .padding(.leading, side == .leading ? 12 : 10 + Self.underNotch)
-        .padding(.trailing, side == .leading ? 10 + Self.underNotch : 12)
-        .frame(maxHeight: .infinity)
+        .padding(.leading, side == .leading ? Self.outerPadding : Self.underNotch + inset + Self.innerPadding)
+        .padding(.trailing, side == .leading ? Self.underNotch + inset + Self.innerPadding : Self.outerPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: side == .leading ? .trailing : .leading)
         .background {
             UnevenRoundedRectangle(bottomLeadingRadius: side == .leading ? 10 : 0, bottomTrailingRadius: side == .trailing ? 10 : 0,
                                    style: .continuous)

@@ -64,7 +64,8 @@ import Observation
     var layout: IslandLayout {
         IslandLayout(notch: metrics?.notchSize ?? Self.fallbackNotchSize, scale: preferences.scale,
                      screen: metrics?.screenFrame.size ?? .zero, siri: preferences.siri.layout, panel: preferences.panel.layout,
-                     display: DisplayProfile.factor(for: metrics))
+                     display: DisplayProfile.factor(for: metrics),
+                     settingsFillsLikeReference: DisplayProfile.isKnown(metrics))
     }
 
     /// The panel's pages on this Mac with these settings: the shelf while it is on, the battery page
@@ -666,7 +667,17 @@ import Observation
         island.didTransition = { [weak self] from, to in
             previous?(from, to)
             self?.transitionHaptic(from: from, to: to)
+            self?.updateAnchorIslandReach(to)
         }
+    }
+
+    /// The anchored window's name and Release beside the notch move out past the island's compact
+    /// ears (what is playing) while those are out.
+    private func updateAnchorIslandReach(_ presentation: IslandPresentation) {
+        guard case .compact = presentation else { return anchorMirror.setIslandReach(0) }
+        let layout = self.layout
+        let reach = (layout.size(for: presentation).width - layout.notch.width) / 2 + layout.shoulderRadius(for: presentation)
+        anchorMirror.setIslandReach(reach.rounded(.up))
     }
 
     private func transitionHaptic(from: IslandPresentation, to: IslandPresentation) {

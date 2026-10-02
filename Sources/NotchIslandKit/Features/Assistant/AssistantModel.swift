@@ -423,6 +423,8 @@ nonisolated struct FileScope: Sendable, Equatable {
     static let rootActionLimit = 2
     /// Columns of the Applications gallery (↑/↓ move by a row of them).
     var galleryColumns: Int { settings().galleryColumns }
+    /// The gallery's icon side (Settings ▸ Spotlight ▸ App Gallery).
+    var galleryIconSize: CGFloat { settings().galleryIconSize.points }
 
     /// Apple Intelligence answers here: it is available and the user has not turned it off.
     private var answersWithIntelligence: Bool { intelligenceAvailable && settings().usesIntelligence }
@@ -814,7 +816,7 @@ nonisolated struct FileScope: Sendable, Equatable {
             ? allApps.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             : allApps
         for hit in gallery.prefix(icons) {
-            _ = await AssistantIcons.thumbnail(for: hit, points: AssistantIcons.galleryIconSize, prewarming: true)
+            _ = await AssistantIcons.thumbnail(for: hit, points: settings().galleryIconSize.points, prewarming: true)
         }
         await readListsAhead()
         // The kept icons of apps and icon styles that are gone go, and the least recently used
@@ -1773,13 +1775,13 @@ nonisolated enum AssistantMatch {
     /// A gallery icon, drawn once at the size it is shown (2x) off the main thread: a hundred full
     /// icons, looked up and scaled on the main thread as the gallery scrolled in, were what made
     /// it slow to open. Only cells on screen ask (the grid is lazy).
-    static func cachedThumbnail(for hit: AssistantHit) -> NSImage? { thumbnails[hit.url.path] }
+    static func cachedThumbnail(for hit: AssistantHit, points: CGFloat) -> NSImage? { thumbnails[thumbnailKey(hit, points)] }
 
-    /// The gallery cells' icon side.
-    static let galleryIconSize: CGFloat = 48
+    /// Per size: the gallery's icon size can change.
+    private static func thumbnailKey(_ hit: AssistantHit, _ points: CGFloat) -> String { "\(Int(points)) \(hit.url.path)" }
 
     static func thumbnail(for hit: AssistantHit, points: CGFloat, prewarming: Bool = false) async -> NSImage? {
-        let key = hit.url.path
+        let key = thumbnailKey(hit, points)
         if let image = thumbnails[key] { return image }
         let source = Source.app(hit.url.path)
         let pixels = Int(points * 2), disk = disk

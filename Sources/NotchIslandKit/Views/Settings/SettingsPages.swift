@@ -516,7 +516,7 @@ struct ActivitiesSettingsPage: View {
                     Text("Beside the Notch").tag(AnchorBarPlacement.menuBar)
                     Text("Under the Window").tag(AnchorBarPlacement.belowWindow)
                 } label: {
-                    InfoLabel("App name and Release", "Where the anchored app's name and the Release button sit while the window is up at the top: in the menu bar on both sides of the notch, or in a bar under the window.")
+                    InfoLabel("App name and Release", "Where the anchored app's name and the Release button sit while the window is up at the top. Beside the notch: in the menu bar's band on both sides of the notch (past what is playing, when that shows there), the window right under it and nothing below. Under the window: a slim bar under it, the window up to the screen's top.")
                 }
                 .choiceBar()
                 .fixedSize()
@@ -660,6 +660,12 @@ struct SiriSettingsPage: View {
                     ForEach(SiriGallerySort.allCases) { Text($0.title).tag($0) }
                 } label: {
                     InfoLabel("Order", "The apps in the gallery (⌘1): the ones you used last first, or alphabetically.")
+                }
+                .choiceBar()
+                Picker(selection: $preferences.siri.galleryIconSize) {
+                    ForEach(SiriGalleryIconSize.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    InfoLabel("Icon size", "How large the apps are in the gallery (⌘1). Its window grows with them, so the same number of apps fits in a row.")
                 }
                 .choiceBar()
                 RowsStepper(title: "Columns", detail: "Apps in a row. The gallery's window widens with them.",

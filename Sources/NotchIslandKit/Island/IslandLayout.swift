@@ -53,6 +53,9 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     /// screen that is not a known MacBook panel.
     var display: CGFloat = 1
 
+    /// The screen is a known MacBook panel: Settings grows with it (see `size(for: .settings)`).
+    var settingsFillsLikeReference = false
+
     /// Everything the open island scales by: the user's size times the screen's.
     var factor: CGFloat { scale.factor * display }
 
@@ -134,6 +137,8 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     static let settingsBottomMargin: CGFloat = 64
     static let settingsMaximum = CGSize(width: 1180, height: 740)
     static let settingsMinimum = CGSize(width: 820, height: 520)
+    /// The screen Settings was designed on (the reference Mac, 13.6-inch Air at 1280 × 832).
+    static let referenceScreen = CGSize(width: 1280, height: 832)
     /// Standing in for the screen before one is known (a 14-inch MacBook's default resolution).
     static let fallbackScreen = CGSize(width: 1512, height: 982)
     /// The app gallery (Applications ⌘1): wider than the list, for nine columns of apps.
@@ -144,11 +149,18 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     static let galleryRowSpacing: CGFloat = 4
 
     /// The gallery page for `rows` rows: the field above them, the insets around.
-    static func galleryPageHeight(rows: Int) -> CGFloat {
+    static func galleryPageHeight(rows: Int, icon: CGFloat = SiriGalleryIconSize.medium.points) -> CGFloat {
         let rows = CGFloat(max(1, rows))
         return assistantTopInset * 2 + assistantFieldHeight + Metrics.Expanded.pageBottomInset
-            + rows * galleryCellHeight + (rows - 1) * galleryRowSpacing
+            + rows * galleryCellHeight(icon: icon) + (rows - 1) * galleryRowSpacing
     }
+
+    /// A cell for icons of `icon` points: the icon with the cell's insets and caption around it
+    /// (77 for the 48-pt icons the gallery had before their size could be set).
+    static func galleryCellHeight(icon: CGFloat) -> CGFloat { galleryCellHeight - 48 + icon }
+
+    /// A column for icons of `icon` points: as much wider as the icon is (91 pt for 48-pt icons).
+    static func galleryColumnWidth(icon: CGFloat) -> CGFloat { assistantGalleryWidth / 9 - 48 + icon }
     /// The assistant's field and rows (`AssistantView`), which are not scaled.
     static let assistantFieldHeight: CGFloat = 40
     static let assistantRowHeight: CGFloat = 32
@@ -229,10 +241,17 @@ nonisolated struct IslandLayout: Sendable, Equatable {
                 height: notch.height + min(page, (Self.expandedMaximumScreenShare * screen.height - notch.height).rounded(.down))
             )
         case .settings:
+            // On a known MacBook (`DisplayProfile`) Settings takes the share of the screen it takes
+            // on the reference Mac (1180 × 740 of 1280 × 832): the same size on the screen, with
+            // more room for the pages. Elsewhere at most `settingsMaximum`, as before.
             let screen = screen == .zero ? Self.fallbackScreen : screen
-            let width = min(max(screen.width - 2 * Self.settingsSideMargin, Self.settingsMinimum.width), Self.settingsMaximum.width)
+            let maximum = settingsFillsLikeReference
+                ? CGSize(width: Self.settingsMaximum.width * max(1, screen.width / Self.referenceScreen.width),
+                         height: Self.settingsMaximum.height * max(1, screen.height / Self.referenceScreen.height))
+                : Self.settingsMaximum
+            let width = min(max(screen.width - 2 * Self.settingsSideMargin, Self.settingsMinimum.width), maximum.width)
             let page = min(max(screen.height - notch.height - Self.settingsBottomMargin, Self.settingsMinimum.height),
-                           Self.settingsMaximum.height)
+                           maximum.height)
             return CGSize(width: width.rounded(), height: notch.height + page.rounded())
         case .assistant(let room):
             let f = factor
@@ -246,13 +265,13 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             case .rows(let count): min(Self.assistantRowsPageHeight(count) - Self.assistantBottomInset + assistantRowInset,
                                        max(list, Self.assistantSuggestionsPageHeight))
             case .list: max(list, Self.assistantSuggestionsPageHeight)
-            case .gallery: Self.galleryPageHeight(rows: siri.galleryRows)
-            case .galleryRows(let count): Self.galleryPageHeight(rows: min(count, siri.galleryRows))
+            case .gallery: Self.galleryPageHeight(rows: siri.galleryRows, icon: siri.galleryIcon)
+            case .galleryRows(let count): Self.galleryPageHeight(rows: min(count, siri.galleryRows), icon: siri.galleryIcon)
             }
             // The panel's width times Siri's own factor, so Siri grows out of the header as wide.
             let panel = (max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f * self.panel.widthFactor
                          * siri.widthFactor).rounded()
-            let gallery = (Self.assistantGalleryWidth * f * CGFloat(siri.galleryColumns) / 9).rounded()
+            let gallery = (Self.galleryColumnWidth(icon: siri.galleryIcon) * f * CGFloat(siri.galleryColumns)).rounded()
             return CGSize(
                 width: min(room.isGallery ? max(panel, gallery) : panel, screen.width - 2 * Self.settingsSideMargin),
                 height: notch.height + page

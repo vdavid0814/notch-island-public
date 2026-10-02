@@ -97,34 +97,48 @@ nonisolated enum AnchorBarPlacement: String, Codable, Sendable, CaseIterable, Id
     var id: Self { self }
 }
 
-/// The live copy's window at the top of the screen (`AnchorMirror`): the window's picture from the
-/// screen's top edge down, on an island-black stage with the island's shoulders at the top and a
-/// chin under it (as tall as the menu bar: the real window, a menu bar lower, ends there).
+/// The live copy's window at the top of the screen (`AnchorMirror`) on an island-black stage with
+/// the island's shoulders at the top.
+///
+/// The real window always stays a menu bar lower than the screen's top (macOS keeps it under the
+/// bar), so whatever the stage shows, it must cover the real window down to its bottom edge:
+/// - Name and Release under the window (`belowWindow`): the picture as high as the bar under it
+///   allows, and a slim bar (`barHeight`) under it.
+/// - Beside the notch (`menuBar`): the picture exactly over the real window and the menu bar's
+///   band above it black, holding the name and Release on either side of the notch. No bar under
+///   the window: nothing of the stage or the app is below the window's own bottom edge.
 nonisolated struct AnchorStageLayout: Sendable, Equatable {
     /// The stage, in global coordinates (y down).
     var frame: CGRect
     /// The window's picture in the stage (top-left origin).
     var copy: CGRect
-    /// The bar under it.
+    /// The bar under it (zero height beside the notch).
     var chin: CGRect
     var shoulder: CGFloat
     var bottomRadius: CGFloat
-    /// How far below the picture the real window is (the menu bar): a click is sent this much lower.
+    /// How far below the picture the real window is: a click is sent this much lower.
     var offset: CGFloat
 
     static let shoulder: CGFloat = 10
     static let bottomRadius: CGFloat = 22
+    /// The bar under the window: one line of the name and Release.
+    static let barHeight: CGFloat = 22
 
-    init(screen: AnchorScreen, rest: CGRect) {
+    init(screen: AnchorScreen, rest: CGRect, placement: AnchorBarPlacement = .belowWindow) {
         shoulder = Self.shoulder
         bottomRadius = Self.bottomRadius
-        offset = rest.minY - screen.frame.minY
-        let chinHeight = max(offset, 24)
+        let band = max(0, rest.minY - screen.frame.minY)
+        let bar = placement == .belowWindow ? Self.barHeight : 0
+        let top = max(0, band - bar)
+        offset = band - top
         frame = CGRect(x: rest.minX - shoulder, y: screen.frame.minY, width: rest.width + 2 * shoulder,
-                       height: rest.height + chinHeight)
-        copy = CGRect(x: shoulder, y: 0, width: rest.width, height: rest.height)
-        chin = CGRect(x: shoulder, y: rest.height, width: rest.width, height: chinHeight)
+                       height: top + rest.height + bar)
+        copy = CGRect(x: shoulder, y: top, width: rest.width, height: rest.height)
+        chin = CGRect(x: shoulder, y: top + rest.height, width: rest.width, height: bar)
     }
+
+    /// Above the picture: the menu bar's band beside the notch.
+    var band: CGFloat { copy.minY }
 
     /// A point on the picture (global) where the real window has it.
     func forwarded(_ point: CGPoint) -> CGPoint { CGPoint(x: point.x, y: point.y + offset) }

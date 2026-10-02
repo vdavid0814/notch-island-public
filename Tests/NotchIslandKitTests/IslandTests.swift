@@ -702,6 +702,21 @@ import Testing
         #expect(abs(air15 - 1.188) < 0.005)
     }
 
+    @Test func settingsTakesTheReferenceShareOfAKnownMacBook() {
+        let notch = CGSize(width: 185, height: 32)
+        var pro14 = IslandLayout(notch: notch, scale: .standard, screen: CGSize(width: 1512, height: 982))
+        // Elsewhere: at most 1180 × 740, as before.
+        #expect(pro14.size(for: .settings) == CGSize(width: 1180, height: 32 + 740))
+        pro14.settingsFillsLikeReference = true
+        // 92 % of the width and 89 % of the height, as 1180 × 740 is of 1280 × 832.
+        #expect(pro14.size(for: .settings) == CGSize(width: 1394, height: 32 + 873))
+        // The reference Mac itself is unchanged.
+        var air13 = IslandLayout(notch: CGSize(width: 156, height: 28), scale: .standard, screen: CGSize(width: 1280, height: 832))
+        let before = air13.size(for: .settings)
+        air13.settingsFillsLikeReference = true
+        #expect(air13.size(for: .settings) == before)
+    }
+
     @Test func theFactorScalesTheOpenPanelOnly() {
         let notch = CGSize(width: 185, height: 32)
         let plain = IslandLayout(notch: notch, scale: .standard, screen: CGSize(width: 1512, height: 982))
@@ -710,5 +725,23 @@ import Testing
         #expect(scaled.size(for: .compact(.nowPlaying)) == plain.size(for: .compact(.nowPlaying)))
         #expect(scaled.size(for: .expanded(.home)).width == (600 * 1.134).rounded())
         #expect(scaled.size(for: .expanded(.home)).height == 32 + (160 * 1.134).rounded())
+    }
+}
+
+@Suite struct GalleryIconSizeTests {
+    @Test func mediumIsTheGalleryAsItWas() {
+        #expect(IslandLayout.galleryCellHeight(icon: SiriGalleryIconSize.medium.points) == IslandLayout.galleryCellHeight)
+        #expect(abs(IslandLayout.galleryColumnWidth(icon: 48) * 9 - IslandLayout.assistantGalleryWidth) < 1)
+    }
+
+    @Test func largerIconsGrowTheCellsAndTheWindow() {
+        let notch = CGSize(width: 156, height: 28)
+        var layout = IslandLayout(notch: notch, scale: .standard, screen: CGSize(width: 1280, height: 832))
+        let medium = layout.size(for: .assistant(.gallery))
+        layout.siri.galleryIcon = SiriGalleryIconSize.large.points
+        let large = layout.size(for: .assistant(.gallery))
+        // Four rows of 12 pt taller cells, nine columns of 12 pt wider ones.
+        #expect(abs(large.height - medium.height - 4 * 12) < 1)
+        #expect(abs(large.width - medium.width - 9 * 12) < 1)
     }
 }

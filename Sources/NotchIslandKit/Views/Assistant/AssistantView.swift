@@ -320,6 +320,7 @@ private struct AppGallery: View {
     var body: some View {
         // The user's column count (Settings ▸ Siri ▸ App Gallery); the window widens with it.
         let columnCount = assistant.galleryColumns
+        let iconSize = assistant.galleryIconSize
         let columns = Array(repeating: GridItem(.flexible(), spacing: IslandLayout.galleryRowSpacing),
                             count: columnCount)
         let rows = assistant.rows
@@ -330,7 +331,7 @@ private struct AppGallery: View {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         if case .hit(let hit) = row {
                             GalleryCell(hit: hit, isMarked: assistant.marksSelection && index == assistant.selection,
-                                        plateRadius: plateRadius)
+                                        plateRadius: plateRadius, iconSize: iconSize)
                                 .id(row.id)
                                 .contentShape(.rect)
                                 .onTapGesture { assistant.perform(row) }
@@ -351,27 +352,26 @@ private struct GalleryCell: View {
     /// The keys moved the selection here (`AssistantModel.marksSelection`).
     var isMarked = false
     var plateRadius: CGFloat = 10
-
-    static let iconSize: CGFloat = AssistantIcons.galleryIconSize
+    var iconSize: CGFloat = SiriGalleryIconSize.medium.points
     @State private var icon: NSImage?
 
     var body: some View {
         VStack(spacing: Metrics.Spacing.xSmall) {
             Group {
-                if let icon = icon ?? AssistantIcons.cachedThumbnail(for: hit) {
+                if let icon = icon ?? AssistantIcons.cachedThumbnail(for: hit, points: iconSize) {
                     Image(nsImage: icon)
                 } else {
                     // Only a cell without its icon yet asks for it: a gallery of kept icons starts
                     // no task per cell.
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    RoundedRectangle(cornerRadius: iconSize * 0.23, style: .continuous)
                         .fill(.white.opacity(0.08))
                         .padding(4)
-                        .task(id: hit.url) {
-                            icon = await AssistantIcons.thumbnail(for: hit, points: Self.iconSize)
+                        .task(id: "\(Int(iconSize)) \(hit.url.path)") {
+                            icon = await AssistantIcons.thumbnail(for: hit, points: iconSize)
                         }
                 }
             }
-            .frame(width: Self.iconSize, height: Self.iconSize)
+            .frame(width: iconSize, height: iconSize)
             Text(hit.name)
                 .font(.caption)
                 .lineLimit(1)
@@ -379,7 +379,8 @@ private struct GalleryCell: View {
         }
         .padding(.horizontal, Metrics.Spacing.xxSmall)
         // Exactly the height `IslandLayout` sizes the gallery by, so N rows fill it.
-        .frame(maxWidth: .infinity, minHeight: IslandLayout.galleryCellHeight, maxHeight: IslandLayout.galleryCellHeight)
+        .frame(maxWidth: .infinity, minHeight: IslandLayout.galleryCellHeight(icon: iconSize),
+               maxHeight: IslandLayout.galleryCellHeight(icon: iconSize))
         .background { SelectionPlate(isShown: isMarked, shape: .rect(cornerRadius: plateRadius, style: .continuous)) }
     }
 }

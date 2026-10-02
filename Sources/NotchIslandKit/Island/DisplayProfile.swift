@@ -1,4 +1,4 @@
-import CoreGraphics
+import Foundation
 
 /// The notched MacBook screens, recognised by their panel's physical size, and how much larger the
 /// open island is drawn on each so it looks the same on all of them.
@@ -45,6 +45,7 @@ nonisolated enum DisplayProfile: String, Sendable, CaseIterable {
     static let tolerance: CGFloat = 5
     /// However far the user's resolution goes, the island stays within these.
     static let factorRange: ClosedRange<CGFloat> = 0.8...1.5
+    static let overrideKey = "ni.displayFactor"
 
     /// The profile of a built-in panel this size, nil for anything else.
     static func matching(physicalSize: CGSize, isBuiltin: Bool) -> DisplayProfile? {
@@ -63,8 +64,19 @@ nonisolated enum DisplayProfile: String, Sendable, CaseIterable {
         return min(max(factor, Self.factorRange.lowerBound), Self.factorRange.upperBound)
     }
 
+    /// The island's screen is one of the profiles (or a factor is forced for trying them).
+    static func isKnown(_ metrics: NotchMetrics?) -> Bool {
+        if UserDefaults.standard.double(forKey: overrideKey) > 0 { return true }
+        guard let metrics else { return false }
+        return matching(physicalSize: metrics.physicalSize, isBuiltin: metrics.isBuiltin) != nil
+    }
+
     /// The factor for the island's screen: 1 unless it is a known MacBook panel.
     static func factor(for metrics: NotchMetrics?) -> CGFloat {
+        // For trying a profile on another Mac: `defaults write com.davidvarga.notchisland
+        // ni.displayFactor 1.134` (delete the key to go back).
+        let forced = UserDefaults.standard.double(forKey: overrideKey)
+        if forced > 0 { return min(max(forced, factorRange.lowerBound), factorRange.upperBound) }
         guard let metrics, let profile = matching(physicalSize: metrics.physicalSize, isBuiltin: metrics.isBuiltin) else { return 1 }
         return profile.factor(pointsWide: metrics.screenFrame.width)
     }

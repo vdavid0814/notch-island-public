@@ -47,6 +47,8 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
 
     var galleryColumns = 9
     var gallerySort: SiriGallerySort = .recent
+    /// How large the apps' icons are; the cells, the rows and the window grow with them.
+    var galleryIconSize: SiriGalleryIconSize = .medium
 
     // MARK: Files
 
@@ -116,6 +118,7 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
         searchesFileContents = value(.searchesFileContents, d.searchesFileContents)
         galleryColumns = min(max(value(.galleryColumns, d.galleryColumns), Self.galleryColumnsRange.lowerBound), Self.galleryColumnsRange.upperBound)
         gallerySort = value(.gallerySort, d.gallerySort)
+        galleryIconSize = value(.galleryIconSize, d.galleryIconSize)
         // The folders chosen before the home folder could be: it stays off until it is chosen.
         folders = value(.folders, d.folders.subtracting([.home]))
         recentDays = max(1, value(.recentDays, d.recentDays))
@@ -132,7 +135,8 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
 
     /// The part of the settings that sizes Siri's window, for `IslandLayout`.
     var layout: SiriLayout {
-        SiriLayout(widthFactor: panelSize.factor, listRows: listRows, galleryRows: galleryRows, galleryColumns: galleryColumns)
+        SiriLayout(widthFactor: panelSize.factor, listRows: listRows, galleryRows: galleryRows, galleryColumns: galleryColumns,
+                   galleryIcon: galleryIconSize.points)
     }
 
     /// The suggestions (⌘1–⌘7) that are switched on, in order.
@@ -159,6 +163,8 @@ nonisolated struct SiriLayout: Sendable, Equatable {
     var listRows = 7
     var galleryRows = 4
     var galleryColumns = 9
+    /// The gallery's icon side (`SiriGalleryIconSize`).
+    var galleryIcon: CGFloat = SiriGalleryIconSize.medium.points
 }
 
 nonisolated enum SiriShortcut: String, Sendable, Codable, CaseIterable, Identifiable {
@@ -208,6 +214,32 @@ nonisolated enum SiriGallerySort: String, Sendable, Codable, CaseIterable, Ident
 
     var id: String { rawValue }
     var title: String { self == .recent ? "Recently Used" : "Name" }
+}
+
+/// The app gallery's icon sizes (Settings ▸ Spotlight ▸ App Gallery). Medium is the size the
+/// gallery had before it could be set.
+nonisolated enum SiriGalleryIconSize: String, Sendable, Codable, CaseIterable, Identifiable {
+    case small, medium, large, extraLarge
+
+    var id: String { rawValue }
+
+    var points: CGFloat {
+        switch self {
+        case .small: 36
+        case .medium: 48
+        case .large: 60
+        case .extraLarge: 72
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .small: "Small"
+        case .medium: "Medium"
+        case .large: "Large"
+        case .extraLarge: "Extra Large"
+        }
+    }
 }
 
 nonisolated enum SiriFolder: String, Sendable, Codable, CaseIterable, Identifiable {

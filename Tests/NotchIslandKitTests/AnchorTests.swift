@@ -84,29 +84,41 @@ import Testing
 @Suite struct AnchorStageTests {
     let screen = AnchorScreen(frame: CGRect(x: 0, y: 0, width: 1280, height: 832), band: 29, notch: CGSize(width: 156, height: 28))
 
-    @Test func thePictureStartsAtTheScreensTopWithAChinAsTallAsTheMenuBar() {
+    @Test func underTheWindowASlimBarAndThePictureAsHighAsItAllows() {
         let rest = AnchorGeometry.restFrame(screen, size: CGSize(width: 620, height: 433))
-        let layout = AnchorStageLayout(screen: screen, rest: rest)
-        #expect(layout.offset == 29)
+        let layout = AnchorStageLayout(screen: screen, rest: rest, placement: .belowWindow)
+        // The bar is 22 pt, the picture 7 pt below the screen's top (29 − 22).
+        #expect(layout.offset == 22)
         #expect(layout.frame == CGRect(x: 320, y: 0, width: 640, height: 462))
-        #expect(layout.copy == CGRect(x: 10, y: 0, width: 620, height: 433))
-        #expect(layout.chin == CGRect(x: 10, y: 433, width: 620, height: 29))
-        #expect(layout.copyInScreen == CGRect(x: 330, y: 0, width: 620, height: 433))
+        #expect(layout.copy == CGRect(x: 10, y: 7, width: 620, height: 433))
+        #expect(layout.chin == CGRect(x: 10, y: 440, width: 620, height: 22))
+        #expect(layout.copyInScreen == CGRect(x: 330, y: 7, width: 620, height: 433))
         // The stage's bottom is where the real window ends: none of it shows under the stage.
         #expect(layout.frame.maxY == rest.maxY)
         // A second display, placed higher: the stage starts at its own top.
         let other = AnchorScreen(frame: CGRect(x: 1280, y: -200, width: 1920, height: 1080), band: 25, notch: CGSize(width: 180, height: 25))
         let high = AnchorStageLayout(screen: other, rest: AnchorGeometry.restFrame(other, size: CGSize(width: 800, height: 500)))
-        #expect(high.frame.minY == -200 && high.offset == 25)
+        #expect(high.frame.minY == -200 && high.offset == 22 && high.copy.minY == 3)
+    }
+
+    @Test func besideTheNotchNothingIsBelowTheWindow() {
+        let rest = AnchorGeometry.restFrame(screen, size: CGSize(width: 620, height: 433))
+        let layout = AnchorStageLayout(screen: screen, rest: rest, placement: .menuBar)
+        // The picture lies exactly over the real window; the band above it holds the name and Release.
+        #expect(layout.offset == 0)
+        #expect(layout.band == 29)
+        #expect(layout.copyInScreen == rest)
+        #expect(layout.chin.height == 0)
+        #expect(layout.frame.maxY == rest.maxY)
     }
 
     @Test func aPointOnThePictureIsSentWhereTheWindowHasIt() {
         let layout = AnchorStageLayout(screen: screen, rest: AnchorGeometry.restFrame(screen, size: CGSize(width: 620, height: 433)))
         // The picture's top-left is the window's.
-        #expect(layout.forwarded(CGPoint(x: 330, y: 0)) == CGPoint(x: 330, y: 29))
-        #expect(layout.inWindow(CGPoint(x: 330, y: 0)) == .zero)
-        #expect(layout.forwarded(CGPoint(x: 560, y: 121)) == CGPoint(x: 560, y: 150))
-        #expect(layout.inWindow(CGPoint(x: 560, y: 121)) == CGPoint(x: 230, y: 121))
+        #expect(layout.forwarded(CGPoint(x: 330, y: 7)) == CGPoint(x: 330, y: 29))
+        #expect(layout.inWindow(CGPoint(x: 330, y: 7)) == .zero)
+        #expect(layout.forwarded(CGPoint(x: 560, y: 128)) == CGPoint(x: 560, y: 150))
+        #expect(layout.inWindow(CGPoint(x: 560, y: 128)) == CGPoint(x: 230, y: 121))
     }
 
     @Test func onlyADialogSizedWindowOfTheAppMovesTheStageAside() {

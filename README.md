@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.7.3.1 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.7.3.2 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -23,6 +23,19 @@ How much energy each animation and the idle state take, measured before and afte
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.7.3.2
+
+- **The anchored window, Release beside the notch**: the app's name and Release now fit in full,
+  in a black band on both sides of the notch with the window right under it, and nothing below
+  the window any more (no black bar). While something plays, they sit just outside the music
+  icons, as if the notch were a little wider.
+- **Release under the window**: the bar under it is slimmer (22 pt), and the window reaches almost
+  to the screen's top.
+- **App gallery icon size**: Settings ▸ Spotlight ▸ App Gallery ▸ Icon size, from Small to Extra
+  Large; the gallery's window grows with the icons, so a row keeps its number of apps.
+- **Settings on a larger MacBook**: on the 14.2" and 16.2" Pro and the 15.3" Air it takes the same
+  share of the screen as on the 13.6" Air, instead of staying 1180 × 740.
 
 ## What's new in v0.7.3.1
 
