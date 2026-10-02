@@ -118,8 +118,8 @@ the hidden pages; moved in and out of a window, every page was laid out again.
 A trackpad scroll of a Settings page moves only the clip view's layer while it lasts, and the scroll
 view itself once it stops (`ScrollCoalescer`): scrolled by AppKit at every event, every hosting view
 in the page was told its place changed and SwiftUI updated the whole page, hover included. The pages
-are built whole for it (no lazy grids: `GalleryGrid`, `SwatchGrid`); at the top or the bottom the
-scroll is AppKit's, for its rubber band.
+are built whole for it (no lazy grids: `GalleryGrid`, `SwatchGrid`). The ends stretch and spring
+back on the layer too, with AppKit's rubber-band curves (measured).
 
 ## Browser playback
 

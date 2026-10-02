@@ -32,7 +32,7 @@ burst of page switches 47 → 75 (the new slide); opening the panel 13 → 15, a
 Details: `ENERGY-LOG.md`.
 
 Later the same night, scrolling Settings ▸ Widgets with a synthetic trackpad scroll (`ws/smooth`),
-read in Activity Monitor while it ran: Energy Impact 1360–1460 → 25–30, the app's CPU 41 → 7–9 %.
+read in Activity Monitor while it ran: Energy Impact 1360–1460 → ~12, the app's CPU 41 → ~7 %.
 
 ## The October 1, 2026 run (v0.7.1, build 25): the window server
 

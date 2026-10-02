@@ -13,8 +13,8 @@ and measured by `coalition.py`:
 
 | scrolling Settings ▸ Widgets | before | now |
 |---|---|---|
-| Activity Monitor, Energy Impact | 1360–1460 | **25–30** |
-| the app's CPU (coalition) | 41–45 % | **7–9 %** |
+| Activity Monitor, Energy Impact | 1360–1460 | **~12** |
+| the app's CPU (coalition) | 41–45 % | **~7 %** |
 | SwiftUI updating the page | at every frame of the scroll | once, when it stops |
 
 - **Where it went**: every scroll step moved each hosting view in the page (the page's own, and one
@@ -25,9 +25,13 @@ and measured by `coalition.py`:
   scroller's knob; the scroll view is scrolled to where the page is once the scroll and its momentum
   stop (`ScrollCoalescer`), or at once on a click or a key. Events go straight to the scroll view
   under the pointer. Every page is built whole for it: the gallery's and two other lazy grids became
-  non-lazy layouts (`GalleryGrid`, `SwatchGrid`; screenshots identical). A scroll that runs into the
-  top or the bottom is handed to AppKit there, so the rubber band is AppKit's own. Wheel (line)
-  scrolling and `List`s are left to AppKit.
+  non-lazy layouts (`GalleryGrid`, `SwatchGrid`; screenshots identical). Wheel (line) scrolling
+  and `List`s are left to AppKit.
+- **The ends** stretch and spring back on the layer as well, with AppKit's curves measured on this
+  page: the stretch `h·(1 − 1/(0.146·x/h + 1))` for `x` pulled (`h` the visible height; within
+  half a point of AppKit from 140 to 2240 pt pulled), the spring back exponential with 0.1 s, a
+  fling's bounce out by its speed and back at that pace. Handed to AppKit at the ends (the first
+  try), a scroll held there updated the page at every frame again: Activity Monitor showed 200.
 - The same holds for every Settings page; Settings ▸ About while scrolling went from 27 % to 6 %.
 
 ## 2026-10-02 (evening): Settings without the keyboard handover, a quieter rest

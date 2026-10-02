@@ -391,25 +391,39 @@ private final class SettingsWindowRoot: NSView {
 /// when the scroll (with its momentum) stops — one SwiftUI update per scroll, ~7 % of a core.
 ///
 /// Every page in a scroll view here is built whole (no lazy stacks or grids: `GalleryGrid`,
-/// `SwatchGrid`), so the parts a shift brings into view are already drawn. A scroll that runs into
-/// the top or the bottom is handed to AppKit there, for its rubber band; a click, a key or another
-/// scroll view takes the scroll over first. Wheel (line) scrolling is left to AppKit's own smooth
-/// scroll, and scroll views that are not SwiftUI's (a `List`'s table builds only its visible rows).
+/// `SwatchGrid`), so the parts a shift brings into view are already drawn. The ends stretch and
+/// spring back as AppKit's rubber band does (its curves measured on this page), on the layer too:
+/// handed to AppKit, a scroll held at an end updated the page at every frame again. A click, a key
+/// or another scroll view takes the scroll over first. Wheel (line) scrolling is left to AppKit's
+/// own smooth scroll, and scroll views that are not SwiftUI's (a `List`'s table builds only its
+/// visible rows).
 @MainActor final class ScrollCoalescer {
     /// After the last event of a scroll, the scroll view is scrolled to where the page is.
     static let settle: TimeInterval = 0.12
+    /// AppKit's stretch past an end: `h·(1 − 1/(stretch·x/h + 1))` for `x` points pulled, `h` the
+    /// visible height (fitted within half a point to 140–2240 pt pulled).
+    static let stretch: CGFloat = 0.146
+    /// AppKit's spring back to an end: exponential with this time constant, after the fingers lift;
+    /// momentum that runs into an end bounces out and back at the same pace.
+    static let springBack: CFTimeInterval = 0.1
+    private static let springKey = "settingsScrollSpring"
+
     private weak var scroll: NSScrollView?
     /// How far the page is drawn past where the scroll view is.
     private var pending: CGFloat = 0
+    /// How far past an end the fingers have pulled (points of scroll; past the bottom positive).
+    private var excess: CGFloat = 0
+    /// This gesture's momentum ended in a bounce: the rest of it is dropped.
+    private var momentumSpent = false
+    private var lastEvent: TimeInterval = 0
     private var ending: DispatchWorkItem?
-    /// This gesture (and its momentum) reached an end of the page and is AppKit's from there.
-    private var handedOver = false
     private var lastFlash: CFTimeInterval = 0
 
     /// Takes a precise (trackpad) vertical scroll; false leaves it to AppKit.
     func scroll(_ target: NSScrollView, with event: NSEvent) -> Bool {
-        if event.phase == .began || event.phase == .mayBegin { handedOver = false }
-        guard !handedOver, event.hasPreciseScrollingDeltas, abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX),
+        let momentum = !event.momentumPhase.isEmpty
+        if event.phase == .began || event.phase == .mayBegin { momentumSpent = false }
+        guard event.hasPreciseScrollingDeltas, abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX),
               NSStringFromClass(type(of: target)).contains("HostingScrollView"),
               let document = target.documentView, let layer = target.contentView.layer else {
             commit()
@@ -419,37 +433,75 @@ private final class SettingsWindowRoot: NSView {
             commit()
             scroll = target
         }
+        let interval = min(max(event.timestamp - lastEvent, 1.0 / 240), 1.0 / 30)
+        lastEvent = event.timestamp
+        if momentum && momentumSpent { return true }
+        if !momentum, layer.animation(forKey: Self.springKey) != nil {
+            layer.removeAnimation(forKey: Self.springKey)
+        }
         let clip = target.contentView
+        let height = clip.bounds.height
         let origin = clip.bounds.origin.y
-        let limit = max(0, document.frame.height - clip.bounds.height)
+        let limit = max(0, document.frame.height - height)
         // Down the page is a growing origin in the flipped document.
         let direction: CGFloat = document.isFlipped ? -1 : 1
-        let wanted = origin + pending + direction * event.scrollingDeltaY
-        if wanted < 0 || wanted > limit {
-            // Past an end: the rest of this scroll is AppKit's, from the end, with its rubber band.
-            pending = min(max(wanted, 0), limit) - origin
-            commit()
-            handedOver = true
-            return false
+        let delta = direction * event.scrollingDeltaY
+        var position = origin + pending
+        if excess != 0 {
+            let pulled = excess + delta
+            if pulled != 0, (pulled > 0) == (excess > 0) {
+                excess = pulled
+            } else {
+                excess = 0
+                position += pulled
+            }
+        } else {
+            position += delta
         }
-        pending = wanted - origin
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        layer.sublayerTransform = CATransform3DMakeTranslation(0, Self.layerShift(pending, layer: layer), 0)
-        CATransaction.commit()
+        var crossed: CGFloat = 0
+        if position < 0 {
+            crossed = -1
+            if !momentum { excess += position }
+            position = 0
+        } else if position > limit {
+            crossed = 1
+            if !momentum { excess += position - limit }
+            position = limit
+        }
+        pending = position - origin
+        draw(layer, Self.layerShift(pending + Self.stretched(excess, height), layer: layer))
         if let scroller = target.verticalScroller, limit > 0 {
-            scroller.doubleValue = Double((document.isFlipped ? wanted : limit - wanted) / limit)
+            scroller.doubleValue = Double((document.isFlipped ? position : limit - position) / limit)
             let now = CACurrentMediaTime()
             if now - lastFlash > 0.3 {
                 lastFlash = now
                 target.flashScrollers()
             }
         }
+        var wait = Self.settle
+        if momentum, crossed != 0 {
+            // Out by the momentum's speed, as stretched, and back.
+            let speed = abs(delta) / CGFloat(interval) * Self.stretch
+            wait = spring(layer, from: { t in crossed * speed * CGFloat(t) * CGFloat(exp(-t / Self.springBack)) })
+            momentumSpent = true
+        } else if excess != 0, event.phase == .ended || event.phase == .cancelled {
+            let start = Self.stretched(excess, height)
+            excess = 0
+            wait = spring(layer, from: { t in start * CGFloat(exp(-t / Self.springBack)) })
+            momentumSpent = true
+        }
         ending?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.commit() }
         ending = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settle, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: work)
         return true
+    }
+
+    /// AppKit's stretch for `excess` points pulled past an end.
+    static func stretched(_ excess: CGFloat, _ height: CGFloat) -> CGFloat {
+        guard excess != 0, height > 0 else { return 0 }
+        let pulled = abs(excess)
+        return (excess > 0 ? 1 : -1) * height * (1 - 1 / (stretch * pulled / height + 1))
     }
 
     /// The page's layer moved by `pending` points of scroll: up the screen as the page scrolls down.
@@ -457,17 +509,50 @@ private final class SettingsWindowRoot: NSView {
         layer.isGeometryFlipped || layer.contentsAreFlipped() ? -pending : pending
     }
 
+    private func draw(_ layer: CALayer, _ shift: CGFloat) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.sublayerTransform = CATransform3DMakeTranslation(0, shift, 0)
+        CATransaction.commit()
+    }
+
+    /// The page drawn at its end plus `offset(t)` points past it, from `offset(0)` back to the end;
+    /// returns how long that takes.
+    private func spring(_ layer: CALayer, from offset: (Double) -> CGFloat) -> TimeInterval {
+        let duration = 8 * Self.springBack
+        let steps = 48
+        let animation = CAKeyframeAnimation(keyPath: "sublayerTransform.translation.y")
+        animation.values = (0...steps).map { step in
+            let t = duration * Double(step) / Double(steps)
+            return Self.layerShift(pending + (step == steps ? 0 : offset(t)), layer: layer)
+        }
+        animation.duration = duration
+        animation.calculationMode = .linear
+        draw(layer, Self.layerShift(pending, layer: layer))
+        layer.add(animation, forKey: Self.springKey)
+        return duration
+    }
+
     /// The scroll view scrolled to where the page is drawn, and the shift taken off, in one frame.
     func commit() {
         ending?.cancel()
         ending = nil
-        guard let scroll, pending != 0 else { return }
+        guard let scroll else { return }
+        let layer = scroll.contentView.layer
+        layer?.removeAnimation(forKey: Self.springKey)
+        let stretch = Self.stretched(excess, scroll.contentView.bounds.height)
+        guard pending != 0 || layer?.sublayerTransform.m42 != 0 else { return }
         let clip = scroll.contentView
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: clip.bounds.origin.y + pending))
-        scroll.reflectScrolledClipView(clip)
-        clip.layer?.sublayerTransform = CATransform3DIdentity
+        if pending != 0 {
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: clip.bounds.origin.y + pending))
+            scroll.reflectScrolledClipView(clip)
+        }
+        if let layer {
+            // Held past an end, it stays stretched.
+            layer.sublayerTransform = CATransform3DMakeTranslation(0, Self.layerShift(stretch, layer: layer), 0)
+        }
         CATransaction.commit()
         pending = 0
     }
