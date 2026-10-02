@@ -12,6 +12,12 @@ from coalition import coalition_id, read, TICK
 from bench import url
 
 SCENARIOS = {
+    # Nothing driven: what the island costs while left alone.
+    "rest": [(None, 10)],
+    "customize": [("customize", 4), ("customize/close", 3)],
+    "brightness": [("demo/brightness?level=0.3", 0.5), ("demo/brightness?level=0.6", 0.5), ("demo/brightness?level=0.8", 3)],
+    "track": [("demo/media", 4), ("demo/reset", 2)],
+    "siri-type-again": [("demo/siritype?text=saf", 3), ("close", 3)],
     "open-home": [("open?page=home", 2.5), ("close", 3)],
     "open-timer": [("open?page=timer", 2.5), ("close", 3)],
     "open-shelf": [("open?page=shelf", 2.5), ("close", 3)],
@@ -57,7 +63,8 @@ def main():
         th = threading.Thread(target=sampler, daemon=True); th.start()
         time.sleep(0.5)
         for route, wait in SCENARIOS[name]:
-            url(route); time.sleep(wait)
+            if route: url(route)
+            time.sleep(wait)
         stop = True; th.join()
         total_cpu = sum(s[1] for s in samples)
         def worst(span):

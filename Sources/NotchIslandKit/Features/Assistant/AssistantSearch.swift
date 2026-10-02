@@ -12,8 +12,16 @@ nonisolated struct AssistantHit: Sendable, Hashable, Identifiable {
     /// The Uniform Type Identifier, for the file's icon.
     let contentType: String?
     let lastUsed: Date?
+    /// An app's other names in Spotlight (localized, older), so the list kept in memory finds
+    /// what the index's own name query would (`AssistantSearch.allApps`).
+    var alternateNames: [String] = []
 
     var id: URL { url }
+
+    /// Whether the name or one of the other names matches what was typed.
+    func matches(_ query: String, _ mode: SiriMatching = .wordStart) -> Bool {
+        AssistantMatch.matches(name, query, mode) || alternateNames.contains { AssistantMatch.matches($0, query, mode) }
+    }
 
 }
 
@@ -284,13 +292,17 @@ nonisolated enum AssistantSearch {
             var name = MDItemCopyAttribute(item, kMDItemDisplayName) as? String ?? url.lastPathComponent
             if kind == .app, name.hasSuffix(".app") { name.removeLast(4) }
             let type = MDItemCopyAttribute(item, kMDItemContentType) as? String
-            hits.append(AssistantHit(
+            var hit = AssistantHit(
                 kind: kind == .file && type == "public.folder" ? .folder : kind,
                 url: url,
                 name: name,
                 contentType: type,
                 lastUsed: MDItemCopyAttribute(item, kMDItemLastUsedDate) as? Date
-            ))
+            )
+            if kind == .app, let others = MDItemCopyAttribute(item, "kMDItemAlternateNames" as CFString) as? [String] {
+                hit.alternateNames = others.map { $0.hasSuffix(".app") ? String($0.dropLast(4)) : $0 }.filter { $0 != name }
+            }
+            hits.append(hit)
         }
         return hits
     }

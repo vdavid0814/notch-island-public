@@ -29,7 +29,7 @@ case "heat":
     for j in 0..<h { for i in 0..<w {
         let p = px(x, i, j), q = px(y, i, j)
         var o = [p[0] / 3, p[1] / 3, p[2] / 3, 255]
-        if d(p, q) > 8 { o = [255, 0, 0, 255]; b = [min(b[0], i), min(b[1], j), max(b[2], i), max(b[3], j)] }
+        if d(p, q) > (Int(ProcessInfo.processInfo.environment["HEAT"] ?? "") ?? 8) { o = [255, 0, 0, 255]; b = [min(b[0], i), min(b[1], j), max(b[2], i), max(b[3], j)] }
         out.setPixel(&o, atX: i, y: j)
     }}
     save(out, a[4]); print("bbox \(b[0]),\(b[1]) – \(b[2]),\(b[3])")

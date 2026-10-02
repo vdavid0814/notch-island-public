@@ -133,14 +133,80 @@ extension View {
             if style == .fade {
                 shape.fill(Color.black).mask(alignment: .top) {
                     if isSettled {
-                        FadeShadeMask(solidDepth: solidDepth, size: size, stretch: fadeStretch)
-                            .drawingGroup()
+                        FadeShadePicture(solidDepth: solidDepth, size: size, stretch: fadeStretch)
                     } else {
                         FadeShadeMask(solidDepth: solidDepth, size: size, stretch: fadeStretch)
                     }
                 }
             }
         }
+    }
+}
+
+/// The settled fade's black as a picture drawn once per size and kept (`FadeShadeMask`).
+///
+/// With SwiftUI's renderer on the CPU (`RB_DISABLE_GPU`), a `drawingGroup` of the mask blurred and
+/// shaded it again at every opening: ~40 ms of main thread on a performance core per open, half of
+/// the opening's first frame (measured). The island settles at a handful of sizes (the panel, the
+/// pills, the banners), so each is drawn the first time and only shown afterwards. Drawn with
+/// `shadeBleed` around it: the notch band's black reaches past the sides on purpose.
+private struct FadeShadePicture: View {
+    let solidDepth: CGFloat
+    let size: CGSize
+    var stretch: CGFloat = 1
+
+    @Environment(\.displayScale) private var scale
+
+    var body: some View {
+        let bleed = IslandGlassStyle.shadeBleed
+        if let picture = FadeShadeCache.picture(solidDepth: solidDepth, size: size, stretch: stretch, scale: scale) {
+            // At its own pixels from the top left, as the offscreen it replaces: a size that is not a
+            // whole number of pixels is not stretched to fit. (The black's slow ramp may land one
+            // step apart from SwiftUI's own offscreen: up to 4/255 over a white backdrop, in 0.25 %
+            // of a banner's pixels; 16-bit or Display P3 pictures were further apart.)
+            Image(decorative: picture, scale: scale)
+                .frame(width: size.width + 2 * bleed, height: size.height + 2 * bleed, alignment: .topLeading)
+                .frame(width: size.width, height: size.height)
+        } else {
+            FadeShadeMask(solidDepth: solidDepth, size: size, stretch: stretch)
+                .drawingGroup()
+        }
+    }
+}
+
+@MainActor enum FadeShadeCache {
+    private struct Key: Hashable {
+        let width, height, depth, stretch, scale: CGFloat
+    }
+
+    private static var pictures: [Key: CGImage] = [:]
+    private static var order: [Key] = []
+    /// The sizes one session settles at; the oldest goes first past this.
+    private static let capacity = 16
+
+    static func picture(solidDepth: CGFloat, size: CGSize, stretch: CGFloat, scale: CGFloat) -> CGImage? {
+        guard size.width >= 1, size.height >= 1, scale > 0 else { return nil }
+        let key = Key(width: size.width, height: size.height, depth: solidDepth, stretch: stretch, scale: scale)
+        if let picture = pictures[key] {
+            if order.last != key, let index = order.firstIndex(of: key) { order.remove(at: index); order.append(key) }
+            return picture
+        }
+        let bleed = IslandGlassStyle.shadeBleed
+        let renderer = ImageRenderer(content: FadeShadeMask(solidDepth: solidDepth, size: size, stretch: stretch)
+            .frame(width: size.width, height: size.height)
+            .padding(bleed))
+        renderer.scale = scale
+        renderer.isOpaque = false
+        guard let picture = renderer.cgImage else { return nil }
+        pictures[key] = picture
+        order.append(key)
+        if order.count > capacity { pictures[order.removeFirst()] = nil }
+        return picture
+    }
+
+    /// Draws the pictures of `sizes` ahead (after launch, unseen), so even the first opening shows one.
+    static func prepare(solidDepth: CGFloat, sizes: [CGSize], stretch: CGFloat = 1, scale: CGFloat) {
+        for size in sizes { _ = picture(solidDepth: solidDepth, size: size, stretch: stretch, scale: scale) }
     }
 }
 

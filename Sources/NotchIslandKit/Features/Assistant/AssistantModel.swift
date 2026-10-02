@@ -968,6 +968,8 @@ nonisolated struct FileScope: Sendable, Equatable {
         guard rowsAreShowing else { return }
         guard searchPending else { return runSelection() }
         guard deferredReturn == nil else { return }
+        // The services wait for a pause in the typing (`servicesPause`): a Return is that pause.
+        search(now: true)
         let wait = returnWait
         deferredReturn = Task { [weak self] in
             try? await Task.sleep(for: wait)
@@ -1293,7 +1295,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         let text = trimmedQuery
         if !text.isEmpty {
             let matching = settings().matching
-            apps = apps.filter { AssistantMatch.matches($0.name, text, matching) }
+            apps = apps.filter { $0.matches(text, matching) }
             files = files.filter { AssistantMatch.matches($0.name, text, matching) }
         }
         search(now: false)
@@ -1371,14 +1373,22 @@ nonisolated struct FileScope: Sendable, Equatable {
         let scope = FileScope(settings)
         let delay = settings.searchDelay
         // The app list in memory in every mode (it has the apps Spotlight's name query misses:
-        // "device hub" for DeviceHub, v0.4.10), with Spotlight's hits (other names: localized,
-        // alternate) merged in.
+        // "device hub" for DeviceHub, v0.4.10), with Spotlight's other names for them.
         searchPending = true
         let inMemoryApps: [AssistantHit]? = allApps.isEmpty ? nil
-            : Array(AssistantSearch.rank(allApps.filter { AssistantMatch.matches($0.name, text, settings.matching) }, for: text)
+            : Array(AssistantSearch.rank(allApps.filter { $0.matches(text, settings.matching) }, for: text)
                 .prefix(hitLimit))
+        // Read from Spotlight, the list in memory finds what its name query would (other names
+        // included): the apps come from it at once, and the index is not asked at every keystroke
+        // (each query ~20–30 mJ billed by Spotlight's daemon, measured).
+        let appsFromMemory = inMemoryApps != nil && allAppsRead != nil && category == nil
         // Asked of the privacy database once in a while, not at every keystroke.
         let readsPeople = settings.showsPeople && text.count >= 2 && recentContactsAccess() == .granted
+        let readsDefinition = category == nil && settings.showsDefinitions && DictionaryLookup.isWord(text)
+        let asksServices = category == .files || withFiles || readsDefinition || readsPeople || !appsFromMemory
+        // One search of the system's services at a time: the newest waits for the one in flight
+        // (which, already asked, cannot be stopped) instead of running next to it.
+        let previous = searchTask
         // At utility priority: the sources' work (Spotlight, Contacts, the dictionary, the icons)
         // runs on the efficiency cores. At the main thread's user-initiated priority every
         // keystroke's search spread over several performance cores at once (Energy Impact ~80 for
@@ -1388,10 +1398,27 @@ nonisolated struct FileScope: Sendable, Equatable {
                 try? await Task.sleep(for: .seconds(delay), tolerance: .milliseconds(20))
                 guard !Task.isCancelled else { return }
             }
+            if appsFromMemory, let inMemoryApps {
+                await AssistantIcons.prepare(inMemoryApps.map(AssistantIcons.source(for:)))
+                guard !Task.isCancelled, let self, self.generation == generation else { return }
+                self.replaceLists { self.apps = inMemoryApps }
+                guard asksServices else {
+                    self.finishSearch(text: text, category: category, settings: settings, hitLimit: hitLimit)
+                    return
+                }
+            }
+            // The services only once the typing pauses: while letters keep coming, each query's
+            // answer was replaced by the next one's before anyone could read it.
+            if !now, delay < Self.servicesPause {
+                try? await Task.sleep(for: .seconds(Self.servicesPause - delay), tolerance: .milliseconds(20))
+                guard !Task.isCancelled else { return }
+            }
+            await previous?.value
+            guard !Task.isCancelled else { return }
             // The first files read may wait on the system's folder-access prompt.
             let asksAccess = withFiles && self?.filesEnabled == false
             if asksAccess { self?.fileAccessReads += 1 }
-            var foundApps: [AssistantHit] = []
+            var foundApps: [AssistantHit] = inMemoryApps ?? []
             var foundFiles: [AssistantHit] = []
             var foundDefinition: AssistantDefinition?
             var foundContacts: [AssistantContact] = []
@@ -1399,10 +1426,10 @@ nonisolated struct FileScope: Sendable, Equatable {
             if category == .files {
                 foundFiles = text.isEmpty ? await sources.recentFiles(scope) : await sources.files(text, 30, scope)
             } else {
-                async let apps = Self.apps(text, hitLimit, inMemory: inMemoryApps, sources: sources)
+                async let apps = appsFromMemory ? foundApps : Self.apps(text, hitLimit, inMemory: inMemoryApps, sources: sources)
                 async let files = withFiles ? sources.files(text, hitLimit, scope) : []
                 // A word alone is looked up; the people only once they were allowed.
-                async let definition = settings.showsDefinitions && DictionaryLookup.isWord(text) ? sources.define(text) : nil
+                async let definition = readsDefinition ? sources.define(text) : nil
                 async let contacts = readsPeople ? sources.contacts(text, hitLimit) : []
                 (foundApps, foundFiles, foundDefinition, foundContacts) = await (apps, files, definition, contacts)
                 // Once per pause, not per keystroke: the recogniser is not free.
@@ -1419,10 +1446,6 @@ nonisolated struct FileScope: Sendable, Equatable {
             // The rows come with their icons, drawn off the main thread.
             await AssistantIcons.prepare((foundApps + foundFiles).map(AssistantIcons.source(for:)))
             guard !Task.isCancelled, self.generation == generation else { return }
-            // The switches the root lists show their state (read once the typing pauses).
-            if category == nil, settings.showsSystem {
-                self.readStates(of: Array(self.commands(matching: text).prefix(min(hitLimit, Self.rootActionLimit))))
-            }
             self.replaceLists {
                 self.apps = foundApps
                 self.files = foundFiles
@@ -1430,12 +1453,25 @@ nonisolated struct FileScope: Sendable, Equatable {
                 self.contacts = foundContacts
                 self.languageUnsupported = unsupported
             }
-            self.searchPending = false
-            if self.deferredReturn != nil {
-                self.cancelDeferredReturn()
-                self.runSelection()
-            }
+            self.finishSearch(text: text, category: category, settings: settings, hitLimit: hitLimit)
             DiagnosticsFlow.record("siri: \"\(text)\" in \(category.map { String(describing: $0) } ?? "root") → \(foundApps.count) apps, \(foundFiles.count) files (\(settings.matching))")
+        }
+    }
+
+    /// How long the typing must pause before Spotlight's files, the dictionary and Contacts are
+    /// asked (the lists in memory follow every keystroke).
+    static let servicesPause: TimeInterval = 0.15
+
+    /// The search's results are in: the switches' states, and a Return that waited for them.
+    private func finishSearch(text: String, category: AssistantCategory?, settings: SiriSettings, hitLimit: Int) {
+        // The switches the root lists show their state (read once the typing pauses).
+        if category == nil, settings.showsSystem {
+            readStates(of: Array(commands(matching: text).prefix(min(hitLimit, Self.rootActionLimit))))
+        }
+        searchPending = false
+        if deferredReturn != nil {
+            cancelDeferredReturn()
+            runSelection()
         }
     }
 
@@ -1454,7 +1490,8 @@ nonisolated struct FileScope: Sendable, Equatable {
         let rootQuery = category == nil && !query.isEmpty
         loadWindows(for: category, rootQuery: rootQuery, settings: settings)
         let isStale = allAppsRead.map { Date().timeIntervalSince($0) > Self.appsLifetime } ?? true
-        let needsApps = category == .applications && (allApps.isEmpty || isStale)
+        // Root queries take their apps from it as well (`search`): an old list is read again then too.
+        let needsApps = (category == .applications && (allApps.isEmpty || isStale)) || (rootQuery && !allApps.isEmpty && isStale)
         let needsShortcuts = shortcuts == nil && settings.includesShortcuts && (category == .actions || rootQuery)
         let needsPanes = settingsPanes == nil && settings.showsSystem && (category == .system || rootQuery)
         // Built once per opening, at its first use, and dropped `keepDuration` after `end()`.

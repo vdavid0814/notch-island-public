@@ -227,14 +227,14 @@ import Testing
     }
 
     @Test func typingASuggestionsNameOffersItFirstAndReturnOpensIt() async {
-        let model = model(stubSources(apps: ["App Store"], allApps: ["Safari", "Music"]))
+        let model = model(stubSources(apps: ["App Store"], allApps: ["Safari", "Music", "App Store"]))
         model.query = "application"
         await model.settle()
         #expect(model.rows.first == .category(.applications))
         model.activateSelection()
         await model.settle()
         // Its name is not a filter for the list it opens.
-        #expect(model.category == .applications && model.query.isEmpty && model.rows.count == 2)
+        #expect(model.category == .applications && model.query.isEmpty && model.rows.count == 3)
         model.open(nil)
         // "app" starts an app's name: the app comes first, the suggestion after it.
         model.query = "app"
