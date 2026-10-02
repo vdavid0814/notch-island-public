@@ -168,9 +168,49 @@ final class SettingsWindow: NSPanel {
         setFrame(frame, display: false)
     }
 
+    /// Ordered in, invisible and letting every click through, as Settings starts to grow: what the
+    /// window does as it comes on screen again (laying out what changed while it was away, its
+    /// controls taking the window's state; one ~250 ms turn, measured) happens while the island
+    /// grows on the render server, not in the frame the pages should start to fade in.
+    private(set) var isPrestaged = false
+
+    func prestage() {
+        guard !isVisible, !isRehearsing else { return }
+        orderingOut?.cancel()
+        orderingOut = nil
+        isPrestaged = true
+        alphaValue = 0
+        ignoresMouseEvents = true
+        // Its pictures pick up the live readings now too (clocks, monitors, levels), not in the
+        // frame the pages fade in.
+        SettingsPresence.shared.isShown = true
+        orderFrontRegardless()
+        // The keyboard too: becoming key has every control of the shown page take the key state
+        // and lays the page out again (~150 ms, measured), done here while the island grows.
+        if model.island.presentation.isSettings {
+            makeKey()
+            root.layoutSubtreeIfNeeded()
+        }
+    }
+
+    /// Settings closed before it had grown: the prestaged window goes again.
+    func endPrestage() {
+        guard isPrestaged else { return }
+        isPrestaged = false
+        SettingsPresence.shared.isShown = false
+        orderOut(nil)
+        alphaValue = 1
+        ignoresMouseEvents = false
+    }
+
     /// Settings has grown: the pages fade in over the island and take the keyboard from it.
     func show() {
         SettingsPresence.shared.isShown = true
+        if isPrestaged {
+            isPrestaged = false
+            alphaValue = 1
+            ignoresMouseEvents = false
+        }
         if isRehearsing {
             isRehearsing = false
             alphaValue = 1
@@ -186,17 +226,19 @@ final class SettingsWindow: NSPanel {
         clipsToOutline(false)
         surface.show()
         orderFrontRegardless()
-        if model.island.presentation.isSettings { makeKey() }
+        if model.island.presentation.isSettings, !isKeyWindow { makeKey() }
     }
 
     /// Settings closes: out of sight after `fade` (at once without), then ordered out.
     func hide(fade: TimeInterval?) {
-        SettingsPresence.shared.isShown = false
         surface.hide(fade: fade)
         orderingOut?.cancel()
+        // Its pictures stand still once it is out of sight, not in the frame the island starts
+        // to shrink in.
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.orderingOut = nil
+            SettingsPresence.shared.isShown = false
             self.orderOut(nil)
         }
         orderingOut = work

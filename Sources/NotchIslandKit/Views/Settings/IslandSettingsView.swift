@@ -180,8 +180,14 @@ struct IslandSettingsView: View {
         .onDisappear {
             WallpaperLibrary.shared.purge()
             MemoryRelief.afterLargeSurfaceClosed()
+            SettingsWindow.current?.endPrestage()
         }
         .task {
+            // Settings' kept window comes on screen (invisible) while the island grows: a moment
+            // after the growth has been handed to the render server.
+            try? await Task.sleep(for: .milliseconds(40))
+            guard !Task.isCancelled, model.island.presentation.isSettings else { return }
+            SettingsWindow.current?.prestage()
             // Most of the growth first (its tail is too small to see a frame drop in). At full
             // speed: built unseen on the efficiency cores it took up to a second longer to appear,
             // and held the panel's fading widgets still while it ran (tried, seen on video).

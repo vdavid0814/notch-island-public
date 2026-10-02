@@ -122,15 +122,15 @@ final class SettingsPageDeckView: NSView {
     }
 }
 
-/// A kept page: what it shows stands still while it is hidden (`isIslandPanelHidden`, as the
-/// island's own hidden panel).
+/// A kept page. (Its pictures stand still while Settings is closed through `SettingsPresence`; an
+/// `isIslandPanelHidden` written here at each change of page went through every view of both
+/// pages and made a switch a 60–80 ms turn of the main thread, measured.)
 private struct SettingsPageRoot: View {
     let pane: IslandSettingsPane
     let visit: SettingsPageVisit
 
     var body: some View {
         SettingsDetail(pane: pane)
-            .environment(\.isIslandPanelHidden, !visit.isShown)
     }
 }
 
