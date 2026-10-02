@@ -124,9 +124,11 @@ struct LevelSlider: View {
     let kind: LevelKind
 
     @Environment(AppModel.self) private var model
+    @Environment(\.isWidgetPreview) private var isPreview
+    @Environment(\.widgetRenderMode) private var renderMode
 
     var body: some View {
-        let reading = model.levels.reading(kind)
+        let reading = isPreview || renderMode == .canvas ? PictureReadings.level(kind, model: model) : model.levels.reading(kind)
         RestingSlider(
             value: reading.value,
             isEnabled: reading.isAvailable,

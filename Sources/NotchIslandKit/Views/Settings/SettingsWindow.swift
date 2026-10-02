@@ -79,6 +79,7 @@ final class SettingsWindow: NSPanel {
         }
         if !isRehearsing {
             isRehearsing = true
+            SettingsPresence.shared.isShown = true
             alphaValue = 0
             ignoresMouseEvents = true
             orderFrontRegardless()
@@ -92,6 +93,7 @@ final class SettingsWindow: NSPanel {
 
     private func endRehearsal() {
         isRehearsing = false
+        SettingsPresence.shared.isShown = false
         orderOut(nil)
         alphaValue = 1
         ignoresMouseEvents = false
@@ -143,6 +145,7 @@ final class SettingsWindow: NSPanel {
 
     /// Settings has grown: the pages fade in over the island and take the keyboard from it.
     func show() {
+        SettingsPresence.shared.isShown = true
         if isRehearsing {
             isRehearsing = false
             alphaValue = 1
@@ -162,6 +165,7 @@ final class SettingsWindow: NSPanel {
 
     /// Settings closes: out of sight after `fade` (at once without), then ordered out.
     func hide(fade: TimeInterval?) {
+        SettingsPresence.shared.isShown = false
         surface.hide(fade: fade)
         orderingOut?.cancel()
         let work = DispatchWorkItem { [weak self] in

@@ -11,7 +11,14 @@ public struct NotchIslandApp: App {
     public init() {}
 
     public var body: some Scene {
-        MenuBarExtra("NotchIsland", systemImage: Self.menuBarSymbol, isInserted: $preferences.showMenuBarIcon) {
+        // Written only when it changes: SwiftUI sets it again (to the same value) whenever the app
+        // becomes active or inactive (each Siri and Settings opening and closing), and each write
+        // went to the user defaults, whose change notification had every `@AppStorage` view (the
+        // kept Settings pages' pictures) and every observer of the preference update.
+        MenuBarExtra("NotchIsland", systemImage: Self.menuBarSymbol, isInserted: Binding(
+            get: { preferences.showMenuBarIcon },
+            set: { if $0 != preferences.showMenuBarIcon { preferences.showMenuBarIcon = $0 } }
+        )) {
             MenuBarMenu()
                 .environment(AppModel.shared)
         }

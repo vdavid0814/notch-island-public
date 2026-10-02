@@ -11,13 +11,18 @@ struct ExpandedHeader: View {
     @Environment(AppModel.self) private var model
     /// Hidden (kept for the next open): a level banner is the island's own then, not the header's.
     @Environment(\.isIslandPanelHidden) private var isHidden
+    @Environment(\.isHeaderPicture) private var isPicture
 
     var body: some View {
+        // Settings' picture of the header follows the banners only while Settings is on screen:
+        // kept closed, it swapped in the level's capsule (blurred in and out) at every volume or
+        // brightness change, unseen.
+        let banner = isHidden || (isPicture && !SettingsPresence.shared.isShown) ? nil : model.banners.current
         NotchSplitBand(split: split, height: height) {
             HeaderEar(side: .leading, room: split.earWidth)
         } trailing: {
             ZStack(alignment: .trailing) {
-                if !isHidden, let kind = model.banners.current?.levelKind {
+                if let kind = banner?.levelKind {
                     LevelCapsule(kind: kind)
                         .transition(.blurReplace)
                 } else {
@@ -25,7 +30,7 @@ struct ExpandedHeader: View {
                         .transition(.blurReplace)
                 }
             }
-            .animation(Motion.content, value: isHidden ? nil : model.banners.current)
+            .animation(Motion.content, value: banner)
         }
         // Header controls are sized by the notch-height band, whatever the island scale.
         .controlSize(Metrics.Control.size(fittingBand: height))

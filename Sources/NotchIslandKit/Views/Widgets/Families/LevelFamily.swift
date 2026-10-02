@@ -33,7 +33,7 @@ private struct LevelSource {
         switch kind {
         case .volume, .brightness:
             let level: LevelKind = kind == .volume ? .volume : .brightness
-            let reading = model.levels.reading(level)
+            let reading = isPicture ? PictureReadings.level(level, model: model) : model.levels.reading(level)
             value = reading.value
             symbol = IslandFormat.levelSymbol(level, reading: reading)
             isMuted = reading.isMuted
@@ -129,13 +129,15 @@ struct LevelWidget: View {
     @Environment(\.widgetFrameProbe) private var probe
     @Environment(\.widgetStyle) private var style
     @Environment(\.widgetArtworkColor) private var artwork
+    @Environment(\.isWidgetPreview) private var isPreview
+    @Environment(\.widgetRenderMode) private var renderMode
     @Environment(AppModel.self) private var model
 
     /// The value's type: digits of one width.
     static let valueType = TypeSpec(points: 13, monospacedDigits: true)
 
     var body: some View {
-        let reading = model.levels.reading(kind)
+        let reading = isPreview || renderMode == .canvas ? PictureReadings.level(kind, model: model) : model.levels.reading(kind)
         let symbol = IslandFormat.levelSymbol(kind, reading: reading)
         if widget.resolvedLevelLayout(size) == .ring {
             LevelRing(value: reading.value, symbol: symbol,
@@ -362,4 +364,27 @@ nonisolated extension LineCapChoice {
         case .square: .square
         }
     }
+}
+
+/// What a picture of a widget (Settings' gallery, its stage, the Customize canvas) reads of the
+/// levels: live while Settings is on screen; while it is closed, the reading it last showed. Settings
+/// is kept (`SettingsWindow`), and its pictures followed every volume and brightness change unseen:
+/// their sliders were redrawn each time (a volume change cost ~70 ms more of main thread, measured).
+@MainActor enum PictureReadings {
+    private static var levels: [LevelKind: LevelReading] = [:]
+
+    static func level(_ kind: LevelKind, model: AppModel) -> LevelReading {
+        if SettingsPresence.shared.isShown {
+            let reading = model.levels.reading(kind)
+            levels[kind] = reading
+            return reading
+        }
+        return levels[kind] ?? model.levels.reading(kind)
+    }
+}
+
+/// Whether Settings is on screen (`SettingsWindow`), for what only Settings shows.
+@Observable final class SettingsPresence {
+    static let shared = SettingsPresence()
+    var isShown = false
 }
