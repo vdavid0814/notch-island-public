@@ -11,26 +11,107 @@ import SwiftUI
 struct SettingsSurface: NSViewRepresentable {
     let placement: SettingsPlacement
     let model: AppModel
+    /// Settings has started to close: the surface fades out with the island's content.
+    var isClosing = false
 
-    func makeNSView(context: Context) -> SettingsSurfaceView {
-        let view = SettingsSurfaceView(model: model, placement: placement)
-        model.studio.probe.driver = view
-        return view
+    func makeNSView(context: Context) -> SettingsSurfaceAnchor {
+        let anchor = SettingsSurfaceAnchor(model: model, placement: placement)
+        return anchor
     }
 
-    func updateNSView(_ view: SettingsSurfaceView, context: Context) {
-        view.update(placement: placement)
+    func updateNSView(_ anchor: SettingsSurfaceAnchor, context: Context) {
+        anchor.placement = placement
+        anchor.surface?.update(placement: placement)
+        if isClosing { anchor.close() }
     }
 
-    static func dismantleNSView(_ view: SettingsSurfaceView, coordinator: ()) {
-        view.cancel()
+    static func dismantleNSView(_ anchor: SettingsSurfaceAnchor, coordinator: ()) {
+        anchor.dismantle()
+    }
+}
+
+/// Where Settings' surface is shown, in the island's SwiftUI: an empty view whose place on the
+/// screen Settings' own window (`SettingsWindow`, with the kept surface in it) takes.
+final class SettingsSurfaceAnchor: NSView {
+    private let model: AppModel
+    var placement: SettingsPlacement
+    private(set) var surface: SettingsSurfaceView?
+    private var isClosing = false
+
+    init(model: AppModel, placement: SettingsPlacement) {
+        self.model = model
+        self.placement = placement
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, surface == nil, !isClosing, let frame = screenFrame else { return }
+        let settings = SettingsWindow.reused(model: model, placement: placement, frame: frame)
+        surface = settings.surface
+        model.studio.probe.driver = settings.surface
+        settings.show()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        place()
+    }
+
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        super.setFrameOrigin(newOrigin)
+        place()
+    }
+
+    override func layout() {
+        super.layout()
+        place()
+    }
+
+    /// This view's place on the screen.
+    private var screenFrame: CGRect? {
+        guard let window else { return nil }
+        let frame = window.convertToScreen(convert(bounds, to: nil)).integral
+        return frame.width > 0 && frame.height > 0 ? frame : nil
+    }
+
+    /// Settings' window over this view's place.
+    func place() {
+        guard surface != nil, !isClosing, let frame = screenFrame else { return }
+        SettingsWindow.current?.place(frame)
+    }
+
+    /// Settings starts to close: gone from sight with the island's content.
+    func close() {
+        guard !isClosing else { return }
+        isClosing = true
+        if surface != nil { SettingsWindow.current?.hide(fade: model.island.presentation.isIdle ? 0.1 : 0.18) }
+    }
+
+    func dismantle() {
+        isClosing = true
+        guard let surface else { return }
+        surface.cancel()
+        SettingsWindow.current?.hide(fade: nil)
+        self.surface = nil
     }
 }
 
 final class SettingsSurfaceView: NSView, CustomizeDriving {
     private let model: AppModel
     private var placement: SettingsPlacement
-    private let pagesHost: NSHostingView<AnyView>
+    /// Each page in a view graph of its own, kept, the shown one visible.
+    let deck: SettingsPageDeckView
+    /// The sidebar and the deck beside it: what the Customize editor sinks back from.
+    private let pagesHost = SettingsPagesView()
+    /// The sidebar (SwiftUI), under the deck.
+    let sidebarHost: DeferringHostingView<AnyView>
     private var editorHost: NSHostingView<AnyView>?
     private let overlay = FlierOverlay()
     private var flier: CALayer?
@@ -53,21 +134,67 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
     init(model: AppModel, placement: SettingsPlacement) {
         self.model = model
         self.placement = placement
-        pagesHost = NSHostingView(rootView: AnyView(EmptyView()))
+        deck = SettingsPageDeckView(model: model)
+        sidebarHost = DeferringHostingView(rootView: AnyView(EmptyView()))
         super.init(frame: .zero)
         wantsLayer = true
-        pagesHost.sizingOptions = []
-        pagesHost.safeAreaRegions = []
-        pagesHost.wantsLayer = true
-        pagesHost.rootView = pagesRoot
+        sidebarHost.sizingOptions = []
+        sidebarHost.safeAreaRegions = []
+        sidebarHost.rootView = pagesRoot
+        pagesHost.addSubview(sidebarHost)
+        pagesHost.addSubview(deck)
         addSubview(pagesHost)
+        deck.show(model.settingsPane)
+        observePane()
         addSubview(overlay)
-        pagesHost.fadeInOnRenderServer(duration: IslandSettingsView.pagesFadeIn)
-        // A request that arrived before Settings had grown (a deep link, the island's menu).
+        takeEarlyRequest()
+    }
+
+    /// Settings opens again with the kept pages: as a new surface would have started.
+    func reattach(placement: SettingsPlacement) {
+        cancel()
+        update(placement: placement)
+        takeEarlyRequest()
+    }
+
+    /// A request that arrived before Settings had grown (a deep link, the island's menu).
+    private func takeEarlyRequest() {
         if let id = model.studio.customizing, model.editedWidgets.board.contains(id) {
             DispatchQueue.main.async { [weak self] in self?.open(id, animated: false) }
         }
     }
+
+    /// Settings is shown: the page it shows starts afresh, fading in on the render server.
+    func show() {
+        layer?.removeAnimation(forKey: Self.hideKey)
+        alphaValue = 1
+        deck.show(model.settingsPane)
+        deck.reopen()
+        pagesHost.fadeInOnRenderServer(duration: IslandSettingsView.pagesFadeIn)
+    }
+
+    /// Settings closes: faded out over `fade` (at once without), its pages standing still
+    /// (clocks, readings, looping pictures) until shown again.
+    func hide(fade: TimeInterval?) {
+        deck.closed()
+        guard let fade, let layer, alphaValue > 0 else {
+            layer?.removeAnimation(forKey: Self.hideKey)
+            alphaValue = 0
+            return
+        }
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = layer.presentation()?.opacity ?? 1
+        animation.toValue = 0
+        animation.duration = fade
+        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        alphaValue = 0
+        layer.add(animation, forKey: Self.hideKey)
+        CATransaction.commit()
+    }
+
+    static let hideKey = "settingsHide"
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -77,14 +204,33 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
     override func layout() {
         super.layout()
         pagesHost.frame = bounds
+        sidebarHost.frame = pagesHost.bounds
+        // Beside the sidebar, as `SettingsPages` leaves room for it.
+        let leading = placement.leading + SettingsPlacement.sidebarWidth
+        let deckFrame = CGRect(x: leading, y: 0, width: max(0, bounds.width - leading), height: bounds.height)
+        if deck.frame != deckFrame { deck.frame = deckFrame }
         editorHost?.frame = bounds
         overlay.frame = bounds
+    }
+
+    /// The deck shows the pane the sidebar (or a link) picks.
+    private func observePane() {
+        withObservationTracking {
+            _ = model.settingsPane
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.window?.isVisible == true { self.deck.show(self.model.settingsPane) }
+                self.observePane()
+            }
+        }
     }
 
     func update(placement: SettingsPlacement) {
         guard placement != self.placement else { return }
         self.placement = placement
-        pagesHost.rootView = pagesRoot
+        needsLayout = true
+        sidebarHost.rootView = pagesRoot
         if let id = model.studio.customizing, editorHost != nil { editorHost?.rootView = editorRoot(id) }
     }
 
@@ -473,6 +619,19 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
         studio.probe.stageReport = nil
         studio.probe.canvasReport = nil
     }
+}
+
+/// The sidebar and the deck: one layer to sink back and fade.
+final class SettingsPagesView: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var isFlipped: Bool { true }
 }
 
 /// The layer the widget flies in: over everything, answering no click.

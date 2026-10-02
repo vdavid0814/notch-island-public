@@ -82,10 +82,19 @@ struct WidgetsSettingsPage: View {
             if mode != .topBar { model.studio.headerSelection = nil }
             if mode != .size { model.studio.draft = nil }
         }
-        .onDisappear {
-            model.studio.draft = nil
-            model.studio.headerSelection = nil
-        }
+        .onDisappear(perform: left)
+        // Kept between visits (`SettingsPageDeck`): left as a page that goes, and shown again as
+        // a new one, with nothing picked.
+        .onSettingsPageVisit(shown: takeRequestedEdit, hidden: {
+            left()
+            var quiet = Transaction()
+            quiet.disablesAnimations = true
+            withTransaction(quiet) {
+                selection = nil
+                group = []
+                notice = nil
+            }
+        })
         .task(id: notice) {
             guard notice != nil else { return }
             try? await Task.sleep(for: .seconds(4))
@@ -95,6 +104,11 @@ struct WidgetsSettingsPage: View {
 
     /// Exactly the area the home page gives its board.
     static func boardSize(_ layout: IslandLayout) -> CGSize { BoardSizing.board(layout) }
+
+    private func left() {
+        model.studio.draft = nil
+        model.studio.headerSelection = nil
+    }
 
     /// "Edit …" from a widget's context menu in the island.
     private func takeRequestedEdit() {
@@ -710,6 +724,14 @@ private struct WidgetStoreView: View {
                     .frame(minWidth: 160, maxWidth: Self.searchWidth)
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width.rounded() } action: { rowWidth = $0 }
+            .onSettingsPageVisit(shown: {}, hidden: {
+                var quiet = Transaction()
+                quiet.disablesAnimations = true
+                withTransaction(quiet) {
+                    category = nil
+                    search = ""
+                }
+            })
 
             if kinds.isEmpty {
                 ContentUnavailableView.search(text: search)

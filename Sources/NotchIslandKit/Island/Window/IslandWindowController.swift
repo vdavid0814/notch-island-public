@@ -55,6 +55,38 @@ import SwiftUI
         observationGeneration += 1
         observeLayout()
         reanchor()
+        // `NI_NO_PREPARE=1` (measuring): Settings is built only when first opened.
+        if ProcessInfo.processInfo.environment["NI_NO_PREPARE"] != "1" { prepareSettings(after: Self.settingsPreparationDelay) }
+    }
+
+    /// Settings is built once, unseen, a while after launch (`SettingsSurfaceView.prepare`):
+    /// its first opening then costs what any later one does (Energy Impact ~340 → ~40, measured).
+    static let settingsPreparationDelay: Duration = .seconds(6)
+
+    /// One piece of Settings per step, at background quality of service (efficiency cores), only
+    /// while the island is closed: a step waits while it is open.
+    private func prepareSettings(after delay: Duration) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: delay, tolerance: .milliseconds(200))
+            guard let self, self.isStarted, let metrics = self.metrics else { return }
+            guard !self.model.island.presentation.isOpen, !self.model.island.presentation.isBanner else {
+                self.prepareSettings(after: .seconds(3))
+                return
+            }
+            MainThrift.lowPower(for: 0.5)
+            await Task.yield()
+            if !SettingsWindow.isPrepared {
+                let layout = self.model.layout
+                let size = IslandSettingsView.surfaceSize(layout)
+                let frame = CGRect(x: (metrics.notchRect.midX - size.width / 2).rounded(),
+                                   y: metrics.screenFrame.maxY - layout.notch.height - size.height,
+                                   width: size.width, height: size.height)
+                SettingsWindow.prepare(model: self.model, frame: frame)
+            } else if !SettingsWindow.prepareNextPage(model: self.model) {
+                return
+            }
+            self.prepareSettings(after: .milliseconds(400))
+        }
     }
 
     func stop() {
@@ -140,7 +172,7 @@ import SwiftUI
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             // Only Esc in the panel itself: in a popover it closes the popover first.
             guard event.keyCode == 53, let self, self.model.island.presentation.isSettings,
-                  event.window === self.panel else { return event }
+                  event.window === self.panel || event.window is SettingsWindow else { return event }
             // A popover open over Settings is not key (it took no keystroke yet), so its Esc lands
             // here: it is the popover's, not Settings'.
             if let popover = self.ownWindows(excludingPanel: true).first(where: { String(describing: type(of: $0)).contains("Popover") }) {
@@ -184,7 +216,7 @@ import SwiftUI
     /// alert, the colour panel.
     private var hasPassingWindow: Bool {
         NSApp.modalWindow != nil || NSApp.windows.contains { window in
-            guard window !== panel, window.isVisible else { return false }
+            guard window !== panel, !(window is SettingsWindow), window.isVisible else { return false }
             let name = String(describing: type(of: window))
             return name.contains("Popover") || name.contains("Menu") || window is NSColorPanel || window.isSheet
                 || window.level.rawValue >= NSWindow.Level.modalPanel.rawValue
@@ -201,7 +233,9 @@ import SwiftUI
                 guard self.panel?.acceptsKeyboard == true else { return }
                 if self.hasPassingWindow { continue }
                 if NSApp.isActive {
-                    if NSApp.keyWindow == nil { self.panel?.makeKey() }
+                    if NSApp.keyWindow == nil {
+                        if let settings = SettingsWindow.current, settings.isVisible { settings.makeKey() } else { self.panel?.makeKey() }
+                    }
                 } else {
                     self.model.controller.closeKeyboardOverlay()
                 }
@@ -227,7 +261,7 @@ import SwiftUI
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
         escapeMonitor = nil
         guard let panel, panel.acceptsKeyboard else { return }
-        if panel.isKeyWindow {
+        if panel.isKeyWindow || NSApp.keyWindow is SettingsWindow {
             if let previous = previousKeyWindow, previous.isVisible, previous !== panel {
                 previous.makeKey()
             } else {

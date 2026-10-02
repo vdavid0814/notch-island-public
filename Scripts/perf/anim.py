@@ -27,6 +27,8 @@ SCENARIOS = {
     "airpods": [("demo/airpods", 5), ("close", 2)],
     "timer-done": [("demo/timerdone", 8), ("demo/reset", 2)],
     "settings": [("settings/general", 4), ("settings/widgets", 4), ("close", 3)],
+    # Every page in turn, twice, then closed.
+    "settings-tour": [(f"settings/{p}", 1.5) for p in ["general", "widgets", "activities", "siri", "about"] * 2] + [("close", 3)],
     # Someone flicking the island open and shut, fast.
     "spam-open": [("open?page=home", 0.25), ("close", 0.25)] * 10 + [("close", 2)],
     "spam-open-slow": [("open?page=home", 0.6), ("close", 0.6)] * 8 + [("close", 2)],
@@ -47,8 +49,8 @@ def main():
             while not stop:
                 time.sleep(0.1)
                 cur = read(cid); t = time.time()
-                samples.append((t, (cur["cpu_time"] - prev["cpu_time"]) * TICK / 1e9,
-                                (cur["energy"] - prev["energy"]) / 1e9, t - pt))
+                e = sum(cur[k] - prev[k] for k in ("energy", "gpu_energy_nj", "energy_billed_to_me", "gpu_energy_nj_billed_to_me"))
+                samples.append((t, (cur["cpu_time"] - prev["cpu_time"]) * TICK / 1e9, e / 1e9, t - pt))
                 prev, pt = cur, t
         th = threading.Thread(target=sampler, daemon=True); th.start()
         time.sleep(0.5)

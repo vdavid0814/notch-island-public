@@ -131,6 +131,8 @@ import SwiftUI
             animation.isRemovedOnCompletion = false
         }
         shape.add(animation, forKey: "outline")
+        // Settings' own window over the island clips to the same outline (`SettingsWindow`).
+        SettingsWindow.current?.followOutline(animation, final: shape.path)
         CATransaction.commit()
 
         unmasking.cancel()
@@ -195,7 +197,7 @@ import SwiftUI
     }
 
     /// The outline with its top centre at the origin, y running down.
-    private static func path(_ outline: IslandOutline) -> CGPath {
+    static func path(_ outline: IslandOutline) -> CGPath {
         outline.path(in: CGRect(x: -0.5, y: 0, width: 1, height: 1)).cgPath
     }
 }

@@ -118,6 +118,21 @@ struct IslandSettingsView: View {
     /// the growth stuttered; the empty window colour grows in smoothly instead.
     @State private var showsPages = false
 
+    static func placement(_ layout: IslandLayout) -> SettingsPlacement {
+        let gap = sidebarGap
+        return SettingsPlacement(
+            outerRadius: max(16, layout.bottomRadius(for: .settings) - gap),
+            leading: layout.shoulderRadius(for: .settings) + gap,
+            gap: gap
+        )
+    }
+
+    /// The pages' room: Settings' size under the band at the notch's height.
+    static func surfaceSize(_ layout: IslandLayout) -> CGSize {
+        let size = layout.size(for: .settings)
+        return CGSize(width: size.width, height: max(0, size.height - layout.notch.height))
+    }
+
     var body: some View {
         let layout = model.layout
         let split = NotchSplit(
@@ -149,19 +164,13 @@ struct IslandSettingsView: View {
             if showsPages {
                 // The sidebar floats as far from the island's side as from its bottom, its lower
                 // outer corner concentric with the island's (radius = the island's minus the gap).
-                let gap = Self.sidebarGap
-                let placement = SettingsPlacement(
-                    outerRadius: max(16, layout.bottomRadius(for: .settings) - gap),
-                    leading: layout.shoulderRadius(for: .settings) + gap,
-                    gap: gap
-                )
+                let placement = Self.placement(layout)
                 // In a view graph of its own, dropped with it when Settings closes: in the island's
                 // graph, the pages' caches outlived them (measured: ~70 MB kept after one visit).
                 // Faded in by the render server: faded by SwiftUI, every frame of the fade updated
                 // the island's graph around it. A widget's Customize editor takes the pages' place
                 // there, the widget flying between them (`SettingsSurface`).
-                SettingsSurface(placement: placement, model: model)
-                    .opacity(model.island.presentation.isSettings ? 1 : 0)
+                SettingsSurface(placement: placement, model: model, isClosing: !model.island.presentation.isSettings)
             } else {
                 Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -223,7 +232,9 @@ struct SettingsPages: View {
                 .padding(.leading, placement.leading)
                 .padding(.bottom, placement.gap)
                 .padding(.top, 4)
-            SettingsDetail(pane: model.settingsPane)
+            // The pages themselves are kept beside it, each in a graph of its own
+            // (`SettingsPageDeckView`, laid over this room by `SettingsSurfaceView`).
+            Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -351,7 +362,7 @@ struct SettingsTile: View {
     }
 }
 
-private struct SettingsDetail: View {
+struct SettingsDetail: View {
     let pane: IslandSettingsPane
 
     var body: some View {
@@ -376,7 +387,6 @@ private struct SettingsDetail: View {
             .frame(maxWidth: pane == .widgets ? .infinity : 720)
             .frame(maxWidth: .infinity)
         }
-        .id(pane)
     }
 }
 

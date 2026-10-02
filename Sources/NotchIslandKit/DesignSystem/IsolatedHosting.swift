@@ -27,7 +27,7 @@ struct IsolatedHosting<Input: Equatable, Content: View>: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSHostingView<Content> {
         context.coordinator.input = input
-        let view = NSHostingView(rootView: content)
+        let view = DeferringHostingView(rootView: content)
         // Its size comes from here, never from its content.
         view.sizingOptions = []
         view.safeAreaRegions = []
@@ -76,7 +76,7 @@ struct IsolatedFillHosting<Input: Equatable, Content: View>: NSViewRepresentable
 
     func makeNSView(context: Context) -> NSHostingView<Content> {
         context.coordinator.input = input
-        let view = isPicture ? PictureHostingView(rootView: content) : NSHostingView(rootView: content)
+        let view = isPicture ? PictureHostingView(rootView: content) : DeferringHostingView(rootView: content)
         view.sizingOptions = []
         view.safeAreaRegions = []
         if let fadeIn { view.fadeInOnRenderServer(duration: fadeIn) }
@@ -103,7 +103,7 @@ struct IsolatedFillHosting<Input: Equatable, Content: View>: NSViewRepresentable
 
 /// A hosting view that is only looked at: hit testing passes it by, so the view around it keeps its
 /// clicks, hover and tooltips.
-private final class PictureHostingView<Content: View>: NSHostingView<Content> {
+private final class PictureHostingView<Content: View>: DeferringHostingView<Content> {
     required init(rootView: Content) {
         super.init(rootView: rootView)
     }
@@ -112,6 +112,53 @@ private final class PictureHostingView<Content: View>: NSHostingView<Content> {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// A hosting view that lays nothing out while it is not seen: hidden (it or a view around it), or
+/// in a window that is ordered out. Settings keeps its pages (`SettingsWindow`), and what they show
+/// live — the widget gallery's previews and the stage read the volume, the brightness, the battery,
+/// the music — was laid out again at every change while Settings was closed (a volume banner cost
+/// ~70 ms more of main thread, measured). The layout it put off runs once it is seen again.
+class DeferringHostingView<Content: View>: NSHostingView<Content> {
+    private var deferredLayout = false
+
+    required init(rootView: Content) {
+        super.init(rootView: rootView)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Laid out even while unseen (building a page ahead of its first showing).
+    var forcesLayout = false
+
+    override func layout() {
+        if !forcesLayout, let window, isHiddenOrHasHiddenAncestor || !window.isVisible {
+            deferredLayout = true
+            DeferredLayouts.views.add(self)
+            return
+        }
+        deferredLayout = false
+        super.layout()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        if deferredLayout { needsLayout = true }
+    }
+}
+
+/// The hosting views that put a layout off while their window was ordered out.
+@MainActor enum DeferredLayouts {
+    static let views = NSHashTable<NSView>.weakObjects()
+
+    /// `window` is about to be ordered in: whatever was put off in it is laid out with it.
+    static func resume(in window: NSWindow) {
+        for view in views.allObjects where view.window === window {
+            view.needsLayout = true
+            views.remove(view)
+        }
+    }
 }
 
 extension NSView {

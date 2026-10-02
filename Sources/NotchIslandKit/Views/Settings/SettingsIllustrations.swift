@@ -287,6 +287,17 @@ final class GrowthLoopView: NSView {
         restart()
     }
 
+    /// Its page hidden (Settings keeps its pages): no timer, no spring until it shows again.
+    override func viewDidHide() {
+        super.viewDidHide()
+        restart()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        restart()
+    }
+
     override func layout() {
         super.layout()
         CATransaction.begin()
@@ -312,7 +323,7 @@ final class GrowthLoopView: NSView {
         island.path = GrowthPicture.islandPath(GrowthPicture.closed)
         widgets.opacity = 0
         CATransaction.commit()
-        guard let window, duration > 0 else { return }
+        guard let window, duration > 0, !isHiddenOrHasHiddenAncestor else { return }
         if widgets.contents == nil { renderWidgets(scale: window.backingScaleFactor) }
         cycleStart = CACurrentMediaTime() + Self.lead
         nextStep = 0
@@ -328,7 +339,7 @@ final class GrowthLoopView: NSView {
     /// Adds the next spring at its exact place in the loop, then waits until just before the one
     /// after it.
     private func addNextSpring() {
-        guard window != nil, duration > 0 else { return }
+        guard window != nil, duration > 0, !isHiddenOrHasHiddenAncestor else { return }
         let opens = nextStep % 2 == 0
         var begin = cycleStart + Double(nextStep / 2) * cycle + (opens ? 0 : closeAt)
         // Woken late (a busy main thread, say a page being built), the loop waits for it rather
