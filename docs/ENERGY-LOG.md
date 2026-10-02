@@ -4,6 +4,30 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-02 (evening): Settings without the keyboard handover, a quieter rest
+
+On the charger, release builds, `anim.py` back to back (before = v0.7.2 (26), after = this build):
+
+| scenario | before | morning build | now |
+|---|---|---|---|
+| opening Settings, first time after launch (worst 5 s) | 134–157 | 54 | **20–24** |
+| opening Settings again | 39–54 | 38–39 | **13–19** |
+| Settings tour (every page twice) | 504–517 | 39–41 | **15–23** |
+| at rest: the app's wake-ups a second | ~1 | ~0.6–1 | **~0** |
+
+- **Settings' window no longer takes the keyboard when it opens**: it takes it with the first click
+  in it (a click is handled as in a key window). Becoming key had every control of the shown page
+  and the sidebar take the key state, and give it back at the close: four fifths of an opening's
+  CPU energy (170 → 31 mJ, measured). The island keeps the keyboard meanwhile, so Esc still closes.
+- **The clipboard history** looks at the pasteboard every five seconds once nothing has been typed or
+  clicked for a minute (once a second otherwise): at rest it was the app's only wake-up.
+- **Looked into and left**: scrolling Settings ▸ Widgets costs ~10 % of the main thread while it
+  scrolls, about half of it the gallery's cards (not their previews), the rest SwiftUI's own work
+  for a scrolled page (hover hit-testing, transforms). An AppKit scroll view around the page, a
+  grid that is not lazy, AppKit hover tracking and responsive scrolling were each tried and cost
+  more. Siri's first opening starts Safari's AutoFill helper (~50 mJ, once per launch) for its text
+  field; setting no content type on the field and its field editor did not stop it.
+
 ## 2026-10-02: Settings kept, Siri read ahead (after v0.7.2, build 26)
 
 **Why.** Settings cost an Energy Impact of 400–600 at every opening and page change (Activity
