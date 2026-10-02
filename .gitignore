@@ -18,3 +18,5 @@ Scripts/perf/ws/hideapp
 Scripts/perf/ws/ws_results.jsonl
 Scripts/perf/ws/key
 Scripts/perf/ws/smooth
+Scripts/perf/ws/axscroll
+Scripts/perf/apps/

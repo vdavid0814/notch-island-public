@@ -81,7 +81,8 @@ background.
   the segmented bars and buttons keep their glass.
 - How it was measured (the app, the window server and coreaudiod together, with a real pointer):
   [docs/ENERGY-LOG.md](docs/ENERGY-LOG.md), [docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)
-  and `Scripts/perf/ws/ws_bench.py`.
+  and `Scripts/perf/ws/ws_bench.py`; the method, for the next round:
+  [docs/OPTIMIZATION-PLAYBOOK.md](docs/OPTIMIZATION-PLAYBOOK.md).
 
 ## What's new in v0.7
 
