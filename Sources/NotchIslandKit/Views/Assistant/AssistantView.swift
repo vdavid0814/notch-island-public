@@ -626,3 +626,34 @@ private struct AnswerPane: View {
         }
     }
 }
+
+/// Siri's view built and drawn once, unseen, a while after launch (`AppModel`, after the model's
+/// own `prewarm`): what its first opening did for the first time — loading and instantiating the
+/// view's types, the text field and its input context, the fonts and symbols it draws — is done
+/// ahead, on the efficiency cores, in a window that is never shown. The first opening cost about
+/// seven times a later one (Energy Impact ~90 against ~12, measured).
+@MainActor enum AssistantRehearsal {
+    static func run(model: AppModel) {
+        let size = model.layout.size(for: .assistant(.list))
+        guard size.width > 0, size.height > 0 else { return }
+        MainThrift.lowPower(for: 0.5)
+        let window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .darkAqua)
+        let host = NSHostingView(rootView: AssistantView()
+            .environment(model)
+            .environment(\.colorScheme, .dark)
+            .environment(\.appearsActive, true)
+            .frame(width: size.width, height: size.height, alignment: .top))
+        host.sizingOptions = []
+        host.frame = CGRect(origin: .zero, size: size)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        host.display()
+        // Gone a turn later, with what it built.
+        DispatchQueue.main.async {
+            window.contentView = nil
+            window.close()
+        }
+    }
+}

@@ -276,10 +276,13 @@ import Observation
         // What the first opening of Siri needs, read ahead while nothing else is going on.
         if !hasPrewarmed {
             hasPrewarmed = true
-            Task { [weak self] in
+            // At background priority: what it reads off the main thread runs on the efficiency cores.
+            Task(priority: .background) { [weak self] in
                 try? await Task.sleep(for: .seconds(12), tolerance: .seconds(3))
                 guard let self, self.isRunning, !self.island.presentation.isAssistant else { return }
                 await self.assistant.prewarm()
+                guard self.isRunning, !self.island.presentation.isOpen else { return }
+                AssistantRehearsal.run(model: self)
             }
         }
     }

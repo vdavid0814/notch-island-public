@@ -283,6 +283,11 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// availability outlive it, as a closed panel is kept: a quick re-open reads and builds none of
     /// them again (a `shortcuts list` process, the emoji table and its index).
     static let keepDuration: Duration = .seconds(10)
+    /// How long the read lists (shortcuts, panes, emoji, bookmarks) outlive a close: read again at
+    /// every opening after ten seconds, they were most of what typing a first word cost (a
+    /// `shortcuts list` process, the panes' table, the emoji index; Energy Impact ~350, measured).
+    /// They are a few megabytes; read ahead after launch (`prewarm`) and kept half an hour.
+    static let listsKeepDuration: Duration = .seconds(30 * 60)
     /// Times `keepDuration` (a test moves its own).
     @ObservationIgnored var clock: any Clock<Duration> = ContinuousClock()
     /// Frees the kept lists `keepDuration` after a close; nil while Siri is open or once they are gone.
@@ -811,9 +816,39 @@ nonisolated struct FileScope: Sendable, Equatable {
         for hit in gallery.prefix(icons) {
             _ = await AssistantIcons.thumbnail(for: hit, points: AssistantIcons.galleryIconSize, prewarming: true)
         }
+        await readListsAhead()
         // The kept icons of apps and icon styles that are gone go, and the least recently used
         // beyond the cache's bound.
         await AssistantIcons.tidyDisk()?.value
+    }
+
+    /// What a first typed word reads — the lists a root query searches, and the system's search
+    /// services (Spotlight, the dictionary, Contacts), whose first query of a launch cost several
+    /// times a later one, billed to the app — read once ahead, unseen, at background priority.
+    private func readListsAhead() async {
+        let settings = settings()
+        let sources = sources
+        let needsShortcuts = shortcuts == nil && settings.includesShortcuts
+        let needsPanes = settingsPanes == nil && settings.showsSystem
+        let needsEmoji = emoji == nil && settings.showsEmoji
+        let needsBookmarks = bookmarks == nil && settings.showsBookmarks
+        async let foundShortcuts = needsShortcuts ? sources.shortcuts() : nil
+        async let foundPanes = needsPanes ? sources.settingsPanes() : nil
+        async let foundEmoji = needsEmoji ? EmojiIndex.build(sources.emoji) : nil
+        async let foundBookmarks = needsBookmarks ? sources.bookmarks() : nil
+        let lists = await (foundShortcuts, foundPanes, foundEmoji, foundBookmarks)
+        var icons = Set<AssistantIcons.Source>()
+        if lists.0?.isEmpty == false { icons.insert(AssistantIcons.shortcutsSource) }
+        if lists.1?.isEmpty == false { icons.insert(AssistantIcons.systemSettingsSource) }
+        if !icons.isEmpty { await AssistantIcons.prepare(Array(icons)) }
+        // Siri may have opened and read them itself meanwhile.
+        if needsShortcuts, shortcuts == nil { shortcuts = lists.0 ?? [] }
+        if needsPanes, settingsPanes == nil { settingsPanes = lists.1 ?? [] }
+        if needsEmoji, emoji == nil { emoji = lists.2 ?? EmojiIndex([]) }
+        if needsBookmarks, bookmarks == nil { bookmarks = lists.3 ?? [] }
+        _ = await sources.apps("a", 1)
+        if settings.showsDefinitions { _ = await sources.define("notch") }
+        if settings.showsPeople, sources.contactsAccess() == .granted { _ = await sources.contacts("a", 1) }
     }
 
     /// The assistant closed: cancel everything and forget the query; the lists go `keepDuration`
@@ -864,7 +899,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         AssistantIcons.tidyDisk()
         releaseTask?.cancel()
         releaseTask = Task { [weak self, clock] in
-            try? await clock.sleep(for: Self.keepDuration, tolerance: .seconds(1))
+            try? await clock.sleep(for: Self.listsKeepDuration, tolerance: .seconds(1))
             guard !Task.isCancelled, let self else { return }
             self.releaseTask = nil
             self.shortcuts = nil
@@ -1327,7 +1362,11 @@ nonisolated struct FileScope: Sendable, Equatable {
         let inMemoryApps: [AssistantHit]? = allApps.isEmpty ? nil
             : Array(AssistantSearch.rank(allApps.filter { AssistantMatch.matches($0.name, text, settings.matching) }, for: text)
                 .prefix(hitLimit))
-        searchTask = Task { [weak self] in
+        // At utility priority: the sources' work (Spotlight, Contacts, the dictionary, the icons)
+        // runs on the efficiency cores. At the main thread's user-initiated priority every
+        // keystroke's search spread over several performance cores at once (Energy Impact ~80 for
+        // a typed word, measured), for results that came only a few milliseconds sooner.
+        searchTask = Task(priority: .utility) { [weak self] in
             if !now, delay > 0 {
                 try? await Task.sleep(for: .seconds(delay), tolerance: .milliseconds(20))
                 guard !Task.isCancelled else { return }

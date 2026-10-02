@@ -1,5 +1,6 @@
 import CoreServices
 import Foundation
+import Synchronization
 
 /// An app or a file the assistant found for the query.
 nonisolated struct AssistantHit: Sendable, Hashable, Identifiable {
@@ -65,7 +66,7 @@ nonisolated enum AssistantSearch {
             """
         // More than shown: the index's other apps (builds, helpers) are left out afterwards.
         let indexed = run(predicate, scopes: everywhere, fetch: 80, kind: .app)
-        let onDisk = diskApps().filter { AssistantMatch.matches($0.name, query) }
+        let onDisk = cachedDiskApps().filter { AssistantMatch.matches($0.name, query) }
         return Array(rank(merged(indexed, onDisk), for: query).prefix(limit))
     }
 
@@ -74,6 +75,18 @@ nonisolated enum AssistantSearch {
         var seen = Set(indexed.map { $0.url.resolvingSymlinksInPath().path })
         return indexed + onDisk.filter { seen.insert($0.url.resolvingSymlinksInPath().path).inserted }
     }
+
+    /// `diskApps` as read at most `diskAppsLifetime` ago: every keystroke's search read the folders
+    /// again (~10–50 ms of a core per keystroke, the first one cold, measured).
+    static func cachedDiskApps(now: Date = Date()) -> [AssistantHit] {
+        if let cached = diskAppsCache.withLock({ $0 }), now.timeIntervalSince(cached.read) < diskAppsLifetime { return cached.hits }
+        let hits = diskApps()
+        diskAppsCache.withLock { $0 = (now, hits) }
+        return hits
+    }
+
+    static let diskAppsLifetime: TimeInterval = 60
+    private static let diskAppsCache = Mutex<(read: Date, hits: [AssistantHit])?>(nil)
 
     /// Every app in the app folders (and one folder down, like /Applications/Utilities), read
     /// from disk. Spotlight's index misses apps: on a tester's Mac 19 of 28 apps in /Applications
@@ -122,7 +135,7 @@ nonisolated enum AssistantSearch {
         // NotchIsland itself would always come first (it is active while the assistant is open).
         let own = Bundle.main.bundleURL.resolvingSymlinksInPath().path
         let hits = merged(run(#"kMDItemContentTypeTree == "com.apple.application-bundle""#, scopes: everywhere, fetch: 4000, kind: .app),
-                          diskApps())
+                          cachedDiskApps())
             // Inside another app only as its own tools (`isListedApp`).
             .filter { ($0.url.deletingLastPathComponent().path.contains(".app") ? embeddingApp($0.url.path) != nil : true)
                 && $0.url.resolvingSymlinksInPath().path != own }

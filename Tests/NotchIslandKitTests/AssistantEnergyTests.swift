@@ -117,7 +117,7 @@ final class ManualClock: Clock {
         // the running apps (read live at every opening).
         model.end()
         await settle { clock.sleeperCount == 1 }
-        clock.advance(by: AssistantModel.keepDuration - .milliseconds(100))
+        clock.advance(by: AssistantModel.listsKeepDuration - .milliseconds(100))
         await settle { false }
         #expect(model.shortcuts != nil && model.settingsPanes != nil && model.emoji != nil && model.windows == nil)
         await open()
@@ -128,7 +128,7 @@ final class ManualClock: Clock {
         // Closed for the whole keep: everything goes, and the next opening reads it again.
         model.end()
         await settle { clock.sleeperCount == 1 }
-        clock.advance(by: AssistantModel.keepDuration)
+        clock.advance(by: AssistantModel.listsKeepDuration)
         await settle { model.emoji == nil }
         #expect(model.shortcuts == nil && model.settingsPanes == nil && model.emoji == nil)
         await open()
