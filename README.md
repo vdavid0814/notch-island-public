@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.7.2 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.7.3 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -24,15 +24,25 @@ Swift 6, SwiftUI, macOS 27.
 
 ---
 
-## Since v0.7.2 (not released yet)
+## What's new in v0.7.3
+
+The same island and the same Settings, for a fraction of the energy: nothing looks or moves
+differently. Activity Monitor's Energy Impact, before → after:
 
 - **Settings opens and changes pages without a cost spike**: it is built once a few seconds after
-  launch, unseen, and kept (Activity Monitor's Energy Impact for a tour of the pages ~590 → ~41;
-  about 110 MB more memory). The widget gallery's pictures come in at once.
+  launch, unseen, and kept; the widget gallery's pictures are there at once. A tour of every page
+  ~510 → 15–23, opening it the first time 134–157 → 20–24 (it takes the keyboard only with the
+  first click in it). About 110 MB more memory.
+- **Scrolling Settings ▸ Widgets** ~1400 → ~12 and no more dropped frames: a trackpad scroll moves
+  the page on the window server and the page itself once it stops; the ends stretch and spring back
+  as before. The same for every Settings page.
 - **Siri**: its lists are read ahead and kept, searches run on the efficiency cores (typing a first
   word after launch 377 → 286, the first opening 79 → 71).
+- **At rest** the app no longer wakes up at all (the clipboard is looked at every five seconds once
+  nothing has been typed or clicked for a minute).
 - **The panel's pages** slide in from their side of the header as they fade in.
-- Details and what is still above target: [docs/ENERGY-LOG.md](docs/ENERGY-LOG.md).
+- Details: [docs/ENERGY-LOG.md](docs/ENERGY-LOG.md); how it was done:
+  [docs/OPTIMIZATION-PLAYBOOK.md](docs/OPTIMIZATION-PLAYBOOK.md).
 
 ## What's new in v0.7.2
 
