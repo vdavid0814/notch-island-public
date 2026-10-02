@@ -25,9 +25,11 @@ and this work, diagnostics reports removed from both.
    and Esc in Settings (`ws/mouse`, `ws/key`).
 5. **Unit tests** (`Scripts/test.sh`): 887 tests.
 
-**Results** (Energy Impact, worst 5 s, before → after): a Settings tour 590 → 37 the first time after
-a launch, 397 → 37 later; Siri's first opening 85 → 76, typing a word the first time 438 → 272; a
-burst of page switches 50 → 93 (the new slide), a timer finishing 9.8 → 15.3. Details: `ENERGY-LOG.md`.
+**Results** (Energy Impact, worst 5 s, before → after): a Settings tour 591 → 41 the first time after
+a launch, 401 → 41 later; Siri's first opening 79 → 71, typing a word the first time 377 → 286; a
+burst of page switches 47 → 75 (the new slide); opening the panel 13 → 15, a timer finishing
+9.8 → 11.6. Longest main-thread turn while Settings opens and changes pages: 245–410 ms → ≤ 70 ms.
+Details: `ENERGY-LOG.md`.
 
 ## The October 1, 2026 run (v0.7.1, build 25): the window server
 

@@ -26,21 +26,22 @@ two rounds (siri and settings-tour: the first and the second time after a launch
 
 | scenario | before | after | change | CPU ms before → after |
 |---|---|---|---|---|
-| Settings tour, first after launch (every page twice, closed) | 590 | 37 | **−94 %** | 2330 → 1260 |
-| Settings tour, again | 397 | 37 | **−91 %** | 1980 → 1210 |
-| Siri, first opening after launch | 85 | 76 | −11 % | 285 → 318 |
-| Siri, again | 9 | 9 | | 147 → 157 |
-| Siri, typing a word, first time after launch | 438 | 272 | **−38 %** | 485 → 427 |
-| Siri, typing a word, again | — | 66 | | — → 490 |
-| Siri's app gallery | 41 | 40 | | 400 → 422 |
-| opening the panel | 14.6 | 15.2 | (noise) | 154 → 176 |
-| hover open | 11.5 | 11.9 | | 157 → 169 |
-| spam-open (10 × 0.25 s) | 29.0 | 30.3 | +4 % | 582 → 664 |
-| spam-pages (12 page switches in 5 s) | 49.5 | 93.1 | **+88 %** (the new slide) | 976 → 1528 |
-| volume (3 changes) | 6.8 | 7.1–7.8 | +10 % | 215 → 270 |
-| AirPods | 4.8 | 4.0 | | 108 → 127 |
-| battery (charger in and out) | 2.7 | 2.9 | (a later run) | 103 → 101 |
-| timer done | 9.8 | 11.5 | +17 % (a later run) | 364 → 444 |
+| Settings tour, first after launch (every page twice, closed) | 591 | 41 | **−93 %** | 2350 → 877 |
+| Settings tour, again | 401 | 41 | **−90 %** | 1984 → 843 |
+| Siri, first opening after launch | 79 | 71 | −10 % | 313 → 305 |
+| Siri, again | 9 | 10 | | 146 → 153 |
+| Siri, typing a word, first time after launch | 377 | 286 | **−24 %** | 516 → 426 |
+| Siri's app gallery | 37.5 | 41.0 | +9 % | 420 → 408 |
+| opening the panel | 13.1 | 15.4 | +18 % | 157 → 173 |
+| hover open | 10.2 | 11.8 | +16 % | 155 → 166 |
+| spam-open (10 × 0.25 s) | 27.9 | 30.4 | +9 % | 576 → 610 |
+| spam-pages (12 page switches in 5 s) | 47.0 | 75.2 | **+60 %** (the new slide) | 960 → 1488 |
+| volume (3 changes) | 6.7 | 7.5 | +12 % | 216 → 284 |
+| AirPods | 3.2 | 5.8 | (noise: 4.8 → 4.0 in another run) | 108 → 114 |
+| battery (charger in and out) | 2.8 | 3.0 | | 98 → 106 |
+| timer done | 9.8 | 11.6 | +18 % | 368 → 446 |
+
+(The final build, two rounds, battery 50 %. Typing a word again after the first time: ~65.)
 
 The window server, with a real pointer (`ws_bench.py`, one round each): a Settings tour 3.6 → 1.4 J
 (the app 6.6 → 1.2 J, its peak 1039 → 115 mW); Settings ▸ General left open 10–17 → 3–8 mW; ten
