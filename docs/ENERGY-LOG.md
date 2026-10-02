@@ -69,6 +69,11 @@ with Settings kept.
 - While closed, Settings stands still: its pictures' clocks and monitors wait (`PanelTimelineView`,
   `whileShown`), the level widgets and the header's picture keep their last reading
   (`PictureReadings`, `SettingsPresence`), the Activities page reads only whether there is a battery.
+- **Frames**: the longest main-thread turns while Settings opens and changes pages (`NI_TRACE=1`)
+  went from 245–410 ms (the pages built) to ≤ 70 ms: Settings' window comes on screen, invisible,
+  and takes the keyboard while the island grows (on the render server), so the turn in which the
+  pages fade in is ~45 ms instead of ~210; a page switch writes no environment over the pages any
+  more (50–80 → 30–60 ms, most of it the URL command's own handling in the test).
 - The widget gallery's previews come one a frame as their cards appear (`GalleryPreviewQueue`)
   instead of 60 ms plus 35 ms per place in the gallery (up to two seconds for the cards further down).
 - `MenuBarExtra(isInserted:)` set its binding again (unchanged) at every activation of the app (each
