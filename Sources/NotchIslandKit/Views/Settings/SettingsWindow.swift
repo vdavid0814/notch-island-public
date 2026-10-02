@@ -81,7 +81,6 @@ final class SettingsWindow: NSPanel {
             isRehearsing = true
             alphaValue = 0
             ignoresMouseEvents = true
-            DeferredLayouts.resume(in: self)
             orderFrontRegardless()
         }
         rehearsed.insert(pane)
@@ -156,7 +155,6 @@ final class SettingsWindow: NSPanel {
         outline.removeAnimation(forKey: "outline")
         outline.path = Self.settingsPath(model.layout)
         CATransaction.commit()
-        DeferredLayouts.resume(in: self)
         surface.show()
         orderFrontRegardless()
         if model.island.presentation.isSettings { makeKey() }

@@ -110,6 +110,8 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
     let deck: SettingsPageDeckView
     /// The sidebar and the deck beside it: what the Customize editor sinks back from.
     private let pagesHost = SettingsPagesView()
+    /// The sidebar and the pages, as one view (what fades in when Settings opens).
+    var pagesView: NSView { pagesHost }
     /// The sidebar (SwiftUI), under the deck.
     let sidebarHost: DeferringHostingView<AnyView>
     private var editorHost: NSHostingView<AnyView>?

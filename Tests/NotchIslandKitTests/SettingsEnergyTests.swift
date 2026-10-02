@@ -139,21 +139,27 @@ private func largestDifference(_ a: [UInt8], _ b: [UInt8]) -> Int {
         /// SwiftUI fade they replaced and on its curve.
         @Test func thePagesFadeInOnTheRenderServer() async throws {
             let model = AppModel()
+            // Settings is open (closing, its pages go out of sight at once).
+            model.island.apply(.settings, animation: nil)
             let size = model.layout.size(for: .settings)
             let host = NSHostingView(rootView: IslandSettingsView().environment(model))
             let window = NSWindow(contentRect: CGRect(x: -10_000, y: -10_000, width: size.width, height: size.height),
                                   styleMask: .borderless, backing: .buffered, defer: false)
             window.contentView = host
-            defer { window.contentView = nil }
+            defer {
+                window.contentView = nil
+                SettingsWindow.current?.hide(fade: nil)
+            }
             host.frame = CGRect(origin: .zero, size: size)
-            // The pages join most of an opening after it starts: looked for as soon as they are in.
+            // The pages join most of an opening after it starts, in Settings' own window
+            // (`SettingsWindow`): looked for as soon as they are in.
             // Long enough for a main actor busy with every other suite's drawing.
             let deadline = Date.now.addingTimeInterval(model.preferences.animationDuration + 40)
             var pages: NSView?
             while pages == nil, Date.now < deadline {
                 try await Task.sleep(for: .milliseconds(5))
                 host.layoutSubtreeIfNeeded()
-                pages = nestedHost(in: host)
+                if let settings = SettingsWindow.current, settings.isVisible { pages = settings.surface.pagesView }
             }
             try expectFadeIn(on: try #require(pages), duration: IslandSettingsView.pagesFadeIn)
         }

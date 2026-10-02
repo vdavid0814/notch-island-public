@@ -757,7 +757,6 @@ private struct WidgetStoreView: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 300), spacing: 12)], spacing: 12) {
             ForEach(kinds) { kind in
                 GalleryCard(kind: kind, grid: model.editedWidgets.board.grid,
-                            order: IslandWidgetKind.allCases.firstIndex(of: kind) ?? 0,
                             isAdded: model.editedWidgets.board.contains(kind),
                             add: { add(kind) }, open: { open(kind) })
             }
@@ -770,16 +769,14 @@ private struct WidgetStoreView: View {
 private struct GalleryCard: View {
     let kind: IslandWidgetKind
     let grid: BoardGrid
-    /// Position in the gallery: previews come in one after another.
-    let order: Int
     let isAdded: Bool
     let add: () -> Void
     let open: () -> Void
 
     @State private var isHovered = false
     /// A live preview is a whole widget (sliders, glass buttons…). Built all at once, sixteen of
-    /// them stalled the frame Settings opened in; each now arrives a few frames after the last,
-    /// fading in on the render server (`WidgetPreview`).
+    /// them stalled the frame Settings opened in; each now arrives a frame after the last
+    /// (`GalleryPreviewQueue`), fading in on the render server (`WidgetPreview`).
     @State private var showsPreview = false
 
     /// The preview's well, and how far in it sits: the card's corners are concentric with it.
@@ -834,10 +831,28 @@ private struct GalleryCard: View {
         .animation(.easeOut(duration: 0.15), value: isHovered)
         .animation(.spring(duration: 0.3), value: isAdded)
         .task {
-            try? await Task.sleep(for: .milliseconds(60 + 35 * order))
+            guard !showsPreview else { return }
+            await GalleryPreviewQueue.turn()
             guard !Task.isCancelled else { return }
             showsPreview = true
         }
+    }
+}
+
+/// Hands the gallery's previews their turn to be built: one a frame, in the order their cards
+/// appeared. They waited 60 ms plus 35 ms per place in the whole gallery, so the cards further down
+/// stayed empty for up to two seconds after they scrolled into view (asked about: "the pictures
+/// load slowly"); a card that appears alone now gets its preview at once.
+@MainActor enum GalleryPreviewQueue {
+    /// Between two previews: one display frame.
+    static let spacing: Duration = .milliseconds(16)
+    private static var nextTurn = ContinuousClock.now
+
+    static func turn() async {
+        let now = ContinuousClock.now
+        let slot = max(now, nextTurn)
+        nextTurn = slot + spacing
+        if slot > now { try? await Task.sleep(until: slot, tolerance: .milliseconds(2)) }
     }
 }
 
