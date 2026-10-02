@@ -66,7 +66,10 @@ nonisolated struct ClipboardItem: Hashable, Identifiable, Sendable, Codable {
             let timer = DispatchSource.makeTimerSource(queue: .main)
             timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(500))
             timer.setEventHandler { [weak self] in
-                MainActor.assumeIsolated { self?.check() }
+                MainActor.assumeIsolated {
+                    self?.check()
+                    self?.pace()
+                }
             }
             timer.resume()
             self.timer = timer
@@ -74,6 +77,21 @@ nonisolated struct ClipboardItem: Hashable, Identifiable, Sendable, Codable {
             timer?.cancel()
             timer = nil
         }
+    }
+
+    /// Once a second while the Mac is being used; every five seconds once nothing has been typed
+    /// or clicked for a minute (a copy needs a keystroke or a click, and the first look after one
+    /// is at most five seconds late): at rest the look was the app's only wake-up.
+    private var isRelaxed = false
+
+    private func pace() {
+        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState,
+                                                           eventType: CGEventType(rawValue: ~0) ?? .null)
+        let relaxed = idle > 60
+        guard relaxed != isRelaxed, let timer else { return }
+        isRelaxed = relaxed
+        let interval: DispatchTimeInterval = relaxed ? .seconds(5) : .seconds(1)
+        timer.schedule(deadline: .now() + interval, repeating: interval, leeway: relaxed ? .seconds(2) : .milliseconds(500))
     }
 
     /// Reads the pasteboard if it changed since the last look.
