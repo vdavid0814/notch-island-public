@@ -19,7 +19,7 @@ def close(entry):
     s = c - kids
     fn = re.sub(r"\s+\(in .*", "", name); fn = re.sub(r"\s+\+ \d+.*", "", fn)
     m = re.search(r"\(in ([^)]+)\)", name); mod = m.group(1) if m else "?"
-    if s > 0 and not any(fn.startswith(x) for x in IDLE) and thr is not None and (not flt or flt in thr):
+    if s > 0 and not any(fn.startswith(x) for x in IDLE) and thr is not None and (not flt or flt.lower() in thr.lower()):
         threads[thr] += s; selfc[(mod, fn[:120])] += s
         seen = set()
         for (pm, pf) in path + [(mod, fn[:120])]:

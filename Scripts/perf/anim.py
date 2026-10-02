@@ -27,6 +27,8 @@ SCENARIOS = {
     "airpods": [("demo/airpods", 5), ("close", 2)],
     "timer-done": [("demo/timerdone", 8), ("demo/reset", 2)],
     "settings": [("settings/general", 4), ("settings/widgets", 4), ("close", 3)],
+    # Opened on General, left a moment, closed.
+    "settings-open": [("settings/general", 3), ("close", 3)],
     # Every page in turn, twice, then closed.
     "settings-tour": [(f"settings/{p}", 1.5) for p in ["general", "widgets", "activities", "siri", "about"] * 2] + [("close", 3)],
     # Someone flicking the island open and shut, fast.

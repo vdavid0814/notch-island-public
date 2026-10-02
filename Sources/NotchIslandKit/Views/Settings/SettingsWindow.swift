@@ -185,12 +185,6 @@ final class SettingsWindow: NSPanel {
         // frame the pages fade in.
         SettingsPresence.shared.isShown = true
         orderFrontRegardless()
-        // The keyboard too: becoming key has every control of the shown page take the key state
-        // and lays the page out again (~150 ms, measured), done here while the island grows.
-        if model.island.presentation.isSettings {
-            makeKey()
-            root.layoutSubtreeIfNeeded()
-        }
     }
 
     /// Settings closed before it had grown: the prestaged window goes again.
@@ -203,7 +197,7 @@ final class SettingsWindow: NSPanel {
         ignoresMouseEvents = false
     }
 
-    /// Settings has grown: the pages fade in over the island and take the keyboard from it.
+    /// Settings has grown: the pages fade in over the island.
     func show() {
         SettingsPresence.shared.isShown = true
         if isPrestaged {
@@ -226,7 +220,10 @@ final class SettingsWindow: NSPanel {
         clipsToOutline(false)
         surface.show()
         orderFrontRegardless()
-        if model.island.presentation.isSettings, !isKeyWindow { makeKey() }
+        // Not made key: the island keeps the keyboard (Esc closes Settings from there), and this
+        // window takes it with the first click in it (a field, the sidebar). Made key at every
+        // opening, every control of the page and the sidebar took the key state, and gave it back
+        // at the close: four fifths of what an opening cost (170 → 31 mJ, measured).
     }
 
     /// Settings closes: out of sight after `fade` (at once without), then ordered out.
@@ -289,6 +286,15 @@ final class SettingsWindow: NSPanel {
     }
 
     // MARK: Keyboard
+
+    /// The first click in the window makes it key and is handled as any other: as a window that
+    /// was not key, it went only to making the window key, and the sidebar or a field missed it.
+    override func sendEvent(_ event: NSEvent) {
+        if !isKeyWindow, canBecomeKey, [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
+            makeKey()
+        }
+        super.sendEvent(event)
+    }
 
     override var canBecomeKey: Bool { isVisible && !isRehearsing }
     override var canBecomeMain: Bool { false }
