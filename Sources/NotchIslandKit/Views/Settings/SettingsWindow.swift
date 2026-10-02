@@ -132,9 +132,34 @@ final class SettingsWindow: NSPanel {
         clip.isGeometryFlipped = true
         outline.fillColor = CGColor(gray: 0, alpha: 1)
         clip.addSublayer(outline)
-        root.layer?.mask = clip
         root.onLayout = { [weak self] in self?.placeClip() }
         placeClip()
+        clipsToOutline(false)
+    }
+
+    /// At rest the window is cut by its own rounded lower corners (the island's, continuous like
+    /// SwiftUI's): the window server draws those as cheaply as any corner. A mask layer in the
+    /// island's outline (needed only while the outline moves, as Settings closes) had it render
+    /// the whole window offscreen at every frame of anything moving in it (General's looping
+    /// picture: ~10 mW more in the window server, measured).
+    private func clipsToOutline(_ moving: Bool) {
+        guard let layer = root.layer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if moving {
+            layer.cornerRadius = 0
+            layer.masksToBounds = false
+            layer.mask = clip
+        } else {
+            layer.mask = nil
+            layer.cornerRadius = model.layout.bottomRadius(for: .settings)
+            layer.cornerCurve = .continuous
+            // The lower corners, whichever way the view's layer runs.
+            layer.maskedCorners = layer.isGeometryFlipped || layer.contentsAreFlipped()
+                ? [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] : [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+            layer.masksToBounds = true
+        }
+        CATransaction.commit()
     }
 
     /// Over the island's page area: only a new size lays anything out.
@@ -158,6 +183,7 @@ final class SettingsWindow: NSPanel {
         outline.removeAnimation(forKey: "outline")
         outline.path = Self.settingsPath(model.layout)
         CATransaction.commit()
+        clipsToOutline(false)
         surface.show()
         orderFrontRegardless()
         if model.island.presentation.isSettings { makeKey() }
@@ -184,6 +210,7 @@ final class SettingsWindow: NSPanel {
     /// The island's outline moves (`IslandOutlineMotion`): the pages are cut by it too.
     func followOutline(_ animation: CAKeyframeAnimation, final: CGPath?) {
         guard isVisible else { return }
+        clipsToOutline(true)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         outline.path = final

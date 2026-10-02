@@ -15,10 +15,13 @@ extension View {
 private struct WhileShown: ViewModifier {
     let start: () -> Void
     let stop: () -> Void
-    @Environment(\.isIslandPanelHidden) private var isHidden
+    @Environment(\.isIslandPanelHidden) private var isPanelHidden
+    @Environment(\.isWidgetPreview) private var isPreview
+    @Environment(\.isHeaderPicture) private var isHeaderPicture
     @State private var isRunning = false
 
     func body(content: Content) -> some View {
+        let isHidden = isPanelHidden || ((isPreview || isHeaderPicture) && !SettingsPresence.shared.isShown)
         content
             .onAppear { set(!isHidden) }
             .onDisappear { set(false) }
@@ -51,9 +54,18 @@ struct PanelTimeline<Base: TimelineSchedule>: TimelineSchedule {
 struct PanelTimelineView<Schedule: TimelineSchedule, Content: View>: View {
     let schedule: Schedule
     @ViewBuilder let content: (TimelineViewDefaultContext) -> Content
-    @Environment(\.isIslandPanelHidden) private var isHidden
+    @Environment(\.isIslandPanelHidden) private var isPanelHidden
     /// The editor's canvas is a picture: one entry, never a tick.
     @Environment(\.widgetRenderMode) private var renderMode
+    /// Settings' pictures (the gallery's previews, the stage's header) tick only while Settings
+    /// is on screen: it is kept while closed (`SettingsWindow`), and their clocks woke the app
+    /// every second for nothing.
+    @Environment(\.isWidgetPreview) private var isPreview
+    @Environment(\.isHeaderPicture) private var isHeaderPicture
+
+    private var isHidden: Bool {
+        isPanelHidden || ((isPreview || isHeaderPicture) && !SettingsPresence.shared.isShown)
+    }
 
     init(_ schedule: Schedule, @ViewBuilder content: @escaping (TimelineViewDefaultContext) -> Content) {
         self.schedule = schedule
