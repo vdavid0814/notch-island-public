@@ -256,7 +256,7 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// drawing the icons again on every opening of the gallery was most of its energy, measured)
     /// and read again in the background once it is older than `appsLifetime`.
     @ObservationIgnored private var allAppsRead: Date?
-    static let appsLifetime: TimeInterval = 10 * 60
+    static let appsLifetime: TimeInterval = 30 * 60
     /// The user's shortcuts, read once per opening (and kept for `keepDuration` after it).
     private(set) var shortcuts: [String]? { didSet { if shortcuts != oldValue { listsVersion &+= 1 } } }
     /// The System Settings panes (⌘5), read once per opening (and kept for `keepDuration` after it).
@@ -822,6 +822,18 @@ nonisolated struct FileScope: Sendable, Equatable {
         await AssistantIcons.tidyDisk()?.value
     }
 
+    /// Contacts' authorization as read at most `accessLifetime` ago: each read is a question to the
+    /// privacy daemon (tccd, billed to the app), and typing asked it at every keystroke.
+    private func recentContactsAccess(now: Date = Date()) -> AccessState {
+        if let cached = cachedContactsAccess, now.timeIntervalSince(cached.read) < Self.accessLifetime { return cached.state }
+        let state = sources.contactsAccess()
+        cachedContactsAccess = (state, now)
+        return state
+    }
+
+    @ObservationIgnored private var cachedContactsAccess: (state: AccessState, read: Date)?
+    static let accessLifetime: TimeInterval = 30
+
     /// What a first typed word reads — the lists a root query searches, and the system's search
     /// services (Spotlight, the dictionary, Contacts), whose first query of a launch cost several
     /// times a later one, billed to the app — read once ahead, unseen, at background priority.
@@ -1135,6 +1147,7 @@ nonisolated struct FileScope: Sendable, Equatable {
                 guard let self else { return }
                 self.permissionRequests -= 1
                 self.contactsAccess = access
+                self.cachedContactsAccess = nil
                 self.onFileAccessSettled?()
                 self.search(now: true)
             }
@@ -1362,6 +1375,8 @@ nonisolated struct FileScope: Sendable, Equatable {
         let inMemoryApps: [AssistantHit]? = allApps.isEmpty ? nil
             : Array(AssistantSearch.rank(allApps.filter { AssistantMatch.matches($0.name, text, settings.matching) }, for: text)
                 .prefix(hitLimit))
+        // Asked of the privacy database once in a while, not at every keystroke.
+        let readsPeople = settings.showsPeople && text.count >= 2 && recentContactsAccess() == .granted
         // At utility priority: the sources' work (Spotlight, Contacts, the dictionary, the icons)
         // runs on the efficiency cores. At the main thread's user-initiated priority every
         // keystroke's search spread over several performance cores at once (Energy Impact ~80 for
@@ -1386,8 +1401,7 @@ nonisolated struct FileScope: Sendable, Equatable {
                 async let files = withFiles ? sources.files(text, hitLimit, scope) : []
                 // A word alone is looked up; the people only once they were allowed.
                 async let definition = settings.showsDefinitions && DictionaryLookup.isWord(text) ? sources.define(text) : nil
-                async let contacts = settings.showsPeople && text.count >= 2 && sources.contactsAccess() == .granted
-                    ? sources.contacts(text, hitLimit) : []
+                async let contacts = readsPeople ? sources.contacts(text, hitLimit) : []
                 (foundApps, foundFiles, foundDefinition, foundContacts) = await (apps, files, definition, contacts)
                 // Once per pause, not per keystroke: the recogniser is not free.
                 unsupported = sources.isUnsupportedLanguage(text)
@@ -1446,7 +1460,10 @@ nonisolated struct FileScope: Sendable, Equatable {
         let needsBookmarks = bookmarks == nil && settings.showsBookmarks && rootQuery
         guard needsApps || needsShortcuts || needsPanes || needsEmoji || needsBookmarks, loadTask == nil else { return }
         let sources = sources
-        loadTask = Task { [weak self] in
+        // At utility priority, as the searches: the lists are read by Spotlight and the system's
+        // tables off the main thread, and nobody waits on them within a frame (the gallery shows
+        // the list it has meanwhile).
+        loadTask = Task(priority: .utility) { [weak self] in
             async let apps = needsApps ? sources.allApps() : []
             async let shortcuts = needsShortcuts ? sources.shortcuts() : nil
             async let panes = needsPanes ? sources.settingsPanes() : nil

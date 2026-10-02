@@ -207,6 +207,20 @@ final class SettingsWindow: NSPanel {
         }
     }
 
+    /// Out of the window list with the island while the session is locked or the screens sleep;
+    /// back with it if Settings is still open.
+    private var wasShownBeforeSuspension = false
+
+    func setSuspended(_ suspended: Bool) {
+        if suspended {
+            wasShownBeforeSuspension = isVisible && !isRehearsing
+            if isVisible { orderOut(nil) }
+        } else if wasShownBeforeSuspension {
+            wasShownBeforeSuspension = false
+            if model.island.presentation.isSettings { orderFrontRegardless() }
+        }
+    }
+
     /// The island's outline moves (`IslandOutlineMotion`): the pages are cut by it too.
     func followOutline(_ animation: CAKeyframeAnimation, final: CGPath?) {
         guard isVisible else { return }

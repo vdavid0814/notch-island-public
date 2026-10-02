@@ -24,6 +24,16 @@ Swift 6, SwiftUI, macOS 27.
 
 ---
 
+## Since v0.7.2 (not released yet)
+
+- **Settings opens and changes pages without a cost spike**: it is built once a few seconds after
+  launch, unseen, and kept (Activity Monitor's Energy Impact for a tour of the pages ~600 → ~40;
+  about 110 MB more memory). The widget gallery's pictures come in at once.
+- **Siri**: its lists are read ahead and kept, searches run on the efficiency cores (typing a first
+  word after launch 438 → 272, the first opening 85 → 76).
+- **The panel's pages** slide in from their side of the header as they fade in.
+- Details and what is still above target: [docs/ENERGY-LOG.md](docs/ENERGY-LOG.md).
+
 ## What's new in v0.7.2
 
 Customize rebuilt from the ground up, more of every widget to style, and a battery page laid out

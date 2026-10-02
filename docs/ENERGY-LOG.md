@@ -4,6 +4,107 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-02: Settings kept, Siri read ahead (after v0.7.2, build 26)
+
+**Why.** Settings cost an Energy Impact of 400–600 at every opening and page change (Activity
+Monitor), its frame rate dropped while it was built, and the widget gallery's pictures arrived one
+by one for up to two seconds. Siri's first opening and first search after a launch went past 80 too.
+The target: nothing in Settings or Siri near 80, nothing else costlier, the look and the motion the
+same.
+
+**Machine and method.** The same MacBook Air M5, macOS 27, on battery (~75 → 60 %). Release builds of
+v0.7.2 (26) ("before") and this work ("after"), signed alike, report destinations removed.
+`Scripts/perf/ab.py` (`anim.py`, which now also counts GPU energy and the energy other processes bill
+to the app, as Activity Monitor does): before and after alternating, two rounds, a fresh launch and
+35 s of rest before each. `Scripts/perf/ws/ws_bench.py` for the window server, with a real pointer.
+
+The build running on this Mac before was a **debug** build (`Scripts/run.sh` built debug): in
+Settings it takes about three times the CPU of a release build. `Scripts/run.sh` builds release now.
+
+Activity Monitor's Energy Impact (the app's coalition, worst 5 s), and the app's CPU ms; medians of
+two rounds (siri and settings-tour: the first and the second time after a launch):
+
+| scenario | before | after | change | CPU ms before → after |
+|---|---|---|---|---|
+| Settings tour, first after launch (every page twice, closed) | 590 | 37 | **−94 %** | 2330 → 1260 |
+| Settings tour, again | 397 | 37 | **−91 %** | 1980 → 1210 |
+| Siri, first opening after launch | 85 | 76 | −11 % | 285 → 318 |
+| Siri, again | 9 | 9 | | 147 → 157 |
+| Siri, typing a word, first time after launch | 438 | 272 | **−38 %** | 485 → 427 |
+| Siri, typing a word, again | — | 66 | | — → 490 |
+| Siri's app gallery | 41 | 40 | | 400 → 422 |
+| opening the panel | 14.6 | 15.2 | (noise) | 154 → 176 |
+| hover open | 11.5 | 11.9 | | 157 → 169 |
+| spam-open (10 × 0.25 s) | 29.0 | 30.3 | +4 % | 582 → 664 |
+| spam-pages (12 page switches in 5 s) | 49.5 | 93.1 | **+88 %** (the new slide) | 976 → 1528 |
+| volume (3 changes) | 6.8 | 7.1–7.8 | +10 % | 215 → 270 |
+| AirPods | 4.8 | 4.0 | | 108 → 127 |
+| battery (charger in and out) | 2.7 | 4.0 | (a later run) | 103 → 110 |
+| timer done | 9.8 | 15.3 | **+56 %** | 364 → 470 |
+
+The window server, with a real pointer (`ws_bench.py`, one round each): a Settings tour 3.6 → 1.4 J
+(the app 6.6 → 1.2 J, its peak 1039 → 115 mW); Settings ▸ General left open 10–17 → 3–8 mW; ten
+hover opens 1.95 → 2.00 J; at rest 2.0 → 2.4 mW (the app 0.01 → 0.04 mW). Memory: 40–50 MB → ~160 MB
+with Settings kept.
+
+### What changed
+
+**Settings: built once, kept, in a window of its own**
+- Settings' pages were built and laid out from nothing at every opening and every change of page
+  (~1.2 s of main thread on the performance cores, almost all of it SwiftUI layout). They are now
+  built once, a few seconds after launch, unseen, on the efficiency cores — the sidebar, then one
+  page per step, then each page drawn once in its window at no opacity — and kept for as long as the
+  app runs (~110 MB more memory, as asked: "load everything into RAM").
+- Each page is a view graph of its own (`SettingsPageDeckView`); a page change hides one and shows
+  another; hidden pages lay nothing out (`DeferringHostingView`). A page shown again starts at its
+  top with nothing picked, as a new one did.
+- They live in their own window (`SettingsWindow`) over the island's page area, ordered in only
+  while Settings is open. Tried first and dropped: kept inside the island's window, every resize of
+  that window (each open, close and Siri step) and every key change went over the hidden pages and
+  their native controls (Siri's opening cost five times its main thread); moved out of the island
+  and back, every page was laid out again (~1 s, more than building them).
+- The window is cut by the island's lower corners at rest (a mask layer there cost the window server
+  ~10 mW while General was open) and by the island's moving outline while Settings closes, frame for
+  frame (`IslandOutlineMotion` hands it the same keyframes).
+- While closed, Settings stands still: its pictures' clocks and monitors wait (`PanelTimelineView`,
+  `whileShown`), the level widgets and the header's picture keep their last reading
+  (`PictureReadings`, `SettingsPresence`), the Activities page reads only whether there is a battery.
+- The widget gallery's previews come one a frame as their cards appear (`GalleryPreviewQueue`)
+  instead of 60 ms plus 35 ms per place in the gallery (up to two seconds for the cards further down).
+- `MenuBarExtra(isInserted:)` set its binding again (unchanged) at every activation of the app (each
+  Siri and Settings opening and closing); each write went to the user defaults and woke every
+  `@AppStorage` view. It is written only when it changes.
+
+**Siri**
+- The lists a typed word searches (shortcuts, System Settings panes, emoji, bookmarks) are read ahead
+  after launch and kept half an hour after a close (they went ten seconds after it and were read
+  again at the next word); the system's search services get their first query then too; Siri's view
+  is drawn once unseen (`AssistantRehearsal`).
+- A keystroke's search and the lists run at utility priority (efficiency cores); the apps on disk are
+  read once a minute instead of at every keystroke; the app list is kept 30 minutes instead of 10.
+
+**The panel's pages** (asked for: a nicer switch)
+- The new page slides in a short way from its side of the header's order as it fades in, the page
+  left fades out where it is; no blur. Moving a page costs SwiftUI a redraw per frame, glass and all,
+  so only the arriving page moves (both moving cost half again as much).
+
+### Not met, or costlier
+- **Typing in Siri the first time after a launch** stays far above 80 (272): most of it is energy
+  other processes bill to the app (~1 J, against 0.13 J the second time) — the window server drawing
+  the list the first time, Spotlight, the privacy daemon. The searches' own share went down; warming
+  the services ahead did not move the billed part.
+- **Siri's first opening after a launch** is just under 80 (68–79 across runs); later openings ~9.
+- **Page switches** cost more with the slide (12 switches in 5 s: 50 → 93); a single switch is about
+  +30 ms of main thread. Kept pages, a cheaper curve and moving only the arriving page were tried;
+  moving anything over glass costs a SwiftUI redraw per frame.
+- **Banners while Settings is kept**: a timer finishing (+100 ms), a volume change (+50 ms) still
+  cost a little more than before, from what the kept pages still follow; the readings found
+  (levels, the header picture, the battery, clocks) were frozen, the rest not yet traced.
+
+### Tests
+`Scripts/test.sh`: 887 tests; the timing tests that fail under load (banner expiry, Siri's return
+after typing) pass alone. `thePagesFadeInOnTheRenderServer` looks for the pages in Settings' window now.
+
 ## 2026-10-01: v0.7.1 (build 25): the window server's share
 
 **Why.** A comparison with Boring Notch (2.7.3) on September 30 counted the window server too: at rest

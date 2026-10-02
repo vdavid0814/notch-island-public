@@ -103,9 +103,18 @@ view appears inside an open never rides its spring (`withoutAnimation`). Setting
 looping animation picture is Core Animation, and the widget studio's live preview has
 a view graph of its own (`IsolatedHosting`), so neither updates all of Settings.
 
-Settings' pages run in a view graph of their own (`IsolatedFillHosting`) that goes when Settings
-closes; the decoded preview wallpapers are dropped then too (`WallpaperLibrary.purge`), and a moment
-later the allocator's freed pages are handed back (`MemoryRelief`, also after Siri closes).
+Settings is built once and kept for as long as the app runs, in a window of its own
+(`SettingsWindow`) that lies over the island's page area and is ordered in only while Settings is
+open: built a few seconds after launch, unseen, on the efficiency cores (sidebar, then one page per
+step, then each page drawn once in the window at no opacity). Each page has a view graph of its own
+(`SettingsPageDeckView`); the pages not shown are hidden and lay nothing out (`DeferringHostingView`).
+The island's SwiftUI only holds an empty anchor (`SettingsSurfaceAnchor`) that puts the window over
+its place. The window is cut by the island's lower corners at rest and by the island's moving outline
+while Settings closes (`IslandOutlineMotion` hands it the same keyframes). While closed, Settings'
+pictures stand still: their clocks and monitors wait (`PanelTimelineView`, `whileShown`), and the
+level widgets and header pictures keep their last reading (`PictureReadings`, `SettingsPresence`).
+Kept anywhere else it cost the island: in the island's window every resize and key change went over
+the hidden pages; moved in and out of a window, every page was laid out again.
 
 ## Browser playback
 

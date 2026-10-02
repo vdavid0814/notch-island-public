@@ -101,6 +101,7 @@ import SwiftUI
         settle.cancel()
         inFlightIslands = nil
         panel?.orderOut(nil)
+        SettingsWindow.current?.hide(fade: nil)
     }
 
     /// Screens asleep, session locked or system sleeping: nothing is visible, so
@@ -109,6 +110,7 @@ import SwiftUI
     func setSuspended(_ suspended: Bool) {
         guard suspended != isSuspended else { return }
         isSuspended = suspended
+        SettingsWindow.current?.setSuspended(suspended)
         if suspended {
             giveKeyboardBack()
             panel?.orderOut(nil)

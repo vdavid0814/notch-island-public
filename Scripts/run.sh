@@ -1,12 +1,15 @@
 #!/bin/bash
-# Builds the app, replaces any running instance and launches the fresh build.
+# Builds the app (release; CONFIG=debug for a debug build), replaces any running instance and
+# launches the fresh build.
 # Extra arguments are passed to the app.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/build/NotchIsland.app"
 
-"$ROOT/Scripts/build.sh"
+# A release build unless asked otherwise (CONFIG=debug): a debug build takes about three times the
+# CPU in Settings and Siri, which is what Activity Monitor then shows.
+CONFIG="${CONFIG:-release}" "$ROOT/Scripts/build.sh"
 
 if pgrep -x NotchIsland >/dev/null; then
   echo "==> quitting the running instance"

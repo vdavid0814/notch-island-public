@@ -5,6 +5,30 @@ anyone can repeat them on their own Mac and compare. It comes with every copy: i
 (`docs/`), inside the app (`NotchIsland.app/Contents/Resources/`) and next to the app in the `.dmg`.
 The detailed before/after tables, and what was changed, are in `ENERGY-LOG.md` next to it.
 
+## The October 2, 2026 run (after v0.7.2): Settings kept, Siri read ahead
+
+**Setup.** The same MacBook Air M5, macOS 27, on battery (75 → 58 %). Release builds of v0.7.2 (26)
+and this work, diagnostics reports removed from both.
+
+**What was run**
+1. **Every animation, back to back** (`Scripts/perf/ab.py` → `anim.py`, which now counts GPU energy
+   and the energy billed to the app): two rounds, before and after alternating, a fresh launch and
+   35 s of rest before each. Scenarios: settings-tour (new: every Settings page twice) twice, siri,
+   siri-search, siri again, siri-apps, open-home, hover, spam-open, spam-pages, volume, airpods,
+   battery, timer-done.
+2. **The window server** (`ws_bench.py`, real pointer): rest, a Settings tour, Settings ▸ General
+   at rest, ten hover opens.
+3. **Where the time goes**: `sample` with `selftime.py`, `chain.py` and `subtree.py` (new); the
+   energy of a scenario split by `parts.py` (new): CPU, GPU, billed by other processes.
+4. **It still works and looks the same**: screenshots of Settings' pages, the Customize editor,
+   Settings closing mid-way, the gallery scrolled, the panel's page switch; real clicks, typing
+   and Esc in Settings (`ws/mouse`, `ws/key`).
+5. **Unit tests** (`Scripts/test.sh`): 887 tests.
+
+**Results** (Energy Impact, worst 5 s, before → after): a Settings tour 590 → 37 the first time after
+a launch, 397 → 37 later; Siri's first opening 85 → 76, typing a word the first time 438 → 272; a
+burst of page switches 50 → 93 (the new slide), a timer finishing 9.8 → 15.3. Details: `ENERGY-LOG.md`.
+
 ## The October 1, 2026 run (v0.7.1, build 25): the window server
 
 **Setup.** The same MacBook Air M5, macOS 27, on battery, music playing. Release builds of v0.7 (24)

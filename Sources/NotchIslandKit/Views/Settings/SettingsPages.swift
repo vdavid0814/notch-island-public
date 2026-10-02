@@ -474,8 +474,9 @@ struct ActivitiesSettingsPage: View {
                 }
             }
 
-            // Desktop Macs have no battery, so there is nothing to alert about.
-            if model.power.state.hasBattery {
+            // Desktop Macs have no battery, so there is nothing to alert about. (Read on its own:
+            // the whole power state changed at every percent and redrew this page, kept unseen.)
+            if model.power.hasBattery {
                 Section("Battery") {
                     SettingPictureRow { PowerPicture() }
                     Toggle(isOn: $preferences.showPowerAlerts) {

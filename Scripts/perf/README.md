@@ -185,3 +185,32 @@ window's layer tree to `$TMPDIR/ni-layers.txt` (masks, filters, shadows, backdro
 - The readings: the window server's energy is noisy below ~20 mW (even negative 1 s deltas); compare
   A B A B and read its CPU %. A window started by a script may not animate at all (check a screenshot),
   and the display sleeps after 180 idle minutes.
+
+## The night of October 2, 2026 (Settings kept, Siri read ahead)
+
+New tools:
+
+| File | What |
+|---|---|
+| `selftime.py <sample> [N] [thread] [module]` | A `sample` report's busy time per thread (idle waits left out), the hottest functions by self time, and the inclusive time of one module's frames (`NotchIsland`, `SwiftUI`, `AppKit`, `QuartzCore`). |
+| `chain.py <sample> <needle> [min]` | The callers of every call-tree node matching `needle`. |
+| `subtree.py <sample> <needle> <min> [depth] [min]` | The call tree under the first node matching `needle`. |
+| `parts.py <scenario …>` | An `anim.py` scenario's coalition energy split: CPU, GPU, billed to the app by other processes, performance-core ms, instructions. |
+| `ws/key.swift` | Types text or Esc with CGEvents (`swiftc -O key.swift -o key`). |
+
+`anim.py` now counts GPU energy and the energy other processes billed to the app, as Activity
+Monitor does; `anim.py settings-tour` visits every Settings page twice.
+
+Points for these tools:
+- **Debug builds** (`Scripts/build.sh` without `CONFIG=release`) cost ~3× the CPU of release builds
+  in Settings; measure release builds only.
+- **Moving an `NSHostingView` to another superview** (even within the same window) re-derives its
+  environment, lays everything out again and rebuilds the keyboard loop: keeping a SwiftUI surface
+  only pays if the view never moves. Hidden hosting views in a window that resizes are laid out with
+  it, and their native controls redraw at every key or activation change of the window.
+- **A view graph kept unseen still follows every model it reads** (a volume change redrew the
+  gallery's volume preview in the ordered-out Settings window). Look for what a kept view reads.
+- **`@AppStorage` re-evaluates on any user-defaults write**: SwiftUI's `MenuBarExtra(isInserted:)`
+  set its binding (unchanged) at every activation, and the write woke every `@AppStorage` view.
+- **A first query billed to the app**: Siri's first search after a launch had ~1 J of energy billed
+  to NotchIsland by system daemons (Spotlight, Contacts, siriknowledged); `parts.py` shows it.
