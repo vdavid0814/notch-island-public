@@ -17,17 +17,21 @@ import SwiftUI
 struct IsolatedHosting<Input: Equatable, Content: View>: NSViewRepresentable {
     let size: CGSize
     let input: Input
+    /// In Settings: out of the window while Settings is closed (`DeferringHostingView`).
+    var pausesWithSettings = false
     let content: Content
 
-    init(size: CGSize, input: Input, @ViewBuilder content: () -> Content) {
+    init(size: CGSize, input: Input, pausesWithSettings: Bool = false, @ViewBuilder content: () -> Content) {
         self.size = size
         self.input = input
+        self.pausesWithSettings = pausesWithSettings
         self.content = content()
     }
 
     func makeNSView(context: Context) -> NSHostingView<Content> {
         context.coordinator.input = input
         let view = DeferringHostingView(rootView: content)
+        view.pausesWithSettings = pausesWithSettings
         // Its size comes from here, never from its content.
         view.sizingOptions = []
         view.safeAreaRegions = []
@@ -65,18 +69,23 @@ struct IsolatedFillHosting<Input: Equatable, Content: View>: NSViewRepresentable
     var fadeIn: TimeInterval?
     /// A picture: clicks, hover and tooltips go to the view around it.
     var isPicture = false
+    /// In Settings: out of the window while Settings is closed (`DeferringHostingView`).
+    var pausesWithSettings = false
     let content: Content
 
-    init(input: Input, fadeIn: TimeInterval? = nil, isPicture: Bool = false, @ViewBuilder content: () -> Content) {
+    init(input: Input, fadeIn: TimeInterval? = nil, isPicture: Bool = false, pausesWithSettings: Bool = false,
+         @ViewBuilder content: () -> Content) {
         self.input = input
         self.fadeIn = fadeIn
         self.isPicture = isPicture
+        self.pausesWithSettings = pausesWithSettings
         self.content = content()
     }
 
     func makeNSView(context: Context) -> NSHostingView<Content> {
         context.coordinator.input = input
-        let view = isPicture ? PictureHostingView(rootView: content) : DeferringHostingView(rootView: content)
+        let view: DeferringHostingView<Content> = isPicture ? PictureHostingView(rootView: content) : DeferringHostingView(rootView: content)
+        view.pausesWithSettings = pausesWithSettings
         view.sizingOptions = []
         view.safeAreaRegions = []
         if let fadeIn { view.fadeInOnRenderServer(duration: fadeIn) }
@@ -142,6 +151,38 @@ class DeferringHostingView<Content: View>: NSHostingView<Content> {
     override func viewDidUnhide() {
         super.viewDidUnhide()
         if deferredLayout { needsLayout = true }
+    }
+
+    /// Taken out of its superview while Settings is closed and put back as it opens
+    /// (`SettingsPresence`): Settings is kept, and a live picture in it (the widget gallery's
+    /// previews, the studio's island) followed the models it reads unseen — a volume change, a
+    /// timer finishing — and redrew. Out of the window, it does nothing.
+    var pausesWithSettings = false {
+        didSet {
+            guard pausesWithSettings != oldValue else { return }
+            presenceObserver = pausesWithSettings ? NotificationCenter.default.addObserver(
+                forName: SettingsPresence.didChange, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.followPresence() }
+            } : nil
+        }
+    }
+
+    private var presenceObserver: (any NSObjectProtocol)?
+    private weak var pausedIn: NSView?
+
+    private func followPresence() {
+        if SettingsPresence.shared.isShown {
+            guard let container = pausedIn, superview == nil else { return }
+            pausedIn = nil
+            frame = container.bounds
+            container.addSubview(self)
+            container.needsLayout = true
+        } else {
+            guard let container = superview, pausedIn == nil else { return }
+            pausedIn = container
+            removeFromSuperview()
+        }
     }
 }
 

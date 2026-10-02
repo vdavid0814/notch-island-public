@@ -218,7 +218,8 @@ private struct StudioStage: View {
             // Shown smaller inside its own graph, not by scaling the host: AppKit hit-tests a
             // scaled view where it was laid out, and clicks near the island's edges missed.
             IsolatedHosting(size: CGSize(width: (room.width * fit).rounded(), height: (room.height * fit).rounded()),
-                            input: StagePick(selection: selection, group: group, mode: mode, room: room, fit: fit)) {
+                            input: StagePick(selection: selection, group: group, mode: mode, room: room, fit: fit),
+                            pausesWithSettings: true) {
                 StageIsland(selection: $selection, group: $group, thumbnails: thumbnails, room: room, fit: fit)
                     .environment(model)
                     .environment(\.appearsActive, true)
@@ -908,7 +909,8 @@ struct WidgetPreview: View {
         let rect = GridRect(column: 0, row: 0, width: cells.width, height: cells.height)
         let size = geometry.frame(for: rect).size
         let scale = min(1, maxSize.width / size.width, maxSize.height / size.height)
-        IsolatedFillHosting(input: PreviewInput(kind: kind, rect: rect, size: size, scale: scale), fadeIn: Self.fadeIn, isPicture: true) {
+        IsolatedFillHosting(input: PreviewInput(kind: kind, rect: rect, size: size, scale: scale), fadeIn: Self.fadeIn, isPicture: true,
+                            pausesWithSettings: true) {
             IslandWidgetView(widget: IslandWidget(kind: kind, frame: rect, options: kind.defaultOptions),
                              size: size, thumbnails: thumbnails)
                 .environment(\.isWidgetPreview, true)

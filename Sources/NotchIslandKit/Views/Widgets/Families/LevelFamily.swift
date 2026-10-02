@@ -386,5 +386,8 @@ nonisolated extension LineCapChoice {
 /// Whether Settings is on screen (`SettingsWindow`), for what only Settings shows.
 @Observable final class SettingsPresence {
     static let shared = SettingsPresence()
-    var isShown = false
+    nonisolated static let didChange = Notification.Name("NotchIsland.settingsPresenceChanged")
+    var isShown = false {
+        didSet { if isShown != oldValue { NotificationCenter.default.post(name: Self.didChange, object: nil) } }
+    }
 }

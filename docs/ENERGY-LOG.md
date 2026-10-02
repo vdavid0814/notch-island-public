@@ -39,8 +39,8 @@ two rounds (siri and settings-tour: the first and the second time after a launch
 | spam-pages (12 page switches in 5 s) | 49.5 | 93.1 | **+88 %** (the new slide) | 976 → 1528 |
 | volume (3 changes) | 6.8 | 7.1–7.8 | +10 % | 215 → 270 |
 | AirPods | 4.8 | 4.0 | | 108 → 127 |
-| battery (charger in and out) | 2.7 | 4.0 | (a later run) | 103 → 110 |
-| timer done | 9.8 | 15.3 | **+56 %** | 364 → 470 |
+| battery (charger in and out) | 2.7 | 2.9 | (a later run) | 103 → 101 |
+| timer done | 9.8 | 11.5 | +17 % (a later run) | 364 → 444 |
 
 The window server, with a real pointer (`ws_bench.py`, one round each): a Settings tour 3.6 → 1.4 J
 (the app 6.6 → 1.2 J, its peak 1039 → 115 mW); Settings ▸ General left open 10–17 → 3–8 mW; ten
@@ -68,7 +68,9 @@ with Settings kept.
   frame (`IslandOutlineMotion` hands it the same keyframes).
 - While closed, Settings stands still: its pictures' clocks and monitors wait (`PanelTimelineView`,
   `whileShown`), the level widgets and the header's picture keep their last reading
-  (`PictureReadings`, `SettingsPresence`), the Activities page reads only whether there is a battery.
+  (`PictureReadings`, `SettingsPresence`), the Activities page reads only whether there is a battery,
+  and the gallery's previews and the studio's island are taken out of the window (a timer finishing
+  15.3 → 11.5, the charger 4.0 → 2.9).
 - **Frames**: the longest main-thread turns while Settings opens and changes pages (`NI_TRACE=1`)
   went from 245–410 ms (the pages built) to ≤ 70 ms: Settings' window comes on screen, invisible,
   and takes the keyboard while the island grows (on the render server), so the turn in which the
@@ -102,9 +104,11 @@ with Settings kept.
 - **Page switches** cost more with the slide (12 switches in 5 s: 50 → 93); a single switch is about
   +30 ms of main thread. Kept pages, a cheaper curve and moving only the arriving page were tried;
   moving anything over glass costs a SwiftUI redraw per frame.
-- **Banners while Settings is kept**: a timer finishing (+100 ms), a volume change (+50 ms) still
-  cost a little more than before, from what the kept pages still follow; the readings found
-  (levels, the header picture, the battery, clocks) were frozen, the rest not yet traced.
+- **Banners while Settings is kept**: a timer finishing (+80 ms) and a volume change (+50 ms) still
+  cost a little more than before. What was found is stopped while Settings is closed: the levels,
+  the header picture, the battery, the clocks, and the widget gallery's previews and the studio's
+  island, which leave the window (`DeferringHostingView.pausesWithSettings`) and come back as
+  Settings grows.
 
 ### Tests
 `Scripts/test.sh`: 887 tests; the timing tests that fail under load (banner expiry, Siri's return
