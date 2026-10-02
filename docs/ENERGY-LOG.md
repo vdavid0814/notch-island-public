@@ -4,6 +4,32 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-02 (night): scrolling Settings ▸ Widgets
+
+Scrolling the widget gallery with the trackpad showed an Energy Impact of 1300–1500 in Activity
+Monitor, and the frame rate dropped. On the charger, release builds, the same synthetic trackpad
+scroll (down and up, 1440 pt/s, `ws/smooth`), read in Activity Monitor's Energy tab while it ran
+and measured by `coalition.py`:
+
+| scrolling Settings ▸ Widgets | before | now |
+|---|---|---|
+| Activity Monitor, Energy Impact | 1360–1460 | **25–30** |
+| the app's CPU (coalition) | 41–45 % | **7–9 %** |
+| SwiftUI updating the page | at every frame of the scroll | once, when it stops |
+
+- **Where it went**: every scroll step moved each hosting view in the page (the page's own, and one
+  per gallery preview); SwiftUI then invalidated each of them (`geometryInWindowDidChange`), updated
+  the page, hit-tested hover twice through every card and rebuilt its responders. That is not
+  something a view can opt out of.
+- **Now** a trackpad scroll moves only the clip view's layer (drawn by the window server) and the
+  scroller's knob; the scroll view is scrolled to where the page is once the scroll and its momentum
+  stop (`ScrollCoalescer`), or at once on a click or a key. Events go straight to the scroll view
+  under the pointer. Every page is built whole for it: the gallery's and two other lazy grids became
+  non-lazy layouts (`GalleryGrid`, `SwatchGrid`; screenshots identical). A scroll that runs into the
+  top or the bottom is handed to AppKit there, so the rubber band is AppKit's own. Wheel (line)
+  scrolling and `List`s are left to AppKit.
+- The same holds for every Settings page; Settings ▸ About while scrolling went from 27 % to 6 %.
+
 ## 2026-10-02 (evening): Settings without the keyboard handover, a quieter rest
 
 On the charger, release builds, `anim.py` back to back (before = v0.7.2 (26), after = this build):

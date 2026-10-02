@@ -31,6 +31,9 @@ burst of page switches 47 → 75 (the new slide); opening the panel 13 → 15, a
 9.8 → 11.6. Longest main-thread turn while Settings opens and changes pages: 245–410 ms → ≤ 70 ms.
 Details: `ENERGY-LOG.md`.
 
+Later the same night, scrolling Settings ▸ Widgets with a synthetic trackpad scroll (`ws/smooth`),
+read in Activity Monitor while it ran: Energy Impact 1360–1460 → 25–30, the app's CPU 41 → 7–9 %.
+
 ## The October 1, 2026 run (v0.7.1, build 25): the window server
 
 **Setup.** The same MacBook Air M5, macOS 27, on battery, music playing. Release builds of v0.7 (24)

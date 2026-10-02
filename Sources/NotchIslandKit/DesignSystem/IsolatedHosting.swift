@@ -153,6 +153,18 @@ class DeferringHostingView<Content: View>: NSHostingView<Content> {
         if deferredLayout { needsLayout = true }
     }
 
+    /// While a Settings page scrolls, AppKit hit-tests it at every frame to update the cursor, and
+    /// through SwiftUI each test walked every control of the page (~15 % of a scroll's main-thread
+    /// time, measured). Then — and never for a click — the test stops here.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if ScrollActivity.isActive, let type = NSApp.currentEvent?.type,
+           ![.leftMouseDown, .rightMouseDown, .otherMouseDown, .leftMouseUp, .rightMouseUp, .otherMouseUp, .leftMouseDragged].contains(type),
+           !isHiddenOrHasHiddenAncestor, frame.contains(point) {
+            return self
+        }
+        return super.hitTest(point)
+    }
+
     /// Taken out of its superview while Settings is closed and put back as it opens
     /// (`SettingsPresence`): Settings is kept, and a live picture in it (the widget gallery's
     /// previews, the studio's island) followed the models it reads unseen — a volume change, a

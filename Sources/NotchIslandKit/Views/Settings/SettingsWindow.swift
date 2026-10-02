@@ -293,7 +293,42 @@ final class SettingsWindow: NSPanel {
         if !isKeyWindow, canBecomeKey, [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
             makeKey()
         }
+        // A wheel or trackpad scroll goes straight to the scroll view under the pointer. Routed by
+        // AppKit, every event of a scroll (120 a second on a trackpad) hit-tested the whole page
+        // through SwiftUI first (~a third of a scroll's main-thread time, measured).
+        if event.type == .scrollWheel {
+            ScrollActivity.mark()
+            if let target = scrollTarget(for: event) {
+                if coalescer.scroll(target, with: event) { return }
+                target.scrollWheel(with: event)
+                return
+            }
+        }
+        // A click (or a key) lands where the page is drawn: the scroll is handed over first.
+        if [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown].contains(event.type) { coalescer.commit() }
         super.sendEvent(event)
+    }
+
+    private let coalescer = ScrollCoalescer()
+
+    /// The innermost scroll view under the event that can scroll its way; nil leaves it to AppKit.
+    private func scrollTarget(for event: NSEvent) -> NSScrollView? {
+        guard let root = contentView else { return nil }
+        let point = event.locationInWindow
+        let vertical = abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX)
+        var found: NSScrollView?
+        func visit(_ view: NSView) {
+            guard !view.isHidden, view.alphaValue > 0 else { return }
+            if let scroll = view as? NSScrollView, scroll.convert(scroll.bounds, to: nil).contains(point),
+               let document = scroll.documentView {
+                let room = vertical ? document.frame.height - scroll.contentView.bounds.height
+                                    : document.frame.width - scroll.contentView.bounds.width
+                if room > 1 { found = scroll }
+            }
+            for subview in view.subviews { visit(subview) }
+        }
+        visit(root)
+        return found
     }
 
     override var canBecomeKey: Bool { isVisible && !isRehearsing }
@@ -333,5 +368,107 @@ private final class SettingsWindowRoot: NSView {
     override func layout() {
         super.layout()
         onLayout?()
+    }
+}
+
+/// When Settings was last scrolled: while it scrolls, hit tests that AppKit makes only to update the
+/// cursor (not for a click) stop at the page's hosting view (`DeferringHostingView`).
+@MainActor enum ScrollActivity {
+    private static var last: CFTimeInterval = 0
+    static func mark() { last = CACurrentMediaTime() }
+    static var isActive: Bool { CACurrentMediaTime() - last < 0.2 }
+}
+
+/// A trackpad scroll of a Settings page, moved on the render server and handed to the scroll view
+/// once it stops.
+///
+/// Moved by AppKit at every event (120 a second), the page's scroll view had SwiftUI update the
+/// whole page each time — every hosting view in it (each gallery preview is one) told its place in
+/// the window changed, hover hit-tested again through every card, the keyboard loop rebuilt —
+/// ~40 % of a core while scrolling the Widgets page (Activity Monitor ~1300–1500, measured). Here
+/// each event only shifts the clip view's layer (`sublayerTransform`), which the window server
+/// draws, and moves the scroller's knob; the scroll view itself is scrolled to where the page is
+/// when the scroll (with its momentum) stops — one SwiftUI update per scroll, ~7 % of a core.
+///
+/// Every page in a scroll view here is built whole (no lazy stacks or grids: `GalleryGrid`,
+/// `SwatchGrid`), so the parts a shift brings into view are already drawn. A scroll that runs into
+/// the top or the bottom is handed to AppKit there, for its rubber band; a click, a key or another
+/// scroll view takes the scroll over first. Wheel (line) scrolling is left to AppKit's own smooth
+/// scroll, and scroll views that are not SwiftUI's (a `List`'s table builds only its visible rows).
+@MainActor final class ScrollCoalescer {
+    /// After the last event of a scroll, the scroll view is scrolled to where the page is.
+    static let settle: TimeInterval = 0.12
+    private weak var scroll: NSScrollView?
+    /// How far the page is drawn past where the scroll view is.
+    private var pending: CGFloat = 0
+    private var ending: DispatchWorkItem?
+    /// This gesture (and its momentum) reached an end of the page and is AppKit's from there.
+    private var handedOver = false
+    private var lastFlash: CFTimeInterval = 0
+
+    /// Takes a precise (trackpad) vertical scroll; false leaves it to AppKit.
+    func scroll(_ target: NSScrollView, with event: NSEvent) -> Bool {
+        if event.phase == .began || event.phase == .mayBegin { handedOver = false }
+        guard !handedOver, event.hasPreciseScrollingDeltas, abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX),
+              NSStringFromClass(type(of: target)).contains("HostingScrollView"),
+              let document = target.documentView, let layer = target.contentView.layer else {
+            commit()
+            return false
+        }
+        if scroll !== target {
+            commit()
+            scroll = target
+        }
+        let clip = target.contentView
+        let origin = clip.bounds.origin.y
+        let limit = max(0, document.frame.height - clip.bounds.height)
+        // Down the page is a growing origin in the flipped document.
+        let direction: CGFloat = document.isFlipped ? -1 : 1
+        let wanted = origin + pending + direction * event.scrollingDeltaY
+        if wanted < 0 || wanted > limit {
+            // Past an end: the rest of this scroll is AppKit's, from the end, with its rubber band.
+            pending = min(max(wanted, 0), limit) - origin
+            commit()
+            handedOver = true
+            return false
+        }
+        pending = wanted - origin
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.sublayerTransform = CATransform3DMakeTranslation(0, Self.layerShift(pending, layer: layer), 0)
+        CATransaction.commit()
+        if let scroller = target.verticalScroller, limit > 0 {
+            scroller.doubleValue = Double((document.isFlipped ? wanted : limit - wanted) / limit)
+            let now = CACurrentMediaTime()
+            if now - lastFlash > 0.3 {
+                lastFlash = now
+                target.flashScrollers()
+            }
+        }
+        ending?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.commit() }
+        ending = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settle, execute: work)
+        return true
+    }
+
+    /// The page's layer moved by `pending` points of scroll: up the screen as the page scrolls down.
+    private static func layerShift(_ pending: CGFloat, layer: CALayer) -> CGFloat {
+        layer.isGeometryFlipped || layer.contentsAreFlipped() ? -pending : pending
+    }
+
+    /// The scroll view scrolled to where the page is drawn, and the shift taken off, in one frame.
+    func commit() {
+        ending?.cancel()
+        ending = nil
+        guard let scroll, pending != 0 else { return }
+        let clip = scroll.contentView
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: clip.bounds.origin.y + pending))
+        scroll.reflectScrolledClipView(clip)
+        clip.layer?.sublayerTransform = CATransform3DIdentity
+        CATransaction.commit()
+        pending = 0
     }
 }

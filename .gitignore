@@ -17,3 +17,4 @@ Scripts/perf/ws/mouse
 Scripts/perf/ws/hideapp
 Scripts/perf/ws/ws_results.jsonl
 Scripts/perf/ws/key
+Scripts/perf/ws/smooth

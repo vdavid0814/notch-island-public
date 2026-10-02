@@ -175,7 +175,7 @@ struct TopBarInspector: View {
                 .foregroundStyle(SettingsPalette.secondary)
                 .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
         } else {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 260), spacing: 8)], alignment: .leading, spacing: 8) {
+            GalleryGrid(minimum: 150, maximum: 260, spacing: 8) {
                 ForEach(unused) { item in
                     PaletteTile(item: item) {
                         // On the side with more room left, at its notch end.

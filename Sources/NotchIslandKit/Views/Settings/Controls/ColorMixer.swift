@@ -52,7 +52,6 @@ struct ColorMixer: View {
 
     /// The theme's own colours.
     private static let basics = IslandTheme.Preset.allCases.filter { $0 != .custom }
-    private let columns = Array(repeating: GridItem(.fixed(26), spacing: 10), count: 4)
 
     init(rgb: Binding<IslandTheme.RGB>) {
         _rgb = rgb
@@ -80,7 +79,7 @@ struct ColorMixer: View {
                 Text("Basic colours")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(SettingsPalette.secondary)
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+                SwatchGrid(count: 4, width: 26, spacing: 10, rowSpacing: 10) {
                     ForEach(Array(Self.basics.enumerated()), id: \.element) { index, preset in
                         Button { pick(preset) } label: {
                             ColorCircle(color: preset.color?.color ?? .white, isSelected: isSelected(preset))
@@ -98,7 +97,7 @@ struct ColorMixer: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(SettingsPalette.secondary)
                         .padding(.top, 4)
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+                    SwatchGrid(count: 4, width: 26, spacing: 10, rowSpacing: 10) {
                         ForEach(recents, id: \.hex) { recent in
                             Button { pickRecent(recent) } label: {
                                 ColorCircle(color: recent.color, isSelected: preset == nil && recent == rgb)

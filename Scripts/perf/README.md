@@ -197,6 +197,7 @@ New tools:
 | `subtree.py <sample> <needle> <min> [depth] [min]` | The call tree under the first node matching `needle`. |
 | `parts.py <scenario …>` | An `anim.py` scenario's coalition energy split: CPU, GPU, billed to the app by other processes, performance-core ms, instructions. |
 | `ws/key.swift` | Types text or Esc with CGEvents (`swiftc -O key.swift -o key`). |
+| `ws/smooth.swift <x> <y> <pt per frame> <frames>` | A trackpad-like scroll at 120 Hz, with gesture phases (`swiftc -O smooth.swift -o smooth`). |
 
 `anim.py` now counts GPU energy and the energy other processes billed to the app, as Activity
 Monitor does; `anim.py settings-tour` visits every Settings page twice.

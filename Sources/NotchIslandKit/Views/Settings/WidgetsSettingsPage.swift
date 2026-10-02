@@ -755,7 +755,7 @@ private struct WidgetStoreView: View {
     }
 
     private func grid(_ kinds: [IslandWidgetKind]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 300), spacing: 12)], spacing: 12) {
+        GalleryGrid(minimum: 200, maximum: 300, spacing: 12) {
             ForEach(kinds) { kind in
                 GalleryCard(kind: kind, grid: model.editedWidgets.board.grid,
                             isAdded: model.editedWidgets.board.contains(kind),
