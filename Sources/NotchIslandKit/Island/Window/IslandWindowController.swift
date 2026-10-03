@@ -88,29 +88,51 @@ import SwiftUI
     static let settingsPreparationDelay: Duration = .seconds(6)
 
     /// One piece of Settings per step, at background quality of service (efficiency cores), only
-    /// while the island is closed: a step waits while it is open.
+    /// while the island is closed and the pointer is away from it: a step waits meanwhile.
+    ///
+    /// The steps run from a run-loop timer, not a task: a task's job runs at the task's priority
+    /// (the dispatch job adopts it) and the main thread's priority rose and fell through every step
+    /// (`ps -M`: 4 and 46 in turn), so its long steps ran on the performance cores whatever their
+    /// quality of service said. From a timer, at background, they stay on the efficiency cores
+    /// (each ~3× longer); the window and the sidebar are a step of their own, the first page the
+    /// next. After launch: 5.0 → 2.35 J, and no quarter of a second over ~120 mJ where it reached
+    /// ~950 (Activity Monitor 1300–2700 for seconds; measured).
     private func prepareSettings(after delay: Duration) {
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: delay, tolerance: .milliseconds(200))
-            guard let self, self.isStarted, let metrics = self.metrics else { return }
-            guard !self.model.island.presentation.isOpen, !self.model.island.presentation.isBanner else {
-                self.prepareSettings(after: .seconds(3))
-                return
+        let seconds = Double(delay.components.seconds) + Double(delay.components.attoseconds) * 1e-18
+        let timer = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isStarted, let metrics = self.metrics else { return }
+                let presentation = self.model.island.presentation
+                guard !presentation.isOpen, !presentation.isBanner, !self.model.controller.isPointerNearIsland else {
+                    self.prepareSettings(after: .seconds(presentation.isOpen ? 3 : 1))
+                    return
+                }
+                pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
+                let more = self.prepareSettingsStep(metrics: metrics)
+                // Back to the main thread's own once the run loop has done this step's commit (its
+                // layout and drawing come in the transaction flush, after this callback).
+                let restore = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, CFIndex.max) { _, _ in
+                    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)
+                }
+                CFRunLoopAddObserver(CFRunLoopGetMain(), restore, .commonModes)
+                if more { self.prepareSettings(after: .milliseconds(400)) }
             }
-            MainThrift.lowPower(for: 0.5)
-            await Task.yield()
-            if !SettingsWindow.isPrepared {
-                let layout = self.model.layout
-                let size = IslandSettingsView.surfaceSize(layout)
-                let frame = CGRect(x: (metrics.notchRect.midX - size.width / 2).rounded(),
-                                   y: metrics.screenFrame.maxY - layout.notch.height - size.height,
-                                   width: size.width, height: size.height)
-                SettingsWindow.prepare(model: self.model, frame: frame)
-            } else if !SettingsWindow.prepareNextPage(model: self.model) {
-                return
-            }
-            self.prepareSettings(after: .milliseconds(400))
         }
+        RunLoop.main.add(timer, forMode: .default)
+    }
+
+    /// One step of the preparation; false once all is done (or Settings is open).
+    private func prepareSettingsStep(metrics: NotchMetrics) -> Bool {
+        if !SettingsWindow.isPrepared {
+            let layout = model.layout
+            let size = IslandSettingsView.surfaceSize(layout)
+            let frame = CGRect(x: (metrics.notchRect.midX - size.width / 2).rounded(),
+                               y: metrics.screenFrame.maxY - layout.notch.height - size.height,
+                               width: size.width, height: size.height)
+            SettingsWindow.prepare(model: model, frame: frame)
+            return true
+        }
+        return SettingsWindow.prepareNextPage(model: model)
     }
 
     func stop() {

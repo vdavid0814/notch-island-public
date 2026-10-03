@@ -23,6 +23,7 @@ default 5 s update). On the charger, release builds of 0.7.3.2 (29) ("before") a
 | a track change, first after launch | 112–166 | 99–105 |
 | Customize opened again | 226–232 | **66–68** |
 | Customize, first after launch | 365–371 | **96–106** |
+| building Settings after launch (6–15 s), worst second | 1300–2700 | **~245** (5.1 → 2.35 J) |
 | Siri, the first typed word after launch (Spotlight cold) | 1784 | **170** |
 | at rest without music (5 min) | 0.0–0.1 | 0.0–0.1 (one 7 mW blip) |
 
@@ -51,17 +52,20 @@ Accessibility once per opening, when a query of three letters asks; within the n
 
 Still over 100 for a second, and why:
 
-- **Right after launch** (6–12 s), building Settings ahead: 1300–2700 for a few seconds. Each step
-  (~130 ms of main thread) runs on the performance cores although its quality of service is
-  background (`qos_class_self()` says 9); a test program's main thread stays on the efficiency
-  cores, so something in the app raises it. `PRIO_DARWIN_BG` kept most of it off them but made
-  the steps 2–8× slower and still left bursts: not shipped.
+- **The launch itself** (~1000 for its first second: loading, LaunchServices).
+- **Building Settings after launch** is now ~245 at worst: its steps ran on the performance cores
+  although their quality of service was background, because a task's job runs at the task's
+  priority (`ps -M` showed the main thread at 4 and 46 in turn). From a run-loop timer at
+  background, the window and sidebar a step of their own, they stay on the efficiency cores (each
+  ~3× longer; a step waits while the pointer is on the notch).
 - **Siri's first opening after launch** (~330): ~80 ms more than later openings, all inside the
   island's own view graph (its first lazy list and layout there; a rehearsal in a window of its own,
   the input source's languages and the field editor made ahead did not reach it).
 - **A first track change after launch** (~100–160): the island emerging for the first time (a
   rehearsal of the pill in a window of its own changed nothing).
-- **Siri's app gallery** (~130): 72 cells built at once.
+- **Siri's app gallery** (~115–145): 72 cells built at once (the selection plates now only where
+  shown, ~5 % less).
+- Memory after a tour with Customize: 205 → 217 MB (the kept editor, the fade's pictures).
 
 ## 2026-10-02 (night): scrolling Settings ▸ Widgets
 

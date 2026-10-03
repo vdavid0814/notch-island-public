@@ -22,6 +22,16 @@ while time.time() - t0 < secs:
     prev, pt = cur, t
 for t, dt, e, c, p, b in rows:
     if e > 0.5: print(f"{t:6.2f}s {e:7.1f} mJ ({1000*e/dt:6.0f} mW)  cpu {c:6.1f} ms  p {p:6.1f}  billed {b:6.1f}")
+def worst_from(start):
+    best = 0; at = 0
+    for i in range(len(rows)):
+        if rows[i][0] < start: continue
+        w = [r for r in rows[i:] if r[0] - rows[i][0] < 1.0]
+        dt = sum(r[1] for r in w); e = sum(r[2] for r in w)
+        if dt >= 0.9 and 1000 * e / dt > best: best, at = 1000 * e / dt, rows[i][0]
+    return best, at
+after, after_at = worst_from(3)
+print(f"after the launch itself (from 3 s): worst 1 s {after:.0f} at {after_at:.1f}s")
 worst = 0; at = 0
 for i in range(len(rows)):
     w = [r for r in rows[i:] if r[0] - rows[i][0] < 1.0]

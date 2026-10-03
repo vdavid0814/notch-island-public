@@ -130,6 +130,8 @@ nonisolated extension BannerKind {
     private var monitorInside: Bool?
 
     private var pointerInside: Bool { monitorInside ?? trackingInside }
+    /// The pointer is over the notch (an opening may follow): work that holds the main thread waits.
+    var isPointerNearIsland: Bool { pointerInside }
 
     /// The policy's own state, for diagnostics.
     var diagnosticsSnapshot: [(String, String)] {

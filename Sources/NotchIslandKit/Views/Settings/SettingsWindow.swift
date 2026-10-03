@@ -45,7 +45,8 @@ final class SettingsWindow: NSPanel {
     /// call of `prepareNextPage`, so no single turn holds the main thread long.
     static func prepare(model: AppModel, frame: CGRect) {
         guard current == nil, frame.width > 0, frame.height > 0 else { return }
-        let window = SettingsWindow(model: model, placement: IslandSettingsView.placement(model.layout), frame: frame)
+        // The window and the sidebar only: the pages come one per step (`prepareNextPage`).
+        let window = SettingsWindow(model: model, placement: IslandSettingsView.placement(model.layout), frame: frame, showsPage: false)
         current = window
         window.root.layoutSubtreeIfNeeded()
         window.surface.sidebarHost.forcesLayout = true
@@ -103,9 +104,9 @@ final class SettingsWindow: NSPanel {
         surface.deck.closed()
     }
 
-    private init(model: AppModel, placement: SettingsPlacement, frame: CGRect) {
+    private init(model: AppModel, placement: SettingsPlacement, frame: CGRect, showsPage: Bool = true) {
         self.model = model
-        surface = SettingsSurfaceView(model: model, placement: placement)
+        surface = SettingsSurfaceView(model: model, placement: placement, showsPage: showsPage)
         super.init(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         // Over the island (its own level), under open menus and Control Center.
         level = NSWindow.Level(rawValue: IslandPanel.restingLevel.rawValue + 1)

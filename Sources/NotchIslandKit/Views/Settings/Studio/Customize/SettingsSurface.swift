@@ -140,7 +140,8 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
     /// Reduced Motion, a deep link, the island's menu.
     static let crossFade: TimeInterval = 0.18
 
-    init(model: AppModel, placement: SettingsPlacement) {
+    /// `showsPage` false (building Settings ahead): no page yet, each comes in a step of its own.
+    init(model: AppModel, placement: SettingsPlacement, showsPage: Bool = true) {
         self.model = model
         self.placement = placement
         deck = SettingsPageDeckView(model: model)
@@ -153,7 +154,7 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
         pagesHost.addSubview(sidebarHost)
         pagesHost.addSubview(deck)
         addSubview(pagesHost)
-        deck.show(model.settingsPane)
+        if showsPage { deck.show(model.settingsPane) }
         observePane()
         addSubview(overlay)
         takeEarlyRequest()

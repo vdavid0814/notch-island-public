@@ -95,7 +95,11 @@ which did not, and how to keep the look identical. The numbers are in `ENERGY-LO
   program's main thread stayed on the E cores, so something in the app raises it. `PRIO_DARWIN_BG`
   kept most of it off the P cores but made steps 2–8× slower (the island blocked up to a second)
   and still showed P bursts. Short pieces (< ~30 ms) stay on the E cores by themselves: split work,
-  or avoid it, rather than relying on `MainThrift` for long bursts.
+  or avoid it, rather than relying on `MainThrift` for long bursts. What did work for work nobody
+  waits on: run it from a **run-loop timer** (not a task, whose job brings its priority) with the
+  thread at background, and restore it in a one-shot `beforeWaiting` observer of the last order
+  (after the commit's layout and drawing): Settings' preparation 5.1 → 2.35 J, its worst second
+  2700 → 245.
 - **Splitting Siri's Home Folder scope** into its subfolders (to leave ~/Library out of Spotlight's
   search): opening ~/Pictures, ~/Music… for the scope asks the privacy prompt and blocks.
 - **Keeping the closed panel longer** (`keepDuration` 600 s): opening it from idle cost the same,
