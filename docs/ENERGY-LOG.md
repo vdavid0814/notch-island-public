@@ -4,6 +4,54 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-03 (night): opening, banners, Siri and Customize under 100 for a second
+
+Measured as Activity Monitor shows it at *View ▸ Update Frequency ▸ Very often (1 s)*: the worst
+one-second window of the app's coalition energy (`anim.py`'s "worst 1 s"; "worst 5 s" is the
+default 5 s update). On the charger, release builds of 0.7.3.2 (29) ("before") and this work
+("after"), `ab.py`, two rounds, each from a fresh launch:
+
+| scenario (worst 1 s) | before | after |
+|---|---|---|
+| opening the panel (again) | 50–52 | **30–32** |
+| opening by hover | 50–51 | **32–33** |
+| flicking it open and shut (10 × 0.25 s) | 72–79 | **55–57** |
+| hover flicked (10 × 0.3 s) | 90–96 | **70–72** |
+| page switches (12 in 5 s) | 115 | **80–92** |
+| the charger banner | 11–12 | **4–5** |
+| brightness (3 changes) | 16 | **9–10** |
+| a track change, first after launch | 112–166 | 99–105 |
+| Customize opened again | 226–232 | **66–68** |
+| Siri, the first typed word after launch (Spotlight cold) | 1784 | **170** |
+| at rest without music (5 min) | 0.0–0.1 | 0.0–0.1 (one 7 mW blip) |
+
+- **The fade style's black** (blurred, shaded, under every open island) was drawn again on the CPU at
+  every opening — with `RB_DISABLE_GPU` SwiftUI's `drawingGroup` renders on the CPU: ~40 ms of a
+  performance core, half of the opening's first frame. It is now a picture per size, kept
+  (`FadeShadeCache`), the panel's drawn ahead after launch. The same pixels within 4/255 (the
+  slow ramp lands a step apart in 0.25 % of a banner's pixels; the panel is identical).
+- **Siri's apps from memory**: the root search matched the app list it keeps and still asked
+  Spotlight for apps at every keystroke (20–30 mJ billed by Spotlight's daemon each, ~300 when
+  cold). The list now carries Spotlight's other names, apps come from it at once, and Spotlight's
+  files, the dictionary and Contacts are asked once the typing pauses (0.15 s), one search at a
+  time. With a privacy prompt pending (which holds every file search), the apps still show; before,
+  the whole list waited.
+- **Customize's editor kept**: its inspector's native controls took ~150 ms to build at every
+  opening; built at the first and kept hidden, an opening only shows it (screenshots identical).
+- **Siri's rehearsal** asks the keyboard input source for its languages ahead (~20 ms of the first
+  opening).
+
+Still over 100 for a second, and why:
+
+- **Right after launch** (6–12 s), building Settings ahead: 1300–2700 for a few seconds. Each step
+  (~130 ms of main thread) runs on the performance cores although its quality of service is
+  background (`qos_class_self()` says 9); a test program's main thread stays on the efficiency
+  cores, so something in the app raises it. `PRIO_DARWIN_BG` kept most of it off them but made
+  the steps 2–8× slower and still left bursts: not shipped.
+- **Siri's first opening after launch** (~330) and **the first Customize** (~360): one long main
+  thread turn each (layout, the field's first focus, the editor's controls).
+- **Siri's app gallery** (~130): 72 cells built at once.
+
 ## 2026-10-02 (night): scrolling Settings ▸ Widgets
 
 Scrolling the widget gallery with the trackpad showed an Energy Impact of 1300–1500 in Activity

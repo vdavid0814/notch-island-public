@@ -45,7 +45,16 @@ which did not, and how to keep the look identical. The numbers are in `ENERGY-LO
    the geometry from changing, not the reaction to it.
 4. **Cost per event against the frame**: time one step (e.g. `layoutSubtreeIfNeeded()` right after
    the change, logged). 20–24 ms in one step is a dropped frame at 60 Hz and two at 120 Hz.
-5. `NI_TRACE=1`: every main run-loop turn over 2 ms in the log ("TURN").
+5. `NI_TRACE=1`: every main run-loop turn over 2 ms in the log ("TURN"). In zsh `log` is a
+   builtin: use `/usr/bin/log stream`.
+6. **Moment by moment**: `timeline.py <scenario>` prints the coalition's energy every 50 ms, split
+   into the app's own, GPU and billed by other processes (Spotlight, Contacts…), with the P-core
+   milliseconds; `launch.py <app>` does the same for a launch and what is prepared after it. With
+   Activity Monitor at *Very often (1 s)*, its number is `anim.py`'s "worst 1 s".
+7. **What a sample's time goes through**: `fold.py <sample> "Main Thread" --by <regex> …` groups
+   the busy samples by the first of several frames (layout, graph update, commit, ours).
+8. Test programs that touch the Desktop, Documents… run unsigned trip the privacy prompt and hang
+   (and leave the prompt on screen): measure inside the app instead (a temporary env switch).
 
 ## 4. Tactics that worked
 
@@ -66,8 +75,32 @@ which did not, and how to keep the look identical. The numbers are in `ENERGY-LO
   idle); nothing at rest (~0 wake-ups/s).
 - **Read ahead, at low priority**: Siri's lists and apps at `.utility` / `.background`, kept for
   30 minutes.
+- **Draw once per size, keep the picture**: the fade style's blurred, shaded black was drawn on the
+  CPU at every opening (`RB_DISABLE_GPU`: SwiftUI's `drawingGroup` renders on the CPU) — now a
+  picture per size (`FadeShadeCache`). Look in a sample for `CABackingStoreUpdate_` / `ripc_` /
+  `vImage` under the commit: that is drawing, and drawing the same thing again is avoidable.
+- **Memory instead of a service**: Siri's apps come from the list it keeps (with Spotlight's other
+  names) instead of a Spotlight query per keystroke; Spotlight's files, the dictionary and Contacts
+  only after a 0.15 s pause in the typing, one search at a time. A service's work is billed to the
+  app ("billed" in `timeline.py`): 20–300 mJ per Spotlight query.
+- **Keep what is built, hidden**: the Customize editor (its native controls cost ~150 ms to build)
+  stays in its window hidden between openings (`DeferringHostingView` lays nothing out hidden).
 
 ## 5. Tried and dropped (measured equal or worse)
+
+- **The main thread's quality of service for long work** (October 3): a burst on the main thread
+  longer than ~40 ms ran on the performance cores even with `pthread_set_qos_class_self_np`
+  background (logged: `qos_class_self()` 9, yet 75 % of a 130 ms Settings preparation step on the
+  P cores), set before or after the task's `await`, with the task itself at `.background`. A test
+  program's main thread stayed on the E cores, so something in the app raises it. `PRIO_DARWIN_BG`
+  kept most of it off the P cores but made steps 2–8× slower (the island blocked up to a second)
+  and still showed P bursts. Short pieces (< ~30 ms) stay on the E cores by themselves: split work,
+  or avoid it, rather than relying on `MainThrift` for long bursts.
+- **Splitting Siri's Home Folder scope** into its subfolders (to leave ~/Library out of Spotlight's
+  search): opening ~/Pictures, ~/Music… for the scope asks the privacy prompt and blocks.
+- **Keeping the closed panel longer** (`keepDuration` 600 s): opening it from idle cost the same,
+  because the whole content stack leaves the hierarchy at idle; the kept page only helps
+  panel → banner → panel.
 
 An AppKit `NSScrollView` around a SwiftUI page, responsive scrolling, AppKit hover tracking instead
 of `.onHover`, one `onContinuousHover` for the gallery, scrolling the clip view's bounds by hand,

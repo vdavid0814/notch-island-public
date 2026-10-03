@@ -12,6 +12,10 @@
 | `glass-drive-test.swift` | An AppKit glass resized every frame by our own display link along SwiftUI's spring, with SwiftUI content kept still. |
 | `image-diff.swift` | Pixel difference of two screenshots. |
 | `ws/ws_bench.py <label> <app\|none\|keep:app> <scenario …>` | The app, WindowServer and coreaudiod together (coalition energy, CPU, wake-ups), with a real pointer: rest, 10 hover opens, a Settings tour, Settings ▸ General at rest. Build `ws/mouse.swift` and `ws/hideapp.swift` first. |
+| `timeline.py <scenario> [step]` | The coalition's energy every 50 ms through one `anim.py` scenario: own CPU, GPU, billed by other processes, P-core ms. |
+| `launch.py <app> [seconds]` | The same for a launch and the work prepared after it, with the worst 1 s window. `NI_ENV=KEY=value` passes an environment variable. |
+| `fold.py <sample> [thread] [--by regex …]` | A `sample` report as folded stacks, or its busy time grouped by the first regex a stack goes through. |
+| `shots.py <dir> <label=app> … -- [route …]` | Settled states screenshotted for each build (fresh launch) and compared with the first. |
 | `night.py cycle\|rest\|only <label> …` | The overnight soak: every animation and opening (panels, hover, Siri and its galleries, level/battery/AirPods/timer/drop banners, a track change, every Settings page, music paused and playing), sampled four times a second, then a rest reported per minute to catch leaks. Rows in `night/` (not committed). |
 
 Findings (September 2026, macOS 27, MacBook Air M5):
