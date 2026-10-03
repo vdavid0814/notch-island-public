@@ -68,6 +68,9 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
     case askIntelligence
     case searchWeb
     case askChatGPT
+    /// "se lunch at 1", "sm on my way", "maps cafe": a new email or message with the text, or Maps
+    /// looking for it (Spotlight's quick actions).
+    case compose(AssistantCompose)
 
     var id: String {
         switch self {
@@ -90,6 +93,7 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
         case .askIntelligence: "ask"
         case .searchWeb: "web"
         case .askChatGPT: "chatgpt"
+        case .compose(let compose): "compose:\(compose.kind.rawValue)"
         }
     }
 }
@@ -572,7 +576,13 @@ nonisolated struct FileScope: Sendable, Equatable {
             // unless a hit's name starts with the query too ("app" is more likely App Store).
             let named = Self.categories(named: text, in: settings.categories).map(AssistantRow.category)
             let hitStarts = (apps + files).contains { AssistantMatch.startsName($0.name, text) }
-            var rows = calculation + (hitStarts ? hits + named : named + hits)
+            // A quick action typed by its key ("se", "sm") or with its text comes first; its name
+            // alone ("mail") after the hits (Mail the app is more likely).
+            let compose = settings.showsActions ? AssistantCompose.parse(text) : nil
+            let composeFirst = compose.map { $0.isQuickKey || !$0.text.isEmpty } ?? false
+            var rows = calculation + (composeFirst ? [AssistantRow.compose(compose!)] : [])
+                + (hitStarts ? hits + named : named + hits)
+                + (compose != nil && !composeFirst ? [AssistantRow.compose(compose!)] : [])
             let ask: [AssistantRow] = intelligence ? [.askIntelligence] : []
             if !languageUnsupported { rows += ask }
             rows += [.searchWeb]
@@ -1167,6 +1177,9 @@ nonisolated struct FileScope: Sendable, Equatable {
             guard let url = AssistantActions.chatGPTURL(for: text) else { return }
             onClose?()
             NSWorkspace.shared.open(url)
+        case .compose(let compose):
+            onClose?()
+            AssistantActions.perform(compose)
         }
     }
 
@@ -1296,7 +1309,9 @@ nonisolated struct FileScope: Sendable, Equatable {
         if !text.isEmpty {
             let matching = settings().matching
             apps = apps.filter { $0.matches(text, matching) }
-            files = files.filter { AssistantMatch.matches($0.name, text, matching) }
+            // A `kind:` word filters by type, not by name.
+            let name = AssistantSearch.kindFilter(text).rest
+            files = files.filter { AssistantMatch.matches($0.name, name, matching) }
         }
         search(now: false)
     }
@@ -1636,6 +1651,11 @@ nonisolated enum AssistantMatch {
         let words = keptWords(of: original)
         let tokens = query.split(whereSeparator: \.isWhitespace)
         let wordStarts = tokens.allSatisfy { token in words.contains { $0.hasPrefix(token) } }
+        // Quick keys, as Spotlight's: the first letters of the name's words, all of them ("vsc"
+        // Visual Studio Code, "ss" System Settings, "se" Send Email).
+        if !wordStarts, tokens.count == 1, query.count >= 2, keptInitials(of: original).contains(query) {
+            return true
+        }
         switch mode {
         case .wordStart:
             return wordStarts
@@ -1650,7 +1670,7 @@ nonisolated enum AssistantMatch {
     /// their synonyms, commands) are matched again at every keystroke, and folding them again was
     /// most of Siri's main-thread time while typing (measured). Long texts (copies in Clipboard)
     /// are not kept; the rest goes with the lists a while after Siri closes (`forget`).
-    private struct Kept { var names: [String: String] = [:]; var words: [String: [Substring]] = [:] }
+    private struct Kept { var names: [String: String] = [:]; var words: [String: [Substring]] = [:]; var initials: [String: [String]] = [:] }
     private static let known = Mutex(Kept())
 
     private static func folded(_ text: String) -> String {
@@ -1673,6 +1693,42 @@ nonisolated enum AssistantMatch {
             known.words[text] = words
         }
         return words
+    }
+
+    /// The name's quick keys: its words' first letters, split at spaces and marks, and again with
+    /// capitals inside a word ("DeviceHub" is "dh" too). Only names of two words or more have one.
+    private static func keptInitials(of text: String) -> [String] {
+        guard text.utf8.count <= 256 else { return [] }
+        if let kept = known.withLock({ $0.initials[text] }) { return kept }
+        let initials = initials(of: text)
+        known.withLock { known in
+            if known.initials.count >= 4096 { known.initials.removeAll() }
+            known.initials[text] = initials
+        }
+        return initials
+    }
+
+    static func initials(of name: String) -> [String] {
+        let whole = fold(name).split { !$0.isLetter && !$0.isNumber }
+        var parts: [String] = []
+        var current = "", previousWasLower = false
+        for character in name {
+            guard character.isLetter || character.isNumber else {
+                if !current.isEmpty { parts.append(current) }
+                current = ""; previousWasLower = false
+                continue
+            }
+            if character.isUppercase, previousWasLower, !current.isEmpty { parts.append(current); current = "" }
+            current.append(character)
+            previousWasLower = character.isLowercase
+        }
+        if !current.isEmpty { parts.append(current) }
+        var found: [String] = []
+        for words in [whole.map(String.init), parts] where words.count >= 2 {
+            let key = fold(String(words.compactMap(\.first)))
+            if !found.contains(key) { found.append(key) }
+        }
+        return found
     }
 
     static func forget() { known.withLock { $0 = Kept() } }
@@ -1988,6 +2044,25 @@ nonisolated enum AssistantURL {
         return components?.url
     }
 
+    /// A new email or message through the system's sharing services (Mail, Messages), which fill
+    /// in the text; Maps by its URL.
+    static func perform(_ compose: AssistantCompose) {
+        let service: NSSharingService? = switch compose.kind {
+        case .email: NSSharingService(named: .composeEmail)
+        case .message: NSSharingService(named: .composeMessage)
+        case .maps: nil
+        }
+        if let service {
+            if compose.isAddress { service.recipients = [compose.text] }
+            let items: [Any] = compose.text.isEmpty || compose.isAddress ? [] : [compose.text]
+            if service.canPerform(withItems: items) {
+                service.perform(withItems: items)
+                return
+            }
+        }
+        if let url = compose.url { NSWorkspace.shared.open(url) }
+    }
+
     /// Runs one of the user's shortcuts in the background, the way the Shortcuts menu does.
     static func runShortcut(named name: String) {
         do {
@@ -2001,5 +2076,74 @@ nonisolated enum AssistantURL {
     /// The system's dictation into the focused field (the mic in the field).
     static func startDictation() {
         NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil)
+    }
+}
+
+
+/// Spotlight's quick actions that take what follows them: a new email, a new message, Maps.
+nonisolated struct AssistantCompose: Hashable, Sendable {
+    nonisolated enum Kind: String, Sendable, CaseIterable { case email, message, maps }
+
+    let kind: Kind
+    /// What follows the action's word.
+    let text: String
+    /// Typed by its quick key ("se", "sm", "sim"), not by name.
+    let isQuickKey: Bool
+
+    /// The words that start each, its quick key first.
+    static let words: [Kind: [String]] = [
+        .email: ["se", "email", "e-mail", "mail", "level"],
+        .message: ["sm", "message", "imessage", "msg", "uzenet"],
+        .maps: ["sim", "maps", "map", "terkep", "directions"],
+    ]
+
+    static func parse(_ query: String) -> AssistantCompose? {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        let first = trimmed.prefix { !$0.isWhitespace }
+        let word = String(first).lowercased().folding(options: .diacriticInsensitive, locale: nil)
+        guard let kind = Kind.allCases.first(where: { words[$0]?.contains(word) == true }) else { return nil }
+        let text = trimmed.dropFirst(first.count).trimmingCharacters(in: .whitespaces)
+        // Maps needs something to look for.
+        if kind == .maps, text.isEmpty { return nil }
+        return AssistantCompose(kind: kind, text: text, isQuickKey: words[kind]?.first == word)
+    }
+
+    var title: String {
+        switch kind {
+        case .email: text.isEmpty ? String(localized: "Send Email") : String(localized: "Send Email: “\(text)”")
+        case .message: text.isEmpty ? String(localized: "Send Message") : String(localized: "Send Message: “\(text)”")
+        case .maps: String(localized: "Search Maps for “\(text)”")
+        }
+    }
+
+    var symbol: String {
+        switch kind {
+        case .email: "envelope.fill"
+        case .message: "message.fill"
+        case .maps: "map.fill"
+        }
+    }
+
+    /// What follows is an email address alone: the recipient.
+    var isAddress: Bool { kind == .email && !text.contains(" ") && text.contains("@") }
+
+    /// Where it goes when the sharing service cannot (an address alone is the recipient; anything
+    /// else is the text).
+    var url: URL? {
+        var components = URLComponents()
+        switch kind {
+        case .email:
+            components.scheme = "mailto"
+            if !text.contains(" "), text.contains("@") { components.path = text }
+            else if !text.isEmpty { components.queryItems = [URLQueryItem(name: "body", value: text)] }
+        case .message:
+            components.scheme = "sms"
+            components.path = ""
+            if !text.isEmpty { components.queryItems = [URLQueryItem(name: "body", value: text)] }
+        case .maps:
+            components.scheme = "maps"
+            components.queryItems = [URLQueryItem(name: "q", value: text)]
+        }
+        return components.url
     }
 }

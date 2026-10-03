@@ -158,20 +158,63 @@ nonisolated enum AssistantSearch {
         // Desktop, Documents, Downloads and iCloud Drive are privacy-protected: the first search
         // there asks the user for access (one prompt per folder). `AssistantModel` therefore
         // reads files only once the user has asked for them.
-        let term = escaped(query)
-        guard !term.isEmpty, !scope.paths.isEmpty else { return [] }
+        let (rest, types) = kindFilter(query)
+        let term = escaped(rest)
+        guard !(term.isEmpty && types.isEmpty), !scope.paths.isEmpty else { return [] }
+        let kinds = types.isEmpty ? nil : "(" + types.map { "kMDItemContentTypeTree == \"\($0)\"" }.joined(separator: " || ") + ")"
+        // Only a kind ("kind:pdf"): the files of that kind used last.
+        guard !term.isEmpty else {
+            let hits = run([kinds!, notApps].joined(separator: " && "), scopes: scope.paths, fetch: 200, kind: .file)
+            return Array(hits.sorted { ($0.lastUsed ?? .distantPast) > ($1.lastUsed ?? .distantPast) }.prefix(limit))
+        }
         // Word starts ("q*"cdw), or anywhere in the name ("*q*"cd).
         let pattern = scope.anywhere ? "\"*\(term)*\"cd" : "\"\(term)*\"cdw"
         // Folders too, as in Spotlight (the recent list keeps to files). With the contents on,
         // also the files that say it (whole words from three letters on, as Spotlight indexes them).
         let name = "kMDItemDisplayName == \(pattern)"
-        let match = scope.contents && query.count >= 3 ? "(\(name) || kMDItemTextContent == \"\(term)*\"cdw)" : name
-        let predicate = "\(match) && \(notApps)"
+        let match = scope.contents && rest.count >= 3 ? "(\(name) || kMDItemTextContent == \"\(term)*\"cdw)" : name
+        let predicate = ([match, notApps] + (kinds.map { [$0] } ?? [])).joined(separator: " && ")
         let hits = run(predicate, scopes: scope.paths, fetch: max(40, limit * 3), kind: .file)
         // By name first: a file that only says the word comes after the ones called it.
-        let named = hits.filter { AssistantMatch.matches($0.name, query, scope.anywhere ? .anywhere : .wordStart) }
-        return Array((rank(named, for: query) + rank(hits.filter { !named.contains($0) }, for: query)).prefix(limit))
+        let named = hits.filter { AssistantMatch.matches($0.name, rest, scope.anywhere ? .anywhere : .wordStart) }
+        return Array((rank(named, for: rest) + rank(hits.filter { !named.contains($0) }, for: rest)).prefix(limit))
     }
+
+    /// Spotlight's `kind:` filter, anywhere in the query ("kind:pdf invoice", "report kind:image";
+    /// Hungarian names too, "kind:kép"): the content types it keeps, and the rest of the query.
+    static func kindFilter(_ query: String) -> (rest: String, types: [String]) {
+        var rest: [Substring] = [], types: [String] = []
+        for word in query.split(whereSeparator: \.isWhitespace) {
+            let lower = word.lowercased().folding(options: .diacriticInsensitive, locale: nil)
+            guard lower.hasPrefix("kind:"), let found = kinds[String(lower.dropFirst(5))] else {
+                rest.append(word)
+                continue
+            }
+            types += found.filter { !types.contains($0) }
+        }
+        return (rest.joined(separator: " "), types)
+    }
+
+    /// The `kind:` names and the content types they stand for.
+    static let kinds: [String: [String]] = {
+        let table: [([String], [String])] = [
+            (["pdf"], ["com.adobe.pdf"]),
+            (["image", "images", "photo", "photos", "picture", "pictures", "kep", "kepek", "foto"], ["public.image"]),
+            (["movie", "movies", "video", "videos", "film"], ["public.movie"]),
+            (["music", "audio", "song", "songs", "zene", "hang"], ["public.audio"]),
+            (["folder", "folders", "mappa"], ["public.folder"]),
+            (["document", "documents", "doc", "docs", "dokumentum"], ["public.text", "public.composite-content", "public.presentation", "public.spreadsheet"]),
+            (["text", "szoveg"], ["public.text"]),
+            (["presentation", "keynote", "slides", "prezentacio"], ["public.presentation"]),
+            (["spreadsheet", "numbers", "excel", "tablazat"], ["public.spreadsheet"]),
+            (["archive", "zip", "archivum"], ["public.archive"]),
+            (["code", "source", "kod"], ["public.source-code"]),
+            (["email", "mail", "level"], ["com.apple.mail.emlx"]),
+        ]
+        var kinds: [String: [String]] = [:]
+        for (names, types) in table { for name in names { kinds[name] = types } }
+        return kinds
+    }()
 
     /// Files used in the last month, most recent first (the Files suggestion).
     @concurrent static func recentFiles(limit: Int = 30, scope: FileScope = FileScope()) async -> [AssistantHit] {

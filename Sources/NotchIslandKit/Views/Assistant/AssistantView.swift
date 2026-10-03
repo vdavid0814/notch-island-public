@@ -513,6 +513,8 @@ struct RowView: View {
             Image(systemName: "safari").foregroundStyle(.blue).imageScale(.large)
         case .askChatGPT:
             Image(systemName: "bubble.left.and.text.bubble.right.fill").foregroundStyle(.green).imageScale(.large)
+        case .compose(let compose):
+            AssistantTile(symbol: compose.symbol, color: compose.kind == .maps ? .green : .blue)
         }
     }
 
@@ -552,6 +554,7 @@ struct RowView: View {
         case .askIntelligence: String(localized: "Ask Apple Intelligence")
         case .searchWeb: String(localized: "Search the Web")
         case .askChatGPT: String(localized: "Ask ChatGPT")
+        case .compose(let compose): compose.title
         }
     }
 }

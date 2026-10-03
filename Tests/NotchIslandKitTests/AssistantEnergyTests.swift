@@ -220,7 +220,8 @@ final class ManualClock: Clock {
         }
         #expect(shown == [
             "s: hit:/stub/app/Safari | hit:/stub/app/Smile Studio | hit:/stub/app/Simulator | command:settings:general | command:settings:widgets | pane:com.apple.Software-Update-Settings.extension | pane:com.apple.settings.Storage | hit:/stub/file/smile.png | hit:/stub/file/Small print.pdf | hit:/stub/file/sms.txt | window:1:0 | window:2:0 | action:island:stopwatch | action:island:shelf | web | chatgpt",
-            "sm: hit:/stub/app/Smile Studio | hit:/stub/file/smile.png | hit:/stub/file/Small print.pdf | hit:/stub/file/sms.txt | window:2:0 | action:shortcut:Smile back | emoji:🔸 | emoji:🔹 | web | chatgpt",
+            // "sm" is also Send Message's quick key, and Stage Manager's and the shortcut's initials.
+            "sm: compose:message | hit:/stub/app/Smile Studio | pane:com.apple.Desktop-Settings.extension | hit:/stub/file/smile.png | hit:/stub/file/Small print.pdf | hit:/stub/file/sms.txt | window:2:0 | action:shortcut:Smile back | action:shortcut:Send message | emoji:🔸 | emoji:🔹 | web | chatgpt",
             "smi: hit:/stub/app/Smile Studio | hit:/stub/file/smile.png | window:2:0 | action:shortcut:Smile back | emoji:😀 | emoji:😃 | category:7 | web | chatgpt",
             "smil: hit:/stub/app/Smile Studio | hit:/stub/file/smile.png | window:2:0 | action:shortcut:Smile back | emoji:😀 | emoji:😃 | category:7 | web | chatgpt",
             "smile: hit:/stub/app/Smile Studio | hit:/stub/file/smile.png | window:2:0 | action:shortcut:Smile back | emoji:😀 | emoji:😊 | category:7 | web | chatgpt",

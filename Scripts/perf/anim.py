@@ -14,10 +14,18 @@ from bench import url
 SCENARIOS = {
     # Nothing driven: what the island costs while left alone.
     "rest": [(None, 10)],
+    # Banners and pills right after the panel was open (it is kept, hidden, for a while).
+    "after-open": [("open?page=home", 2), ("close", 2.5), ("demo/volume?level=0.3", 0.5), ("demo/volume?level=0.6", 0.5), ("demo/volume?level=0.8", 3), ("demo/charging", 3), ("demo/reset", 2)],
+    "banners": [("demo/volume?level=0.3", 0.5), ("demo/volume?level=0.6", 0.5), ("demo/volume?level=0.8", 3), ("demo/charging", 3), ("demo/reset", 2)],
     "customize": [("customize", 4), ("customize/close", 3)],
+    # The widget studio: Settings ▸ Widgets, Now Playing customized, elements picked, closed.
+    "studio": [("settings/widgets", 2), ("widget/nowplaying/customize", 3), ("demo/select?element=title", 1.5),
+               ("demo/select?element=artwork", 1.5), ("demo/select?element=", 1.5), ("customize/close", 2.5), ("close", 3)],
     "brightness": [("demo/brightness?level=0.3", 0.5), ("demo/brightness?level=0.6", 0.5), ("demo/brightness?level=0.8", 3)],
     "track": [("demo/media", 4), ("demo/reset", 2)],
     "siri-type-again": [("demo/siritype?text=saf", 3), ("close", 3)],
+    # A longer query typed at ~8 letters a second, the panel already open.
+    "siri-type-long": [("siri", 1.5), ("demo/siritype?text=system%20settings", 4), ("close", 3)],
     "open-home": [("open?page=home", 2.5), ("close", 3)],
     "open-timer": [("open?page=timer", 2.5), ("close", 3)],
     "open-shelf": [("open?page=shelf", 2.5), ("close", 3)],
