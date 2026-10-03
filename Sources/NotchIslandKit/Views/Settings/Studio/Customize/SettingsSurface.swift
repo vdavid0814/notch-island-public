@@ -114,7 +114,14 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
     var pagesView: NSView { pagesHost }
     /// The sidebar (SwiftUI), under the deck.
     let sidebarHost: DeferringHostingView<AnyView>
+    /// The editor while Customize shows (opening, open, closing).
     private var editorHost: NSHostingView<AnyView>?
+    /// The editor, built at the first Customize and kept, hidden, for the next: built afresh at
+    /// every opening, its inspector's native controls took ~150 ms of a performance core, Activity
+    /// Monitor ~240 for a second (measured). Hidden, it lays nothing out (`DeferringHostingView`).
+    private var keptEditor: DeferringHostingView<AnyView>?
+    /// Counts the openings: a new one gives the kept editor a new editing session.
+    private var editorOpenings = 0
     private let overlay = FlierOverlay()
     private var flier: CALayer?
     /// A step of the transition waiting for its moment (cancelled by the next one).
@@ -234,6 +241,7 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
         needsLayout = true
         sidebarHost.rootView = pagesRoot
         if let id = model.studio.customizing, editorHost != nil { editorHost?.rootView = editorRoot(id) }
+        // A hidden kept editor takes the new placement when it opens next (`makeEditorHost`).
     }
 
     private var pagesRoot: AnyView {
@@ -244,7 +252,7 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
     }
 
     private func editorRoot(_ id: WidgetID) -> AnyView {
-        AnyView(CustomizeEditor(widgetID: id, placement: placement, close: { [weak self] in self?.close() })
+        AnyView(CustomizeEditor(widgetID: id, opening: editorOpenings, placement: placement, close: { [weak self] in self?.close() })
             .environment(model)
             .environment(\.colorScheme, .dark)
             .environment(\.appearsActive, true)
@@ -399,7 +407,7 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
     func cancel() {
         cancelPending()
         removeFlier()
-        editorHost?.removeFromSuperview()
+        editorHost?.isHidden = true
         editorHost = nil
         pagesHost.isHidden = false
         pagesHost.alphaValue = 1
@@ -413,12 +421,21 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
 
     private func makeEditorHost(_ id: WidgetID) -> NSHostingView<AnyView> {
         if let editorHost { return editorHost }
-        let host = NSHostingView(rootView: editorRoot(id))
+        editorOpenings += 1
+        if let kept = keptEditor {
+            kept.rootView = editorRoot(id)
+            kept.frame = bounds
+            kept.isHidden = false
+            editorHost = kept
+            return kept
+        }
+        let host = DeferringHostingView(rootView: editorRoot(id))
         host.sizingOptions = []
         host.safeAreaRegions = []
         host.wantsLayer = true
         host.frame = bounds
         addSubview(host, positioned: .below, relativeTo: overlay)
+        keptEditor = host
         editorHost = host
         return host
     }
@@ -426,8 +443,7 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
     private func tearDownEditor() {
         guard let editor = editorHost else { return }
         editorHost = nil
-        MainThrift.lowPower(for: 0.3)
-        editor.removeFromSuperview()
+        editor.isHidden = true
     }
 
     /// Where the widget is on the stage now, in this view.

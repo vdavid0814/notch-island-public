@@ -9,6 +9,9 @@ import SwiftUI
 /// Laid out by `CustomizeLayout`, the same frames the transition flies the widget into.
 struct CustomizeEditor: View {
     let widgetID: WidgetID
+    /// Which opening of Customize this is: the editor is kept between them, and each opening edits
+    /// afresh (a new session).
+    var opening = 0
     let placement: SettingsPlacement
     let close: () -> Void
 
@@ -79,8 +82,15 @@ struct CustomizeEditor: View {
                 }
             }
         }
-        .onAppear {
-            if session == nil { session = EditorSession(widget: widgetID, store: model.editedWidgets) }
+        .onChange(of: opening, initial: true) {
+            let isFirst = session == nil
+            let fresh = EditorSession(widget: widgetID, store: model.editedWidgets)
+            session = fresh
+            // The first time the panes' own appearance does this.
+            if !isFirst {
+                model.studio.session = fresh
+                isFocused = true
+            }
         }
         .onChange(of: model.editedWidgets.board.contains(widgetID)) { _, exists in
             // Removed elsewhere (the island's context menu): nothing left to edit.
