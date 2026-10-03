@@ -65,22 +65,25 @@ import SwiftUI
     /// The fade style's black for the panel's pages, drawn ahead and unseen on the efficiency cores
     /// (`FadeShadeCache`): the first opening after launch then only shows it.
     private func prepareShades() {
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(3), tolerance: .milliseconds(500))
-            guard let self, self.isStarted, self.model.effectiveGlassStyle == .fade,
-                  !self.model.island.presentation.isOpen else { return }
-            let layout = self.model.layout
-            let scale = self.panel?.screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-            var sizes: [CGSize] = []
-            for page in ExpandedPage.allCases {
-                let size = layout.outline(for: .expanded(page)).size
-                let shade = CGSize(width: size.width, height: size.height + IslandLayout.overdraw)
-                if !sizes.contains(shade) { sizes.append(shade) }
+        let timer = Timer(timeInterval: 3, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isStarted, self.model.effectiveGlassStyle == .fade,
+                      !self.model.island.presentation.isOpen else { return }
+                let layout = self.model.layout
+                let scale = self.panel?.screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+                var sizes: [CGSize] = []
+                for page in ExpandedPage.allCases {
+                    let size = layout.outline(for: .expanded(page)).size
+                    let shade = CGSize(width: size.width, height: size.height + IslandLayout.overdraw)
+                    if !sizes.contains(shade) { sizes.append(shade) }
+                }
+                // From a run-loop timer at background, as Settings' preparation (`prepareSettings`).
+                MainThrift.atBackground {
+                    FadeShadeCache.prepare(solidDepth: IslandLayout.overdraw + layout.notch.height, sizes: sizes, scale: scale)
+                }
             }
-            MainThrift.lowPower(for: 0.3)
-            await Task.yield()
-            FadeShadeCache.prepare(solidDepth: IslandLayout.overdraw + layout.notch.height, sizes: sizes, scale: scale)
         }
+        RunLoop.main.add(timer, forMode: .default)
     }
 
     /// Settings is built once, unseen, a while after launch (`SettingsSurfaceView.prepare`):
@@ -107,14 +110,9 @@ import SwiftUI
                     self.prepareSettings(after: .seconds(presentation.isOpen ? 3 : 1))
                     return
                 }
-                pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
-                let more = self.prepareSettingsStep(metrics: metrics)
                 // Back to the main thread's own once the run loop has done this step's commit (its
                 // layout and drawing come in the transaction flush, after this callback).
-                let restore = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, CFIndex.max) { _, _ in
-                    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)
-                }
-                CFRunLoopAddObserver(CFRunLoopGetMain(), restore, .commonModes)
+                let more = MainThrift.atBackground { self.prepareSettingsStep(metrics: metrics) }
                 if more { self.prepareSettings(after: .milliseconds(400)) }
             }
         }

@@ -60,4 +60,18 @@ nonisolated enum Thrifty {
         RunLoop.main.add(timer, forMode: .common)
         restore = timer
     }
+
+    /// `work` with the main thread at background quality of service (the efficiency cores), until
+    /// the run loop has committed what it left (layout, drawing). Only from a run-loop timer or
+    /// observer: in a task's job the job's own priority holds the thread up, and long work ran on
+    /// the performance cores whatever was set (`ps -M`: 4 and 46 in turn, measured October 3).
+    static func atBackground<T>(_ work: () -> T) -> T {
+        guard isEnabled else { return work() }
+        pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
+        let restore = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, CFIndex.max) { _, _ in
+            pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), restore, .commonModes)
+        return work()
+    }
 }

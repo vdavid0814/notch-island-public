@@ -653,7 +653,7 @@ private struct AnswerPane: View {
     static func run(model: AppModel) {
         let size = model.layout.size(for: .assistant(.list))
         guard size.width > 0, size.height > 0 else { return }
-        MainThrift.lowPower(for: 0.5)
+        // At background quality of service by its caller (`MainThrift.atBackground`).
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: .darkAqua)

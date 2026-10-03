@@ -306,8 +306,15 @@ import Observation
                 try? await Task.sleep(for: .seconds(12), tolerance: .seconds(3))
                 guard let self, self.isRunning, !self.island.presentation.isAssistant else { return }
                 await self.assistant.prewarm()
-                guard self.isRunning, !self.island.presentation.isOpen else { return }
-                AssistantRehearsal.run(model: self)
+                // The rehearsal from a run-loop timer at background (`MainThrift.atBackground`): in
+                // this task's job the main thread's priority rose with it, on the performance cores.
+                let timer = Timer(timeInterval: 0.05, repeats: false) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self, self.isRunning, !self.island.presentation.isOpen else { return }
+                        MainThrift.atBackground { AssistantRehearsal.run(model: self) }
+                    }
+                }
+                RunLoop.main.add(timer, forMode: .default)
             }
         }
     }
