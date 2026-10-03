@@ -516,6 +516,10 @@ struct RowView: View {
             Image(systemName: "bubble.left.and.text.bubble.right.fill").foregroundStyle(.green).imageScale(.large)
         case .compose(let compose):
             AssistantTile(symbol: compose.symbol, color: compose.kind == .maps ? .green : .blue)
+        case .menuItem(let item):
+            Image(nsImage: AssistantIcons.app(item.appPath, scale: displayScale))
+                .resizable()
+                .aspectRatio(contentMode: .fit)
         }
     }
 
@@ -528,6 +532,7 @@ struct RowView: View {
         case .contact(let contact): contact.detail
         case .event(let event): Self.when(event)
         case .bookmark(let bookmark): bookmark.url.host() ?? bookmark.browser
+        case .menuItem(let item): "\(item.appName) ▸ \(item.location)"
         default: nil
         }
     }
@@ -556,6 +561,7 @@ struct RowView: View {
         case .searchWeb: String(localized: "Search the Web")
         case .askChatGPT: String(localized: "Ask ChatGPT")
         case .compose(let compose): compose.title
+        case .menuItem(let item): item.title
         }
     }
 }

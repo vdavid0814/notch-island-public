@@ -71,6 +71,8 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
     /// "se lunch at 1", "sm on my way", "maps cafe": a new email or message with the text, or Maps
     /// looking for it (Spotlight's quick actions).
     case compose(AssistantCompose)
+    /// A command in the menu bar of the app the user is in (Return chooses it there).
+    case menuItem(AssistantMenuItem)
 
     var id: String {
         switch self {
@@ -94,6 +96,7 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
         case .searchWeb: "web"
         case .askChatGPT: "chatgpt"
         case .compose(let compose): "compose:\(compose.kind.rawValue)"
+        case .menuItem(let item): "menu:\(item.id)"
         }
     }
 }
@@ -194,6 +197,8 @@ nonisolated struct AssistantSources: Sendable {
     var bookmarks: @Sendable () async -> [AssistantBookmark] = { [] }
     /// The currencies' rates per euro (fetched at most once a day); nil when they cannot be had.
     var rates: @Sendable () async -> [String: Double]? = { nil }
+    /// The menu bar commands of the app with this process id.
+    var menuItems: @Sendable (pid_t) async -> [AssistantMenuItem] = { _ in [] }
 
     static let live = AssistantSources(
         apps: { await AssistantSearch.apps(matching: $0, limit: $1) },
@@ -210,7 +215,11 @@ nonisolated struct AssistantSources: Sendable {
         contactsAccess: { ContactsLookup.access() },
         requestContacts: { await ContactsLookup.request() },
         bookmarks: { await BrowserBookmarks.all() },
-        rates: { await CurrencyRates.shared.rates() }
+        rates: { await CurrencyRates.shared.rates() },
+        menuItems: { pid in
+            guard let app = NSRunningApplication(processIdentifier: pid) else { return [] }
+            return await AppMenus.items(of: app)
+        }
     )
 }
 
@@ -254,6 +263,11 @@ nonisolated struct FileScope: Sendable, Equatable {
     private(set) var apps: [AssistantHit] = [] { didSet { if apps != oldValue { listsVersion &+= 1 } } }
     /// Root search hits, or the Files list (recent files, or the ones matching the query).
     private(set) var files: [AssistantHit] = [] { didSet { if files != oldValue { listsVersion &+= 1 } } }
+    /// The menu bar commands of the app the user was in when Siri opened (`menuApp`), read once
+    /// per opening, when a query of three letters or more first asks for them.
+    private(set) var menuItems: [AssistantMenuItem]? { didSet { if menuItems != oldValue { listsVersion &+= 1 } } }
+    @ObservationIgnored private var menuApp: pid_t?
+    @ObservationIgnored private var menuTask: Task<Void, Never>?
     /// Every app, most recently used first: the Applications gallery, filtered in memory.
     private(set) var allApps: [AssistantHit] = [] { didSet { if allApps != oldValue { listsVersion &+= 1 } } }
     /// When `allApps` was read from Spotlight: it is kept across openings (asking Spotlight and
@@ -558,7 +572,8 @@ nonisolated struct FileScope: Sendable, Equatable {
                 + system
                 + (settings.showsFiles ? files.map(AssistantRow.hit) : [])
                 + (settings.showsWindows ? windows(matching: text).prefix(few).map(AssistantRow.window) : [])
-                + (settings.showsActions ? actions(matching: text).prefix(Self.rootActionLimit).map(AssistantRow.action) : [])
+                + (settings.showsActions ? actions(matching: text).prefix(Self.rootActionLimit).map(AssistantRow.action)
+                   + menuItems(matching: text).prefix(few).map(AssistantRow.menuItem) : [])
                 + (settings.showsPeople ? contacts.prefix(few).map(AssistantRow.contact)
                    + (calendar == .granted ? events.prefix(few).map(AssistantRow.event) : []) : [])
                 + (settings.showsBookmarks ? bookmarks(matching: text).prefix(few).map(AssistantRow.bookmark) : [])
@@ -791,6 +806,9 @@ nonisolated struct FileScope: Sendable, Equatable {
             intelligenceAvailable = Self.readIntelligenceNow()
             knownIntelligence = intelligenceAvailable
         }
+        // The app the user is in (the island never takes the front): its menus are searched.
+        let front = NSWorkspace.shared.frontmostApplication
+        menuApp = front.flatMap { $0.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : $0.processIdentifier }
         // The app list is read ahead (one Spotlight query, off the main thread), so the gallery
         // opens full.
         loadLists(for: .applications, query: "")
@@ -887,6 +905,9 @@ nonisolated struct FileScope: Sendable, Equatable {
         windowsTask = nil
         askTask?.cancel()
         askTask = nil
+        menuTask?.cancel()
+        menuTask = nil
+        menuItems = nil
         searchPending = false
         cancelDeferredReturn()
         category = nil
@@ -1180,6 +1201,10 @@ nonisolated struct FileScope: Sendable, Equatable {
         case .compose(let compose):
             onClose?()
             AssistantActions.perform(compose)
+        case .menuItem(let item):
+            onClose?()
+            // Once Siri has let go of the keyboard: the app takes the command as from its menu.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { AppMenus.press(item) }
         }
     }
 
@@ -1503,6 +1528,7 @@ nonisolated struct FileScope: Sendable, Equatable {
     private func loadLists(for category: AssistantCategory?, query: String) {
         let settings = settings()
         let rootQuery = category == nil && !query.isEmpty
+        loadMenus(rootQuery: rootQuery && query.count >= 3, settings: settings)
         loadWindows(for: category, rootQuery: rootQuery, settings: settings)
         let isStale = allAppsRead.map { Date().timeIntervalSince($0) > Self.appsLifetime } ?? true
         // Root queries take their apps from it as well (`search`): an old list is read again then too.
@@ -1544,6 +1570,25 @@ nonisolated struct FileScope: Sendable, Equatable {
             // Asked for something else while this ran (the task is single-flight).
             self.loadLists(for: self.category, query: self.trimmedQuery)
         }
+    }
+
+    /// The front app's menu commands, once per opening, at utility priority.
+    private func loadMenus(rootQuery: Bool, settings: SiriSettings) {
+        guard rootQuery, settings.showsActions, menuItems == nil, menuTask == nil, let pid = menuApp else { return }
+        let sources = sources
+        menuTask = Task(priority: .utility) { [weak self] in
+            let found = await sources.menuItems(pid)
+            guard !Task.isCancelled, let self else { return }
+            self.replaceLists { self.menuItems = found }
+        }
+    }
+
+    /// The menu commands whose name (or quick key) matches, those starting with the query first.
+    private func menuItems(matching text: String) -> [AssistantMenuItem] {
+        guard let menuItems, !text.isEmpty else { return [] }
+        let matching = settings().matching
+        let found = menuItems.filter { AssistantMatch.matches($0.title, text, matching) }
+        return found.filter { AssistantMatch.startsName($0.title, text) } + found.filter { !AssistantMatch.startsName($0.title, text) }
     }
 
     /// The running apps for root queries (no Accessibility), their windows' titles only for ⌘6.

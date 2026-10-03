@@ -25,6 +25,8 @@ SCENARIOS = {
     "track": [("demo/media", 4), ("demo/reset", 2)],
     "siri-type-again": [("demo/siritype?text=saf", 3), ("close", 3)],
     # A longer query typed at ~8 letters a second, the panel already open.
+    # A query that reaches the front app's menu commands (read once per opening).
+    "siri-menu": [("demo/siritype?text=zoom", 3), ("close", 3)],
     "siri-type-long": [("siri", 1.5), ("demo/siritype?text=system%20settings", 4), ("close", 3)],
     "open-home": [("open?page=home", 2.5), ("close", 3)],
     "open-timer": [("open?page=timer", 2.5), ("close", 3)],
