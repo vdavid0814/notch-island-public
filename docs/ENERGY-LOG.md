@@ -22,6 +22,7 @@ default 5 s update). On the charger, release builds of 0.7.3.2 (29) ("before") a
 | brightness (3 changes) | 16 | **9–10** |
 | a track change, first after launch | 112–166 | 99–105 |
 | Customize opened again | 226–232 | **66–68** |
+| Customize, first after launch | 365–371 | **96–106** |
 | Siri, the first typed word after launch (Spotlight cold) | 1784 | **170** |
 | at rest without music (5 min) | 0.0–0.1 | 0.0–0.1 (one 7 mW blip) |
 
@@ -38,8 +39,15 @@ default 5 s update). On the charger, release builds of 0.7.3.2 (29) ("before") a
   the whole list waited.
 - **Customize's editor kept**: its inspector's native controls took ~150 ms to build at every
   opening; built at the first and kept hidden, an opening only shows it (screenshots identical).
+- **Customize's editor built ahead**: the last step of building Settings after launch builds it too
+  (hidden), so the first Customize only shows it; the launch's preparation ~5.1 → ~5.35 J.
 - **Siri's rehearsal** asks the keyboard input source for its languages ahead (~20 ms of the first
   opening).
+
+New in Siri, as Spotlight in macOS 26 (none of it costs anything until used): quick keys (a name's
+initials: "vsc", "ss"), `kind:` filters for files ("kind:pdf invoice", "kind:kép"), quick actions
+("se …" email, "sm …" message, "maps …"), and the front app's menu commands (read through
+Accessibility once per opening, when a query of three letters asks; within the noise).
 
 Still over 100 for a second, and why:
 
@@ -48,8 +56,11 @@ Still over 100 for a second, and why:
   background (`qos_class_self()` says 9); a test program's main thread stays on the efficiency
   cores, so something in the app raises it. `PRIO_DARWIN_BG` kept most of it off them but made
   the steps 2–8× slower and still left bursts: not shipped.
-- **Siri's first opening after launch** (~330) and **the first Customize** (~360): one long main
-  thread turn each (layout, the field's first focus, the editor's controls).
+- **Siri's first opening after launch** (~330): ~80 ms more than later openings, all inside the
+  island's own view graph (its first lazy list and layout there; a rehearsal in a window of its own,
+  the input source's languages and the field editor made ahead did not reach it).
+- **A first track change after launch** (~100–160): the island emerging for the first time (a
+  rehearsal of the pill in a window of its own changed nothing).
 - **Siri's app gallery** (~130): 72 cells built at once.
 
 ## 2026-10-02 (night): scrolling Settings ▸ Widgets
