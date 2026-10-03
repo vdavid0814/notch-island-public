@@ -62,6 +62,8 @@ final class SettingsWindow: NSPanel {
             current.surface.deck.prepare(pane)
             return true
         }
+        // Customize's editor too, hidden: the first Customize after launch then only shows it.
+        if current.surface.prepareEditor() { return true }
         return current.rehearse(order)
     }
 

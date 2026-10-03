@@ -440,6 +440,25 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
         return host
     }
 
+    /// Builds the kept editor ahead, hidden, laid out once (for the board's first widget; each
+    /// opening gives it the widget it edits). False when it is there already or there is nothing
+    /// to customize.
+    func prepareEditor() -> Bool {
+        guard keptEditor == nil, editorHost == nil, let id = model.editedWidgets.board.widgets.first?.id else { return false }
+        let host = DeferringHostingView(rootView: editorRoot(id))
+        host.sizingOptions = []
+        host.safeAreaRegions = []
+        host.wantsLayer = true
+        host.frame = bounds
+        host.isHidden = true
+        addSubview(host, positioned: .below, relativeTo: overlay)
+        host.forcesLayout = true
+        host.layoutSubtreeIfNeeded()
+        host.forcesLayout = false
+        keptEditor = host
+        return true
+    }
+
     private func tearDownEditor() {
         guard let editor = editorHost else { return }
         editorHost = nil
