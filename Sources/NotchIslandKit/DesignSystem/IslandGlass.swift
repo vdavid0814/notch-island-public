@@ -181,8 +181,9 @@ private struct FadeShadePicture: View {
 
     private static var pictures: [Key: CGImage] = [:]
     private static var order: [Key] = []
-    /// The sizes one session settles at; the oldest goes first past this.
-    private static let capacity = 16
+    /// The sizes one session settles at (the panel, a pill or two, the banners); the least recently
+    /// shown goes first past this. The panel's picture is ~3 MB.
+    private static let capacity = 8
 
     static func picture(solidDepth: CGFloat, size: CGSize, stretch: CGFloat, scale: CGFloat) -> CGImage? {
         guard size.width >= 1, size.height >= 1, scale > 0 else { return nil }

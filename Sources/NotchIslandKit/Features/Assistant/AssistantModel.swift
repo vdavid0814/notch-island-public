@@ -2137,7 +2137,7 @@ nonisolated struct AssistantCompose: Hashable, Sendable {
 
     /// The words that start each, its quick key first.
     static let words: [Kind: [String]] = [
-        .email: ["se", "email", "e-mail", "mail", "level"],
+        .email: ["se", "email", "e-mail", "mail"],
         .message: ["sm", "message", "imessage", "msg", "uzenet"],
         .maps: ["sim", "maps", "map", "terkep", "directions"],
     ]

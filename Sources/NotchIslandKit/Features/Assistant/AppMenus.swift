@@ -28,6 +28,9 @@ nonisolated enum AppMenus {
     static let timeout: Float = 0.25
     /// Enough for any app's menus; a runaway menu (a Recent list of hundreds) stops here.
     static let itemLimit = 800
+    /// All the reading may take: an app that answers slowly (each call may wait `timeout`) leaves
+    /// its menus partly read rather than holding a thread.
+    static let budget: TimeInterval = 1
 
     /// The menu items of the app with `pid`, the Apple menu left out (Spotlight lists the system's
     /// own commands already).
@@ -39,19 +42,20 @@ nonisolated enum AppMenus {
         var found: [AssistantMenuItem] = []
         let name = app.localizedName ?? ""
         let path = app.bundleURL?.path ?? ""
+        let deadline = Date().addingTimeInterval(budget)
         let menus: [AXUIElement] = value(bar, kAXChildrenAttribute) ?? []
-        for menuBarItem in menus.dropFirst() where found.count < itemLimit {
+        for menuBarItem in menus.dropFirst() where found.count < itemLimit && Date() < deadline {
             guard let title: String = value(menuBarItem, kAXTitleAttribute), !title.isEmpty,
                   let menu = (value(menuBarItem, kAXChildrenAttribute) as [AXUIElement]?)?.first else { continue }
-            collect(menu, path: [title], depth: 0, into: &found, app: (name, path, app.processIdentifier))
+            collect(menu, path: [title], depth: 0, into: &found, app: (name, path, app.processIdentifier), deadline: deadline)
         }
         return found
     }
 
     private static func collect(_ menu: AXUIElement, path: [String], depth: Int, into found: inout [AssistantMenuItem],
-                                app: (name: String, path: String, pid: pid_t)) {
+                                app: (name: String, path: String, pid: pid_t), deadline: Date) {
         let items: [AXUIElement] = value(menu, kAXChildrenAttribute) ?? []
-        for item in items where found.count < itemLimit {
+        for item in items where found.count < itemLimit && Date() < deadline {
             // Title, enabled and submenu in one round trip.
             var values: CFArray?
             let attributes = [kAXTitleAttribute, kAXEnabledAttribute, kAXChildrenAttribute] as CFArray
@@ -60,7 +64,7 @@ nonisolated enum AppMenus {
             guard let title = list[0] as? String, !title.isEmpty else { continue }
             let submenu = (list[2] as? [AXUIElement])?.first
             if let submenu {
-                if depth < 2 { collect(submenu, path: path + [title], depth: depth + 1, into: &found, app: app) }
+                if depth < 2 { collect(submenu, path: path + [title], depth: depth + 1, into: &found, app: app, deadline: deadline) }
                 continue
             }
             guard (list[1] as? Bool) == true else { continue }
