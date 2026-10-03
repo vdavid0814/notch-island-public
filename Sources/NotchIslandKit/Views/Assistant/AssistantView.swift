@@ -413,11 +413,17 @@ private struct SelectionPlate: View {
         self.shape = AnyShape(shape)
     }
 
+    /// Only there while shown (fading in and out as before): at no opacity in every cell, the
+    /// gallery's 72 plates were each a shape to lay out and update at every change of the list.
     var body: some View {
-        shape
-            .fill(Color.islandAccent.opacity(0.16))
-            .opacity(isShown ? 1 : 0)
-            .animation(.easeOut(duration: 0.12), value: isShown)
+        ZStack {
+            if isShown {
+                shape
+                    .fill(Color.islandAccent.opacity(0.16))
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: isShown)
     }
 }
 
