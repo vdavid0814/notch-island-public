@@ -1,3 +1,4 @@
+import Carbon
 import SwiftUI
 
 /// Siri in the notch, as spare as the system's Search window: the Siri orb in the header band and
@@ -654,6 +655,12 @@ private struct AnswerPane: View {
         window.contentView = host
         host.layoutSubtreeIfNeeded()
         host.display()
+        // The field's first focus asks the keyboard input source for its languages, which the
+        // text system works out from ICU's tables (~20 ms of the first opening, measured): asked
+        // here once, unseen, they are kept for it.
+        for source in [TISCopyCurrentKeyboardInputSource(), TISCopyCurrentKeyboardLayoutInputSource()] {
+            if let source = source?.takeRetainedValue() { _ = TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages) }
+        }
         // Gone a turn later, with what it built.
         DispatchQueue.main.async {
             window.contentView = nil
