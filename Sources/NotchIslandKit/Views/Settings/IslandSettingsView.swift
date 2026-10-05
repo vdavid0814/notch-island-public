@@ -199,6 +199,8 @@ struct IslandSettingsView: View {
             guard !Task.isCancelled else { return }
             model.permissions.refresh()
             model.launchAtLogin.refresh()
+            // The pages' fade is over by now.
+            SettingsWindow.verifyShown(model: model)
         }
     }
 }

@@ -294,6 +294,7 @@ nonisolated extension BannerKind {
         wantsExpanded = false
         wantsAssistant = false
         if model.island.isPinned { model.island.isPinned = false }
+        Log.island.notice("open settings from \(String(describing: self.model.island.presentation), privacy: .public)\(self.wantsSettings ? " (already open)" : "", privacy: .public)")
         guard !wantsSettings else { return }
         wantsSettings = true
         openWasUserInitiated = true

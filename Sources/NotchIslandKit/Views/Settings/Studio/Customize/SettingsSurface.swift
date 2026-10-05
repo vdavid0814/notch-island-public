@@ -52,6 +52,15 @@ final class SettingsSurfaceAnchor: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        attach()
+        if window != nil, surface == nil, !isClosing {
+            Log.window.notice("settings anchor in its window without a size yet; waiting for its layout")
+        }
+    }
+
+    /// Settings' window over this view, once it is in a window with a size. Put into the window
+    /// before SwiftUI had sized it, the view was given up on, and Settings grew empty.
+    private func attach() {
         guard window != nil, surface == nil, !isClosing, let frame = screenFrame else { return }
         let settings = SettingsWindow.reused(model: model, placement: placement, frame: frame)
         surface = settings.surface
@@ -83,7 +92,8 @@ final class SettingsSurfaceAnchor: NSView {
 
     /// Settings' window over this view's place.
     func place() {
-        guard surface != nil, !isClosing, let frame = screenFrame else { return }
+        guard surface != nil else { return attach() }
+        guard !isClosing, let frame = screenFrame else { return }
         SettingsWindow.current?.place(frame)
     }
 
@@ -197,6 +207,15 @@ final class SettingsSurfaceView: NSView, CustomizeDriving {
     }
 
     static let hideKey = "settingsHide"
+
+    /// What decides whether the pages can be seen, for the log (`SettingsWindow.verifyShown`).
+    var visibilityDescription: String {
+        let page = deck.shown.map { "\($0)" } ?? "none"
+        return "surface alpha \(alphaValue) opacity \(layer?.opacity ?? -1) frame \(frame.size); "
+            + "pages hidden \(pagesHost.isHidden) alpha \(pagesHost.alphaValue) opacity \(pagesHost.layer?.opacity ?? -1) "
+            + "animations \(pagesHost.layer?.animationKeys() ?? []); deck \(page), \(deck.subviews.filter { !$0.isHidden }.count) shown; "
+            + "editor \(editorHost != nil), flier \(flier != nil), studio \(studio.phase)"
+    }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

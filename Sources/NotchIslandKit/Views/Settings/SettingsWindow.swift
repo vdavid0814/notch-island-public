@@ -200,16 +200,14 @@ final class SettingsWindow: NSPanel {
     /// Settings has grown: the pages fade in over the island.
     func show() {
         SettingsPresence.shared.isShown = true
-        if isPrestaged {
-            isPrestaged = false
-            alphaValue = 1
-            ignoresMouseEvents = false
+        if alphaValue != 1 || ignoresMouseEvents, !isPrestaged, !isRehearsing {
+            Log.window.error("settings window shown from alpha \(self.alphaValue, privacy: .public), ignoring clicks \(self.ignoresMouseEvents, privacy: .public), neither prestaged nor rehearsing")
         }
-        if isRehearsing {
-            isRehearsing = false
-            alphaValue = 1
-            ignoresMouseEvents = false
-        }
+        // Whatever left it see-through (prestaged, rehearsing, or anything else): seen now.
+        isPrestaged = false
+        isRehearsing = false
+        alphaValue = 1
+        ignoresMouseEvents = false
         orderingOut?.cancel()
         orderingOut = nil
         CATransaction.begin()
@@ -224,6 +222,32 @@ final class SettingsWindow: NSPanel {
         // window takes it with the first click in it (a field, the sidebar). Made key at every
         // opening, every control of the page and the sidebar took the key state, and gave it back
         // at the close: four fifths of what an opening cost (170 → 31 mJ, measured).
+    }
+
+    /// Settings has grown and its pages should be in: whether they can be seen. Settings now and
+    /// then grew empty until the app was restarted (Oct 2026, not reproduced): what the window and
+    /// its pages were then goes to the log, and the window is shown again.
+    static func verifyShown(model: AppModel) {
+        guard model.island.presentation.isSettings else { return }
+        let islands = NSApp.windows.compactMap { $0 as? IslandPanel }.filter(\.isVisible)
+            .map { "island level \($0.level.rawValue) \($0.frame)" }.joined(separator: ", ")
+        guard let current else {
+            Log.window.error("settings grew without its window (never built); \(islands, privacy: .public)")
+            return
+        }
+        let seen = current.isVisible && current.occlusionState.contains(.visible) && current.alphaValue > 0
+            && current.surface.alphaValue > 0 && !current.surface.pagesView.isHidden
+        let state = "visible \(current.isVisible), on screen \(current.occlusionState.contains(.visible)), "
+            + "level \(current.level.rawValue), alpha \(current.alphaValue), ignores clicks \(current.ignoresMouseEvents), "
+            + "frame \(current.frame), prestaged \(current.isPrestaged), rehearsing \(current.isRehearsing), "
+            + "ordering out \(current.orderingOut != nil), mask \(current.root.layer?.mask != nil); "
+            + "\(current.surface.visibilityDescription); \(islands)"
+        guard !seen else {
+            Log.window.notice("settings shown: \(state, privacy: .public)")
+            return
+        }
+        Log.window.fault("settings grew but its pages cannot be seen: \(state, privacy: .public)")
+        current.show()
     }
 
     /// Settings closes: out of sight after `fade` (at once without), then ordered out.
