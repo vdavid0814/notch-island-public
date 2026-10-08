@@ -3,8 +3,8 @@ import Foundation
 
 // A widget sits on whole cells of the board's grid, so free dragging in the editor always lands on
 // cell boundaries, and every edge lines up with some other edge or with the island's centre. The
-// grid has an even number of columns, so a widget of even width can sit exactly on the notch's
-// centre line.
+// board is centred under the notch whatever its number of columns: with an odd number, the notch's
+// centre line runs through the middle of a column.
 
 nonisolated struct GridSize: Sendable, Codable, Hashable {
     var width: Int
@@ -36,19 +36,17 @@ nonisolated struct BoardGrid: Sendable, Codable, Hashable {
     /// Twelve columns by three rows gives near-square cells on the standard island, each row tall
     /// enough for one row of controls. It is also the reference the kinds' sizes are stated in.
     static let standard = BoardGrid(columns: 12, rows: 3, gap: 8)
-    static let columnRange = 8...24
-    static let rowRange = 2...6
-    static let gapRange: ClosedRange<CGFloat> = 4...14
+    static let columnRange = PanelSettings.columnRange
+    static let rowRange = PanelSettings.rowRange
+    static let gapRange = CGFloat(PanelSettings.gapRange.lowerBound)...CGFloat(PanelSettings.gapRange.upperBound)
 
-    /// Even, so the notch's centre line is a cell edge.
     private(set) var columns: Int
     private(set) var rows: Int
     /// Between two widgets, and the rhythm of the whole board.
     private(set) var gap: CGFloat
 
     init(columns: Int, rows: Int, gap: CGFloat) {
-        let even = columns - columns % 2
-        self.columns = min(max(even, Self.columnRange.lowerBound), Self.columnRange.upperBound)
+        self.columns = min(max(columns, Self.columnRange.lowerBound), Self.columnRange.upperBound)
         self.rows = min(max(rows, Self.rowRange.lowerBound), Self.rowRange.upperBound)
         self.gap = min(max(gap, Self.gapRange.lowerBound), Self.gapRange.upperBound)
     }

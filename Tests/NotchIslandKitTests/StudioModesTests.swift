@@ -67,54 +67,6 @@ import Testing
 }
 
 @Suite struct StudioGridTests {
-    /// This Mac's board at the standard size: 12 × 3 cells of about 34 × 37 pt.
-    private let board = CGSize(width: 492, height: 127)
-
-    @Test func cellsStayLargeEnoughForAControl() {
-        let columns = StudioGrid.columns(board: board, gap: 8)
-        #expect(columns.contains(12))
-        #expect(columns.allSatisfy { $0 % 2 == 0 })
-        #expect(columns == columns.sorted())
-        for count in stride(from: 8, through: 24, by: 2) {
-            let width = StudioGrid.cell(BoardGrid(columns: count, rows: 3, gap: 8), board: board).width
-            #expect(columns.contains(count) == (width >= StudioGrid.minimumCell))
-        }
-        let rows = StudioGrid.rows(board: board, gap: 8)
-        #expect(rows.contains(3) && !rows.contains(6))
-        // A larger board offers more.
-        let roomy = CGSize(width: 900, height: 330)
-        #expect(StudioGrid.columns(board: roomy, gap: 8).count > columns.count)
-        #expect(StudioGrid.rows(board: roomy, gap: 8) == Array(BoardGrid.rowRange))
-    }
-
-    @Test func aBlockedStepSaysWhy() {
-        let grid = BoardGrid.standard
-        #expect(StudioGrid.blocked(columns: 12, grid: grid, board: board) == nil)
-        #expect(StudioGrid.blocked(columns: 14, grid: grid, board: board) == nil || StudioGrid.cell(BoardGrid(columns: 14, rows: 3, gap: 8), board: board).width < 26)
-        let tooMany = StudioGrid.blocked(columns: 24, grid: grid, board: board)
-        #expect(tooMany?.contains("24 columns") == true && tooMany?.contains("wider") == true)
-        let tooTall = StudioGrid.blocked(rows: 6, grid: grid, board: board)
-        #expect(tooTall?.contains("6 rows") == true && tooTall?.contains("taller") == true)
-        // Past the range's ends.
-        #expect(StudioGrid.blocked(columns: 6, grid: grid, board: board)?.contains("fewest") == true)
-        #expect(StudioGrid.blocked(columns: 26, grid: grid, board: board)?.contains("most") == true)
-        #expect(StudioGrid.blocked(rows: 1, grid: grid, board: board)?.contains("fewest") == true)
-        #expect(StudioGrid.blocked(rows: 7, grid: grid, board: board)?.contains("most") == true)
-    }
-
-    @Test func aGridThatLeavesNoRoomNamesWhatItSetsAside() {
-        let board = WidgetBoard.standard
-        #expect(StudioGrid.setAside(by: board.grid, on: board).isEmpty)
-        // Two rows instead of three: whatever stood in the third and finds no room is named, and
-        // the board itself is not touched by asking.
-        let smaller = BoardGrid(columns: 8, rows: 2, gap: 8)
-        let aside = StudioGrid.setAside(by: smaller, on: board)
-        var changed = board
-        changed.setGrid(smaller)
-        #expect(aside == changed.parked.map(\.kind.title))
-        #expect(board.parked.isEmpty)
-    }
-
     @Test func aParkedWidgetGoesBackWhereThereIsRoom() {
         // A board with some room left: a full one may not fit back together the way it was.
         var board = WidgetBoard.standard
@@ -139,69 +91,5 @@ import Testing
         // Restoring what is not parked does nothing.
         let again = board.restore(before[0].id)
         #expect(!again)
-    }
-}
-
-@Suite struct PanelSizingTests {
-    /// This Mac: a 156-pt notch on 1280 × 832.
-    private func layout(_ scale: IslandScale, panel: PanelLayout = PanelLayout()) -> IslandLayout {
-        IslandLayout(notch: CGSize(width: 156, height: 29), scale: scale, screen: CGSize(width: 1280, height: 832), panel: panel)
-    }
-
-    /// A size the panel takes gives back the proportions that made it.
-    @Test func thePanelsSizeGivesBackItsProportions() {
-        for scale in IslandScale.allCases {
-            let base = layout(scale)
-            let limit = base.maximumExpandedSize
-            // Whole steps, as a drag makes them.
-            let widths = (17...32).map { Double($0) * PanelSettings.step }
-            let heights = stride(from: 16, through: 44, by: 4).map { Double($0) * PanelSettings.step }
-            for width in widths {
-                for height in heights {
-                    let panel = PanelSettings(widthFactor: width, boardHeightFactor: height)
-                    let size = base.replacing(panel: panel.layout).size(for: .expanded(.home))
-                    let back = base.panel(forExpandedSize: size)
-                    // Below the screen's limit exactly; at the limit, the smallest factor that reaches it.
-                    if size.width < limit.width {
-                        #expect(abs(back.widthFactor - panel.widthFactor) < 1e-9, "\(scale) width \(width)")
-                    } else {
-                        #expect(back.widthFactor <= panel.widthFactor + 1e-9)
-                    }
-                    if size.height < limit.height {
-                        #expect(abs(back.boardHeightFactor - panel.boardHeightFactor) < 1e-9, "\(scale) height \(height)")
-                    } else {
-                        #expect(back.boardHeightFactor <= panel.boardHeightFactor + 1e-9)
-                    }
-                    // And it makes the same panel.
-                    #expect(base.replacing(panel: back.layout).size(for: .expanded(.home)) == size)
-                }
-            }
-        }
-    }
-
-    @Test func aDraggedSizeSnapsToStepsWithinTheRanges() {
-        let base = layout(.compact)
-        let tiny = base.panel(forExpandedSize: CGSize(width: 10, height: 10))
-        #expect(tiny.widthFactor == PanelSettings.widthRange.lowerBound && tiny.boardHeightFactor == PanelSettings.boardHeightRange.lowerBound)
-        let huge = base.panel(forExpandedSize: CGSize(width: 9000, height: 9000))
-        #expect(huge.widthFactor <= PanelSettings.widthRange.upperBound && huge.boardHeightFactor <= PanelSettings.boardHeightRange.upperBound)
-        let own = base.size(for: .expanded(.home))
-        let nudged = base.panel(forExpandedSize: CGSize(width: own.width + 3, height: own.height + 2))
-        #expect(nudged == PanelSettings())
-        let wider = base.panel(forExpandedSize: CGSize(width: own.width * 1.2, height: own.height))
-        #expect(abs(wider.widthFactor - 1.2) < 1e-9 && wider.boardHeightFactor == 1)
-        // Whole steps.
-        let steps = wider.widthFactor / PanelSettings.step
-        #expect(abs(steps - steps.rounded()) < 1e-9)
-    }
-
-    /// On this Mac the standard panel is 600 pt wide before scaling and never taller than 62 % of
-    /// the screen.
-    @Test func thisMacsPanel() {
-        let standard = layout(.standard)
-        #expect(standard.size(for: .expanded(.home)).width == (600 * IslandScale.standard.factor).rounded())
-        #expect(standard.maximumExpandedSize == CGSize(width: 1180, height: 515))
-        let tallest = layout(.large, panel: PanelLayout(widthFactor: 1.6, boardHeightFactor: 2.2)).size(for: .expanded(.home))
-        #expect(tallest.width <= 1180 && tallest.height <= 515)
     }
 }

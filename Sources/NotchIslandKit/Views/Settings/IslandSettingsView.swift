@@ -373,9 +373,13 @@ struct SettingsTile: View {
 struct SettingsDetail: View {
     let pane: IslandSettingsPane
 
+    @Environment(AppModel.self) private var model
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsPageHeader(pane: pane)
+                // Its saved notch styles open over the page under it.
+                .zIndex(1)
             Group {
                 switch pane {
                 case .general: GeneralSettingsPage()
@@ -395,21 +399,25 @@ struct SettingsDetail: View {
             .frame(maxWidth: pane == .widgets ? .infinity : 720)
             .frame(maxWidth: .infinity)
         }
+        .notchStylesDismissal(model, if: pane == .widgets)
     }
 }
 
 /// The page's tile, title and one line on what it is for.
-private struct SettingsPageHeader: View {
+struct SettingsPageHeader: View {
     let pane: IslandSettingsPane
+
+    static let tileSide: CGFloat = 40
 
     var body: some View {
         HStack(spacing: 14) {
-            SettingsTile(systemImage: pane.systemImage, tint: pane.tint, side: 40)
+            SettingsTile(systemImage: pane.systemImage, tint: pane.tint, side: Self.tileSide)
             VStack(alignment: .leading, spacing: 2) {
                 Text(pane.title).font(.system(size: 22, weight: .bold))
                 Text(pane.subtitle).font(.system(size: 13)).foregroundStyle(SettingsPalette.secondary)
             }
             Spacer(minLength: 0)
+            if pane == .widgets { NotchStyleButtons() }
         }
         .padding(.horizontal, pane == .widgets ? 28 : 0)
         .frame(maxWidth: pane == .widgets ? .infinity : 680)

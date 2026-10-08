@@ -15,6 +15,10 @@ import NotchIslandKit
 //   one appeared it set up a Metal context of ~40 MB for a second or two (every volume key press,
 //   every banner with a bouncing symbol, ~80 MB more while Settings opened). On the CPU: the same
 //   pixels (screenshots compared), the same or less CPU for those moments, no GPU time.
+// Started as the screen recorder (`RecordingHelper`): it records, and quits once the movie is
+// written; the app itself does not start.
+RecordingHelper.runIfAsked()
+
 let environment = ["MallocSpaceEfficient": "1", "RB_DISABLE_GPU": "1"]
 if environment.keys.contains(where: { getenv($0) == nil }) {
     for (name, value) in environment { setenv(name, value, 1) }

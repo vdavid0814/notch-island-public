@@ -144,17 +144,21 @@ struct ShelfWidget: View {
     private func tray(full: Bool, points: CGFloat) -> some View {
         let look = widget.buttonLook(of: .shelfTray)
         let symbol = full ? "tray.full.fill" : "tray"
-        return Button(action: openShelf) {
+        return Group {
             if look == .plain {
-                Image(systemName: symbol)
-                    .font(.system(size: points, weight: .medium))
-                    .foregroundStyle(.secondary)
+                Button(action: openShelf) {
+                    Image(systemName: symbol)
+                        .font(.system(size: points, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Open Shelf")
             } else {
-                WidgetButtonLabel(look: look, symbol: symbol, points: points)
+                // The drawn button is the button: its whole shape takes clicks.
+                WidgetButtonLabel(look: look, symbol: symbol, points: points, action: openShelf,
+                                  title: String(localized: "Open Shelf"))
             }
         }
-        .buttonStyle(.plain)
-        .help("Open Shelf")
         .movableElement(.shelfTray, of: widget)
     }
 

@@ -141,11 +141,30 @@ nonisolated struct WidgetBoard: Sendable, Codable, Equatable {
 
     /// Adds a new instance of the kind where there is room; nil when nothing fits.
     @discardableResult
-    mutating func add(_ kind: IslandWidgetKind) -> WidgetID? {
-        guard let rect = freeSlot(for: kind) else { return nil }
-        let widget = IslandWidget(kind: kind, frame: rect, options: kind.defaultOptions, id: WidgetID())
+    mutating func add(_ kind: IslandWidgetKind) -> WidgetID? { add(kind, near: nil) }
+
+    /// A new widget of `kind`: at its default size where `anchor` is (a widget dropped there), or the
+    /// free place nearest it, smaller if it must; without one, the first free place. It takes the
+    /// background most of the board's widgets have (`prevailingLook`), so it looks as they do.
+    @discardableResult
+    mutating func add(_ kind: IslandWidgetKind, near anchor: GridRect?) -> WidgetID? {
+        let rect = anchor.flatMap { placement(for: kind, shrinkingFrom: $0) } ?? freeSlot(for: kind)
+        guard let rect else { return nil }
+        var widget = IslandWidget(kind: kind, frame: rect, options: kind.defaultOptions, id: WidgetID())
+        if let look = prevailingLook { look.apply(to: &widget) }
         widgets.append(widget)
         return widget.id
+    }
+
+    /// The background the most widgets on the board have (on a tie, the one of the widget added
+    /// last); nil on an empty board.
+    var prevailingLook: WidgetLook? {
+        var counts: [WidgetLook: (count: Int, last: Int)] = [:]
+        for (index, widget) in widgets.enumerated() {
+            let look = WidgetLook(widget)
+            counts[look] = ((counts[look]?.count ?? 0) + 1, index)
+        }
+        return counts.max { ($0.value.count, $0.value.last) < ($1.value.count, $1.value.last) }?.key
     }
 
     /// A copy with its own id and the same look, as near the original as there is room (smaller
@@ -260,9 +279,11 @@ nonisolated struct WidgetBoard: Sendable, Codable, Equatable {
     /// come and go in pairs, one at each side, so everything stays where it is about the notch;
     /// rows at the bottom. A widget the smaller grid cuts through is moved in as near as there is
     /// room, shrinking down to its minimum; what still does not fit is parked.
-    mutating func setGridKeepingCells(_ new: BoardGrid) {
+    /// `leadingColumns`: how many of the columns added (taken away, if negative) are at the
+    /// leading side — the side whose edge was dragged; nil: half at each side.
+    mutating func setGridKeepingCells(_ new: BoardGrid, leadingColumns: Int? = nil) {
         guard new != grid else { return }
-        let shift = (new.columns - grid.columns) / 2
+        let shift = leadingColumns ?? (new.columns - grid.columns) / 2
         grid = new
         let placedBefore = widgets
         widgets = []
@@ -364,5 +385,24 @@ nonisolated struct Lossy<Value: Decodable>: Decodable {
 
     init(from decoder: any Decoder) throws {
         value = try? Value(from: decoder)
+    }
+}
+
+/// What a widget sits on, as one value: its background, the background's colour and its strength.
+nonisolated struct WidgetLook: Hashable, Sendable {
+    var background: WidgetBackground
+    var color: IslandTheme.RGB?
+    var opacity: Double?
+
+    init(_ widget: IslandWidget) {
+        background = widget.background
+        color = widget.backgroundColor
+        opacity = widget.backgroundOpacity
+    }
+
+    func apply(to widget: inout IslandWidget) {
+        widget.background = background
+        widget.backgroundColor = color
+        widget.backgroundOpacity = opacity
     }
 }

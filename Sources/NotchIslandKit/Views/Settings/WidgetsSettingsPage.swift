@@ -17,13 +17,19 @@ struct WidgetsSettingsPage: View {
     /// Two or more widgets picked with ⌘-click: edited together.
     @State private var group: Set<WidgetID> = []
     @State private var notice: String?
+    /// The scroll view's height, and the Size mode's controls': in Size mode the stage takes the
+    /// room they leave, so the controls sit at the window's bottom.
+    @State private var viewportHeight: CGFloat = 0
+    @State private var inspectorHeight: CGFloat = 0
     @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
 
     var body: some View {
         ScrollViewReader { scroller in
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    StudioStage(selection: $selection, group: $group, backdrop: $backdrop, notice: notice)
+                VStack(alignment: .leading, spacing: Self.spacing) {
+                    StudioStage(selection: $selection, group: $group, backdrop: $backdrop, notice: notice,
+                                fillHeight: model.studio.mode == .size
+                                    ? viewportHeight - Self.topInset - Self.spacing - inspectorHeight - bottomInset : 0)
                         .id(StudioAnchor.stage)
                     Group {
                         let picked = group.filter { model.editedWidgets.board.contains($0) }
@@ -35,6 +41,7 @@ struct WidgetsSettingsPage: View {
                                 SizeInspector()
                                 ParkedTray()
                             }
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { inspectorHeight = $0 }
                             .transition(.opacity)
                         } else if picked.count >= 2 {
                             GroupInspector(ids: picked, selection: $selection, group: $group)
@@ -61,13 +68,33 @@ struct WidgetsSettingsPage: View {
                     .opacity(model.studio.contentOpacity)
                 }
                 .padding(.horizontal, 28)
-                .padding(.top, 10)
-                .padding(.bottom, 28)
+                .padding(.top, Self.topInset)
+                .padding(.bottom, bottomInset)
+                // A row added or taken away while sizing grows the stage: what is under it glides.
+                .animation(.spring(duration: 0.3, bounce: 0.05), value: model.studio.draft?.panel.rows)
             }
             .scrollIndicators(.automatic)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
+            // Size mode's ready-made sizes: out of their button, over the Size cards and buttons.
+            .overlayPreferenceValue(ReadyMadeAnchors.self, alignment: .topLeading) { anchors in
+                GeometryReader { proxy in
+                    if model.studio.mode == .size, let area = anchors[.area], let button = anchors[.button] {
+                        ReadyMadeBox(button: proxy[button], area: proxy[area])
+                    }
+                }
+            }
         }
-        .onAppear(perform: takeRequestedEdit)
+        .background { BoardUndoKeys(selection: $selection, group: $group) }
+        .onAppear {
+            takeRequestedEdit()
+            if model.studio.sizeEntry == nil { noteSizeEntry() }
+        }
         .onChange(of: model.editingWidget) { takeRequestedEdit() }
+        // Another page's board (from either picker): the picks on the old one end.
+        .onChange(of: model.studio.page) {
+            selection = nil
+            group = []
+        }
         .onChange(of: model.studio.mode) { _, mode in
             // Each mode's own picks and drafts end with it.
             if mode != .widgets {
@@ -75,12 +102,19 @@ struct WidgetsSettingsPage: View {
                 group = []
             }
             if mode != .topBar { model.studio.headerSelection = nil }
-            if mode != .size { model.studio.draft = nil }
+            if mode != .size {
+                model.studio.draft = nil
+                model.studio.closeReadyMade()
+            }
+            noteSizeEntry()
         }
         .onDisappear(perform: left)
         // Kept between visits (`SettingsPageDeck`): left as a page that goes, and shown again as
         // a new one, with nothing picked.
-        .onSettingsPageVisit(shown: takeRequestedEdit, hidden: {
+        .onSettingsPageVisit(shown: {
+            takeRequestedEdit()
+            noteSizeEntry()
+        }, hidden: {
             left()
             var quiet = Transaction()
             quiet.disablesAnimations = true
@@ -97,12 +131,25 @@ struct WidgetsSettingsPage: View {
         }
     }
 
+    private static let topInset: CGFloat = 10
+    /// Under the page: in Size mode its controls end where the sidebar does.
+    private var bottomInset: CGFloat { model.studio.mode == .size ? IslandSettingsView.sidebarGap : 28 }
+    private static let spacing: CGFloat = 22
+
     /// Exactly the area the home page gives its board.
     static func boardSize(_ layout: IslandLayout) -> CGSize { BoardSizing.board(layout) }
 
     private func left() {
         model.studio.draft = nil
         model.studio.headerSelection = nil
+        model.studio.sizeEntry = nil
+        model.studio.closeReadyMade()
+        model.studio.showsNotchStyles = false
+    }
+
+    /// Size mode entered, or shown again: what Reset Size goes back to is what it finds now.
+    private func noteSizeEntry() {
+        model.studio.sizeEntry = model.studio.mode == .size ? model.sizeSnapshot() : nil
     }
 
     /// "Edit …" from a widget's context menu in the island.
@@ -134,6 +181,44 @@ struct WidgetsSettingsPage: View {
 
 private enum StudioAnchor: Hashable { case stage }
 
+/// ⌘Z and ⌘⇧Z on the page: the board edited (its widgets added, moved, resized, restyled, taken
+/// away) back a step and forward again. Only while the page is the one shown and Customize is not
+/// open over it (its own undo is the widget's).
+private struct BoardUndoKeys: View {
+    @Binding var selection: WidgetID?
+    @Binding var group: Set<WidgetID>
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.settingsPageVisit) private var visit
+
+    var body: some View {
+        let store = model.editedWidgets
+        let isActive = (visit?.isShown ?? true) && model.studio.customizing == nil && model.studio.mode != .topBar
+        ZStack {
+            Button("Undo") { step { store.undo() } }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(!isActive || store.undoStack.isEmpty)
+            Button("Redo") { step { store.redo() } }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(!isActive || store.redoStack.isEmpty)
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func step(_ change: () -> Bool) {
+        var changed = false
+        withAnimation(.spring(duration: 0.32, bounce: 0.18)) { changed = change() }
+        guard changed else { return NSSound.beep() }
+        // A pick on a widget that is gone ends.
+        let board = model.editedWidgets.board
+        if let id = selection, !board.contains(id) { selection = nil }
+        group = group.filter { board.contains($0) }
+    }
+}
+
 /// What the stage's island takes from Settings around it: the widgets picked, and what the stage
 /// edits.
 private struct StagePick: Equatable {
@@ -154,6 +239,9 @@ private struct StudioStage: View {
     @Binding var group: Set<WidgetID>
     @Binding var backdrop: DesktopBackdropStyle
     let notice: String?
+    /// As tall as this at the least (Size mode: the room its controls leave), the desktop
+    /// reaching down under the island.
+    var fillHeight: CGFloat = 0
 
     @Environment(AppModel.self) private var model
     /// The round Stage button's height: the hint's capsule is made as tall, and the stage's lower
@@ -161,33 +249,45 @@ private struct StudioStage: View {
     @State private var controlHeight: CGFloat = 28
     /// The stage's own width: an island wider than it is shown smaller, whole.
     @State private var stageWidth: CGFloat = 0
+    /// How much smaller the island was shown when sizing began: kept until it ends, so the island
+    /// stays put while cells are added (the stage grows under it) instead of shrinking away.
+    @State private var sizingFit: CGFloat?
+    /// The stage's height as drawn, following the one it should have: into Size mode it unfolds
+    /// down to the controls at the window's bottom, and folds back up out of it.
+    @State private var shownHeight: CGFloat?
+    /// The mode the height was last set for, and until when a change of height is the mode's
+    /// (unfolding) rather than a row's.
+    @State private var heightMode: WidgetStudio.Mode?
+    @State private var unfoldsUntil: TimeInterval = 0
+
+    /// The stage unfolding into Size mode's room, and folding back.
+    static let unfold: Animation = .spring(duration: 0.55, bounce: 0.12)
 
     /// Between the hint and the button and the stage's edges.
     static let controlInset: CGFloat = 12
     /// Beside an island shown smaller to fit.
     static let sideInset: CGFloat = 16
 
-    /// Size mode's room: the panel as it is, with room to drag its edges out a good way — no more
-    /// than the largest it may be made on this screen. Only as large as that, so the stage stays
-    /// short and the controls under it in sight; it is the stored panel's (not the one being
-    /// dragged), so a drag lays out nothing around the stage, and the room grows after it.
-    static func sizeRoom(_ layout: IslandLayout) -> CGSize {
-        let island = layout.size(for: .expanded(.home))
-        let largest = layout.replacing(panel: PanelLayout(widthFactor: PanelSettings.widthRange.upperBound,
-                                                          boardHeightFactor: PanelSettings.boardHeightRange.upperBound))
-            .size(for: .expanded(.home))
-        return CGSize(width: min(largest.width, (island.width * 1.3).rounded()),
-                      height: min(largest.height, island.height + max(64, (island.height * 0.35).rounded())))
-    }
+    /// Under the island in the stage's picture, for the Size mode's lower handle (every mode has
+    /// it, so the picture is the same size in all three).
+    static let badgeRoom: CGFloat = 28
 
     var body: some View {
         let layout = model.layout
         let island = layout.size(for: .expanded(.home))
         let mode = model.studio.mode
-        // In Size mode the island's room is the largest it may get, fixed: dragging its edges
-        // lays out nothing around the stage.
-        let room = mode == .size ? Self.sizeRoom(layout) : island
-        let fit = stageWidth > 0 ? min(1, (stageWidth - 2 * Self.sideInset) / room.width) : 1
+        // The picture is as large as the island stored, in every mode. While the panel is sized
+        // the island keeps its scale and stays where it is: rows grow downwards, the stage with
+        // them, and columns out to the sides — nothing shrinks away and jumps back.
+        let drawn = mode == .size
+            ? (model.studio.draft.map { layout.replacing(panel: $0.panel.layout) } ?? layout).size(for: .expanded(.home)) : island
+        let room = CGSize(width: max(island.width, drawn.width), height: max(island.height, drawn.height))
+        let shown = stageWidth > 0 ? min(1, (stageWidth - 2 * Self.sideInset) / island.width) : 1
+        let fit = sizingFit ?? shown
+        // As wide as the stage — never wider: a draft wider than it is cut at its sides, and the
+        // stage keeps its own width (measured from its frame, a wider box widened it for good) —
+        // and as tall as the island drawn.
+        let box = CGSize(width: stageWidth > 0 ? stageWidth : (room.width * fit).rounded(), height: (room.height * fit).rounded())
         let shape = UnevenRoundedRectangle(
             topLeadingRadius: 18,
             bottomLeadingRadius: controlHeight / 2 + Self.controlInset,
@@ -195,6 +295,7 @@ private struct StudioStage: View {
             topTrailingRadius: 18,
             style: .continuous
         )
+        let height = max((layout.notch.height + box.height + Self.badgeRoom + 56).rounded(), fillHeight.rounded())
         ZStack(alignment: .top) {
             DesktopBackdrop(style: backdrop)
                 .contentShape(.rect)
@@ -211,15 +312,31 @@ private struct StudioStage: View {
             // observed inside.
             // Shown smaller inside its own graph, not by scaling the host: AppKit hit-tests a
             // scaled view where it was laid out, and clicks near the island's edges missed.
-            IsolatedHosting(size: CGSize(width: (room.width * fit).rounded(), height: (room.height * fit).rounded()),
+            IsolatedHosting(size: CGSize(width: box.width, height: box.height + Self.badgeRoom),
                             input: StagePick(selection: selection, group: group, mode: mode, room: room, fit: fit),
                             pausesWithSettings: true) {
                 StageIsland(selection: $selection, group: $group, room: room, fit: fit)
+                    .frame(width: box.width, height: box.height + Self.badgeRoom, alignment: .top)
                     .environment(model)
                     .environment(\.appearsActive, true)
             }
         }
-        .frame(height: (layout.notch.height + room.height * fit + (mode == .size ? 86 : 70)).rounded())
+        .frame(height: shownHeight ?? height)
+        .onAppear { heightMode = mode }
+        .onChange(of: height) { _, new in
+            // Into Size mode or out of it (its room measured a moment later is part of it): the
+            // stage unfolds down to the controls, or folds back up. A row added while sizing:
+            // as the island grows.
+            let now = ProcessInfo.processInfo.systemUptime
+            if heightMode != mode {
+                unfoldsUntil = now + 0.8
+                heightMode = mode
+            }
+            withAnimation(now < unfoldsUntil ? Self.unfold : .spring(duration: 0.3, bounce: 0.05)) { shownHeight = new }
+        }
+        // Grown or shrunk by a row while sizing: what is under the stage glides with it.
+        .animation(.spring(duration: 0.3, bounce: 0.05), value: box.height)
+        .onChange(of: model.studio.draft != nil) { _, isSizing in sizingFit = isSizing ? shown : nil }
         .frame(maxWidth: .infinity)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { stageWidth = $0 }
         .clipShape(shape)
@@ -315,7 +432,9 @@ private struct StageIsland: View {
                         HeaderStageEditor(split: split, height: layout.notch.height)
                     } else {
                         ExpandedHeader(split: split, height: layout.notch.height)
-                            .allowsHitTesting(false)
+                            // Only its page picker works: it picks the page the stage edits, as
+                            // the picker under the stage does; the rest is a picture.
+                            .environment(\.headerPicksStudioPage, true)
                             // A picture of the header: its controls' tooltips ("Home"…) must not pop
                             // up over the widgets being arranged under it.
                             .environment(\.showsControlHelp, false)
@@ -332,6 +451,7 @@ private struct StageIsland: View {
                     // Only the Widgets mode arranges them.
                     .allowsHitTesting(mode == .widgets)
                     .opacity(mode == .topBar ? 0.4 : 1)
+                    .padding(layout.boardInset)
                     .padding(.top, Metrics.Expanded.pageTopInset)
                     .padding(.bottom, Metrics.Expanded.pageBottomInset)
                     .padding(.horizontal, split.contentInset)
@@ -346,10 +466,13 @@ private struct StageIsland: View {
         .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
         .frame(width: room.width, height: room.height, alignment: .top)
         .overlay {
-            if mode == .size { SizeStageOverlay(island: size, room: room, base: base) }
+            if mode == .size { SizeStageOverlay(island: size, room: room, base: base, fit: fit) }
         }
         .scaleEffect(fit, anchor: .top)
         .frame(width: (room.width * fit).rounded(), height: (room.height * fit).rounded(), alignment: .top)
+        // A column or row added or taken away while sizing grows in or out (the cells, the widgets
+        // moved for a column at the side dragged, the handles): no jump from one size to the next.
+        .animation(.spring(duration: 0.28, bounce: 0.1), value: layout.panel)
     }
 }
 
@@ -810,6 +933,7 @@ private struct GalleryCard: View {
     let add: () -> Void
     let open: () -> Void
 
+    @Environment(AppModel.self) private var model
     @State private var isHovered = false
     /// A live preview is a whole widget (sliders, glass buttons…). Built all at once, sixteen of
     /// them stalled the frame Settings opened in; each now arrives a frame after the last
@@ -864,6 +988,13 @@ private struct GalleryCard: View {
                 .strokeBorder(isHovered ? .white.opacity(0.14) : SettingsPalette.cardStroke)
         }
         .help(kind.summary)
+        // Dragged up onto the stage's island: put where it is let go (`GalleryDrop`).
+        .onDrag {
+            model.studio.draggedKind = kind
+            return NSItemProvider(object: GalleryDrop.payload(kind) as NSString)
+        } preview: {
+            WidgetPreview(kind: kind, grid: grid, maxSize: CGSize(width: 176, height: 60))
+        }
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.15), value: isHovered)
         .animation(.spring(duration: 0.3), value: isAdded)

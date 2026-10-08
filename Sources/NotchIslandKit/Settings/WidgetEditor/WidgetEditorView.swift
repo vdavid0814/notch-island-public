@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Customize Island as a window (only without a notch screen, where Settings cannot grow out of
 /// the notch): the same widget studio as Settings ▸ Widgets.
@@ -27,6 +28,8 @@ struct BoardEditor: View {
     @Environment(AppModel.self) private var model
     /// A drag in progress: where the widget is under the pointer, and the cells it will land on.
     @State private var interaction: DragSession<WidgetID, GridRect>?
+    /// A widget dragged in from the gallery: where it would land, and whether it fits there as it is.
+    @State private var dropCandidate: (rect: GridRect, isExact: Bool)?
     /// True for as long as a move or resize drag is really in progress (`tracking`).
     @GestureState private var isDragging = false
     @FocusState private var isFocused: Bool
@@ -35,7 +38,9 @@ struct BoardEditor: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let board = model.editedWidgets.board
+            // While the panel is being sized (`StudioDraft`): the board on the draft's grid, each
+            // widget on its cells — never the old grid stretched to the new size.
+            let board = model.studio.draft.map { $0.board(model.editedWidgets.board) } ?? model.editedWidgets.board
             let geometry = WidgetBoardGeometry(size: proxy.size, grid: board.grid)
             ZStack(alignment: .topLeading) {
                 GridLayer(geometry: geometry, isEmphasized: interaction != nil || showsGrid,
@@ -62,8 +67,16 @@ struct BoardEditor: View {
                     widgetView(widget, geometry: geometry)
                         .opacity(showsGrid ? 0.55 : 1)
                 }
+                if let dropCandidate {
+                    Ghost(frame: geometry.frame(for: dropCandidate.rect), rect: dropCandidate.rect, isValid: true)
+                        .zIndex(3)
+                }
             }
             .coordinateSpace(.named(BoardSpace.name))
+            .onDrop(of: [.plainText], delegate: GalleryDrop(model: model, geometry: geometry, candidate: $dropCandidate) { id in
+                group.wrappedValue = []
+                selection = id
+            })
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
         }
         .focusable()
@@ -99,7 +112,7 @@ struct BoardEditor: View {
         let showsHandles = selection == widget.id && group.wrappedValue.count < 2
 
         ZStack(alignment: .topLeading) {
-            IslandWidgetView(widget: widget, size: contentFrame.size)
+            ZoomedWidgetView(widget: widget, size: contentFrame.size)
                 // A picture: no live glass, nothing ticking.
                 .environment(\.widgetRenderMode, .canvas)
                 .allowsHitTesting(false)
@@ -237,7 +250,8 @@ private struct GridLayer: View {
                 ForEach(0..<geometry.grid.columns, id: \.self) { column in
                     let cell = GridRect(column: column, row: row, width: 1, height: 1)
                     let frame = geometry.frame(for: cell)
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    // Each cell a round dot: the room shown, not a tile to be filled.
+                    Circle()
                         .fill(.white.opacity(occupied.contains { $0.intersects(cell) } ? 0 : (isEmphasized ? 0.08 : 0.04)))
                         .frame(width: frame.width, height: frame.height)
                         .offset(x: frame.minX, y: frame.minY)
@@ -313,4 +327,69 @@ struct WidgetIcon: View {
 extension IslandWidgetKind {
     /// The app icon's gradient (`WidgetKindSpec.iconColors`).
     var iconColors: [Color] { spec.iconColors.map(\.color) }
+}
+
+/// A widget dragged from Settings' gallery onto the stage's board: while it is over the board, the
+/// place it would take (its default size, centred under the pointer, snapped to the cells — or the
+/// free place nearest that); let go, it is added there and picked, looking as the board's other
+/// widgets do (`WidgetBoard.add(_:near:)`).
+struct GalleryDrop: DropDelegate {
+    let model: AppModel
+    let geometry: WidgetBoardGeometry
+    @Binding var candidate: (rect: GridRect, isExact: Bool)?
+    let added: (WidgetID) -> Void
+
+    static let prefix = "notchisland-widget:"
+
+    static func payload(_ kind: IslandWidgetKind) -> String { prefix + kind.rawValue }
+
+    private var kind: IslandWidgetKind? { model.studio.draggedKind }
+
+    func validateDrop(info: DropInfo) -> Bool { kind != nil && info.hasItemsConforming(to: [.plainText]) }
+
+    func dropEntered(info: DropInfo) { update(info) }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        update(info)
+        return DropProposal(operation: .copy)
+    }
+
+    func dropExited(info: DropInfo) { candidate = nil }
+
+    func performDrop(info: DropInfo) -> Bool {
+        defer {
+            candidate = nil
+            model.studio.draggedKind = nil
+        }
+        guard let kind, let anchor = anchor(for: kind, at: info.location) else { return false }
+        var id: WidgetID?
+        withAnimation(.spring(duration: 0.35, bounce: 0.2)) { id = model.editedWidgets.add(kind, near: anchor) }
+        guard let id else {
+            NSSound.beep()
+            return false
+        }
+        added(id)
+        return true
+    }
+
+    private func update(_ info: DropInfo) {
+        guard let kind, let anchor = anchor(for: kind, at: info.location) else { return candidate = nil }
+        let board = model.editedWidgets.board
+        if board.isFree(anchor, for: kind) {
+            candidate = (anchor, true)
+        } else if let near = board.placement(for: kind, size: anchor.size, near: anchor) {
+            candidate = (near, false)
+        } else {
+            candidate = nil
+        }
+    }
+
+    /// Its default size with its middle under the pointer, on whole cells inside the board.
+    private func anchor(for kind: IslandWidgetKind, at point: CGPoint) -> GridRect? {
+        let grid = model.editedWidgets.board.grid
+        let size = grid.defaultSize(for: kind)
+        guard size.width <= grid.columns, size.height <= grid.rows else { return nil }
+        let frame = geometry.frame(for: GridRect(column: 0, row: 0, width: size.width, height: size.height))
+        return geometry.snappedMove(origin: CGPoint(x: point.x - frame.width / 2, y: point.y - frame.height / 2), size: size)
+    }
 }

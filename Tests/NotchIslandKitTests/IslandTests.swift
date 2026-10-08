@@ -108,27 +108,27 @@ import Testing
         #expect(layout.shoulderRadius(for: .banner(.dropTarget)) == 8)
     }
 
-    @Test func expandedScalesEverythingButTheHeaderBand() {
+    @Test func expandedIsItsBoardAndTheInsetsRoundIt() {
         let notch = CGSize(width: 156, height: 28)
-        let standard = IslandLayout(notch: notch, scale: .standard)
-        let large = IslandLayout(notch: notch, scale: .large)
-        let compact = IslandLayout(notch: notch, scale: .compact)
-        #expect(standard.size(for: .expanded(.home)) == CGSize(width: 600, height: 188))
-        #expect(large.size(for: .expanded(.home)) == CGSize(width: 690, height: 212))
-        #expect(compact.size(for: .expanded(.home)) == CGSize(width: 540, height: 172))
-        #expect(large.bottomRadius(for: .expanded(.shelf)) == 28 * 1.15)
-        #expect(large.shoulderRadius(for: .expanded(.shelf)) == 10)
-        // Header band (height minus the scaled page) always equals the notch height.
         for scale in IslandScale.allCases {
             let layout = IslandLayout(notch: notch, scale: scale)
-            let page = (IslandLayout.expandedPageHeight * scale.factor).rounded()
-            #expect(layout.size(for: .expanded(.timer)).height - page == notch.height)
+            let size = layout.size(for: .expanded(.timer))
+            // The board's cells and gaps at the scale, the insets round them; the header band is
+            // always exactly the notch's height.
+            // So many pitches (a cell and its gap) at the reference gap, the insets round them.
+            let pitch = (48 * scale.factor).rounded()
+            #expect(layout.pitch == pitch && layout.cell == pitch - 8)
+            #expect(size.width == 12 * pitch - IslandLayout.referenceGap + 2 * IslandLayout.boardSideInset)
+            #expect(size.height - notch.height
+                    == IslandLayout.boardTopInset + 3 * pitch - IslandLayout.referenceGap + IslandLayout.boardBottomInset)
         }
-    }
-
-    @Test func expandedWidensForAWideNotch() {
-        let layout = IslandLayout(notch: CGSize(width: 240, height: 32), scale: .standard)
-        #expect(layout.size(for: .expanded(.home)).width == 620)
+        let large = IslandLayout(notch: notch, scale: .large)
+        #expect(large.bottomRadius(for: .expanded(.shelf)) == 28 * 1.15)
+        #expect(large.shoulderRadius(for: .expanded(.shelf)) == 10)
+        // The insets are the page's (`Metrics.Expanded`).
+        #expect(IslandLayout.boardSideInset == 10 + Metrics.Expanded.horizontalInset)
+        #expect(IslandLayout.boardTopInset == Metrics.Expanded.pageTopInset)
+        #expect(IslandLayout.boardBottomInset == Metrics.Expanded.pageBottomInset)
     }
 
     @Test func expandedSizeDoesNotDependOnThePage() {
@@ -743,8 +743,10 @@ import Testing
         var scaled = plain
         scaled.display = 1.134
         #expect(scaled.size(for: .compact(.nowPlaying)) == plain.size(for: .compact(.nowPlaying)))
-        #expect(scaled.size(for: .expanded(.home)).width == (600 * 1.134).rounded())
-        #expect(scaled.size(for: .expanded(.home)).height == 32 + (160 * 1.134).rounded())
+        // The pitch (a cell and its gap) larger by the factor, the insets as they are.
+        let pitch = (48 * 1.134).rounded()
+        #expect(abs(scaled.size(for: .expanded(.home)).width - (12 * pitch - 8 + 36)) < 0.01)
+        #expect(abs(scaled.size(for: .expanded(.home)).height - (32 + 3 * pitch - 8 + 16)) < 0.01)
     }
 }
 

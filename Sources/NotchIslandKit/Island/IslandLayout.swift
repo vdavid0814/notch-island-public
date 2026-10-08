@@ -66,6 +66,12 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         return layout
     }
 
+    /// The same island at another ready-made size (Settings ▸ Widgets ▸ Size).
+    func replacing(scale: IslandScale) -> IslandLayout {
+        IslandLayout(notch: notch, scale: scale, screen: screen, siri: siri, panel: panel, display: display,
+                     settingsFillsLikeReference: settingsFillsLikeReference)
+    }
+
     /// The widest the panel may be on this screen, and the tallest.
     var maximumExpandedSize: CGSize {
         let screen = screen == .zero ? Self.fallbackScreen : screen
@@ -73,22 +79,62 @@ nonisolated struct IslandLayout: Sendable, Equatable {
                       height: (Self.expandedMaximumScreenShare * screen.height).rounded(.down))
     }
 
-    /// The panel's proportions that make it `size` (its edges dragged in Settings ▸ Widgets ▸
-    /// Size), each in steps of `step` and within its range — and no further than the screen lets
-    /// the panel grow, so a factor never runs on past the size it still changes.
-    func panel(forExpandedSize size: CGSize, step: Double = PanelSettings.step) -> PanelSettings {
-        let f = factor
-        let base = max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f
-        let limit = maximumExpandedSize
-        // The nearest step; at the screen's limit the first step that reaches it.
-        func snapped(_ value: CGFloat, atLimit: Bool, in range: ClosedRange<Double>) -> Double {
-            let steps = Double(value) / step
-            return range.clamp((atLimit ? (steps - 1e-9).rounded(.up) : steps.rounded()) * step)
-        }
-        let width = snapped(min(size.width, limit.width) / base, atLimit: size.width >= limit.width, in: PanelSettings.widthRange)
-        let height = snapped((min(size.height, limit.height) - notch.height) / (Self.expandedPageHeight * f),
-                             atLimit: size.height >= limit.height, in: PanelSettings.boardHeightRange)
-        return PanelSettings(widthFactor: width, boardHeightFactor: height)
+    // MARK: The board
+
+    /// From the panel's sides to its board: the shoulder and the page's inset (`NotchSplit`'s
+    /// `contentInset` with `Metrics.Expanded.horizontalInset`); above it the header and the page's
+    /// top inset, under it its bottom inset (`Metrics.Expanded`).
+    static let boardSideInset: CGFloat = 18
+    static let boardTopInset: CGFloat = 8
+    static let boardBottomInset: CGFloat = 8
+    /// Beside the notch, on each side, at least this much of the panel: the header's picker and
+    /// buttons.
+    static let headerEar: CGFloat = 130
+
+    /// The gap the panel's insets are drawn for: a board with another gap is that much smaller or
+    /// larger inside the same panel (`boardInset`), so the gap never changes the panel's size.
+    static let referenceGap: CGFloat = 8
+
+    /// From one cell to the next at this island's scale: a cell and the gap after it (whole points:
+    /// the board is too, and its cells stay square). The panel is so many of these.
+    var pitch: CGFloat { ((panel.cell + panel.gap) * factor).rounded() }
+    /// A cell's side as drawn: the pitch less the gap.
+    var cell: CGFloat { pitch - cellGap }
+    /// Between two cells, in points at any scale (as the board draws it: `WidgetBoardGeometry`).
+    var cellGap: CGFloat { panel.gap }
+
+    /// The board the panel's cells make (`PanelLayout`): exactly `columns` × `rows` cells.
+    var board: CGSize { board(columns: panel.columns, rows: panel.rows) }
+
+    func board(columns: Int, rows: Int) -> CGSize {
+        CGSize(width: CGFloat(columns) * pitch - cellGap, height: CGFloat(rows) * pitch - cellGap)
+    }
+
+    /// How far the board sits inside the page's area (the panel less its insets) on each side: half
+    /// the gap's difference from the reference one — the gap carves the widgets' room out of the
+    /// cells, it does not make the panel larger or smaller.
+    var boardInset: CGFloat { (cellGap - Self.referenceGap) / 2 }
+
+    /// The columns the panel may have with its cells: enough for the header beside the notch, no
+    /// more than the screen takes.
+    var columnRange: ClosedRange<Int> {
+        let narrowest = notch.width + 2 * Self.headerEar - 2 * Self.boardSideInset + Self.referenceGap
+        let widest = maximumExpandedSize.width - 2 * Self.boardSideInset + Self.referenceGap
+        let fewest = Int((narrowest / pitch).rounded(.up))
+        let most = Int((widest / pitch).rounded(.down))
+        return Self.clamped(fewest...max(fewest, most), within: PanelSettings.columnRange)
+    }
+
+    /// The rows the panel may have with its cells: no more than the screen takes.
+    var rowRange: ClosedRange<Int> {
+        let tallest = maximumExpandedSize.height - notch.height - Self.boardTopInset - Self.boardBottomInset + Self.referenceGap
+        let most = Int((tallest / pitch).rounded(.down))
+        return Self.clamped(1...max(1, most), within: PanelSettings.rowRange)
+    }
+
+    private static func clamped(_ range: ClosedRange<Int>, within bounds: ClosedRange<Int>) -> ClosedRange<Int> {
+        let lower = bounds.clamp(range.lowerBound), upper = bounds.clamp(range.upperBound)
+        return lower...max(lower, upper)
     }
 
     /// Glass extends this far above the window top, where it is clipped, so its
@@ -120,12 +166,8 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     static let levelPillEar: CGFloat = 92
     /// The detail row a banner adds below the header band.
     static let bannerDetailHeight: CGFloat = 48
-    /// Expanded panel before scaling: extra width beside the notch, its floor, and the page height.
-    /// The panel's own factors (`panel`) scale them further, within the screen: no wider than
-    /// Settings may be, and a page no taller than `expandedMaximumScreenShare` of the screen.
-    static let expandedExtraWidth: CGFloat = 380
-    static let expandedMinimumWidth: CGFloat = 600
-    static let expandedPageHeight: CGFloat = 160
+    /// The open panel is no taller than this share of the screen (and no wider than Settings may
+    /// be): past it, its cells are drawn smaller to fit.
     static let expandedMaximumScreenShare: CGFloat = 0.62
     /// The assistant below its header band: the search field, a list of hits and actions, or an
     /// answer. As wide as the expanded panel, so from the header's Siri button it grows downward.
@@ -197,7 +239,7 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     /// Each ear of the recording pill: room for the time ("12:34") at a small size beside the notch.
     var recordingEar: CGFloat { ear + 16 }
     /// The recording card under the notch (`RecordingCard`): the time and Stop on one row.
-    static let recordingCardDetailHeight: CGFloat = 54
+    static let recordingCardDetailHeight: CGFloat = 58
     static let recordingCardMinimumWidth: CGFloat = 320
 
     /// Width of each ear beside the notch in compact and banner: as narrow as the
@@ -241,16 +283,17 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             return CGSize(width: max(notch.width + 2 * recordingEar, Self.recordingCardMinimumWidth),
                           height: notch.height + Self.recordingCardDetailHeight)
         case .expanded:
-            let f = factor
-            let screen = screen == .zero ? Self.fallbackScreen : screen
-            // Scaled lengths are rounded so glass edges stay on the pixel grid at every scale.
-            let width = (max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f * panel.widthFactor).rounded()
-            let page = (Self.expandedPageHeight * f * panel.boardHeightFactor).rounded()
-            return CGSize(
-                width: min(width, screen.width - 2 * Self.settingsSideMargin),
-                // The header band stays exactly the notch height; only the page scales.
-                height: notch.height + min(page, (Self.expandedMaximumScreenShare * screen.height - notch.height).rounded(.down))
-            )
+            // Exactly as large as its cells (`PanelLayout`'s pitch) and the insets round them, rounded
+            // so glass edges stay on the pixel grid; within the screen (`maximumExpandedSize`).
+            // At the reference gap: another gap changes the cells inside, not the panel.
+            let limit = maximumExpandedSize
+            let span = CGSize(width: CGFloat(panel.columns) * pitch - Self.referenceGap,
+                              height: CGFloat(panel.rows) * pitch - Self.referenceGap)
+            let width = (span.width + 2 * Self.boardSideInset).rounded()
+            let page = (Self.boardTopInset + span.height + Self.boardBottomInset).rounded()
+            return CGSize(width: min(width, limit.width),
+                          // The header band stays exactly the notch height.
+                          height: notch.height + min(page, limit.height - notch.height))
         case .settings:
             // On a known MacBook (`DisplayProfile`) Settings takes the share of the screen it takes
             // on the reference Mac (1180 × 740 of 1280 × 832): the same size on the screen, with
@@ -280,8 +323,7 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             case .galleryRows(let count): Self.galleryPageHeight(rows: min(count, siri.galleryRows), icon: siri.galleryIcon)
             }
             // The panel's width times Siri's own factor, so Siri grows out of the header as wide.
-            let panel = (max(notch.width + Self.expandedExtraWidth, Self.expandedMinimumWidth) * f * self.panel.widthFactor
-                         * siri.widthFactor).rounded()
+            let panel = (size(for: .expanded(.home)).width * siri.widthFactor).rounded()
             let gallery = (Self.galleryColumnWidth(icon: siri.galleryIcon) * f * CGFloat(siri.galleryColumns)).rounded()
             return CGSize(
                 width: min(room.isGallery ? max(panel, gallery) : panel, screen.width - 2 * Self.settingsSideMargin),

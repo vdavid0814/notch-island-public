@@ -13,12 +13,14 @@ struct WidgetBoardView: View {
             ZStack(alignment: .topLeading) {
                 ForEach(board.widgets) { widget in
                     let frame = geometry.frame(for: widget.frame)
-                    IslandWidgetView(widget: widget, size: frame.size)
+                    ZoomedWidgetView(widget: widget, size: frame.size)
                         .offset(x: frame.minX, y: frame.minY)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
         }
+        // The gap carves the widgets' room out of the cells (`IslandLayout.boardInset`).
+        .padding(model.layout.boardInset)
         .environment(\.widgetBoard, WidgetBoardShape(grid: board.grid, cornerRadius: ConcentricGeometry.boardCornerRadius(model.layout)))
     }
 }

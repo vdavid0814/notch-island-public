@@ -31,8 +31,18 @@ import SwiftUI
     /// The panel as an edge or a slider dragged in Size mode makes it, until the drag ends and it
     /// is stored: the stage draws it, the real panel is not staged again at every step.
     var draft: StudioDraft?
+    /// What Size mode found when it was entered (`SizeSnapshot`); nil outside it.
+    var sizeEntry: SizeSnapshot?
+    /// Size mode's ready-made sizes are open (`ReadyMadeBox`), and what is on them in.
+    var showsReadyMade = false
+    var readyMadeContentIn = false
+    /// The saved notch styles are open beside the page's title (`NotchStylesMenu`), and where.
+    var showsNotchStyles = false
+    var notchStylesFrame: CGRect = .zero
     /// The top bar's item picked in Top Bar mode.
     var headerSelection: HeaderItem?
+    /// The kind being dragged out of the gallery, for the stage to show where it would land.
+    @ObservationIgnored var draggedKind: IslandWidgetKind?
 
     /// The mode picked and on its way in (`switchMode`): the picker shows it at once.
     var pendingMode: Mode?
@@ -70,6 +80,26 @@ import SwiftUI
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: Self.fadeIn)) { self.contentOpacity = 1 }
         }
+    }
+
+    /// The ready-made sizes opened or closed as Customize's Open Widgets is (`WidgetVersionsMenu`),
+    /// a fifth faster (asked for): the box unfolds out of the button, then what is on it comes in;
+    /// that goes first on the way back.
+    @MainActor func toggleReadyMade() {
+        let pace = 0.8
+        if showsReadyMade {
+            withAnimation(.easeIn(duration: 0.12 * pace)) { readyMadeContentIn = false }
+            withAnimation(.spring(duration: 0.38 * pace, bounce: 0.08).delay(0.06 * pace)) { showsReadyMade = false }
+        } else {
+            withAnimation(.spring(duration: 0.55 * pace, bounce: 0.22)) { showsReadyMade = true }
+            withAnimation(.spring(duration: 0.45 * pace, bounce: 0.1).delay(0.1 * pace)) { readyMadeContentIn = true }
+        }
+    }
+
+    /// Closed at once (another mode, the page left).
+    @MainActor func closeReadyMade() {
+        showsReadyMade = false
+        readyMadeContentIn = false
     }
 
     private static let fadeOut: TimeInterval = 0.12

@@ -130,38 +130,21 @@ struct PreviewMenuBar: View {
     static var status: [Key: Int] = [:]
 }
 
-/// NotchIsland's mark: the island hanging from a black squircle's top edge, in Liquid Glass
-/// colours. Stands in for the app icon wherever Settings shows the app.
+/// The app's own icon (`Support/AppIcon.png`, the bundle's `AppIcon.icns`): the island hanging
+/// over a desktop — as Finder and the Dock show it.
 struct AppMark: View {
     var side: CGFloat = 38
 
     static func cornerRadius(side: CGFloat) -> CGFloat { side * 0.24 }
 
+    /// The bundle's icon; the running app's where the bundle has none (a test run).
+    static let icon: NSImage = Bundle.main.image(forResource: "AppIcon") ?? NSApplication.shared.applicationIconImage
+
     var body: some View {
-        RoundedRectangle(cornerRadius: Self.cornerRadius(side: side), style: .continuous)
-            .fill(LinearGradient(colors: [Color(red: 0.16, green: 0.36, blue: 0.86), Color(red: 0.05, green: 0.08, blue: 0.26)],
-                                 startPoint: .top, endPoint: .bottom))
-            .overlay(alignment: .top) {
-                UnevenRoundedRectangle(bottomLeadingRadius: side * 0.16, bottomTrailingRadius: side * 0.16, style: .continuous)
-                    .fill(.black)
-                    .frame(width: side * 0.62, height: side * 0.3)
-                    .overlay(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: side * 0.025).fill(.pink.gradient)
-                            .frame(width: side * 0.11, height: side * 0.11).padding(.leading, side * 0.07)
-                    }
-                    .overlay(alignment: .trailing) {
-                        HStack(spacing: side * 0.02) {
-                            ForEach(0..<3) { index in
-                                Capsule().fill(.white.opacity(0.85))
-                                    .frame(width: side * 0.025, height: side * [0.06, 0.1, 0.05][index])
-                            }
-                        }
-                        .padding(.trailing, side * 0.08)
-                    }
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: Self.cornerRadius(side: side), style: .continuous).strokeBorder(.white.opacity(0.15), lineWidth: 0.5)
-            }
+        Image(nsImage: Self.icon)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
             .frame(width: side, height: side)
             .accessibilityHidden(true)
     }

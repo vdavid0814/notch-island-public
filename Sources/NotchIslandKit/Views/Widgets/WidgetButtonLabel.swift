@@ -15,6 +15,12 @@ struct WidgetButtonLabel: View {
     let symbol: String
     /// The widget's own size for the symbol.
     let points: CGFloat
+    /// Pressed: the button is a button of its own, as large as it is drawn and where it is drawn, so
+    /// a click anywhere on its shape takes. (A button round the label took clicks only on the
+    /// plain symbol's room, which a larger shape reaches past: a click beside the symbol was lost.)
+    var action: (() -> Void)? = nil
+    /// Its name, for the pointer's help and VoiceOver, with an `action`.
+    var title: String? = nil
 
     @Environment(\.isWidgetPreview) private var isPreview
     @Environment(\.widgetRenderMode) private var renderMode
@@ -36,10 +42,21 @@ struct WidgetButtonLabel: View {
                     let room = proxy.frame(in: .named(WidgetShape.space)).offsetBy(dx: -move.width, dy: -move.height)
                     let drawn = Self.drawnSize(of: look, points: points, room: proxy.size)
                     let shift = widgetShape.map { Self.shift(room: room, drawn: drawn, widget: $0.size) } ?? .zero
-                    button
+                    pressable
                         .position(x: proxy.size.width / 2 + shift.width, y: proxy.size.height / 2 + shift.height)
                 }
             }
+    }
+
+    @ViewBuilder private var pressable: some View {
+        if let action {
+            Button(action: action) { button }
+                .buttonStyle(.plain)
+                .help(title ?? "")
+                .accessibilityLabel(title ?? "")
+        } else {
+            button
+        }
     }
 
     @ViewBuilder private var button: some View {

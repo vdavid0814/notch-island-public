@@ -359,12 +359,8 @@ struct NowPlayingButton: View {
                 .font(.system(size: points))
                 .help(title)
         } else {
-            Button(action: action) {
-                WidgetButtonLabel(look: look, symbol: symbol, points: points)
-            }
-            .buttonStyle(.plain)
-            .help(title)
-            .accessibilityLabel(title)
+            // The drawn button is the button (`WidgetButtonLabel.action`): its whole shape takes clicks.
+            WidgetButtonLabel(look: look, symbol: symbol, points: points, action: action, title: title)
         }
     }
 }

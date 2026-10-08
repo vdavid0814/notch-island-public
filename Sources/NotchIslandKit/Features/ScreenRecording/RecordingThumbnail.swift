@@ -130,7 +130,11 @@ import AVFoundation
         case .saveToDesktop, .saveToDocuments:
             let folder = FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(action == .saveToDesktop ? "Desktop" : "Documents", isDirectory: true)
-            if let moved = Self.move(url, to: folder) { self.url = moved }
+            if Self.move(url, to: folder) == nil {
+                // Not allowed to the app itself (the movie was written by the system for it, in a
+                // folder macOS keeps from the app): Finder moves it.
+                Self.finder("move (POSIX file \(Self.quoted(url.path)) as alias) to (POSIX file \(Self.quoted(folder.path)) as alias)")
+            }
         case .mail:
             NSSharingService(named: .composeEmail)?.perform(withItems: [url])
         case .quickTime:
@@ -146,7 +150,10 @@ import AVFoundation
                 try FileManager.default.trashItem(at: url, resultingItemURL: nil)
                 Log.recording.notice("moved to the Trash")
             } catch {
-                Log.recording.error("could not delete: \(error.localizedDescription, privacy: .public)")
+                // macOS keeps the folder from the app (the movie was written by the system for it):
+                // Finder puts it in the Trash.
+                Log.recording.notice("trash refused (\(error.localizedDescription, privacy: .public)): asking Finder")
+                Self.finder("delete (POSIX file \(Self.quoted(url.path)) as alias)")
             }
         case .markup:
             Self.trimInQuickTime(url)
@@ -174,6 +181,30 @@ import AVFoundation
             Log.recording.error("could not move: \(error.localizedDescription, privacy: .public)")
             return nil
         }
+    }
+
+    /// `command` sent to Finder (`tell application "Finder" to …`), off the main thread: macOS asks
+    /// once whether the app may control Finder.
+    private static func finder(_ command: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", "tell application \"Finder\" to \(command)"]
+        process.standardOutput = FileHandle.nullDevice
+        let errors = Pipe()
+        process.standardError = errors
+        process.terminationHandler = { process in
+            guard process.terminationStatus != 0 else { return }
+            let why = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            Log.recording.error("Finder could not: \(why, privacy: .public)")
+        }
+        do { try process.run() } catch {
+            Log.recording.error("could not ask Finder: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// `text` as an AppleScript string.
+    nonisolated static func quoted(_ text: String) -> String {
+        "\"" + text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
     private static func open(_ url: URL, with app: URL) {

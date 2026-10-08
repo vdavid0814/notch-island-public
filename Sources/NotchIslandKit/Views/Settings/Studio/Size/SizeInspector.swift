@@ -1,11 +1,17 @@
 import SwiftUI
 
-/// Under the stage in Size mode: the open panel's size, and its board's cells — how many, how
-/// large, and the gap between them (`BoardSizing`). Cells added keep their size and the panel
-/// grows with them, unless its size is kept: then the cells get smaller instead.
+/// Under the stage in Size mode: the panel's board by its cells (`PanelSettings`, `BoardSizing`).
+/// Its cells' size — the same room divided into more, smaller cells or fewer, larger ones — and the
+/// gap between them; how many columns and rows (as the handles on the stage set them, one at a
+/// time). Under them, Reset Size and the island's ready-made sizes, which open over all of it and
+/// make everything larger or smaller together. Nothing here changes a widget's shape: each keeps
+/// its cells.
 struct SizeInspector: View {
     @Environment(AppModel.self) private var model
-    @State private var blockedNote: String?
+    /// The board's room when the Cell slider was taken: the cells divide that room.
+    @State private var cellRoom: CGSize?
+    /// The panel when the Gap slider was taken: its range stays as it was while it moves.
+    @State private var gapBase: PanelSettings?
 
     private static let settle: Animation = .spring(duration: 0.3, bounce: 0.1)
 
@@ -14,236 +20,213 @@ struct SizeInspector: View {
         let panel = studio.draft?.panel ?? model.preferences.panel
         let layout = model.layout.replacing(panel: panel.layout)
         let island = layout.size(for: .expanded(.home))
-        let grid = model.editedWidgets.board.grid
-        let board = BoardSizing.board(layout)
-        let cell = BoardSizing.cell(grid, board: board)
-        let ranges = BoardSizing.factorRanges(model.layout)
-        // Compact, the most used first: the stage above stays in sight while they change it.
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Size").font(.title3.weight(.semibold))
-                    Text("Add cells, or drag the island's edges above. Each widget keeps its cells, so more cells are more room.")
-                        .font(.callout)
-                        .foregroundStyle(SettingsPalette.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                StudioCard("Cells", subtitle: "\(Int(panel.cell)) pt square, \(Int(panel.gap)) pt apart") {
+                    VStack(spacing: 8) {
+                        SliderRow(title: "Size", value: "\(Int(panel.cell)) pt",
+                                  widest: "\(Int(PanelSettings.cellRange.upperBound)) pt") {
+                            Slider(value: Binding(get: { panel.cell }, set: { new in
+                                let room = cellRoom ?? BoardSizing.board(model.layout)
+                                draft(BoardSizing.dividing(room, into: new.rounded(), from: panel, layout: model.layout))
+                            }), in: PanelSettings.cellRange) { editing in
+                                cellRoom = editing ? BoardSizing.board(model.layout) : nil
+                                if !editing { commit() }
+                            } label: { Text("Cell size") }
+                        }
+                        .help("Smaller cells fit more widgets in the same room; larger ones, fewer and larger")
+                        let gaps = BoardSizing.gapRange(gapBase ?? panel)
+                        SliderRow(title: "Gap", value: "\(Int(panel.gap)) pt",
+                                  widest: "\(Int(PanelSettings.gapRange.upperBound)) pt") {
+                            Slider(value: Binding(get: { min(max(panel.gap, gaps.lowerBound), gaps.upperBound) }, set: { new in
+                                draft(BoardSizing.withGap(new, gapBase ?? panel))
+                            }), in: gaps) { editing in
+                                gapBase = editing ? panel : nil
+                                if !editing { commit() }
+                            } label: { Text("Gap") }
+                        }
+                        .help("The space between the widgets: the panel keeps its size, the widgets get a little smaller or larger")
+                    }
+                    .frame(maxHeight: .infinity, alignment: .top)
                 }
-                Spacer(minLength: 12)
-                Button("Reset Size and Cells") {
+                .frame(maxWidth: .infinity)
+                StudioCard("Panel", subtitle: "\(Int(island.width)) × \(Int(island.height)) pt  ·  \(panel.columns) × \(panel.rows) cells") {
+                    VStack(spacing: 8) {
+                        countRow("Width", value: panel.columns, range: layout.columnRange, unit: "columns") { count in
+                            var next = panel
+                            next.columns = count
+                            return next
+                        }
+                        countRow("Height", value: panel.rows, range: layout.rowRange, unit: "rows") { count in
+                            var next = panel
+                            next.rows = count
+                            return next
+                        }
+                    }
+                    .frame(maxHeight: .infinity, alignment: .top)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            // The two cards as tall as each other.
+            .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 12) {
+                // Back to exactly what Size mode found: the cells, the ready-made size, every
+                // widget where it was.
+                Button {
+                    guard let entry = studio.sizeEntry else { return }
+                    cellRoom = nil
+                    gapBase = nil
                     withAnimation(Self.settle) {
                         studio.draft = nil
-                        model.preferences.panel = PanelSettings()
-                        model.editedWidgets.setGrid(.standard)
+                        model.restoreSize(entry)
                     }
-                    blockedNote = nil
+                } label: {
+                    Label("Reset Size", systemImage: "arrow.counterclockwise").frame(maxWidth: .infinity)
                 }
-                .disabled(model.preferences.panel == PanelSettings() && grid == .standard)
-            }
-            countsBar(grid, panel: panel, cell: cell)
-            if let blockedNote {
-                Label(blockedNote, systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(SettingsPalette.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .transition(.opacity)
-            }
-            HStack(alignment: .top, spacing: 12) {
-                StudioCard("Cells", subtitle: "\(Int(cell.width.rounded())) × \(Int(cell.height.rounded())) pt each, \(Int(grid.gap)) pt apart") {
-                    VStack(spacing: 8) {
-                        // A cell's size is the panel's share while the panel keeps its size.
-                        cellRow("Width", value: cell.width, disabled: panel.keepsSize) { width in
-                            CGSize(width: width, height: cell.height)
-                        }
-                        cellRow("Height", value: cell.height, disabled: panel.keepsSize) { height in
-                            CGSize(width: cell.width, height: height)
-                        }
-                        SliderRow(title: "Gap", value: "\(Int(grid.gap)) pt", widest: "\(Int(BoardSizing.maximumCell)) pt") {
-                            Slider(value: Binding(get: { Double(grid.gap) }, set: { new in
-                                let gap = CGFloat(new.rounded())
-                                guard gap != grid.gap else { return }
-                                apply(BoardSizing.setGap(gap, panel: model.preferences.panel, grid: grid, layout: model.layout), animated: false)
-                            }), in: Double(BoardGrid.gapRange.lowerBound)...Double(BoardGrid.gapRange.upperBound)) {
-                                Text("Gap")
-                            }
-                        }
+                .disabled(studio.sizeEntry.map { $0 == model.sizeSnapshot() && studio.draft == nil } ?? true)
+                .help("Everything back as it was when Size was opened")
+                Button {
+                    studio.toggleReadyMade()
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Ready-made Size")
+                        Spacer(minLength: 8)
+                        Text(model.preferences.scale.title).foregroundStyle(SettingsPalette.secondary)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(SettingsPalette.secondary)
                     }
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity)
-                StudioCard("Panel", subtitle: "\(Int(island.width)) × \(Int(island.height)) pt") {
-                    VStack(spacing: 8) {
-                        factorRow("Width", value: panel.widthFactor, range: ranges.width) { panel, value in
-                            var next = panel
-                            next.widthFactor = value
-                            return next
-                        }
-                        factorRow("Height", value: panel.boardHeightFactor, range: ranges.height) { panel, value in
-                            var next = panel
-                            next.boardHeightFactor = value
-                            return next
-                        }
-                        HStack {
-                            Text("Size when open").foregroundStyle(SettingsPalette.secondary)
-                            Spacer(minLength: 8)
-                            Picker("Size when open", selection: Binding(get: { model.preferences.scale }, set: { scale in
-                                withAnimation(Self.settle) { model.preferences.scale = scale }
-                            })) {
-                                ForEach(IslandScale.allCases) { Text($0.title).tag($0) }
-                            }
-                            .labelsHidden()
-                            .fixedSize()
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity)
+                .help("The whole panel larger or smaller: its cells, the gap and every widget together")
+                // The ready-made sizes unfold out of it (`ReadyMadeBox`).
+                .anchorPreference(key: ReadyMadeAnchors.self, value: .bounds) { [.button: $0] }
             }
+            .controlSize(.large)
+            .buttonBorderShape(.capsule)
+        }
+        // Where the ready-made sizes open: over the cards and the buttons, down to the window's
+        // bottom (`WidgetsSettingsPage`).
+        .transformAnchorPreference(key: ReadyMadeAnchors.self, value: .bounds) { $0[.area] = $1 }
+    }
+
+    /// Columns or rows, one at a time: added or taken away at both sides (columns) or the bottom.
+    private func countRow(_ title: String, value: Int, range: ClosedRange<Int>, unit: String,
+                          with: @escaping (Int) -> PanelSettings) -> some View {
+        SliderRow(title: title, value: "\(value) \(unit)", widest: "\(range.upperBound) \(unit)") {
+            Slider(value: Binding(get: { Double(min(max(value, range.lowerBound), range.upperBound)) }, set: { new in
+                draft(with(Int(new.rounded())))
+            }), in: Double(range.lowerBound)...Double(max(range.upperBound, range.lowerBound + 1)), step: 1) { editing in
+                if !editing { commit() }
+            } label: { Text(title) }
         }
     }
 
-    // MARK: Counts
-
-    /// What is changed most, on one row: the columns, the rows, and whether the panel keeps its
-    /// size as they change. Under each other where the row is too narrow.
-    private func countsBar(_ grid: BoardGrid, panel: PanelSettings, cell: CGSize) -> some View {
-        let columns = countControl("Columns", value: grid.columns, note: "One more at each side") { delta in
-            setCounts(columns: grid.columns + 2 * delta, rows: grid.rows)
-        }
-        let rows = countControl("Rows", value: grid.rows, note: "At the bottom") { delta in
-            setCounts(columns: grid.columns, rows: grid.rows + delta)
-        }
-        let keeps = HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Keep Panel Size").font(.subheadline.weight(.medium))
-                Text(panel.keepsSize ? "New cells make all of them smaller" : "The panel grows with new cells")
-                    .font(.caption)
-                    .foregroundStyle(SettingsPalette.secondary)
-            }
-            Toggle("Keep Panel Size", isOn: Binding(get: { model.preferences.panel.keepsSize }, set: { on in
-                model.preferences.panel.keepsSize = on
-                blockedNote = nil
-            }))
-            .labelsHidden()
-            .toggleStyle(.islandSwitch)
-        }
-        .help("On: the panel stays as it is, and every cell and the gap get smaller so new cells fit. Off: cells keep their size and the panel grows with them.")
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 0) {
-                columns
-                Divider().frame(height: 30).padding(.horizontal, 18)
-                rows
-                Spacer(minLength: 18)
-                keeps
-            }
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 0) {
-                    columns
-                    Divider().frame(height: 30).padding(.horizontal, 18)
-                    rows
-                }
-                keeps
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SettingsPalette.card, in: .rect(cornerRadius: SettingsForm.cardRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: SettingsForm.cardRadius, style: .continuous).strokeBorder(SettingsPalette.cardStroke)
-        }
+    /// The stage follows the slider; nothing is stored until it is let go.
+    private func draft(_ panel: PanelSettings) {
+        guard model.studio.draft?.panel != panel else { return }
+        SnapTick.perform()
+        model.studio.draft = StudioDraft(panel: panel)
     }
 
-    private func countControl(_ title: String, value: Int, note: String, change: @escaping (Int) -> Void) -> some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(note).font(.caption).foregroundStyle(SettingsPalette.secondary)
-            }
-            Text("\(value)")
-                .font(.title2.weight(.semibold).monospacedDigit())
-                .frame(minWidth: 30, alignment: .trailing)
-                .contentTransition(.numericText(value: Double(value)))
-            // Every step is tried: one that cannot be taken says why.
-            Stepper(title, onIncrement: { change(1) }, onDecrement: { change(-1) })
-                .labelsHidden()
-        }
-        .fixedSize()
-    }
-
-    // MARK: Panel
-
-    /// A proportion of the panel: the draft follows the slider, the preference is written on release.
-    private func factorRow(_ title: String, value: Double, range: ClosedRange<Double>,
-                           with: @escaping (PanelSettings, Double) -> PanelSettings) -> some View {
-        let studio = model.studio
-        return SliderRow(title: title, value: value.formatted(.percent.precision(.fractionLength(0))),
-                         widest: range.upperBound.formatted(.percent.precision(.fractionLength(0)))) {
-            Slider(value: Binding(get: { min(max(value, range.lowerBound), range.upperBound) }, set: { new in
-                let snapped = (new / 0.01).rounded() * 0.01
-                let next = with(studio.draft?.panel ?? model.preferences.panel, snapped)
-                if studio.draft?.panel != next { studio.draft = StudioDraft(panel: next) }
-            }), in: range) { editing in
-                if !editing { commitDraft() }
-            } label: {
-                Text(title)
-            }
-        }
-    }
-
-    private func commitDraft() {
+    private func commit() {
         guard let draft = model.studio.draft else { return }
-        model.preferences.panel = draft.panel
-        model.studio.draft = nil
+        withAnimation(Self.settle) {
+            model.setPanel(draft.panel, leadingColumns: draft.leadingColumns)
+            model.studio.draft = nil
+        }
     }
+}
 
-    // MARK: Cells
+/// Where Size mode's ready-made sizes come from and open to, for the page to lay them out over
+/// its scroll view (`ReadyMadePanel`).
+struct ReadyMadeAnchors: PreferenceKey {
+    enum Part { case button, area }
+    static let defaultValue: [Part: Anchor<CGRect>] = [:]
+    static func reduce(value: inout [Part: Anchor<CGRect>], nextValue: () -> [Part: Anchor<CGRect>]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
 
-    /// A cell's width or height: the panel follows it while the slider moves (a draft), and is
-    /// written on release.
-    private func cellRow(_ title: String, value: CGFloat, disabled: Bool, size: @escaping (CGFloat) -> CGSize) -> some View {
+/// The island's ready-made sizes (the pictures of General ▸ Size when open) on the Size mode's
+/// controls: opened and closed exactly as Customize's Open Widgets (`WidgetVersionsMenu`) — the box
+/// on Settings' ground grows out of the Ready-made button to cover the cards and the buttons, its
+/// corners from the capsule's to the list's, and what is on it comes up out of a blur once it is
+/// under way. The button being at the bottom right, the box grows up and to the left. A click
+/// beside it closes it.
+struct ReadyMadeBox: View {
+    /// The button, and the room it opens over, in the space it is laid out in.
+    let button: CGRect
+    let area: CGRect
+
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
         let studio = model.studio
-        let range = Double(BoardSizing.minimumCell)...Double(BoardSizing.maximumCell)
-        return SliderRow(title: title, value: "\(Int(value.rounded())) pt", widest: "\(Int(BoardSizing.maximumCell)) pt") {
-            Slider(value: Binding(get: { min(max(Double(value), range.lowerBound), range.upperBound) }, set: { new in
-                let grid = model.editedWidgets.board.grid
-                let from = studio.draft?.panel ?? model.preferences.panel
-                guard case .changed(let change) = BoardSizing.setCell(size(CGFloat(new.rounded())), panel: from, grid: grid,
-                                                                       layout: model.layout),
-                      studio.draft?.panel != change.panel else { return }
-                studio.draft = StudioDraft(panel: change.panel)
-            }), in: range) { editing in
-                if !editing { commitDraft() }
-            } label: {
-                Text(title)
+        let isOpen = studio.showsReadyMade
+        let rect = isOpen ? area : button
+        let radius = isOpen ? WidgetVersionsMenu.radius : button.height / 2
+        ZStack(alignment: .topLeading) {
+            // A click anywhere but on it closes it (and does nothing else).
+            if isOpen {
+                Color.clear
+                    .contentShape(Rectangle().subtracting(Rectangle().path(in: area)))
+                    .onTapGesture { studio.toggleReadyMade() }
             }
-            .disabled(disabled)
+            ReadyMadePanel(close: { studio.toggleReadyMade() })
+                .frame(width: area.width, height: area.height)
+                // Comes up out of a blur and a little from below as the box opens around it.
+                .opacity(studio.readyMadeContentIn ? 1 : 0)
+                .blur(radius: studio.readyMadeContentIn ? 0 : 6)
+                .offset(y: studio.readyMadeContentIn ? 0 : 10)
+                .frame(width: rect.width, height: rect.height, alignment: .bottomTrailing)
+                .background { SettingsBackdrop() }
+                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(isOpen ? 0.5 : 0), radius: 18, y: 8)
+                .opacity(isOpen ? 1 : 0)
+                .allowsHitTesting(isOpen)
+                .offset(x: rect.minX, y: rect.minY)
         }
-        .help(disabled ? "The panel keeps its size: its cells are its share. Turn off Keep Panel Size to set them." : "")
+        // Closed from elsewhere: what is on it goes with it.
+        .onChange(of: isOpen) { _, open in
+            if !open, studio.readyMadeContentIn { withAnimation(.easeIn(duration: 0.12)) { studio.readyMadeContentIn = false } }
+        }
     }
+}
 
-    /// More or fewer columns or rows. Refused with its reason; taken with a note when a widget
-    /// finds no room on the new grid (it is set aside, not lost).
-    private func setCounts(columns: Int, rows: Int) {
-        let grid = model.editedWidgets.board.grid
-        let outcome = BoardSizing.setCounts(columns: columns, rows: rows, panel: model.preferences.panel, grid: grid, layout: model.layout)
-        apply(outcome, animated: true)
-    }
+/// What the ready-made sizes' box holds: its title, Done, and the sizes. Picked, a size is set at
+/// once (the stage follows); Done or Esc closes them.
+struct ReadyMadePanel: View {
+    let close: () -> Void
 
-    private func apply(_ outcome: BoardSizing.Outcome, animated: Bool) {
-        switch outcome {
-        case .refused(let reason):
-            NSSound.beep()
-            withAnimation(.easeOut(duration: 0.15)) { blockedNote = reason }
-        case .changed(let change):
-            let board = model.editedWidgets.board
-            let countsChange = change.grid.columns != board.grid.columns || change.grid.rows != board.grid.rows
-            let aside = countsChange ? StudioGrid.setAside(by: change.grid, on: board, keepingCells: true) : []
-            withAnimation(animated ? Self.settle : nil) {
-                model.studio.draft = nil
-                if model.preferences.panel != change.panel { model.preferences.panel = change.panel }
-                if countsChange { model.editedWidgets.setGridKeepingCells(change.grid) } else { model.editedWidgets.setGrid(change.grid) }
-                blockedNote = aside.isEmpty ? nil
-                    : String(localized: "\(aside.formatted(.list(type: .and))) found no room on this grid: under Didn't Fit below.")
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Ready-made Size").font(.headline)
+                Spacer(minLength: 12)
+                Button("Done", action: close)
+                    .keyboardShortcut(.cancelAction)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
             }
+            PictureChoice(options: IslandScale.allCases, selection: Binding(get: { model.preferences.scale }, set: { scale in
+                model.preferences.scale = scale
+                // The same cells at another scale: as many as still fit.
+                model.setPanel(BoardSizing.fitted(model.preferences.panel, layout: model.layout))
+            }), title: \.title) { scale in
+                IslandSizePicture(scale: scale)
+            }
+            // In the middle of the room under the title.
+            .frame(maxHeight: .infinity)
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 

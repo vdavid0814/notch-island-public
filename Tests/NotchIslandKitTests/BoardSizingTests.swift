@@ -3,123 +3,152 @@ import Foundation
 import Testing
 @testable import NotchIslandKit
 
-/// Settings ▸ Widgets ▸ Size by cells (`BoardSizing`): cells added keep their size and the panel
-/// grows with them, or, with the size kept, they and the gap get smaller; every widget keeps its
-/// cells and its place about the notch.
+/// Settings ▸ Widgets ▸ Size: the panel by its square cells (`PanelSettings`, `BoardSizing`).
 @Suite struct BoardSizingTests {
-    let layout = IslandLayout(notch: CGSize(width: 185, height: 32), scale: .standard, screen: CGSize(width: 1728, height: 1117))
-
-    private func cell(_ panel: PanelSettings, _ grid: BoardGrid) -> CGSize {
-        BoardSizing.cell(grid, board: BoardSizing.board(layout, panel: panel))
+    /// This Mac: a 156-pt notch on 1280 × 832.
+    private func layout(_ panel: PanelSettings = PanelSettings(), scale: IslandScale = .standard) -> IslandLayout {
+        IslandLayout(notch: CGSize(width: 156, height: 29), scale: scale, screen: CGSize(width: 1280, height: 832), panel: panel.layout)
     }
 
-    private func near(_ a: CGSize, _ b: CGSize) -> Bool {
-        abs(a.width - b.width) <= BoardSizing.tolerance && abs(a.height - b.height) <= BoardSizing.tolerance
+    private func cell(_ layout: IslandLayout, _ panel: PanelSettings) -> CGSize {
+        let geometry = WidgetBoardGeometry(size: BoardSizing.board(layout), grid: panel.grid)
+        return CGSize(width: geometry.cellWidth, height: geometry.cellHeight)
     }
 
-    @Test func columnsAddedInPairsKeepTheCellsAndWidenThePanel() throws {
-        let panel = PanelSettings(), grid = BoardGrid.standard
-        let before = cell(panel, grid)
-        let change = try #require(BoardSizing.setCounts(columns: 14, rows: 3, panel: panel, grid: grid, layout: layout).change)
-        #expect(change.grid.columns == 14 && change.grid.rows == 3 && change.grid.gap == grid.gap)
-        #expect(near(cell(change.panel, change.grid), before), "\(cell(change.panel, change.grid)) was \(before)")
-        let widths = (BoardSizing.board(layout, panel: panel).width, BoardSizing.board(layout, panel: change.panel).width)
-        // Two cells and two gaps wider.
-        #expect(abs(widths.1 - widths.0 - 2 * (before.width + grid.gap)) <= 1)
-        // Taken away again: the panel it was.
-        let back = try #require(BoardSizing.setCounts(columns: 12, rows: 3, panel: change.panel, grid: change.grid, layout: layout).change)
-        #expect(abs(back.panel.widthFactor - panel.widthFactor) < 0.002 && back.grid == grid)
+    /// Whatever the counts, the gap and the scale, a cell is square and of the panel's size: the
+    /// panel is exactly as large as its cells make it.
+    @Test(arguments: IslandScale.allCases)
+    func cellsAreSquareAndThePanelIsTheirs(scale: IslandScale) {
+        for (columns, rows, gap) in [(12, 3, 8.0), (13, 4, 4), (9, 2, 14), (16, 5, 10)] {
+            let panel = PanelSettings(cell: 40, gap: gap, columns: columns, rows: rows)
+            let layout = layout(panel, scale: scale)
+            let side = cell(layout, panel)
+            // The island's size is whole points: a cell is a fraction of a point off at most.
+            #expect(abs(side.width - side.height) < 0.2, "\(scale) \(columns)×\(rows)")
+            #expect(abs(side.width - layout.cell) < 0.2, "\(scale) \(columns)×\(rows)")
+            #expect(layout.pitch == ((40 + gap) * scale.factor).rounded() && layout.cell == layout.pitch - gap)
+        }
     }
 
-    @Test func aRowAddedKeepsTheCellsAndDeepensTheBoard() throws {
-        let panel = PanelSettings(), grid = BoardGrid.standard
-        let before = cell(panel, grid)
-        let change = try #require(BoardSizing.setCounts(columns: 12, rows: 4, panel: panel, grid: grid, layout: layout).change)
-        #expect(near(cell(change.panel, change.grid), before))
-        #expect(change.panel.boardHeightFactor > panel.boardHeightFactor && change.panel.widthFactor == panel.widthFactor)
-    }
-
-    @Test func aKeptSizeMakesTheCellsAndTheGapSmaller() throws {
+    /// One more column is one more cell of the same size: the panel one step wider, nothing else.
+    @Test func aColumnMoreIsACellMore() {
         var panel = PanelSettings()
-        panel.keepsSize = true
-        let grid = BoardGrid.standard
-        let before = cell(panel, grid)
-        let change = try #require(BoardSizing.setCounts(columns: 16, rows: 3, panel: panel, grid: grid, layout: layout).change)
-        #expect(change.panel == panel)
-        let after = cell(change.panel, change.grid)
-        #expect(after.width < before.width && change.grid.gap < grid.gap)
-        // Still the whole board, cells and gaps.
-        #expect(abs(BoardSizing.board(change.grid, cell: after).width - BoardSizing.board(layout, panel: panel).width) < 0.01)
-        // The gap about as much smaller as the cells.
-        #expect(abs(change.grid.gap / after.width - grid.gap / before.width) < 0.03)
+        let before = layout(panel)
+        panel.columns += 1
+        let after = layout(panel)
+        let grown = after.size(for: .expanded(.home)).width - before.size(for: .expanded(.home)).width
+        #expect(abs(grown - CGFloat(panel.cell + panel.gap)) <= 1)
+        #expect(abs(cell(after, panel).width - cell(before, PanelSettings()).width) < 0.2)
+        #expect(after.size(for: .expanded(.home)).height == before.size(for: .expanded(.home)).height)
     }
 
-    @Test func theScreenStopsThePanelAndSaysWhatElseToDo() {
-        var panel = PanelSettings(), grid = BoardGrid.standard
-        var refusal: String?
-        for _ in 0..<12 {
-            switch BoardSizing.setCounts(columns: grid.columns + 2, rows: grid.rows, panel: panel, grid: grid, layout: layout) {
-            case .changed(let change):
-                (panel, grid) = (change.panel, change.grid)
-            case .refused(let reason):
-                refusal = reason
-            }
-            if refusal != nil { break }
+    /// Smaller cells divide the same room into more of them; larger ones into fewer.
+    @Test func smallerCellsFitMoreInTheSameRoom() {
+        let base = layout()
+        let room = BoardSizing.board(base)
+        let small = BoardSizing.dividing(room, into: 30, from: PanelSettings(), layout: base)
+        let large = BoardSizing.dividing(room, into: 56, from: PanelSettings(), layout: base)
+        #expect(small.cell == 30 && small.columns > 12 && small.rows > 3)
+        #expect(large.cell == 56 && large.columns < 12 && large.rows < 3)
+        // About the room it was: within a cell each way.
+        let smallBoard = BoardSizing.board(layout(small))
+        #expect(abs(smallBoard.width - room.width) <= CGFloat(small.cell + small.gap))
+        #expect(abs(smallBoard.height - room.height) <= CGFloat(small.cell + small.gap))
+    }
+
+    /// A dragged edge lands on whole cells.
+    @Test func aDragLandsOnWholeCells() {
+        let panel = PanelSettings()
+        let base = layout(panel)
+        let island = base.size(for: .expanded(.home))
+        let step = CGFloat(panel.cell + panel.gap)
+        #expect(BoardSizing.counts(forIsland: island, panel: panel, layout: base) == (12, 3))
+        #expect(BoardSizing.counts(forIsland: CGSize(width: island.width + step * 0.4, height: island.height), panel: panel, layout: base) == (12, 3))
+        #expect(BoardSizing.counts(forIsland: CGSize(width: island.width + step * 0.6, height: island.height), panel: panel, layout: base).columns == 13)
+        #expect(BoardSizing.counts(forIsland: CGSize(width: island.width, height: island.height + step), panel: panel, layout: base).rows == 4)
+    }
+
+    /// No fewer columns than leave the header room beside the notch, no more than the screen takes.
+    @Test func theCountsStayWithinTheScreenAndTheHeader() {
+        let base = layout()
+        let tiny = BoardSizing.fitted(PanelSettings(cell: 40, gap: 8, columns: 4, rows: 1), layout: base)
+        let narrow = layout(tiny).size(for: .expanded(.home)).width
+        #expect(narrow >= 156 + 2 * IslandLayout.headerEar - 1)
+        let huge = BoardSizing.fitted(PanelSettings(cell: 40, gap: 8, columns: 40, rows: 10), layout: base)
+        let size = layout(huge).size(for: .expanded(.home))
+        #expect(size.width <= base.maximumExpandedSize.width && size.height <= base.maximumExpandedSize.height)
+        #expect(huge.columns < 40 && huge.rows < 10)
+    }
+
+    /// A panel stored before (its width and height as factors) comes back as its board's grid.
+    @Test func aPanelFromBeforeIsMarked() throws {
+        let old = try JSONDecoder().decode(PanelSettings.self, from: Data(#"{"widthFactor":1.2,"boardHeightFactor":1.5}"#.utf8))
+        #expect(old.isFromBefore)
+        let new = try JSONDecoder().decode(PanelSettings.self, from: JSONEncoder().encode(PanelSettings(cell: 32, gap: 6, columns: 15, rows: 4)))
+        #expect(!new.isFromBefore && new == PanelSettings(cell: 32, gap: 6, columns: 15, rows: 4))
+    }
+
+    /// A column added at the side whose edge was dragged: the widgets stay on their cells, counted
+    /// from the other side.
+    @Test func aColumnGoesWhereTheEdgeWasDragged() throws {
+        var board = WidgetBoard(widgets: [])
+        let added = board.add(.wifi, near: GridRect(column: 0, row: 0, width: 2, height: 1))
+        let id = try #require(added)
+        var leading = board, trailing = board
+        let wider = BoardGrid(columns: 13, rows: 3, gap: 8)
+        leading.setGridKeepingCells(wider, leadingColumns: 1)
+        trailing.setGridKeepingCells(wider, leadingColumns: 0)
+        #expect(leading.widget(id)?.frame.column == 1)
+        #expect(trailing.widget(id)?.frame.column == 0)
+        #expect(leading.widget(id)?.frame.size == board.widget(id)?.frame.size)
+    }
+}
+
+/// The gap and the zoom: the gap never changes the panel, and a widget smaller than its design is
+/// that design zoomed out.
+@Suite struct GapAndZoomTests {
+    private func layout(_ panel: PanelSettings) -> IslandLayout {
+        IslandLayout(notch: CGSize(width: 156, height: 29), scale: .standard, screen: CGSize(width: 1280, height: 832), panel: panel.layout)
+    }
+
+    @Test func theGapLeavesThePanelAsItIs() {
+        let panel = PanelSettings()
+        let island = layout(panel).size(for: .expanded(.home))
+        for gap in [2.0, 6, 12, 16, 24] {
+            let next = BoardSizing.withGap(gap, panel)
+            #expect(next.cell + next.gap == panel.cell + panel.gap && next.columns == 12 && next.rows == 3)
+            #expect(layout(next).size(for: .expanded(.home)) == island, "gap \(gap)")
+            // The board drawn inside is the cells and gaps exactly, its cells square.
+            let board = BoardSizing.board(layout(next))
+            let geometry = WidgetBoardGeometry(size: board, grid: next.grid)
+            #expect(abs(geometry.cellWidth - geometry.cellHeight) < 0.01 && abs(geometry.cellWidth - CGFloat(next.cell)) < 0.01)
         }
-        let reason = try? #require(refusal)
-        #expect(reason?.contains("Keep Panel Size") == true || reason?.contains("most") == true)
-        #expect(layout.replacing(panel: panel.layout).size(for: .expanded(.home)).width <= layout.maximumExpandedSize.width)
+        // No gap so wide the cells go under the smallest.
+        #expect(BoardSizing.gapRange(PanelSettings(cell: 24, gap: 8, columns: 12, rows: 3)).upperBound == 8)
     }
 
-    @Test func aCellSizeSetsThePanel() throws {
-        let panel = PanelSettings(), grid = BoardGrid.standard
-        let change = try #require(BoardSizing.setCell(CGSize(width: 50, height: 40), panel: panel, grid: grid, layout: layout).change)
-        #expect(near(cell(change.panel, change.grid), CGSize(width: 50, height: 40)))
+    @Test func aWidgetIsZoomedOnlyBelowItsDesign() {
+        let span = GridSize(width: 4, height: 2)
+        let design = WidgetZoom.designSize(span: span)
+        #expect(design == CGSize(width: 4 * 48 - 8, height: 2 * 48 - 8))
+        #expect(WidgetZoom.scale(span: span, size: design) == 1)
+        #expect(WidgetZoom.scale(span: span, size: CGSize(width: design.width * 1.5, height: design.height * 1.5)) == 1)
+        let small = WidgetZoom.scale(span: span, size: CGSize(width: design.width * 0.75, height: design.height * 0.8))
+        #expect(abs(small - 0.75) < 1e-9)
     }
 
-    @Test func aGapKeepsTheCellsUnlessTheSizeIsKept() throws {
-        var panel = PanelSettings()
-        let grid = BoardGrid.standard
-        let before = cell(panel, grid)
-        let wider = try #require(BoardSizing.setGap(12, panel: panel, grid: grid, layout: layout).change)
-        #expect(near(cell(wider.panel, wider.grid), before) && wider.grid.gap == 12)
-        panel.keepsSize = true
-        let kept = try #require(BoardSizing.setGap(12, panel: panel, grid: grid, layout: layout).change)
-        #expect(kept.panel == panel && cell(kept.panel, kept.grid).width < before.width)
-    }
-
-    @Test func widgetsKeepTheirCellsAndTheirPlaceAboutTheNotch() {
-        var board = WidgetBoard.standard
-        let before = board.widgets
-        board.setGridKeepingCells(BoardGrid(columns: 14, rows: 4, gap: 8))
-        #expect(board.parked.isEmpty)
-        for widget in before {
-            let now = board.widget(widget.id)?.frame
-            // One column more at the leading side: everything moves over by one, keeps its size.
-            #expect(now == GridRect(column: widget.frame.column + 1, row: widget.frame.row, width: widget.frame.width, height: widget.frame.height))
-            if widget.frame.isHorizontallyCentred(in: .standard), let now { #expect(now.isHorizontallyCentred(in: board.grid)) }
-        }
-        board.setGridKeepingCells(.standard)
-        #expect(board == WidgetBoard.standard)
-    }
-
-    @Test func fewerCellsMoveInWhatTheyCutAndParkTheRest() {
-        // A one-cell control in every cell of 12 × 3: 10 × 3 keeps 30 of the 36, the outer columns
-        // set aside.
-        var widgets: [IslandWidget] = []
-        for row in 0..<3 {
-            for column in 0..<12 {
-                widgets.append(IslandWidget(kind: .wifi, frame: GridRect(column: column, row: row, width: 1, height: 1), options: [], id: WidgetID()))
-            }
-        }
-        var board = WidgetBoard(widgets: widgets)
-        board.setGridKeepingCells(BoardGrid(columns: 10, rows: 3, gap: 8))
-        #expect(board.widgets.count == 30 && board.parked.count == 6)
-        for widget in board.widgets {
-            #expect(board.isFree(widget.frame, for: widget.kind, excluding: widget.id))
-        }
-        // The inner ones did not move about the notch.
-        let inner = widgets.filter { (1...10).contains($0.frame.column) }
-        for widget in inner { #expect(board.widget(widget.id)?.frame.column == widget.frame.column - 1) }
+    /// Reset Size: every board exactly as Size mode found it, though a smaller grid moved and
+    /// parked its widgets in between.
+    @MainActor @Test func theBoardsComeBackAsTheyWere() {
+        let defaults = UserDefaults(suiteName: "BoardSizingTests.\(UUID().uuidString)")!
+        let pages = WidgetPages(home: WidgetStore(defaults: defaults), defaults: defaults)
+        let entry = pages.snapshot()
+        pages.follow(BoardGrid(columns: 6, rows: 1, gap: 8))
+        #expect(!pages.home.board.parked.isEmpty)
+        pages.follow(.standard)
+        #expect(pages.snapshot() != entry)
+        pages.restore(entry, grid: .standard)
+        #expect(pages.snapshot() == entry && pages.home.board == .standard)
+        #expect(pages.home.undoStack.isEmpty)
     }
 }

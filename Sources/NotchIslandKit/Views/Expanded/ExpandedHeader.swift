@@ -12,6 +12,7 @@ struct ExpandedHeader: View {
     /// Hidden (kept for the next open): a level banner is the island's own then, not the header's.
     @Environment(\.isIslandPanelHidden) private var isHidden
     @Environment(\.isHeaderPicture) private var isPicture
+    @Environment(\.headerPicksStudioPage) private var picksStudioPage
 
     var body: some View {
         // Settings' picture of the header follows the banners only while Settings is on screen:
@@ -24,6 +25,7 @@ struct ExpandedHeader: View {
             ZStack(alignment: .trailing) {
                 if let kind = banner?.levelKind {
                     LevelCapsule(kind: kind)
+                        .allowsHitTesting(!picksStudioPage)
                         .transition(.blurReplace)
                 } else {
                     HeaderEar(side: .trailing, room: split.earWidth)
@@ -46,15 +48,18 @@ struct HeaderEar: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.controlSize) private var controlSize
+    @Environment(\.headerPicksStudioPage) private var picksStudioPage
 
     var body: some View {
         let fit = Self.fit(model: model, side: side, room: room, size: controlSize)
         HStack(spacing: HeaderFit.spacing) {
-            if side == .trailing, fit.hasOverflow { HeaderOverflowMenu(items: fit.overflow) }
+            if side == .trailing, fit.hasOverflow { HeaderOverflowMenu(items: fit.overflow).allowsHitTesting(!picksStudioPage) }
             ForEach(fit.shown) { item in
                 HeaderItemView(item: item, pages: fit.pages)
+                    // On Settings' stage only the page picker works (it picks the board edited).
+                    .allowsHitTesting(!picksStudioPage || item == .pages)
             }
-            if side == .leading, fit.hasOverflow { HeaderOverflowMenu(items: fit.overflow) }
+            if side == .leading, fit.hasOverflow { HeaderOverflowMenu(items: fit.overflow).allowsHitTesting(!picksStudioPage) }
         }
     }
 
@@ -294,6 +299,7 @@ private struct PagePicker: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.controlSize) private var controlSize
+    @Environment(\.headerPicksStudioPage) private var picksStudioPage
 
     /// The bar's drawn width per pages and control size. Once it is known, whether it fits is
     /// arithmetic (`HeaderFit`): a `ViewThatFits` measured the system's bar again on every open.
@@ -316,7 +322,15 @@ private struct PagePicker: View {
         let key = WidthKey(pages: pages, size: controlSize)
         // A page shown without its segment (the battery's, left out where it would reach under the
         // notch, or a page the user hid): no segment is selected.
-        Picker("Page", selection: Binding { model.panelPage } set: { island.page = $0 }) {
+        Picker("Page", selection: Binding {
+            picksStudioPage ? model.studio.page : model.panelPage
+        } set: { page in
+            guard picksStudioPage else { return island.page = page }
+            // On Settings' stage: the board edited, as the stage's own page picker sets it. The
+            // shelf has none.
+            guard page.isBoard else { return NSSound.beep() }
+            withAnimation(Motion.content) { model.studio.page = page }
+        }) {
             ForEach(pages, id: \.self) { page in
                 Label(page.title, systemImage: page.systemImage)
                     .labelStyle(.iconOnly)
@@ -388,4 +402,10 @@ private struct ControlHelp: ViewModifier {
     func body(content: Content) -> some View {
         content.help(showsHelp ? text : "")
     }
+}
+
+extension EnvironmentValues {
+    /// The header on Settings' stage: its page picker picks the board the stage edits
+    /// (`WidgetStudio.page`), and nothing else in it takes a click.
+    @Entry var headerPicksStudioPage = false
 }

@@ -81,6 +81,69 @@ import Observation
         } + preferences.header.customPages.map(\.page)
     }
 
+    /// The panel's board set (Settings ▸ Widgets ▸ Size): every page's board follows its grid, each
+    /// widget on its cells; `leadingColumns` of the columns added (or taken away) at the leading side.
+    func setPanel(_ panel: PanelSettings, leadingColumns: Int? = nil) {
+        preferences.panel = panel
+        boards.follow(panel.grid, leadingColumns: leadingColumns)
+    }
+
+    /// The saved notch styles (Settings ▸ Widgets' Save Notch Style and Open Notch Styles).
+    let notchStyles = NotchStyleStore()
+
+    /// The island as Settings ▸ Widgets has it now, as a notch style (not yet named or kept).
+    func currentNotchStyle() -> NotchStyle {
+        let pages = preferences.header.orderedPages.filter(\.isBoard)
+        let boards = Dictionary(uniqueKeysWithValues: pages.map { ($0.rawValue, self.boards.store(for: $0).board) })
+        let look = NotchStyle.Look(glassStyle: preferences.glassStyle, theme: preferences.theme,
+                                   musicBars: preferences.musicBars.rawValue, musicBarsOnPower: preferences.musicBarsOnPower.rawValue,
+                                   levelStyle: preferences.levelStyle.rawValue)
+        return NotchStyle(name: "", panel: preferences.panel, scale: preferences.scale, header: preferences.header, boards: boards,
+                          look: look)
+    }
+
+    /// Whether the island is as `style` has it.
+    func isCurrent(_ style: NotchStyle) -> Bool {
+        let now = currentNotchStyle()
+        return now.panel == style.panel && now.scale == style.scale && now.header == style.header && now.boards == style.boards
+            && (style.look == nil || now.look == style.look)
+    }
+
+    /// The island as `style` has it: its look, its pages and top bar, its cells and size, every board. A page
+    /// of the user's it does not have goes, with its board; a board it does not have is emptied.
+    /// The boards' changes are steps Undo takes back.
+    func open(_ style: NotchStyle) {
+        if let look = style.look {
+            preferences.glassStyle = look.glassStyle
+            preferences.theme = look.theme
+            if let bars = MusicBarsStyle(rawValue: look.musicBars) { preferences.musicBars = bars }
+            if let bars = MusicBarsStyle(rawValue: look.musicBarsOnPower) { preferences.musicBarsOnPower = bars }
+            if let level = LevelHUDStyle(rawValue: look.levelStyle) { preferences.levelStyle = level }
+        }
+        preferences.header = style.header
+        boards.sync(preferences.header.orderedPages)
+        preferences.scale = style.scale
+        preferences.panel = style.panel
+        for page in preferences.header.orderedPages where page.isBoard {
+            let store = boards.store(for: page)
+            store.load(style.boards[page.rawValue] ?? WidgetBoard(widgets: [], grid: style.panel.grid))
+        }
+        if !preferences.header.orderedPages.contains(studio.page) { studio.page = .home }
+        if !preferences.header.orderedPages.contains(island.page) { island.page = .home }
+    }
+
+    /// The panel, its scale and every board as they are now (Settings ▸ Widgets ▸ Size).
+    func sizeSnapshot() -> SizeSnapshot {
+        SizeSnapshot(panel: preferences.panel, scale: preferences.scale, boards: boards.snapshot())
+    }
+
+    /// All of it back as `snapshot` had it, every widget where it was.
+    func restoreSize(_ snapshot: SizeSnapshot) {
+        preferences.scale = snapshot.scale
+        preferences.panel = snapshot.panel
+        boards.restore(snapshot.boards, grid: snapshot.panel.grid)
+    }
+
     /// The board the Widgets stage shows and edits: the studio's page's.
     var editedWidgets: WidgetStore { boards.store(for: studio.page) }
 
@@ -149,6 +212,12 @@ import Observation
     init(preferences: Preferences = Preferences()) {
         self.preferences = preferences
         boards = WidgetPages(home: widgets)
+        // A panel stored before the board was set by its cells: its board's grid at the default cell.
+        if preferences.panel.isFromBefore {
+            let grid = widgets.board.grid
+            preferences.panel = PanelSettings(cell: PanelSettings().cell, gap: Double(grid.gap), columns: grid.columns, rows: grid.rows)
+        }
+        boards.follow(preferences.panel.grid)
         boards.sync(preferences.header.orderedPages)
         haptics = Haptics(preferences: preferences)
         controller = IslandController(model: self)

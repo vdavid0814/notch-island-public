@@ -23,6 +23,8 @@ import Foundation
         guard page.isBoard else { return home }
         if let store = stores[page] { return store }
         let store = WidgetStore(defaults: defaults, key: Self.key(for: page), seed: WidgetBoard(widgets: [], grid: home.board.grid))
+        // Every page on the panel's grid (a board stored before may have its own).
+        store.follow(home.board.grid)
         stores[page] = store
         return store
     }
@@ -47,6 +49,22 @@ import Foundation
         }
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(WidgetStore.key + ".page.") {
             if !pages.contains(where: { Self.key(for: $0) == key }) { defaults.removeObject(forKey: key) }
+        }
+    }
+
+    /// Every board made so far on `grid` (the panel's), each widget on its cells.
+    func follow(_ grid: BoardGrid, leadingColumns: Int? = nil) {
+        home.follow(grid, leadingColumns: leadingColumns)
+        for store in stores.values where store !== home { store.follow(grid, leadingColumns: leadingColumns) }
+    }
+
+    /// Every board made so far, as it is now.
+    func snapshot() -> [ExpandedPage: WidgetBoard] { stores.mapValues(\.board) }
+
+    /// The boards as `snapshot` had them; one made since then on `grid`, each widget on its cells.
+    func restore(_ snapshot: [ExpandedPage: WidgetBoard], grid: BoardGrid) {
+        for (page, store) in stores {
+            if let board = snapshot[page] { store.replace(with: board) } else { store.follow(grid) }
         }
     }
 

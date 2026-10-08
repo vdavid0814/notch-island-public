@@ -7,8 +7,9 @@ import ScreenCaptureKit
 /// where macOS's Screenshot app saves (the Desktop unless it was changed there), named as it names
 /// its recordings.
 ///
-/// Only with Screen Recording (asked for the first time). The stream runs only while recording, and
-/// ScreenCaptureKit writes the movie itself (`SCRecordingOutput`): no frame passes through the app.
+/// Only with Screen Recording (asked for the first time). The stream runs only while recording, in
+/// a process of its own (`RecordingHelper`), and ScreenCaptureKit writes the movie itself
+/// (`SCRecordingOutput`): no frame passes through the app.
 /// While it records, the island shows it round the notch (`RecordingCompact`), and the pointer over
 /// the notch brings up the time and Stop (`RecordingCard`).
 @Observable final class ScreenRecorder {
@@ -40,9 +41,9 @@ import ScreenCaptureKit
     /// The movie is written and closed, recorded on that display (its thumbnail comes up there).
     @ObservationIgnored var onSaved: ((URL, CGDirectDisplayID) -> Void)?
 
-    @ObservationIgnored private var stream: SCStream?
-    @ObservationIgnored private var watch: RecordingWatch?
-    @ObservationIgnored private var output: SCRecordingOutput?
+    /// The process recording (`RecordingHelper`), and its input (`stop`).
+    @ObservationIgnored private var helper: Process?
+    @ObservationIgnored private var helperInput: FileHandle?
     @ObservationIgnored private var generation = 0
 
     static let frameRate: Int32 = 60
@@ -55,8 +56,9 @@ import ScreenCaptureKit
         }
     }
 
-    /// Starts recording `display` (nil: the main one). Without Screen Recording, asks for it: the
-    /// system's prompt the first time, System Settings after a no.
+    /// Starts recording `display` (nil: the main one), in a process of its own (`RecordingHelper`:
+    /// macOS's Stop in the menu bar goes when that process ends). Without Screen Recording, asks
+    /// for it: the system's prompt the first time, System Settings after a no.
     func start(display: CGDirectDisplayID?) {
         guard state == .idle else { return }
         guard CGPreflightScreenCaptureAccess() else {
@@ -67,75 +69,64 @@ import ScreenCaptureKit
             }
             return
         }
+        guard let executable = Bundle.main.executableURL else { return }
         state = .starting
         generation += 1
         let generation = generation
         let url = Self.newMovieURL()
         let displayID = display ?? CGMainDisplayID()
         onStart?()
-        Task { [weak self] in
-            do {
-                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                guard let screen = content.displays.first(where: { $0.displayID == displayID }) ?? content.displays.first else {
-                    throw RecordingError.noDisplay
-                }
-                // The island (and Settings) are the app's own windows: left out of the movie.
-                let own = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
-                let filter = SCContentFilter(display: screen, excludingApplications: own, exceptingWindows: [])
-                let configuration = SCStreamConfiguration()
-                let scale = CGFloat(filter.pointPixelScale)
-                configuration.width = Int((filter.contentRect.width * scale).rounded())
-                configuration.height = Int((filter.contentRect.height * scale).rounded())
-                configuration.minimumFrameInterval = CMTime(value: 1, timescale: Self.frameRate)
-                configuration.showsCursor = true
-                configuration.queueDepth = 6
-                let recording = SCRecordingOutputConfiguration()
-                recording.outputURL = url
-                recording.outputFileType = .mov
-                recording.videoCodecType = .hevc
-                let watch = RecordingWatch(
-                    stopped: { [weak self] in self?.stoppedBySystem(generation: generation) },
-                    finished: { [weak self] in self?.finished(url, display: displayID, generation: generation) })
-                let output = SCRecordingOutput(configuration: recording, delegate: watch)
-                let stream = SCStream(filter: filter, configuration: configuration, delegate: watch)
-                try stream.addRecordingOutput(output)
-                try await stream.startCapture()
-                guard let self, self.generation == generation, self.state == .starting else {
-                    try? await stream.stopCapture()
-                    return
-                }
-                self.stream = stream
-                self.watch = watch
-                self.output = output
-                self.state = .recording(since: .now)
-                Log.recording.notice("recording display \(displayID, privacy: .public) to \(url.lastPathComponent, privacy: .public)")
-            } catch {
-                Log.recording.error("could not start: \(error.localizedDescription, privacy: .public)")
-                guard let self, self.generation == generation else { return }
-                self.state = .idle
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = [RecordingHelper.flag, String(displayID), url.path, String(ProcessInfo.processInfo.processIdentifier)]
+        let input = Pipe(), output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        output.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil
+                return
             }
+            for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
+                let line = String(line)
+                Task { @MainActor [weak self] in self?.heard(line, url: url, display: displayID, generation: generation) }
+            }
+        }
+        process.terminationHandler = { _ in
+            Task { @MainActor [weak self] in self?.helperEnded(generation: generation) }
+        }
+        do {
+            try process.run()
+            helper = process
+            helperInput = input.fileHandleForWriting
+            Log.recording.notice("recording display \(displayID, privacy: .public) to \(url.lastPathComponent, privacy: .public)")
+        } catch {
+            Log.recording.error("could not start the helper: \(error.localizedDescription, privacy: .public)")
+            state = .idle
         }
     }
 
-    /// Ends the recording: the movie is finished and closed on disk a moment later.
+    /// Ends the recording: the helper closes the movie a moment later and quits.
     func stop() {
         guard state != .idle else { return }
-        let stream = stream
-        self.stream = nil
         state = .idle
-        if let stream {
-            Task { try? await stream.stopCapture() }
+        if let helperInput {
+            helperInput.write(Data("stop\n".utf8))
+            try? helperInput.close()
+            self.helperInput = nil
         } else {
-            // Starting (or a demo recording): nothing was captured yet.
+            // A demo recording: nothing was captured.
             generation += 1
         }
         onStop?()
     }
 
     /// A recording that is only shown (`demo/recording`): the island's indicator and card, without
-    /// a stream or a permission.
+    /// a helper or a permission.
     func demo(_ on: Bool) {
-        guard stream == nil else { return }
+        guard helper == nil else { return }
         if on {
             state = .recording(since: Date.now.addingTimeInterval(-83))
         } else if state != .idle {
@@ -143,22 +134,35 @@ import ScreenCaptureKit
         }
     }
 
-    /// macOS ended the stream (its own Stop in the menu bar, the display gone).
-    private func stoppedBySystem(generation: Int) {
-        guard generation == self.generation, stream != nil else { return }
-        Log.recording.notice("the system stopped the recording")
-        stream = nil
-        state = .idle
-        onStop?()
+    /// A line from the helper.
+    private func heard(_ line: String, url: URL, display: CGDirectDisplayID, generation: Int) {
+        switch line {
+        case "started":
+            guard generation == self.generation, state == .starting else { return }
+            state = .recording(since: .now)
+        case "saved":
+            Log.recording.notice("saved \(url.lastPathComponent, privacy: .public)")
+            lastMovie = url
+            onSaved?(url, display)
+        case "stopped":
+            // macOS ended it (its own Stop in the menu bar, the display gone).
+            guard generation == self.generation, state != .idle else { return }
+            Log.recording.notice("the system stopped the recording")
+            state = .idle
+            onStop?()
+        default:
+            if line.hasPrefix("error") { Log.recording.error("could not start: \(line, privacy: .public)") }
+        }
     }
 
-    private func finished(_ url: URL, display: CGDirectDisplayID, generation: Int) {
-        Log.recording.notice("saved \(url.lastPathComponent, privacy: .public)")
-        lastMovie = url
-        onSaved?(url, display)
-        if generation == self.generation {
-            watch = nil
-            output = nil
+    /// The helper quit (the movie written, or it failed): a recording still shown as going ends.
+    private func helperEnded(generation: Int) {
+        guard generation == self.generation else { return }
+        helper = nil
+        helperInput = nil
+        if state != .idle {
+            state = .idle
+            onStop?()
         }
     }
 
@@ -175,6 +179,10 @@ import ScreenCaptureKit
     }
 
     nonisolated static func saveDirectory() -> URL {
+        // For checking a recording without leaving it on the user's Desktop.
+        if let folder = ProcessInfo.processInfo.environment["NI_RECORDING_DIR"], !folder.isEmpty {
+            return URL(fileURLWithPath: folder, isDirectory: true)
+        }
         let home = FileManager.default.homeDirectoryForCurrentUser
         if let path = CFPreferencesCopyAppValue("location" as CFString, "com.apple.screencapture" as CFString) as? String,
            !path.isEmpty {
@@ -185,10 +193,6 @@ import ScreenCaptureKit
             }
         }
         return home.appendingPathComponent("Desktop", isDirectory: true)
-    }
-
-    nonisolated enum RecordingError: Error {
-        case noDisplay
     }
 }
 

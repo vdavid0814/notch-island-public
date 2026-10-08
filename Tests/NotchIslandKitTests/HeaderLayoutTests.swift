@@ -151,9 +151,9 @@ import Testing
     /// could be arranged: nothing of it goes into "⋯".
     @Test func theStandardBarNeverOverflows() {
         for notch in [CGSize(width: 156, height: 29), CGSize(width: 156, height: 32), CGSize(width: 185, height: 32)] {
-            for factor in [1, PanelSettings.widthRange.upperBound] {
+            for factor in [12, 24] {
                 for scale in IslandScale.allCases {
-                    let layout = IslandLayout(notch: notch, scale: scale, panel: PanelLayout(widthFactor: factor))
+                    let layout = IslandLayout(notch: notch, scale: scale, panel: PanelLayout(columns: factor))
                     let split = NotchSplit(layout: layout, presentation: .expanded(.home),
                                            outerInset: Metrics.Expanded.horizontalInset, clearance: Metrics.notchClearance)
                     let size = Metrics.Control.size(fittingBand: notch.height)
@@ -210,8 +210,9 @@ import Testing
     /// A panel made narrower than its own width (Size ▸ Width) at the smallest island: the bar's
     /// first item beside the notch goes into the menu, and what is drawn fits.
     @Test func aNarrowedPanelOverflowsIntoTheMenu() {
-        let layout = IslandLayout(notch: CGSize(width: 156, height: 29), scale: .extraSmall,
-                                  panel: PanelLayout(widthFactor: PanelSettings.widthRange.lowerBound))
+        // The fewest columns Size allows there.
+        let base = IslandLayout(notch: CGSize(width: 156, height: 29), scale: .extraSmall)
+        let layout = base.replacing(panel: PanelLayout(columns: base.columnRange.lowerBound))
         let split = NotchSplit(layout: layout, presentation: .expanded(.home),
                                outerInset: Metrics.Expanded.horizontalInset, clearance: Metrics.notchClearance)
         let full = width(HeaderLayout.standard.trailing)

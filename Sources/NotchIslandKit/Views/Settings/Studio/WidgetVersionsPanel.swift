@@ -174,7 +174,7 @@ struct WidgetVersionsPanel: View {
                 .tint(.red)
             } else {
                 Spacer(minLength: 0)
-                Button("Delete All", systemImage: "trash") { withAnimation(.spring(duration: 0.3)) { confirmsDeleteAll = true } }
+                Button("Delete All") { withAnimation(.spring(duration: 0.3)) { confirmsDeleteAll = true } }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
                     .foregroundStyle(SettingsPalette.secondary)

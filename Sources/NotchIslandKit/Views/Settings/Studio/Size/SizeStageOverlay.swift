@@ -1,18 +1,20 @@
 import AppKit
 import SwiftUI
 
-/// Over the stage's island in Size mode: a handle on each side (the width, kept centred on the
-/// notch) and on the lower edge (the board's height). While one is dragged, an outline follows the
-/// pointer exactly and the island itself steps from size to size (`StudioDraft`); the preference is
-/// written once, when the drag ends.
+/// Over the stage's island in Size mode: a handle on each side (columns, the panel kept centred on
+/// the notch) and on the lower edge (rows). While one is dragged, an outline follows the pointer
+/// and the island steps a whole cell at a time (`StudioDraft`) — one column or row, of the cells'
+/// own size, so nothing on the board changes shape; the panel is stored once the drag ends.
 struct SizeStageOverlay: View {
-    /// The island as drawn now (the draft's size while dragging), in the overlay's space: centred
-    /// on its width, hanging from its top.
+    /// The island as drawn now (the draft's while dragging), in the overlay's space: centred on its
+    /// width, hanging from its top.
     let island: CGSize
-    /// The overlay's own size (the most the island is dragged to at once: `StudioStage.sizeRoom`).
+    /// The overlay's own size.
     let room: CGSize
     /// The island's layout without the draft.
     let base: IslandLayout
+    /// How much smaller the stage shows the island: a drag on the screen is this much larger on it.
+    let fit: CGFloat
 
     @Environment(AppModel.self) private var model
     @State private var drag: Drag?
@@ -20,17 +22,16 @@ struct SizeStageOverlay: View {
 
     private struct Drag: Equatable {
         let handle: ResizeHandle
-        /// The island's size when the drag began.
-        let start: CGSize
+        /// The panel and the island's size when the drag began, and how much smaller it was shown.
+        let start: PanelSettings
+        let startIsland: CGSize
+        let fit: CGFloat
         /// The size under the pointer.
         var live: CGSize
     }
 
-    private static let space = "sizeStage"
-
     var body: some View {
         let frame = CGRect(x: (room.width - island.width) / 2, y: 0, width: island.width, height: island.height)
-        let grid = model.editedWidgets.board.grid
         ZStack(alignment: .topLeading) {
             if let drag {
                 let live = CGRect(x: (room.width - drag.live.width) / 2, y: 0, width: drag.live.width, height: drag.live.height)
@@ -41,51 +42,41 @@ struct SizeStageOverlay: View {
                     .allowsHitTesting(false)
             }
             ForEach([ResizeHandle.leading, .trailing, .bottom], id: \.self) { handle in
-                let at = drag.map { drag in
-                    handle.position(on: CGRect(x: (room.width - drag.live.width) / 2, y: 0, width: drag.live.width, height: drag.live.height))
-                } ?? handle.position(on: frame)
                 EdgeHandle(isVertical: handle != .bottom)
-                    .position(at)
+                    .position(handle.position(on: frame))
                     .gesture(gesture(handle))
-                    .help(handle == .bottom ? "Drag to make the board taller or shorter" : "Drag to make the panel wider or narrower")
+                    .help(handle == .bottom ? "Drag for more or fewer rows" : "Drag for more or fewer columns")
             }
-            // What it is now, under the island.
-            SizeBadge(text: "\(Int(island.width)) × \(Int(island.height)) pt  ·  \(grid.columns) × \(grid.rows) cells", tint: Color.islandAccent)
-                .position(x: room.width / 2, y: min((drag?.live.height ?? island.height) + 22, room.height - 10))
-                .allowsHitTesting(false)
         }
         .frame(width: room.width, height: room.height, alignment: .topLeading)
-        .coordinateSpace(.named(Self.space))
         .finishingCancelledDrag(isDragging, finish: finish)
     }
 
     private func gesture(_ handle: ResizeHandle) -> some Gesture {
-        DragGesture(minimumDistance: 1, coordinateSpace: .named(Self.space))
+        // On the screen, not in the stage's own (shrunk) space: that space changes as the island
+        // grows, and the pointer would run away from it.
+        DragGesture(minimumDistance: 1, coordinateSpace: .global)
             .tracking($isDragging)
             .onChanged { value in
-                var current = drag ?? Drag(handle: handle, start: island, live: island)
-                let limit = base.maximumExpandedSize
-                let smallest = base.replacing(panel: PanelLayout(widthFactor: PanelSettings.widthRange.lowerBound,
-                                                                 boardHeightFactor: PanelSettings.boardHeightRange.lowerBound))
-                    .size(for: .expanded(.home))
-                let largest = base.replacing(panel: PanelLayout(widthFactor: PanelSettings.widthRange.upperBound,
-                                                                boardHeightFactor: PanelSettings.boardHeightRange.upperBound))
-                    .size(for: .expanded(.home))
+                var current = drag ?? Drag(handle: handle, start: model.preferences.panel, startIsland: island,
+                                           fit: max(fit, 0.1), live: island)
+                let dx = value.translation.width / current.fit, dy = value.translation.height / current.fit
                 switch handle {
                 case .leading, .trailing:
                     // Centred on the notch: both sides move.
-                    let delta = value.translation.width * (handle == .trailing ? 2 : -2)
-                    current.live.width = min(max(current.start.width + delta, smallest.width), min(largest.width, limit.width, room.width))
+                    current.live.width = max(current.startIsland.width + 2 * (handle == .trailing ? dx : -dx), 1)
                 default:
-                    current.live.height = min(max(current.start.height + value.translation.height, smallest.height),
-                                             min(largest.height, limit.height, room.height - 34))
+                    current.live.height = max(current.startIsland.height + dy, base.notch.height + 1)
                 }
                 drag = current
-                var panel = base.panel(forExpandedSize: current.live)
-                panel.keepsSize = model.preferences.panel.keepsSize
-                if model.studio.draft?.panel != panel {
+                let counts = BoardSizing.counts(forIsland: current.live, panel: current.start, layout: base)
+                var next = current.start
+                if handle == .bottom { next.rows = counts.rows } else { next.columns = counts.columns }
+                next = BoardSizing.fitted(next, layout: base)
+                let draft = StudioDraft(panel: next, leadingColumns: handle == .leading ? next.columns - current.start.columns : 0)
+                if model.studio.draft != draft {
                     SnapTick.perform()
-                    withAnimation(.spring(duration: 0.2, bounce: 0.08)) { model.studio.draft = StudioDraft(panel: panel) }
+                    withAnimation(.spring(duration: 0.2, bounce: 0.08)) { model.studio.draft = draft }
                 }
             }
             .onEnded { _ in finish() }
@@ -96,7 +87,7 @@ struct SizeStageOverlay: View {
         drag = nil
         guard let draft = model.studio.draft else { return }
         withAnimation(.spring(duration: 0.25, bounce: 0.1)) {
-            model.preferences.panel = draft.panel
+            model.setPanel(draft.panel, leadingColumns: draft.leadingColumns)
             model.studio.draft = nil
         }
     }

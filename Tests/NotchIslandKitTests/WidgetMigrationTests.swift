@@ -142,11 +142,12 @@ private func scratchDefaults() -> (UserDefaults, String) {
 }
 
 @Suite struct WidgetGridTests {
-    @Test func gridsAreClampedAndEven() {
-        let odd = BoardGrid(columns: 13, rows: 9, gap: 30)
-        #expect(odd.columns == 12 && odd.rows == 6 && odd.gap == 14)
+    /// Any number of columns (the board is centred on the notch either way), within the ranges.
+    @Test func gridsAreClamped() {
+        let odd = BoardGrid(columns: 13, rows: 19, gap: 30)
+        #expect(odd.columns == 13 && odd.rows == BoardGrid.rowRange.upperBound && odd.gap == BoardGrid.gapRange.upperBound)
         let tiny = BoardGrid(columns: 2, rows: 0, gap: 0)
-        #expect(tiny.columns == 8 && tiny.rows == 2 && tiny.gap == 4)
+        #expect(tiny.columns == BoardGrid.columnRange.lowerBound && tiny.rows == 1 && tiny.gap == BoardGrid.gapRange.lowerBound)
         let decoded = try? JSONDecoder().decode(BoardGrid.self, from: Data(#"{"columns":"many","rows":4}"#.utf8))
         #expect(decoded == BoardGrid(columns: 12, rows: 4, gap: 8))
     }
@@ -163,10 +164,10 @@ private func scratchDefaults() -> (UserDefaults, String) {
     /// reference size in cells on any grid; its largest grows with the grid, so a widget may still
     /// span it.
     @Test func kindLimitsConvertToOtherGrids() {
-        let fine = BoardGrid(columns: 24, rows: 6, gap: 6)
+        let fine = BoardGrid(columns: 18, rows: 6, gap: 6)
         #expect(fine.minimum(for: .nowPlaying) == IslandWidgetKind.nowPlaying.minimumSize)
         #expect(fine.defaultSize(for: .stopwatch) == IslandWidgetKind.stopwatch.defaultSize)
-        #expect(fine.maximum(for: .wifi) == GridSize(width: 8, height: 4))
+        #expect(fine.maximum(for: .wifi) == GridSize(width: 6, height: 4))
         let coarse = BoardGrid(columns: 8, rows: 2, gap: 8)
         #expect(coarse.minimum(for: .stopwatch) == IslandWidgetKind.stopwatch.minimumSize)
         #expect(coarse.maximum(for: .wifi) == IslandWidgetKind.wifi.maximumSize)
@@ -182,9 +183,9 @@ private func scratchDefaults() -> (UserDefaults, String) {
 
     @Test func aFinerGridAndBackKeepsEveryFrame() {
         var board = WidgetBoard.standard
-        board.setGrid(BoardGrid(columns: 24, rows: 6, gap: 8))
-        #expect(board.widget(.legacy(.nowPlaying))?.frame == GridRect(column: 0, row: 0, width: 14, height: 6))
-        #expect(board.widget(.legacy(.stopwatch))?.frame == GridRect(column: 14, row: 2, width: 10, height: 2))
+        board.setGrid(BoardGrid(columns: 12, rows: 6, gap: 8))
+        #expect(board.widget(.legacy(.nowPlaying))?.frame == GridRect(column: 0, row: 0, width: 7, height: 6))
+        #expect(board.widget(.legacy(.stopwatch))?.frame == GridRect(column: 7, row: 2, width: 5, height: 2))
         #expect(board.parked.isEmpty)
         board.setGrid(.standard)
         #expect(board == WidgetBoard.standard)
@@ -335,41 +336,40 @@ private func scratchDefaults() -> (UserDefaults, String) {
     nonisolated static let screens = [CGSize.zero, CGSize(width: 1280, height: 800), CGSize(width: 1512, height: 982),
                           CGSize(width: 3456, height: 2234)]
 
-    /// With the default panel settings every size is exactly what it was before they existed.
+    /// The default panel is 12 × 3 cells of 40 pt, 8 pt apart, at the island's scale, with the
+    /// insets round them — within the screen; Siri grows out of the header as wide.
     @Test(arguments: notches, IslandScale.allCases)
-    func defaultsChangeNothing(notch: CGSize, scale: IslandScale) {
+    func theDefaultsAreTwelveByThreeCells(notch: CGSize, scale: IslandScale) {
         for screen in Self.screens {
             let layout = IslandLayout(notch: notch, scale: scale, screen: screen)
             let f = scale.factor
-            let base = max(notch.width + 380, 600)
-            #expect(layout.size(for: .expanded(.home))
-                    == CGSize(width: (base * f).rounded(), height: notch.height + (160 * f).rounded()))
-            #expect(layout.size(for: .assistant(.list)).width == (base * f).rounded())
+            let pitch = (48 * f).rounded()
+            let size = layout.size(for: .expanded(.home))
+            #expect(size.width == min(12 * pitch - 8 + 36, layout.maximumExpandedSize.width))
+            #expect(size.height == notch.height + min(3 * pitch - 8 + 16, layout.maximumExpandedSize.height - notch.height))
+            #expect(layout.size(for: .assistant(.list)).width == size.width)
             #expect(layout.replacing(panel: PanelLayout()) == layout)
         }
     }
 
-    @Test func thePanelGrowsWithinTheScreen() {
-        let notch = CGSize(width: 185, height: 32), screen = CGSize(width: 1512, height: 982)
-        let wide = IslandLayout(notch: notch, scale: .standard, screen: screen,
-                                panel: PanelSettings(widthFactor: 1.2, boardHeightFactor: 1.5).layout)
-        #expect(wide.size(for: .expanded(.home)) == CGSize(width: 720, height: 32 + 240))
-        // Siri grows out of the header as wide, times its own factor.
-        #expect(wide.size(for: .assistant(.list)).width == 720)
+    @Test func thePanelStaysWithinTheScreen() {
+        let notch = CGSize(width: 185, height: 32)
         let huge = IslandLayout(notch: notch, scale: .large, screen: CGSize(width: 1024, height: 640),
-                                panel: PanelSettings(widthFactor: 1.6, boardHeightFactor: 2.2).layout)
+                                panel: PanelSettings(cell: 90, gap: 20, columns: 30, rows: 8).layout)
         let size = huge.size(for: .expanded(.home))
         #expect(size.width == 1024 - 2 * IslandLayout.settingsSideMargin)
-        #expect(size.height == 32 + (0.62 * 640 - 32).rounded(.down))
+        #expect(size.height == (0.62 * 640).rounded(.down))
         // Siri as wide as the panel at most, the gallery too.
         #expect(huge.size(for: .assistant(.list)).width == size.width)
         #expect(huge.size(for: .assistant(.gallery)).width == size.width)
     }
 
     @Test func settingsAreClampedAndTolerant() throws {
-        #expect(PanelSettings(widthFactor: 9, boardHeightFactor: 0) == PanelSettings(widthFactor: 3, boardHeightFactor: 0.8))
-        let decoded = try JSONDecoder().decode(PanelSettings.self, from: Data(#"{"widthFactor":"wide","boardHeightFactor":9,"keepsSize":true}"#.utf8))
-        #expect(decoded.widthFactor == 1 && decoded.boardHeightFactor == 4 && decoded.keepsSize)
+        #expect(PanelSettings(cell: 999, gap: -5, columns: 99, rows: 0)
+                == PanelSettings(cell: PanelSettings.cellRange.upperBound, gap: PanelSettings.gapRange.lowerBound,
+                                 columns: PanelSettings.columnRange.upperBound, rows: PanelSettings.rowRange.lowerBound))
+        let decoded = try JSONDecoder().decode(PanelSettings.self, from: Data(#"{"cell":"large","gap":30,"columns":7}"#.utf8))
+        #expect(decoded.cell == 40 && decoded.gap == PanelSettings.gapRange.upperBound && decoded.columns == 7 && decoded.rows == 3)
         let empty = try JSONDecoder().decode(PanelSettings.self, from: Data("{}".utf8))
         #expect(empty == PanelSettings() && empty.layout == PanelLayout())
     }
@@ -379,7 +379,7 @@ private func scratchDefaults() -> (UserDefaults, String) {
         defer { UserDefaults.standard.removePersistentDomain(forName: name) }
         let preferences = Preferences(defaults: defaults)
         #expect(preferences.panel == PanelSettings())
-        preferences.panel = PanelSettings(widthFactor: 1.3, boardHeightFactor: 1.1)
-        #expect(Preferences(defaults: defaults).panel == PanelSettings(widthFactor: 1.3, boardHeightFactor: 1.1))
+        preferences.panel = PanelSettings(cell: 32, gap: 6, columns: 15, rows: 4)
+        #expect(Preferences(defaults: defaults).panel == PanelSettings(cell: 32, gap: 6, columns: 15, rows: 4))
     }
 }

@@ -33,9 +33,13 @@ struct RecordingCompact: View {
 }
 
 /// The pointer over the notch while recording: how long it has been recording, beside a red dot,
-/// and a red glass Stop. A click anywhere else on it opens the panel.
+/// and Stop on red-tinted Liquid Glass — the two as tall as each other, on one line. A click
+/// anywhere else on it opens the panel.
 struct RecordingCard: View {
     @Environment(AppModel.self) private var model
+
+    /// The row's height: the time's and Stop's.
+    static let rowHeight: CGFloat = 38
 
     var body: some View {
         let layout = model.layout
@@ -48,23 +52,24 @@ struct RecordingCard: View {
                 Circle()
                     .fill(RecordingStyle.red)
                     .frame(width: 10, height: 10)
-                VStack(alignment: .leading, spacing: 0) {
-                    RecordingTime(since: model.recorder.startedAt)
-                        .font(.system(size: 20, weight: .semibold, design: .rounded).monospacedDigit())
-                    Text("Recording")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                RecordingTime(since: model.recorder.startedAt)
+                    .font(.system(size: 28, weight: .semibold, design: .rounded).monospacedDigit())
+                    .lineLimit(1)
+                    .frame(height: Self.rowHeight)
                 Spacer(minLength: 8)
                 Button {
                     model.recorder.stop()
                     model.haptics.play(.tick)
                 } label: {
                     Label("Stop", systemImage: "stop.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18)
+                        .frame(height: Self.rowHeight)
+                        .contentShape(.capsule)
+                        .glassEffect(Glass.regular.tint(RecordingStyle.red.opacity(0.75)).interactive(), in: .capsule)
                 }
-                .islandButton(.capsule, prominent: true)
-                .tint(RecordingStyle.red)
-                .controlSize(.large)
+                .buttonStyle(.plain)
                 .help("Stop recording")
             }
             .padding(.horizontal, split.contentInset + 6)

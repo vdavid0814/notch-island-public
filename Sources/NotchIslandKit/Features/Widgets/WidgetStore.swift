@@ -11,8 +11,22 @@ import Foundation
     nonisolated static let persistDelay: Duration = .milliseconds(400)
 
     private(set) var board: WidgetBoard {
-        didSet { if board != oldValue { schedulePersist() } }
+        didSet {
+            guard board != oldValue else { return }
+            schedulePersist()
+            record(oldValue)
+        }
     }
+
+    /// The boards as they were before each change, the latest last (Settings ▸ Widgets' ⌘Z), and
+    /// the ones undone (⌘⇧Z).
+    private(set) var undoStack: [WidgetBoard] = []
+    private(set) var redoStack: [WidgetBoard] = []
+    @ObservationIgnored private var isRestoring = false
+    @ObservationIgnored private var lastChange: TimeInterval = 0
+    /// Changes this close together are one step: a drag, a slider moved.
+    static let coalescing: TimeInterval = 0.6
+    static let historyLimit = 60
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored let key: String
@@ -40,6 +54,56 @@ import Foundation
     @discardableResult
     func add(_ kind: IslandWidgetKind) -> WidgetID? { board.add(kind) }
 
+    /// A widget dropped on the board at `anchor` (or as near as there is room).
+    @discardableResult
+    func add(_ kind: IslandWidgetKind, near anchor: GridRect) -> WidgetID? { board.add(kind, near: anchor) }
+
+    // MARK: Undo
+
+    private func record(_ old: WidgetBoard) {
+        guard !isRestoring else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        defer { lastChange = now }
+        redoStack.removeAll()
+        // Part of the change still going on (a drag): the board before it is already kept.
+        if now - lastChange < Self.coalescing, !undoStack.isEmpty { return }
+        undoStack.append(old)
+        if undoStack.count > Self.historyLimit { undoStack.removeFirst() }
+    }
+
+    /// The board as it was before the last change; false with nothing to undo.
+    @discardableResult
+    func undo() -> Bool {
+        guard let previous = undoStack.popLast() else { return false }
+        redoStack.append(board)
+        restoring { board = Self.on(board.grid, previous) }
+        return true
+    }
+
+    /// The change undone last, made again; false with nothing to redo.
+    @discardableResult
+    func redo() -> Bool {
+        guard let next = redoStack.popLast() else { return false }
+        undoStack.append(board)
+        restoring { board = Self.on(board.grid, next) }
+        return true
+    }
+
+    /// `board` on the panel's grid now (the panel may have changed since it was kept).
+    private static func on(_ grid: BoardGrid, _ board: WidgetBoard) -> WidgetBoard {
+        var board = board
+        board.setGridKeepingCells(grid)
+        return board
+    }
+
+    private func restoring(_ change: () -> Void) {
+        isRestoring = true
+        change()
+        isRestoring = false
+        // The next change is a step of its own, however soon it comes.
+        lastChange = 0
+    }
+
     @discardableResult
     func duplicate(_ id: WidgetID) -> WidgetID? { board.duplicate(id) }
 
@@ -60,6 +124,23 @@ import Foundation
 
     /// More or fewer cells, each widget on as many as before (`WidgetBoard.setGridKeepingCells`).
     func setGridKeepingCells(_ grid: BoardGrid) { board.setGridKeepingCells(grid) }
+
+    /// The panel's grid (`AppModel.setPanel`): each widget on its cells, columns added on the side
+    /// dragged. Not a step to undo — the panel is not part of the board's history.
+    func follow(_ grid: BoardGrid, leadingColumns: Int? = nil) {
+        guard grid != board.grid else { return }
+        restoring { board.setGridKeepingCells(grid, leadingColumns: leadingColumns) }
+    }
+
+    /// Another board in this one's place (a notch style opened): a change like any other, Undo
+    /// takes it back.
+    func load(_ board: WidgetBoard) { self.board = board }
+
+    /// The board as it was kept before (Reset Size): like the panel, not a step to undo.
+    func replace(with board: WidgetBoard) {
+        guard board != self.board else { return }
+        restoring { self.board = board }
+    }
 
     /// A parked widget back on the board; false when there is no room for it.
     @discardableResult
