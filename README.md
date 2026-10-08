@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.7.3.2 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -23,6 +23,36 @@ How much energy each animation and the idle state take, measured before and afte
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.8
+
+The open island sized by its cells, notch styles you can save and open again, and a new Size
+editor.
+
+- **The panel is made of cells**: Settings ▸ Widgets ▸ Size sets square cells of one size, the gap
+  between them, and how many columns and rows. Drag the island's edges (or the Width and Height
+  sliders) to add or take away one column or row at a time: widgets keep their cells, so they
+  never change shape, they only grow or shrink with them. Smaller cells fit more widgets in the
+  same room. Up to 18 columns and 6 rows; anything that no longer fits goes to **Didn't Fit**,
+  never lost.
+- **A new Size editor**: the Cells and Panel cards sit at the bottom of the window with **Reset
+  Size** and **Ready-made Size** under them, and the desktop behind the island unfolds down to
+  them. **Reset Size** puts back exactly what you had when you opened Size: the cells, the size
+  and every widget where it was. **Ready-made Size** opens out of its button with the same
+  pictures as General ▸ Size when open.
+- **Notch styles**: **Save Notch Style** beside the Widgets title keeps the whole island: every
+  page's widgets with their looks and places, the top bar and its pages, the size, the surface,
+  the colour, the music bars and the volume's style. **Open Notch Styles** lists them: rename
+  them, see a picture of each, open one (Undo takes the widgets back) or delete them.
+- **Widgets**: drag one from the gallery onto the island and it lands where you drop it, looking
+  like the widgets already there. On smaller cells a widget is the same widget drawn smaller, not
+  squeezed. A button now takes clicks over its whole shape. The grid shows its cells as dots.
+- **Screen recording**: macOS's Stop in the menu bar goes away as soon as the movie is saved, and
+  Move and Delete in the thumbnail's menu work on the Desktop and in Documents too.
+- **The recording card**: a larger timer and a red Stop side by side.
+
+> [!WARNING]
+> This version uses even more energy than 0.7.3.2 and may have more bugs.
 
 ## What's new in v0.7.3.2
 
