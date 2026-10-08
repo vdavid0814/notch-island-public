@@ -241,6 +241,7 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
         var range: BatteryChartRange
         var day: Date?
         var style: BatteryChartStyle
+        var cut: BatteryChartCut
         var width: Double
         var height: Double
     }
@@ -256,8 +257,9 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
     /// body. A missing or stale one is built off the main thread and published when ready,
     /// meanwhile the previous one (or nil) is returned. Needs a `.history` lease.
     /// `day`: a past day's midnight to show instead of the range (Daily Usage's pick).
-    func chartGeometry(range: BatteryChartRange, style: BatteryChartStyle, size: CGSize, day: Date? = nil) -> BatteryChartGeometry? {
-        let key = ChartKey(range: range, day: day, style: style, width: size.width, height: size.height)
+    func chartGeometry(range: BatteryChartRange, style: BatteryChartStyle, size: CGSize, day: Date? = nil,
+                       cut: BatteryChartCut = .standard) -> BatteryChartGeometry? {
+        let key = ChartKey(range: range, day: day, style: style, cut: cut, width: size.width, height: size.height)
         let entry = charts[key]
         guard let history, size.width > 0, size.height > 0 else { return entry?.geometry }
         let now = Date()
@@ -269,7 +271,7 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
                 let interval = day.map { calendar.dateInterval(of: .day, for: $0) ?? DateInterval(start: $0, duration: 86_400) }
                 let model = BatteryChartModel(records: history.records, range: day == nil ? range : .today, now: now,
                                               calendar: calendar, interval: interval)
-                let geometry = BatteryChartGeometry(model: model, style: style, size: size)
+                let geometry = BatteryChartGeometry(model: model, style: style, size: size, cut: cut)
                 await self?.store(ChartEntry(version: history.version, bucket: bucket, geometry: geometry), for: key)
             }
         }

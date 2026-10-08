@@ -5,26 +5,20 @@ import SwiftUI
 /// body staying white (it turns yellow in Low Power Mode and red when low) and in the
 /// accessibility value.
 ///
-/// Sized by `height` (the body's height); everything else follows from it, so the same glyph works
-/// in the header band and large in a widget.
+/// Sized by `height` (the body's height); everything else follows from it.
 struct BatteryGlyph: View {
     let level: Int
     let isCharging: Bool
     let tint: StatusTint
     var showsPercentage = true
     var height: CGFloat = 13
-    /// A widget's own colours for the charge and the empty body (its style's), and the type of the
-    /// percentage cut out of it (the style's design, weight, italic).
-    var fillColor: Color? = nil
-    var bodyColor: Color? = nil
-    var numberType: TypeSpec? = nil
 
     var body: some View {
         let level = min(max(level, 0), 100)
         let width = (height * 2.2).rounded()
         let radius = height * 0.3
-        let fill: AnyShapeStyle = fillColor.map { AnyShapeStyle($0) } ?? (tint == .charging ? AnyShapeStyle(.white) : tint.style)
-        let empty: AnyShapeStyle = bodyColor.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.white.opacity(0.35))
+        let fill: AnyShapeStyle = tint == .charging ? AnyShapeStyle(.white) : tint.style
+        let empty = AnyShapeStyle(.white.opacity(0.35))
         HStack(spacing: height * 0.1) {
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -63,54 +57,10 @@ struct BatteryGlyph: View {
     /// The percentage at its natural size (never truncated), in the menu bar's semibold.
     private func number(_ level: Int, width: Font.Width) -> some View {
         Text("\(level)")
-            .font(numberType.map { WidgetTypography.font($0.at(height * 0.9)) } ?? .system(size: height * 0.9, weight: .semibold).monospacedDigit())
+            .font(.system(size: height * 0.9, weight: .semibold).monospacedDigit())
             .tracking(-height * 0.02)
             .fontWidth(width)
             .lineLimit(1)
             .contentTransition(.opacity)
-    }
-}
-
-/// The battery as a ring filled to the charge, the percentage in the middle (the Batteries
-/// widget's look).
-struct BatteryRing: View {
-    let level: Int
-    let isCharging: Bool
-    let tint: StatusTint
-    var showsPercentage = true
-    let diameter: CGFloat
-    /// The percentage's own size (the widget's Percentage element).
-    var percentSize: ElementSize = .medium
-
-    var body: some View {
-        let level = min(max(level, 0), 100)
-        let line = max(3, diameter * 0.1)
-        let points = WidgetType.ringText("100%", diameter: diameter, ratio: 0.22, percentSize)
-        ZStack {
-            Circle().stroke(.white.opacity(0.16), lineWidth: line)
-            Circle()
-                .trim(from: 0, to: CGFloat(level) / 100)
-                .stroke(tint.style, style: StrokeStyle(lineWidth: line, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-            VStack(spacing: 0) {
-                Image(systemName: isCharging ? "bolt.fill" : "laptopcomputer")
-                    // Gives way to a large percentage: the two share the ring's inside.
-                    .font(.system(size: showsPercentage ? min(diameter * 0.2, max(6, diameter * 0.46 - points)) : diameter * 0.34,
-                                  weight: .semibold))
-                    .foregroundStyle(isCharging ? tint.style : AnyShapeStyle(.secondary))
-                if showsPercentage {
-                    Text("\(level)%")
-                        .font(.system(size: points, weight: .semibold, design: .rounded).monospacedDigit())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .contentTransition(.opacity)
-                }
-            }
-            .padding(line * 1.4)
-        }
-        .frame(width: diameter, height: diameter)
-        .animation(Motion.content, value: level)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("Battery \(IslandFormat.percent(Double(level) / 100))"))
     }
 }

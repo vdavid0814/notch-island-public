@@ -52,6 +52,16 @@ final class MediaRemoteAdapterSource: MediaSource {
     private var commands: [ObjectIdentifier: Process] = [:]
     /// Whether the player itself last said it was playing (not an optimistic guess of ours).
     private var reportedPlaying: Bool?
+    /// Play or pause just sent, and until when a report saying otherwise is taken for a late one
+    /// (MediaRemote often repeats the old state once right after a command: the button flipped back
+    /// and forth, and the island fell back on Music's own clock for a moment).
+    private var commandedPlaying: (playing: Bool, until: Date)?
+    /// The player's own state held back meanwhile, applied when the time is up unless it has said
+    /// what was asked for by then.
+    private var heldPlaying: Bool?
+    private var heldTask: Task<Void, Never>?
+    /// How long a report contrary to a play or pause just sent is held back.
+    static let commandSettle: TimeInterval = 1.5
     /// A command waiting for the player's answer, and its deadline.
     private var check: AdapterCommandCheck?
     private var checkTask: Task<Void, Never>?
@@ -80,6 +90,7 @@ final class MediaRemoteAdapterSource: MediaSource {
         restartPolicy = AdapterRestartPolicy()
         track = AdapterTrackState()
         reportedPlaying = nil
+        release()
     }
 
     /// Nothing is visible while suspended, and the adapter re-sends a full snapshot as soon as it
@@ -112,6 +123,10 @@ final class MediaRemoteAdapterSource: MediaSource {
         }
         let arguments = Self.arguments(for: command)
         let baseline = track
+        switch command {
+        case .play, .pause: hold(playing: command == .play)
+        default: release()
+        }
         if let current = track.snapshot {
             track.adopt(current.applying(command, at: .now))
             onEvent?(.nowPlaying(track.snapshot))
@@ -326,6 +341,18 @@ final class MediaRemoteAdapterSource: MediaSource {
 
     private func receive(_ update: AdapterUpdate, generation: Int) {
         guard generation == self.generation, case .running = phase else { return }
+        var update = update
+        if let commanded = commandedPlaying, case .value(let playing) = update.playing {
+            if playing == commanded.playing {
+                release()
+            } else if Date.now < commanded.until {
+                // A late report of the state before the command: the rest of it stands.
+                heldPlaying = playing
+                update.playing = .value(commanded.playing)
+            } else {
+                release()
+            }
+        }
         track.apply(update, receivedAt: .now)
         if case .value(let playing) = update.playing { reportedPlaying = playing }
         if !update.isDiff, case .absent = update.playing { reportedPlaying = nil }
@@ -341,6 +368,34 @@ final class MediaRemoteAdapterSource: MediaSource {
             restartPolicy.receivedOutput()
             onEvent?(.health(.running))
         }
+    }
+
+    /// Holds back reports contrary to `playing` for `commandSettle`; then applies the player's own
+    /// state if it said something else meanwhile and has not come round since.
+    private func hold(playing: Bool) {
+        release()
+        commandedPlaying = (playing, Date.now.addingTimeInterval(Self.commandSettle))
+        heldTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.commandSettle))
+            guard !Task.isCancelled, let self else { return }
+            self.heldTask = nil
+            self.commandedPlaying = nil
+            guard let held = self.heldPlaying else { return }
+            self.heldPlaying = nil
+            var update = AdapterUpdate()
+            update.isDiff = true
+            update.playing = .value(held)
+            self.track.apply(update, receivedAt: .now)
+            self.reportedPlaying = held
+            self.onEvent?(.nowPlaying(self.track.snapshot))
+        }
+    }
+
+    private func release() {
+        heldTask?.cancel()
+        heldTask = nil
+        commandedPlaying = nil
+        heldPlaying = nil
     }
 
     private func childExited(_ exit: AdapterExit, generation: Int) {

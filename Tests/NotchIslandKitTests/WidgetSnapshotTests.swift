@@ -62,7 +62,7 @@ struct WidgetSnapshotTests {
         let rect = GridRect(column: 0, row: 0, width: item.size.width, height: item.size.height)
         let size = geometry.frame(for: rect).size
         let widget = IslandWidget(kind: item.kind, frame: rect, options: item.kind.defaultOptions)
-        let view = IslandWidgetView(widget: widget, size: size, thumbnails: ThumbnailCache())
+        let view = IslandWidgetView(widget: widget, size: size)
             .frame(width: size.width, height: size.height)
             .background(.black)
             .environment(AppModel())

@@ -116,7 +116,9 @@ import Testing
     }
 
     @Test func aParkedWidgetGoesBackWhereThereIsRoom() {
+        // A board with some room left: a full one may not fit back together the way it was.
         var board = WidgetBoard.standard
+        board.remove(.legacy(.volume))
         let before = board.widgets
         board.setGrid(BoardGrid(columns: 8, rows: 2, gap: 8))
         let parked = board.parked

@@ -79,8 +79,7 @@ private func largestDifference(_ a: [UInt8], _ b: [UInt8]) -> Int {
             let rect = GridRect(column: 0, row: 0, width: cells.width, height: cells.height)
             let size = geometry.frame(for: rect).size
             let scale = min(1, 176 / size.width, 60 / size.height)
-            IslandWidgetView(widget: IslandWidget(kind: kind, frame: rect, options: kind.defaultOptions),
-                             size: size, thumbnails: ThumbnailCache())
+            IslandWidgetView(widget: IslandWidget(kind: kind, frame: rect, options: kind.defaultOptions), size: size)
                 .environment(\.isWidgetPreview, true)
                 .environment(\.colorScheme, .dark)
                 .allowsHitTesting(false)
@@ -120,7 +119,7 @@ private func largestDifference(_ a: [UInt8], _ b: [UInt8]) -> Int {
     @Test func thePreviewFadesInOnTheRenderServerAndPassesEventsOn() throws {
         let model = AppModel()
         let host = NSHostingView(rootView: ZStack {
-            WidgetPreview(kind: .battery, grid: model.widgets.board.grid, maxSize: CGSize(width: 176, height: 60))
+            WidgetPreview(kind: .dateTime, grid: model.widgets.board.grid, maxSize: CGSize(width: 176, height: 60))
         }
         .frame(width: 230, height: 78)
         .environment(model))

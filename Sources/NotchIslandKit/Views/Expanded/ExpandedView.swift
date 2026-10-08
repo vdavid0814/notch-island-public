@@ -60,7 +60,7 @@ struct ExpandedView: View {
         switch page {
         case .shelf: ShelfPage(scale: scale, thumbnails: thumbnails)
         // Home, the timer's, the battery's and the user's: each a board of widgets.
-        default: HomePage(page: page, thumbnails: thumbnails)
+        default: HomePage(page: page).environment(\.shelfThumbnails, thumbnails)
         }
     }
 }

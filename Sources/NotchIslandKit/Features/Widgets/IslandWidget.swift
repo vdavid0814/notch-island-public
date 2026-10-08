@@ -46,32 +46,59 @@ nonisolated struct WidgetID: RawRepresentable, Hashable, Codable, Sendable, Cust
 
 nonisolated struct IslandWidget: Sendable, Codable, Hashable, Identifiable {
     /// 1: elements only. 2: element sizes, layouts and backgrounds. 3: ids, style and settings.
-    static let version = 3
+    static let version = 4
 
     var id: WidgetID
     var kind: IslandWidgetKind
     var frame: GridRect
     /// The elements switched on.
     var options: Set<ElementID>
-    /// Element sizes other than medium.
-    var sizes: [ElementID: ElementSize] = [:]
-    /// The widget's accent colour (buttons, sliders, the timer).
-    var tint: WidgetTint = .automatic
-    var layout: WidgetLayout = .automatic
     var background: WidgetBackground = .plate
-    /// How strongly the background is drawn, 0…1; nil is the background's own default
-    /// (`WidgetBackground.defaultOpacity`). Reset whenever the background changes.
+    /// The Colour background's colour; nil is the widget's own (the system's accent, Now Playing's
+    /// cover).
+    var backgroundColor: IslandTheme.RGB?
+    /// How strongly the background is drawn, 0…1; nil is its own (`WidgetBackground.defaultOpacity`).
     var backgroundOpacity: Double?
-    /// Now Playing's buttons all in the plain (colourless) glass. Off: each button's own look.
-    var plainButtons = true
-    /// Each Now Playing button's colour and strength (`TransportButton.rawValue` → look).
-    var buttonLooks: [String: ButtonLook] = [:]
-    /// Its two sides swapped: the artwork on the right, the time on the left…
-    var mirrored = false
-    /// Its elements' and its own look (Customize); empty is the kind's own look.
-    var style = WidgetStyle()
-    /// What this instance shows (a time zone, a label, apps…).
-    var config: WidgetConfig
+    /// How far each moved part is from where the layout puts it, in points (Customize's editor);
+    /// a part not in it is where the layout puts it.
+    var offsets: [ElementID: ElementOffset] = [:]
+    /// Which part is drawn over which where they overlap: higher over lower; a part not in it is
+    /// at 0, and among equals the later one in `WidgetKindSpec.movable` is on top.
+    var layers: [ElementID: Int] = [:]
+    /// How much larger (or smaller) each resized part is drawn than the layout makes it, on each
+    /// axis, from its layout box's top-leading corner; a part not in it is drawn as laid out.
+    var scales: [ElementID: ElementScale] = [:]
+    /// How each text part is set (`WidgetKindSpec.texts`); a part not in it is set as the widget
+    /// sets it.
+    var textStyles: [ElementID: TextStyle] = [:]
+    /// How each button is drawn (`WidgetKindSpec.buttons`); a button not in it is drawn as the
+    /// widget draws it.
+    var buttonLooks: [ElementID: ButtonLook] = [:]
+    /// How each playback line is drawn (`WidgetKindSpec.progressBars`); one not in it is drawn as
+    /// the widget draws it.
+    var progressLooks: [ElementID: ProgressLook] = [:]
+    /// How each picture is sized (`WidgetKindSpec.images`); one not in it is sized as before.
+    var imageLooks: [ElementID: ImageLook] = [:]
+    /// How each chart is drawn (`WidgetKindSpec.charts`); one not in it is drawn as the widget draws it.
+    var chartLooks: [ElementID: ChartLook] = [:]
+    /// How each ruler is drawn (`WidgetKindSpec.rulers`), from Customize.
+    var rulerLooks: [ElementID: RulerLook] = [:]
+    /// How each grid of days is drawn (`WidgetKindSpec.dayGrids`), from Customize.
+    var dayGridLooks: [ElementID: DayGridLook] = [:]
+    /// The size its parts were placed and sized at in Customize (`offsets`, the texts' boxes and
+    /// sizes); at any other it is drawn adapted (`adapted(keepsPlacement:)`). nil: the kind's own.
+    var designSize: GridSize?
+    /// Shapes added in Customize, drawn over the parts in this order (`WidgetFigure`).
+    var figures: [WidgetFigure] = []
+    /// How far Now Playing's back and forward buttons jump, in seconds; nil: 15.
+    var seekSeconds: Int?
+    /// What it shows, where its kind asks (`WidgetKindSpec.settings`): a world clock's city…
+    var config = WidgetConfig()
+
+    /// The jumps the back and forward buttons offer (each has its own system symbol).
+    static let seekChoices = [5, 10, 15, 30, 45, 60, 75, 90]
+
+    var effectiveSeekSeconds: Int { seekSeconds ?? 15 }
 
     /// Without an id, the kind's legacy one: the first instance of a kind, as boards had them.
     init(kind: IslandWidgetKind, frame: GridRect, options: Set<ElementID>, id: WidgetID? = nil) {
@@ -79,7 +106,6 @@ nonisolated struct IslandWidget: Sendable, Codable, Hashable, Identifiable {
         self.kind = kind
         self.frame = frame
         self.options = options
-        config = kind.spec.defaultConfig
     }
 
     /// Switched on, or always drawn (`ElementSpec.isRequired`).
@@ -87,30 +113,149 @@ nonisolated struct IslandWidget: Sendable, Codable, Hashable, Identifiable {
         options.contains(element) || kind.spec.element(element)?.isRequired == true
     }
 
-    /// Whether an element or one of its parts (Now Playing's previous button…) is drawn: only one
-    /// with a switch is left out, while it is off; a part goes with the element it belongs to.
-    func showsElementOrPart(_ id: ElementID) -> Bool {
-        let owner = kind.spec.elements.first(where: { $0.parts.contains(id) })?.id ?? id
-        return !kind.options.contains(owner) || options.contains(owner)
+    func offset(of element: ElementID) -> ElementOffset { offsets[element] ?? .zero }
+
+    func layer(of element: ElementID) -> Int { layers[element] ?? 0 }
+
+    func scale(of element: ElementID) -> ElementScale { scales[element] ?? .one }
+
+    func textStyle(of element: ElementID) -> TextStyle { textStyles[element] ?? .plain }
+
+    func buttonLook(of element: ElementID) -> ButtonLook { buttonLooks[element] ?? .plain }
+
+    func progressLook(of element: ElementID) -> ProgressLook { progressLooks[element] ?? .plain }
+
+    func imageLook(of element: ElementID) -> ImageLook { imageLooks[element] ?? .plain }
+
+    func chartLook(of element: ElementID) -> ChartLook { chartLooks[element] ?? .plain }
+
+    func rulerLook(of element: ElementID) -> RulerLook { rulerLooks[element] ?? .plain }
+
+    func dayGridLook(of element: ElementID) -> DayGridLook { dayGridLooks[element] ?? .plain }
+
+    /// `element` is drawn on Liquid Glass: a button's or a ruler's.
+    func isGlass(_ element: ElementID) -> Bool {
+        (kind.spec.buttons.contains(element) && ButtonLook.isGlass(buttonLook(of: element)))
+            || (kind.spec.rulers.contains(element) && RulerLook.isGlass(rulerLook(of: element)))
+            || (kind.spec.dayGrids.contains(element) && dayGridLook(of: element).isGlass)
     }
 
-    func size(of element: ElementID) -> ElementSize { sizes[element] ?? .medium }
+    /// The parts Customize moves: the kind's, then the shapes added.
+    var movableElements: [ElementID] { kind.spec.movable + figures.map(\.id) }
 
-    /// Drawn on a plate (plain, tinted or the artwork), or straight on the island.
-    var showsPlate: Bool {
-        get { background != .none }
-        set { background = newValue ? (background == .none ? .plate : background) : .none }
+    func figure(_ element: ElementID) -> WidgetFigure? { figures.first { $0.id == element } }
+
+    /// The switch that shows `part` (Customize's Elements): its own, or the one of a pair it is in
+    /// (previous and next, back and forward); nil where it has none.
+    func switchElement(for part: ElementID) -> ElementID? {
+        if kind.options.contains(part) { return part }
+        let pair: ElementID? = switch part {
+        case .previousButton, .nextButton: .skipButtons
+        case .seekBackButton, .seekForwardButton: .seekButtons
+        case .shelfTray: .shelfCount
+        case .shelfAirDrop, .shelfClear: .shelfActions
+        default: part.rawValue.hasPrefix("clipSymbol") && part.clipRow != nil ? .clipSymbols : nil
+        }
+        return pair.flatMap { kind.options.contains($0) ? $0 : nil }
+    }
+
+    /// Delete pressed on picked parts: a shape goes, any other part is switched off (its switch
+    /// brings it back).
+    mutating func delete(_ parts: Set<ElementID>) {
+        for part in parts {
+            if kind == .clipboard, let row = part.clipRow, part == .clipSymbol(row) {
+                // One copy's symbol: that one goes, the others stay.
+                removeClipSymbol(row)
+            } else if figure(part) != nil {
+                removeFigure(part)
+            } else if let element = switchElement(for: part) {
+                options.remove(element)
+            }
+        }
+    }
+
+    /// A shape gone, with where it was moved, its size and its layer.
+    mutating func removeFigure(_ element: ElementID) {
+        figures.removeAll { $0.id == element }
+        offsets[element] = nil
+        scales[element] = nil
+        layers[element] = nil
+    }
+
+    /// Sets `element`'s look; the plain look is no look at all.
+    mutating func setImageLook(_ look: ImageLook, of element: ElementID) {
+        imageLooks[element] = look == .plain ? nil : look
+    }
+
+    mutating func setChartLook(_ look: ChartLook, of element: ElementID) {
+        chartLooks[element] = look == .plain ? nil : look
+    }
+
+    mutating func setRulerLook(_ look: RulerLook, of element: ElementID) {
+        rulerLooks[element] = look == .plain ? nil : look
+    }
+
+    mutating func setDayGridLook(_ look: DayGridLook, of element: ElementID) {
+        dayGridLooks[element] = look == .plain ? nil : look
+    }
+
+    /// A picture grown to the edges or over the widget, moved or resized by hand: from where it is
+    /// drawn in `drawn` (this widget with its pictures placed, `IslandWidgetView.resolved`), at
+    /// its own size from then on.
+    mutating func adoptDrawn(_ element: ElementID, from drawn: IslandWidget) {
+        var look = imageLook(of: element)
+        guard look.fit != .own else { return }
+        scales[element] = drawn.scales[element]
+        offsets[element] = drawn.offsets[element]
+        look.fit = .own
+        setImageLook(look, of: element)
+    }
+
+    /// Sets `element`'s look; the plain look is no look at all.
+    mutating func setProgressLook(_ look: ProgressLook, of element: ElementID) {
+        progressLooks[element] = look == .plain ? nil : look
+    }
+
+    /// Sets `element`'s look; the plain look is no look at all.
+    mutating func setButtonLook(_ look: ButtonLook, of element: ElementID) {
+        buttonLooks[element] = look == .plain ? nil : look
+    }
+
+    /// Sets `element`'s text style; the plain style is no style at all.
+    mutating func setTextStyle(_ style: TextStyle, of element: ElementID) {
+        textStyles[element] = style == .plain ? nil : style
+    }
+
+    /// Where a part is drawn: `ink` (where the layout draws it, within `box`, its layout box)
+    /// resized by its scale and moved by its offset.
+    func drawn(_ element: ElementID, ink: CGRect, box: CGRect) -> CGRect {
+        scale(of: element).applied(to: ink, in: box).offsetBy(dx: offset(of: element).x, dy: offset(of: element).y)
+    }
+
+    /// The layer a group of parts (a row, a column) is drawn at among its neighbours: that of the
+    /// part in it furthest from 0, raised before lowered. A group can only be over or under another
+    /// as a whole.
+    func layer(ofGroup elements: [ElementID]) -> Double {
+        let values = elements.map(layer(of:))
+        let highest = values.max() ?? 0, lowest = values.min() ?? 0
+        return Double(highest >= -lowest ? highest : lowest)
+    }
+
+    /// Whether `element` is drawn over `other` where they overlap.
+    func isDrawn(_ element: ElementID, over other: ElementID) -> Bool {
+        let movable = movableElements
+        let order = { (id: ElementID) in (self.layer(of: id), movable.firstIndex(of: id) ?? 0) }
+        return order(element) > order(other)
+    }
+
+    /// Moved to `offset`; at zero, back where the layout puts it.
+    mutating func setOffset(_ offset: ElementOffset, of element: ElementID) {
+        offsets[element] = offset == .zero ? nil : offset
     }
 
     private enum CodingKeys: String, CodingKey {
-        case version, id, kind, frame, options, sizes, tint, layout, background, backgroundOpacity, showsPlate, mirrored
-        case plainButtons, buttonLooks, style, config
+        case version, id, kind, frame, options, background, showsPlate, backgroundColor, backgroundOpacity, offsets, layers, scales, textStyles, buttonLooks, progressLooks, imageLooks, chartLooks, rulerLooks, dayGridLooks, designSize, seekSeconds, figures, config
     }
-
-    func look(of button: TransportButton) -> ButtonLook { buttonLooks[button.rawValue] ?? ButtonLook() }
-
-    /// The background's strength as drawn.
-    var effectiveBackgroundOpacity: Double { backgroundOpacity ?? background.defaultOpacity }
 
     func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -119,20 +264,49 @@ nonisolated struct IslandWidget: Sendable, Codable, Hashable, Identifiable {
         try container.encode(kind, forKey: .kind)
         try container.encode(frame, forKey: .frame)
         try container.encode(options.map(\.rawValue).sorted(), forKey: .options)
-        try container.encode(Dictionary(uniqueKeysWithValues: sizes.map { ($0.key.rawValue, $0.value) }), forKey: .sizes)
-        try container.encode(tint, forKey: .tint)
-        try container.encode(layout, forKey: .layout)
         try container.encode(background, forKey: .background)
+        try container.encodeIfPresent(backgroundColor, forKey: .backgroundColor)
         try container.encodeIfPresent(backgroundOpacity, forKey: .backgroundOpacity)
-        try container.encode(mirrored, forKey: .mirrored)
-        try container.encode(plainButtons, forKey: .plainButtons)
-        if !buttonLooks.isEmpty { try container.encode(buttonLooks, forKey: .buttonLooks) }
-        if !style.isEmpty { try container.encode(style, forKey: .style) }
-        if config != kind.spec.defaultConfig { try container.encode(config, forKey: .config) }
+        if !offsets.isEmpty {
+            try container.encode(Dictionary(uniqueKeysWithValues: offsets.map { ($0.key.rawValue, $0.value) }), forKey: .offsets)
+        }
+        if !layers.isEmpty {
+            try container.encode(Dictionary(uniqueKeysWithValues: layers.map { ($0.key.rawValue, $0.value) }), forKey: .layers)
+        }
+        if !scales.isEmpty {
+            try container.encode(Dictionary(uniqueKeysWithValues: scales.map { ($0.key.rawValue, $0.value) }), forKey: .scales)
+        }
+        if !textStyles.isEmpty {
+            try container.encode(Dictionary(uniqueKeysWithValues: textStyles.map { ($0.key.rawValue, $0.value) }), forKey: .textStyles)
+        }
+        if !buttonLooks.isEmpty {
+            try container.encode(Dictionary(uniqueKeysWithValues: buttonLooks.map { ($0.key.rawValue, $0.value) }), forKey: .buttonLooks)
+        }
+        if !progressLooks.isEmpty {
+            try container.encode(Dictionary(uniqueKeysWithValues: progressLooks.map { ($0.key.rawValue, $0.value) }), forKey: .progressLooks)
+        }
+        if !imageLooks.isEmpty {
+            try container.encode(Dictionary(uniqueKeysWithValues: imageLooks.map { ($0.key.rawValue, $0.value) }), forKey: .imageLooks)
+        }
+        if !chartLooks.isEmpty {
+            try container.encode(Dictionary(uniqueKeysWithValues: chartLooks.map { ($0.key.rawValue, $0.value) }), forKey: .chartLooks)
+        }
+        if !rulerLooks.isEmpty {
+            try container.encode(Dictionary(uniqueKeysWithValues: rulerLooks.map { ($0.key.rawValue, $0.value) }), forKey: .rulerLooks)
+        }
+        if !dayGridLooks.isEmpty {
+            try container.encode(Dictionary(uniqueKeysWithValues: dayGridLooks.map { ($0.key.rawValue, $0.value) }), forKey: .dayGridLooks)
+        }
+        try container.encodeIfPresent(designSize, forKey: .designSize)
+        try container.encodeIfPresent(seekSeconds, forKey: .seekSeconds)
+        if !figures.isEmpty { try container.encode(figures, forKey: .figures) }
+        if config != WidgetConfig() { try container.encode(config, forKey: .config) }
     }
 
     // Boards saved before a field existed decode with its default; one without ids (before
-    // version 3) gets the kind's legacy id (`WidgetMigration`).
+    // version 3) gets the kind's legacy id (`WidgetMigration`). What earlier versions stored and this
+    // one no longer has (colours, layouts, swapped sides, element sizes, styles) is left out, and a
+    // background no longer offered (the artwork, a gradient, a picture) is the plate.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         kind = try container.decode(IslandWidgetKind.self, forKey: .kind)
@@ -141,116 +315,143 @@ nonisolated struct IslandWidget: Sendable, Codable, Hashable, Identifiable {
         let version = (try? container.decodeIfPresent(Int.self, forKey: .version)) ?? 1
         options = Set((try? container.decode([String].self, forKey: .options))?.map(ElementID.init) ?? [])
         if version < 2 { options.formUnion(WidgetMigration.elementsAddedInVersion2(kind)) }
-        let rawSizes = (try? container.decodeIfPresent([String: ElementSize].self, forKey: .sizes)) ?? [:]
-        sizes = Dictionary(uniqueKeysWithValues: rawSizes.map { (ElementID(rawValue: $0.key), $0.value) })
-        tint = (try? container.decodeIfPresent(WidgetTint.self, forKey: .tint)) ?? .automatic
-        layout = (try? container.decodeIfPresent(WidgetLayout.self, forKey: .layout)) ?? .automatic
+        if version < 4 { options.formUnion(WidgetMigration.elementsSwitchableInVersion4(kind)) }
         if let background = try? container.decodeIfPresent(WidgetBackground.self, forKey: .background) {
             self.background = background
         } else {
             background = ((try? container.decodeIfPresent(Bool.self, forKey: .showsPlate)) ?? true) ? .plate : .none
         }
-        backgroundOpacity = (try? container.decodeIfPresent(Double.self, forKey: .backgroundOpacity))
-            .flatMap { $0 }.map { min(max($0, 0), 1) }
-        mirrored = (try? container.decodeIfPresent(Bool.self, forKey: .mirrored)) ?? false
-        plainButtons = (try? container.decodeIfPresent(Bool.self, forKey: .plainButtons)) ?? true
-        buttonLooks = (try? container.decodeIfPresent([String: ButtonLook].self, forKey: .buttonLooks)) ?? [:]
-        style = (try? container.decodeIfPresent(WidgetStyle.self, forKey: .style)).flatMap { $0 } ?? WidgetStyle()
-        config = (try? container.decodeIfPresent(WidgetConfig.self, forKey: .config)).flatMap { $0 } ?? kind.spec.defaultConfig
+        backgroundColor = (try? container.decodeIfPresent(IslandTheme.RGB.self, forKey: .backgroundColor)).flatMap { $0 }
+        backgroundOpacity = (try? container.decodeIfPresent(Double.self, forKey: .backgroundOpacity)).flatMap { $0 }
+        let offsets = (try? container.decodeIfPresent([String: ElementOffset].self, forKey: .offsets)).flatMap { $0 } ?? [:]
+        self.offsets = Dictionary(uniqueKeysWithValues: offsets.map { (ElementID(rawValue: $0.key), $0.value) })
+        let layers = (try? container.decodeIfPresent([String: Int].self, forKey: .layers)).flatMap { $0 } ?? [:]
+        self.layers = Dictionary(uniqueKeysWithValues: layers.map { (ElementID(rawValue: $0.key), $0.value) })
+        let scales = (try? container.decodeIfPresent([String: ElementScale].self, forKey: .scales)).flatMap { $0 } ?? [:]
+        self.scales = Dictionary(uniqueKeysWithValues: scales.map { (ElementID(rawValue: $0.key), $0.value) })
+        let styles = (try? container.decodeIfPresent([String: TextStyle].self, forKey: .textStyles)).flatMap { $0 } ?? [:]
+        textStyles = Dictionary(uniqueKeysWithValues: styles.map { (ElementID(rawValue: $0.key), $0.value) })
+        let looks = (try? container.decodeIfPresent([String: ButtonLook].self, forKey: .buttonLooks)).flatMap { $0 } ?? [:]
+        buttonLooks = Dictionary(uniqueKeysWithValues: looks.map { (ElementID(rawValue: $0.key), $0.value) })
+        let lines = (try? container.decodeIfPresent([String: ProgressLook].self, forKey: .progressLooks)).flatMap { $0 } ?? [:]
+        progressLooks = Dictionary(uniqueKeysWithValues: lines.map { (ElementID(rawValue: $0.key), $0.value) })
+        let images = (try? container.decodeIfPresent([String: ImageLook].self, forKey: .imageLooks)).flatMap { $0 } ?? [:]
+        imageLooks = Dictionary(uniqueKeysWithValues: images.map { (ElementID(rawValue: $0.key), $0.value) })
+        let charts = (try? container.decodeIfPresent([String: ChartLook].self, forKey: .chartLooks)).flatMap { $0 } ?? [:]
+        chartLooks = Dictionary(uniqueKeysWithValues: charts.map { (ElementID(rawValue: $0.key), $0.value) })
+        let rulers = (try? container.decodeIfPresent([String: RulerLook].self, forKey: .rulerLooks)).flatMap { $0 } ?? [:]
+        rulerLooks = Dictionary(uniqueKeysWithValues: rulers.map { (ElementID(rawValue: $0.key), $0.value) })
+        let grids = (try? container.decodeIfPresent([String: DayGridLook].self, forKey: .dayGridLooks)).flatMap { $0 } ?? [:]
+        dayGridLooks = Dictionary(uniqueKeysWithValues: grids.map { (ElementID(rawValue: $0.key), $0.value) })
+        designSize = (try? container.decodeIfPresent(GridSize.self, forKey: .designSize)).flatMap { $0 }
+        seekSeconds = (try? container.decodeIfPresent(Int.self, forKey: .seekSeconds)).flatMap { $0 }
+        figures = (try? container.decodeIfPresent([WidgetFigure].self, forKey: .figures)).flatMap { $0 } ?? []
+        config = (try? container.decodeIfPresent(WidgetConfig.self, forKey: .config)).flatMap { $0 } ?? WidgetConfig()
+        sanitize()
     }
 
-    /// Drops what the kind does not have: elements, sizes, a layout, a background, styles of
-    /// elements it lacks; and clamps the style and settings to their ranges.
+    /// The background's strength as drawn.
+    var effectiveBackgroundOpacity: Double { backgroundOpacity ?? background.defaultOpacity }
+
+    /// Drops the elements (and offsets) the kind does not have, and keeps the strength within 0…1.
     mutating func sanitize() {
-        let spec = kind.spec
         options.formIntersection(kind.options)
-        sizes = sizes.filter { spec.element($0.key)?.isSizable == true && $0.value != .medium }
-        if !spec.layouts.contains(layout) { layout = .automatic }
-        if !spec.backgrounds.contains(background) { background = .plate }
-        style.sanitize(for: kind)
+        // Shapes: each its own, up to the limit.
+        var seen = Set<ElementID>()
+        figures = Array(figures.filter { $0.id.rawValue.hasPrefix(WidgetFigure.prefix) && seen.insert($0.id).inserted }
+            .prefix(WidgetFigure.limit))
+        let movable = Set(movableElements)
+        offsets = offsets.filter { movable.contains($0.key) && $0.value != .zero && $0.value.isFinite }
+        layers = layers.filter { movable.contains($0.key) && $0.value != 0 }
+        // A text part is resized by its box, never stretched.
+        let texts = Set(kind.spec.texts)
+        scales = scales.filter { movable.contains($0.key) && !texts.contains($0.key) && $0.value != .one && $0.value.isValid }
+        let styled = texts.union(kind.spec.innerTexts)
+        textStyles = textStyles.reduce(into: [:]) { result, entry in
+            guard styled.contains(entry.key) else { return }
+            var style = entry.value
+            style.sanitize()
+            if style != .plain { result[entry.key] = style }
+        }
+        let lines = Set(kind.spec.progressBars)
+        progressLooks = progressLooks.reduce(into: [:]) { result, entry in
+            guard lines.contains(entry.key) else { return }
+            var look = entry.value
+            look.sanitize()
+            if look != .plain { result[entry.key] = look }
+        }
+        let buttons = Set(kind.spec.buttons)
+        buttonLooks = buttonLooks.reduce(into: [:]) { result, entry in
+            guard buttons.contains(entry.key) else { return }
+            var look = entry.value
+            look.sanitize()
+            if look != .plain { result[entry.key] = look }
+        }
+        let images = Set(kind.spec.images)
+        imageLooks = imageLooks.reduce(into: [:]) { result, entry in
+            guard images.contains(entry.key) else { return }
+            var look = entry.value
+            look.sanitize()
+            if look != .plain { result[entry.key] = look }
+        }
+        let charts = Set(kind.spec.charts)
+        chartLooks = chartLooks.reduce(into: [:]) { result, entry in
+            guard charts.contains(entry.key) else { return }
+            var look = entry.value
+            look.sanitize()
+            if look != .plain { result[entry.key] = look }
+        }
+        let rulers = Set(kind.spec.rulers)
+        rulerLooks = rulerLooks.reduce(into: [:]) { result, entry in
+            guard rulers.contains(entry.key) else { return }
+            var look = entry.value
+            look.sanitize()
+            if look != .plain { result[entry.key] = look }
+        }
+        let grids = Set(kind.spec.dayGrids)
+        dayGridLooks = dayGridLooks.reduce(into: [:]) { result, entry in
+            guard grids.contains(entry.key) else { return }
+            var look = entry.value
+            look.sanitize()
+            if look != .plain { result[entry.key] = look }
+        }
+        backgroundOpacity = backgroundOpacity.map { min(max($0, 0), 1) }
+        if let seconds = seekSeconds, !Self.seekChoices.contains(seconds) { seekSeconds = nil }
+        // Only what the kind offers.
         config.sanitize()
+        let settings = Set(kind.spec.settings)
+        if !settings.contains(.timeZone) { config.timeZone = nil }
+        if !settings.contains(.label) { config.label = nil }
+        if !settings.contains(.count), !settings.contains(.files) { config.count = nil }
+        if !settings.contains(.symbols) { config.symbolRows = nil }
     }
 }
 
-/// How large an element is drawn, relative to what fits the widget.
-nonisolated enum ElementSize: String, Sendable, Codable, CaseIterable, Identifiable {
-    case small, medium, large
+/// How far a part of a widget is moved from where the layout puts it, in points.
+nonisolated struct ElementOffset: Sendable, Codable, Hashable {
+    var x: Double
+    var y: Double
 
-    var id: String { rawValue }
+    static let zero = ElementOffset(x: 0, y: 0)
 
-    var title: String {
-        switch self {
-        case .small: "S"
-        case .medium: "M"
-        case .large: "L"
-        }
-    }
-
-    var accessibilityTitle: String {
-        switch self {
-        case .small: "Small"
-        case .medium: "Medium"
-        case .large: "Large"
-        }
-    }
-
-    var factor: CGFloat {
-        switch self {
-        case .small: 0.8
-        case .medium: 1
-        case .large: 1.25
-        }
-    }
+    var isFinite: Bool { x.isFinite && y.isFinite }
 }
 
-/// A widget's arrangement. `automatic` picks one from the widget's size.
-nonisolated enum WidgetLayout: String, Sendable, Codable, CaseIterable, Identifiable {
-    case automatic
-    /// Now Playing: artwork beside the title and the controls.
-    case beside
-    /// Now Playing: the artwork fills the widget, everything else on top of it.
-    case cover
-    /// Now Playing: one line — a small cover, the title and play.
-    case minimal
-    /// Battery: the battery with its charge inside.
-    case glyph
-    /// Battery, levels: a ring filled to the value.
-    case ring
-    /// Levels: a slider.
-    case slider
-    /// Controls: Control Center's round button.
-    case button
-    /// Controls: the button with its name, like Control Center's wide tiles.
-    case tile
+/// How much larger a part is drawn than laid out, on each axis (1: as laid out).
+nonisolated struct ElementScale: Sendable, Codable, Hashable {
+    var x: Double
+    var y: Double
 
-    var id: String { rawValue }
+    static let one = ElementScale(x: 1, y: 1)
+    /// From a tenth to ten times.
+    static let range = 0.1...10.0
 
-    var title: String {
-        switch self {
-        case .automatic: "Automatic"
-        case .beside: "Beside"
-        case .cover: "Cover"
-        case .minimal: "Minimal"
-        case .glyph: "Battery"
-        case .ring: "Ring"
-        case .slider: "Slider"
-        case .button: "Button"
-        case .tile: "Tile"
-        }
-    }
+    var isValid: Bool { Self.range.contains(x) && Self.range.contains(y) }
 
-    var systemImage: String {
-        switch self {
-        case .automatic: "wand.and.sparkles"
-        case .beside: "rectangle.lefthalf.inset.filled"
-        case .cover: "photo.fill"
-        case .minimal: "rectangle.compress.vertical"
-        case .glyph: "battery.75percent"
-        case .ring: "circle.dashed.inset.filled"
-        case .slider: "slider.horizontal.below.rectangle"
-        case .button: "circle.fill"
-        case .tile: "capsule.lefthalf.filled"
-        }
+    /// `rect` (within `box`) as drawn at this scale, from the box's top-leading corner.
+    func applied(to rect: CGRect, in box: CGRect) -> CGRect {
+        CGRect(x: box.minX + (rect.minX - box.minX) * x, y: box.minY + (rect.minY - box.minY) * y,
+               width: rect.width * x, height: rect.height * y)
     }
 }
 
@@ -262,12 +463,6 @@ nonisolated enum WidgetBackground: String, Sendable, Codable, CaseIterable, Iden
     case plate
     /// The plate in the widget's colour.
     case tinted
-    /// Now Playing: the blurred artwork.
-    case artwork
-    /// Two colours (`SurfaceStyle.fill`, `fillEnd`), the widget's accent fading by default.
-    case gradient
-    /// A picture of the user's (`SurfaceStyle.imagePath`).
-    case image
 
     var id: String { rawValue }
 
@@ -276,77 +471,16 @@ nonisolated enum WidgetBackground: String, Sendable, Codable, CaseIterable, Iden
         case .none: "None"
         case .plate: "Plate"
         case .tinted: "Colour"
-        case .artwork: "Artwork"
-        case .gradient: "Gradient"
-        case .image: "Picture"
         }
     }
 
-    /// Whether it has a strength to set (None has nothing to draw).
-    var hasOpacity: Bool { self != .none }
-
-    /// Chosen in Customize, where its colours or picture are picked: a background bar shows it only
-    /// while it is the widget's.
-    var needsCustomize: Bool { self == .gradient || self == .image }
-
-    /// The strength each background is drawn with until the user sets one (plate 40 %, as the
-    /// user chose; colour and artwork as they looked before the setting existed).
+    /// The strength each background is drawn with until the user sets one (the plate 40 %, the
+    /// colour 50 %).
     var defaultOpacity: Double {
         switch self {
         case .none: 0
         case .plate: 0.4
         case .tinted: 0.5
-        case .artwork, .gradient, .image: 1
         }
     }
-}
-
-/// Now Playing's three buttons, each with its own look.
-nonisolated enum TransportButton: String, Sendable, CaseIterable, Identifiable {
-    case previous, playPause, next
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .previous: "Previous"
-        case .playPause: "Play and Pause"
-        case .next: "Next"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .previous: "backward.fill"
-        case .playPause: "playpause.fill"
-        case .next: "forward.fill"
-        }
-    }
-}
-
-/// A button's glass: a colour (automatic = colourless) and how strongly it is tinted, 0…1.
-nonisolated struct ButtonLook: Sendable, Codable, Hashable {
-    var tint: WidgetTint = .automatic
-    var opacity: Double = 0.5
-
-    init(tint: WidgetTint = .automatic, opacity: Double = 0.5) {
-        self.tint = tint
-        self.opacity = opacity
-    }
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        tint = (try? container.decodeIfPresent(WidgetTint.self, forKey: .tint)) ?? .automatic
-        opacity = min(max((try? container.decodeIfPresent(Double.self, forKey: .opacity)) ?? 0.5, 0), 1)
-    }
-}
-
-/// A widget's accent colour. `automatic` is the kind's own (orange for the timer, the system
-/// accent elsewhere).
-nonisolated enum WidgetTint: String, Sendable, Codable, CaseIterable, Identifiable {
-    case automatic, blue, purple, pink, red, orange, yellow, green, mint, teal, gray
-
-    var id: String { rawValue }
-
-    var title: String { self == .automatic ? "Automatic" : rawValue.capitalized }
 }

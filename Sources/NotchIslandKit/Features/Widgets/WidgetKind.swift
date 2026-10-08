@@ -1,94 +1,105 @@
 import Foundation
 
-/// What a widget shows. Everything else about a kind — its name, sizes, elements, looks — is its
-/// `WidgetKindSpec`, kept in its family's spec file (`Families/`).
+/// What a widget shows. The six base widgets: one of each kind of element (a button, a slider, a
+/// label, a live number with buttons, a composite, a chart); and the widgets built on them as they
+/// are — every control as Wi-Fi is (`ControlWidget`), every level as Volume is (`LevelWidget`).
+/// Everything else about a kind — its name, sizes, elements, looks — is its `WidgetKindSpec`
+/// (`WidgetSpecs`). The names are the ones boards have been saved with, so a widget of a kind that
+/// comes back returns from `WidgetBoard.foreign` where it was.
 nonisolated enum IslandWidgetKind: String, Sendable, Codable, CaseIterable, Identifiable {
-    case nowPlaying
-    case timer
-    case stopwatch
-    case shelf
-    case battery
-    case volume
-    case brightness
-    case keyboardBrightness
-    case assistant
-    // Control Center's controls, each its own widget, added one by one like in Control Center.
+    /// A button: Control Center's Wi-Fi switch.
     case wifi
-    case bluetooth
-    case airDrop
-    case darkMode
-    case nightShift
-    case keepAwake
-    case microphone
-    case calculator
-    case voiceMemos
-    case screenshot
-    case notes
-    case lockScreen
-    case focus
-    case clock
-    case home
-    // More widgets.
-    /// The time and the date.
+    /// A slider: the output volume.
+    case volume
+    /// A label: the time and the date.
     case dateTime
-    /// Processor and memory load.
+    /// A live number with buttons that change with its state.
+    case stopwatch
+    /// The composite: artwork, titles, progress and playback buttons.
+    case nowPlaying
+    /// A chart: processor and memory load.
     case systemStats
-
-    // Reserved for 0.6 (`WidgetKindSpec.isImplemented` is false until each is built): hidden from
-    // the gallery and never placed on a board by the app.
-    // Battery.
-    case batteryTime, batteryHealth, batteryCycles, batteryChart, batteryPower, batteryTemperature, charger
-    /// The iPhone's Battery Usage: the last days' use, the displays' time, the last charge.
-    case batteryUsage, batteryScreenTime, batteryLastCharge
-    // Controls.
+    // Built on the base widgets, after them (the gallery lists each group in this order).
+    // Control Center's other controls, each a widget as Wi-Fi is.
+    case bluetooth, airDrop, darkMode, nightShift, keepAwake, microphone
+    case calculator, voiceMemos, screenshot, notes, lockScreen, focus, clock, home
     case soundOutput, outputMute, trueTone, stageManager, lowPowerMode, screenMirroring, missionControl
     case showDesktop, appsLauncher, characterViewer, displaySleep
-    // Time.
-    case worldClock, analogClock, monthCalendar, upNext, countdown
-    // System.
-    case network, diskSpace, uptime, airPodsBattery
-    // Tools.
-    case shortcut, appLauncher, clipboard, photoFrame
+    /// Siri in the notch: a control that opens it.
+    case assistant
+    /// The display's and the keyboard's brightness, each a slider as Volume is.
+    case brightness, keyboardBrightness
+    // The next bases, each with its first widget: a readout (a value and its caption), a list, a
+    // ring with the battery, and a chart.
+    /// A readout: the time in another city.
+    case worldClock
+    /// A list: the last things copied.
+    case clipboard
+    /// A ring and the battery: the charge and the time left.
+    case battery
+    /// A chart: today's charge.
+    case batteryChart
+    // Built on the readout as World Clock is: one figure each, its caption and its symbol.
+    /// The battery's figures: the time left, the health, the cycles, the power flowing, the
+    /// temperature, the charger and the last charge.
+    case batteryTime, batteryHealth, batteryCycles, batteryPower, batteryTemperature, charger, batteryLastCharge
+    /// The Mac's: how long it has been up (and how warm it runs), and the free disk space.
+    case uptime, diskSpace
+    // The next bases, each with its first widget: a ruler, a row of files, a dial, a grid of days
+    // and bars a day.
+    /// A ruler to set by scrolling: the timer.
+    case timer
+    /// A row of files to drag out: the shelf.
+    case shelf
+    /// A dial with hands: the clock face.
+    case analogClock
+    /// A grid of days: this month.
+    case monthCalendar
+    /// Bars a day, one picked: the battery's daily use.
+    case batteryUsage
+    // Built on the bases as they are.
+    /// A readout: the memory in use.
+    case memory
+    /// A control: records the screen; the notch shows it meanwhile.
+    case screenRecording
 
     var id: String { rawValue }
 
-    var spec: WidgetKindSpec { WidgetKindSpec.table[self]! }
-
-    /// The Control Center control this widget is, if it is one.
-    var systemControl: SystemControl? {
+    /// Drawn as a readout (`ReadingWidget`): a value, its caption and its symbol.
+    var isReadout: Bool {
         switch self {
-        case .wifi: .wifi
-        case .bluetooth: .bluetooth
-        case .airDrop: .airDrop
-        case .darkMode: .darkMode
-        case .nightShift: .nightShift
-        case .keepAwake: .keepAwake
-        case .microphone: .microphone
-        case .calculator: .calculator
-        case .voiceMemos: .voiceMemos
-        case .screenshot: .screenshot
-        case .notes: .notes
-        case .lockScreen: .lockScreen
-        case .focus: .focus
-        case .clock: .clock
-        case .home: .home
-        case .soundOutput: .soundOutput
-        case .outputMute: .outputMute
-        case .trueTone: .trueTone
-        case .stageManager: .stageManager
-        case .lowPowerMode: .lowPowerMode
-        case .screenMirroring: .screenMirroring
-        case .missionControl: .missionControl
-        case .showDesktop: .showDesktop
-        case .appsLauncher: .appsLauncher
-        case .characterViewer: .characterViewer
-        case .displaySleep: .displaySleep
+        case .worldClock, .batteryTime, .batteryHealth, .batteryCycles, .batteryPower, .batteryTemperature, .charger,
+             .batteryLastCharge, .uptime, .diskSpace, .memory: true
+        default: false
+        }
+    }
+
+    var spec: WidgetKindSpec { WidgetSpecs.table[self]! }
+
+    /// The Control Center control this widget is, if it is one (they share their names).
+    var systemControl: SystemControl? { SystemControl(rawValue: rawValue) }
+
+    /// What the widget switches or opens, drawn as Wi-Fi is (`ControlWidget`).
+    var control: WidgetControl? {
+        switch self {
+        case .assistant: .assistant
+        case .screenRecording: .screenRecording
+        default: systemControl.map { .system($0) }
+        }
+    }
+
+    /// The level the widget shows and sets, drawn as Volume is (`LevelWidget`).
+    var level: WidgetLevel? {
+        switch self {
+        case .volume: .volume
+        case .brightness: .brightness
+        case .keyboardBrightness: .keyboard
         default: nil
         }
     }
 
-    /// Built, and working on this Mac: the gallery offers it.
-    var isOffered: Bool { spec.isImplemented && spec.isAvailable() }
+    /// Working on this Mac: the gallery offers it.
+    var isOffered: Bool { spec.isAvailable() }
 
     var title: String { spec.title }
     var summary: String { spec.summary }
@@ -98,19 +109,13 @@ nonisolated enum IslandWidgetKind: String, Sendable, Codable, CaseIterable, Iden
     var minimumSize: GridSize { spec.minimumSize }
     var maximumSize: GridSize { spec.maximumSize }
     var defaultSize: GridSize { spec.defaultSize }
-    /// The widget's elements the user may switch on or off, in the order they are drawn. The ones
-    /// always drawn (`ElementSpec.isRequired`) are not among them.
+    /// The elements the user may switch on or off, in the order they are drawn. The ones always
+    /// drawn (`ElementSpec.isRequired`) are not among them.
     var options: [ElementID] { spec.elements.filter { !$0.isRequired }.map(\.id) }
     var defaultOptions: Set<ElementID> { Set(spec.elements.filter { $0.defaultVisible && !$0.isRequired }.map(\.id)) }
-    /// The arrangements the widget can be drawn in; empty when it has only one.
-    var layouts: [WidgetLayout] { spec.layouts }
-    /// The backgrounds it offers (the artwork only where there is one).
-    var backgrounds: [WidgetBackground] { spec.backgrounds }
-    /// Which widgets can swap their two sides.
-    var canMirror: Bool { spec.canMirror }
 
-    /// Sizes offered as one-click presets in the editor, like a widget gallery's families: every
-    /// common footprint the kind allows, smallest first (reference cells).
+    /// Sizes offered as one-click presets in the editor: every common footprint the kind allows,
+    /// smallest first (reference cells).
     var sizePresets: [GridSize] {
         let candidates: [GridSize] = [
             .init(width: 1, height: 1), .init(width: 2, height: 1), .init(width: 3, height: 1),
@@ -127,7 +132,7 @@ nonisolated enum IslandWidgetKind: String, Sendable, Codable, CaseIterable, Iden
     }
 }
 
-/// The widget store's groups, in order.
+/// The gallery's groups, in order.
 nonisolated enum WidgetCategory: String, Sendable, CaseIterable, Identifiable {
     case media, time, controls, battery, system, tools
 
@@ -136,7 +141,7 @@ nonisolated enum WidgetCategory: String, Sendable, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .media: "Media"
-        case .time: "Timers"
+        case .time: "Time"
         case .controls: "Controls"
         case .battery: "Battery"
         case .system: "System"

@@ -265,6 +265,19 @@ nonisolated struct BatteryChartModel: Sendable, Equatable {
     }
 }
 
+/// How a chart's bars are cut (a widget's `ChartLook`): their top corners, the level under which a
+/// bar on battery is drawn apart as run down some (`BatteryChartGeometry.medium`), and the dashed
+/// lines across.
+nonisolated struct BatteryChartCut: Hashable, Sendable {
+    var corners: ChartLook.Corners = .rounded
+    /// Nil: one colour from the low line up.
+    var mediumLevel: Double?
+    /// In percent.
+    var lines: [Int] = [0, 50, 100]
+
+    static let standard = BatteryChartCut()
+}
+
 /// A chart's shapes for one size, prebuilt off the main thread: the view only fills and strokes
 /// them, so a redraw costs no layout work.
 nonisolated struct BatteryChartGeometry: Sendable {
@@ -284,6 +297,9 @@ nonisolated struct BatteryChartGeometry: Sendable {
     /// where the level is under it. Bars and areas of the three never overlap (each is filled in
     /// its own colour); the line's lie on the whole line.
     var low: Path
+    /// Bars only, where the cut sets a medium level: the bars on battery from the low line up to it
+    /// (not in `level`).
+    var medium: Path
     /// Bars only: a faint full-height column behind each charging bar, and a cap at the top of
     /// each run of them (the iPhone's), to fill.
     var chargingBand: Path
@@ -292,13 +308,13 @@ nonisolated struct BatteryChartGeometry: Sendable {
     var gaps: Path
     /// Full-height bands where the displays were off.
     var displayOff: Path
-    /// The 0, 50 and 100 % lines and the tick lines, to stroke.
+    /// The cut's lines across (0, 50 and 100 % unless set) and the tick lines, to stroke.
     var axis: Path
     var ticks: [Tick]
 
     static let hatchSpacing: CGFloat = 4
 
-    init(model: BatteryChartModel, style: BatteryChartStyle, size: CGSize) {
+    init(model: BatteryChartModel, style: BatteryChartStyle, size: CGSize, cut: BatteryChartCut = .standard) {
         self.size = size
         self.style = style
         let duration = model.interval.duration
@@ -307,7 +323,7 @@ nonisolated struct BatteryChartGeometry: Sendable {
         }
         func y(_ level: Double) -> CGFloat { size.height * (1 - CGFloat(min(max(level, 0), 100)) / 100) }
 
-        var level = Path(), charging = Path(), low = Path(), chargingBand = Path(), chargingCap = Path()
+        var level = Path(), charging = Path(), low = Path(), medium = Path(), chargingBand = Path(), chargingCap = Path()
         let lowLevel = Double(PowerState.lowLevel)
         switch style {
         case .bars:
@@ -329,7 +345,7 @@ nonisolated struct BatteryChartGeometry: Sendable {
                 let inset = min((right - left) * 0.18, 2)
                 let rect = CGRect(x: left + inset, y: y(max(value, 2)), width: max(right - left - 2 * inset, 0),
                                   height: size.height - y(max(value, 2)))
-                let radius = min(rect.width * 0.3, 3, rect.height / 2)
+                let radius = min(cut.corners.radius(width: rect.width), rect.height / 2)
                 let radii = RectangleCornerRadii(topLeading: radius, bottomLeading: 0, bottomTrailing: 0, topTrailing: radius)
                 if bucket.isCharging {
                     charging.addRoundedRect(in: rect, cornerRadii: radii, style: .continuous)
@@ -340,6 +356,8 @@ nonisolated struct BatteryChartGeometry: Sendable {
                     closeRun()
                     if value < lowLevel {
                         low.addRoundedRect(in: rect, cornerRadii: radii, style: .continuous)
+                    } else if let mediumLevel = cut.mediumLevel, value < mediumLevel {
+                        medium.addRoundedRect(in: rect, cornerRadii: radii, style: .continuous)
                     } else {
                         level.addRoundedRect(in: rect, cornerRadii: radii, style: .continuous)
                     }
@@ -388,6 +406,7 @@ nonisolated struct BatteryChartGeometry: Sendable {
         self.level = level
         self.charging = charging
         self.low = low
+        self.medium = medium
         self.chargingBand = chargingBand
         self.chargingCap = chargingCap
 
@@ -417,9 +436,9 @@ nonisolated struct BatteryChartGeometry: Sendable {
         self.displayOff = displayOff
 
         var axis = Path()
-        for value in [0.0, 50, 100] {
-            axis.move(to: CGPoint(x: 0, y: y(value)))
-            axis.addLine(to: CGPoint(x: size.width, y: y(value)))
+        for value in cut.lines {
+            axis.move(to: CGPoint(x: 0, y: y(Double(value))))
+            axis.addLine(to: CGPoint(x: size.width, y: y(Double(value))))
         }
         ticks = model.ticks.map { Tick(x: x($0), date: $0) }
         for tick in ticks {

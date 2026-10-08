@@ -8,7 +8,7 @@ import SwiftUI
 /// their own look (a tint over the whole window coloured every glass button, v0.4.8 build).
 nonisolated struct IslandTheme: Codable, Equatable, Sendable {
     nonisolated enum Preset: String, Codable, CaseIterable, Identifiable, Sendable {
-        case white, blue, indigo, purple, pink, red, orange, yellow, green, mint, teal, graphite, custom
+        case white, blue, indigo, purple, pink, red, orange, yellow, lime, green, mint, teal, brown, graphite, custom
 
         var id: String { rawValue }
 
@@ -22,9 +22,11 @@ nonisolated struct IslandTheme: Codable, Equatable, Sendable {
             case .red: "Red"
             case .orange: "Orange"
             case .yellow: "Yellow"
+            case .lime: "Lime"
             case .green: "Green"
             case .mint: "Mint"
             case .teal: "Teal"
+            case .brown: "Brown"
             case .graphite: "Graphite"
             case .custom: "Mix"
             }
@@ -41,9 +43,12 @@ nonisolated struct IslandTheme: Codable, Equatable, Sendable {
             case .red: RGB(NSColor.systemRed)
             case .orange: RGB(NSColor.systemOrange)
             case .yellow: RGB(NSColor.systemYellow)
+            // Between yellow and green, which the system has no colour for.
+            case .lime: RGB(red: 0.7, green: 0.86, blue: 0.24)
             case .green: RGB(NSColor.systemGreen)
             case .mint: RGB(NSColor.systemMint)
             case .teal: RGB(NSColor.systemTeal)
+            case .brown: RGB(NSColor.systemBrown)
             case .graphite: RGB(red: 0.56, green: 0.57, blue: 0.6)
             case .custom: nil
             }

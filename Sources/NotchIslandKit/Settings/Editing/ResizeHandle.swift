@@ -8,6 +8,15 @@ enum ResizeHandle: CaseIterable {
 
     static let corners: [ResizeHandle] = [.topLeading, .topTrailing, .bottomLeading, .bottomTrailing]
 
+    /// The handles shown on `rect` (on screen) with handles `size` wide: the middles of its sides
+    /// always, its corners where three fit in a row both ways (a flat part's corners would sit on
+    /// the middles of its ends).
+    static func shown(on rect: CGRect, size: CGFloat) -> [ResizeHandle] {
+        let room = 3 * size + 2
+        guard rect.width < room || rect.height < room else { return allCases }
+        return allCases.filter { !corners.contains($0) }
+    }
+
     /// The vertical edge it drags: -1 the leading one, 1 the trailing one, 0 neither.
     var horizontal: Int {
         switch self {

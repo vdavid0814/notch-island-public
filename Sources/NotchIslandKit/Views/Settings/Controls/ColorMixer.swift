@@ -49,13 +49,16 @@ struct ColorMixer: View {
     @State private var appeared = false
     /// Read once, as the mixer opens: a colour mixed now joins them when it closes.
     @State private var recents = RecentColors.all
+    /// For a narrow panel: the circles over the spectrum, and the hex code without the RGB values.
+    private let compact: Bool
 
     /// The theme's own colours.
     private static let basics = IslandTheme.Preset.allCases.filter { $0 != .custom }
 
-    init(rgb: Binding<IslandTheme.RGB>) {
+    init(rgb: Binding<IslandTheme.RGB>, compact: Bool = false) {
         _rgb = rgb
         preset = nil
+        self.compact = compact
     }
 
     /// The theme's colour: a basic colour picked is its preset; one mixed is its first colour,
@@ -67,19 +70,26 @@ struct ColorMixer: View {
             theme.wrappedValue.preset = Self.basics.first { $0.color == rgb } ?? .custom
         }
         preset = theme.preset
+        compact = false
     }
 
     func isSelected(_ basic: IslandTheme.Preset) -> Bool {
         if let preset { preset.wrappedValue == basic } else { basic.color == rgb }
     }
 
+    /// Over the spectrum there is the panel's width: the fourteen basic colours in two rows. Beside
+    /// it, four rows, no taller than the spectrum, and no wider than Settings' narrowest leaves it.
+    private var columns: Int { compact ? 7 : 4 }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 26) {
+        let layout = compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 26))
+        layout {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Basic colours")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(SettingsPalette.secondary)
-                SwatchGrid(count: 4, width: 26, spacing: 10, rowSpacing: 10) {
+                SwatchGrid(count: columns, width: 26, spacing: 10, rowSpacing: 10) {
                     ForEach(Array(Self.basics.enumerated()), id: \.element) { index, preset in
                         Button { pick(preset) } label: {
                             ColorCircle(color: preset.color?.color ?? .white, isSelected: isSelected(preset))
@@ -97,7 +107,7 @@ struct ColorMixer: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(SettingsPalette.secondary)
                         .padding(.top, 4)
-                    SwatchGrid(count: 4, width: 26, spacing: 10, rowSpacing: 10) {
+                    SwatchGrid(count: columns, width: 26, spacing: 10, rowSpacing: 10) {
                         ForEach(recents, id: \.hex) { recent in
                             Button { pickRecent(recent) } label: {
                                 ColorCircle(color: recent.color, isSelected: preset == nil && recent == rgb)
@@ -109,7 +119,7 @@ struct ColorMixer: View {
                     }
                 }
             }
-            .frame(width: 4 * 26 + 3 * 10, alignment: .leading)
+            .frame(width: CGFloat(columns) * 26 + CGFloat(columns - 1) * 10, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
@@ -129,7 +139,7 @@ struct ColorMixer: View {
                         .frame(width: 84)
                         .onSubmit(applyHex)
                     Spacer(minLength: 8)
-                    ForEach([("R", rgb.red), ("G", rgb.green), ("B", rgb.blue)], id: \.0) { name, value in
+                    ForEach(compact ? [] : [("R", rgb.red), ("G", rgb.green), ("B", rgb.blue)], id: \.0) { name, value in
                         HStack(spacing: 3) {
                             Text(name).foregroundStyle(SettingsPalette.secondary)
                             Text("\(Int((value * 255).rounded()))").monospacedDigit()
@@ -262,129 +272,5 @@ private struct BrightnessBar: View {
             })
         }
         .accessibilityLabel("Brightness")
-    }
-}
-
-// MARK: - Colour well
-
-/// A style colour as a swatch; a click opens its choices — the element's own colour, the widget's
-/// accent, the artwork's, the theme's — and the mixer for one of its own.
-struct ColorWell: View {
-    @Binding var color: StyleColor
-    @State private var isOpen = false
-
-    var body: some View {
-        Button { isOpen.toggle() } label: {
-            Circle()
-                .fill(color.swatch)
-                .overlay { Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1) }
-                .frame(width: 22, height: 22)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Colour")
-        .popover(isPresented: $isOpen, arrowEdge: .bottom) { ColorWellPanel(color: $color) }
-    }
-}
-
-/// A colour well's popover: where the colour comes from, and the mixer for one of its own. The
-/// choices' bar is the small one: at its regular size it was wider than the popover.
-struct ColorWellPanel: View {
-    @Binding var color: StyleColor
-
-    private enum Choice: Hashable, CaseIterable, Identifiable {
-        case automatic, accent, artwork, theme, custom
-
-        var id: Self { self }
-
-        var title: String {
-            switch self {
-            case .automatic: "Automatic"
-            case .accent: "Accent"
-            case .artwork: "Artwork"
-            case .theme: "Theme"
-            case .custom: "Custom"
-            }
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Picker("Colour", selection: choice) {
-                ForEach(Choice.allCases) { Text($0.title).tag(Optional($0)) }
-            }
-            .choiceBar()
-            .labelsHidden()
-            .controlSize(.small)
-            .fixedSize()
-            .frame(maxWidth: .infinity)
-            ColorMixer(rgb: mixed)
-        }
-        .padding(18)
-        .frame(width: 440)
-    }
-
-    /// nil for a colour the well does not offer (a named tint, a value's scale): nothing marked.
-    private var choice: Binding<Choice?> {
-        Binding {
-            switch color {
-            case .automatic: .automatic
-            case .accent: .accent
-            case .artwork: .artwork
-            case .theme: .theme
-            case .rgb: .custom
-            case .semantic, .named, .valueScale: nil
-            }
-        } set: { choice in
-            switch choice {
-            case .automatic: color = .automatic
-            case .accent: color = .accent
-            case .artwork: color = .artwork
-            case .theme: color = .theme
-            case .custom: color = .rgb(mixed.wrappedValue, alpha: alpha)
-            case nil: break
-            }
-        }
-    }
-
-    /// The mixer's colour: the well's own, or the theme's to start from.
-    private var mixed: Binding<IslandTheme.RGB> {
-        Binding {
-            if case .rgb(let rgb, _) = color { rgb } else { IslandThemeStore.shared.theme.rgb }
-        } set: { rgb in
-            color = .rgb(rgb, alpha: alpha)
-        }
-    }
-
-    private var alpha: Double {
-        if case .rgb(_, let alpha) = color { alpha } else { 1 }
-    }
-}
-
-private extension StyleColor {
-    /// How the colour well draws it, outside any widget: the accent and the theme as the theme's
-    /// colour, automatic as a colour wheel.
-    var swatch: AnyShapeStyle {
-        switch self {
-        case .automatic:
-            AnyShapeStyle(AngularGradient(colors: [.red, .orange, .yellow, .green, .blue, .purple, .red], center: .center))
-        case .accent, .theme: AnyShapeStyle(Color.islandAccent)
-        case .artwork: AnyShapeStyle(LinearGradient(colors: [.pink, .orange], startPoint: .top, endPoint: .bottom))
-        case .semantic(let semantic):
-            switch semantic {
-            case .primary: AnyShapeStyle(.primary)
-            case .secondary: AnyShapeStyle(.secondary)
-            case .tertiary: AnyShapeStyle(.tertiary)
-            case .positive: AnyShapeStyle(Color.green)
-            case .warning: AnyShapeStyle(Color.orange)
-            case .critical: AnyShapeStyle(Color.red)
-            }
-        case .named(let tint):
-            tint.color.map { AnyShapeStyle($0) } ?? StyleColor.automatic.swatch
-        case .rgb(let rgb, let alpha): AnyShapeStyle(rgb.color.opacity(alpha))
-        case .valueScale(let scale):
-            AnyShapeStyle(LinearGradient(colors: scale == .rising ? [.red, .green] : [.green, .red],
-                                         startPoint: .leading, endPoint: .trailing))
-        }
     }
 }

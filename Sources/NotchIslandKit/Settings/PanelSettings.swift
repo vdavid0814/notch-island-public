@@ -48,3 +48,14 @@ nonisolated struct PanelLayout: Sendable, Equatable {
     var widthFactor: CGFloat = 1
     var boardHeightFactor: CGFloat = 1
 }
+
+nonisolated extension ClosedRange {
+    func clamp(_ value: Bound) -> Bound { Swift.min(Swift.max(value, lowerBound), upperBound) }
+}
+
+nonisolated extension KeyedDecodingContainer {
+    /// The value at `key`, or nil when it is missing or cannot be read.
+    func lossy<T: Decodable>(_ type: T.Type, _ key: Key) -> T? {
+        (try? decodeIfPresent(type, forKey: key)).flatMap { $0 }
+    }
+}

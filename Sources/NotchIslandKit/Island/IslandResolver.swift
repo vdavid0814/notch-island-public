@@ -27,6 +27,11 @@ nonisolated struct IslandInputs: Sendable, Equatable {
     var stopwatchActive: Bool = false
     /// `MediaController.isActive`, already gated by the Now Playing preference.
     var nowPlayingActive: Bool = false
+    /// The screen is being recorded (`ScreenRecorder`).
+    var recordingActive: Bool = false
+    /// While recording, the panel was asked for (a page by name, or from the recording card): it
+    /// opens instead of the card.
+    var wantsPanelWhileRecording: Bool = false
 }
 
 nonisolated enum IslandResolver {
@@ -37,7 +42,8 @@ nonisolated enum IslandResolver {
     static func resolve(_ i: IslandInputs) -> IslandPresentation {
         if i.wantsAssistant { return .assistant(i.assistantRoom) }
         if i.wantsSettings { return .settings }
-        if i.wantsExpanded { return .expanded(i.page) }
+        // While recording, the pointer opens the recording card; the panel only when asked for.
+        if i.wantsExpanded { return .expanded(i.recordingActive && !i.wantsPanelWhileRecording ? .recording : i.page) }
         if i.isHidden {
             // Only the direct answer to something the user just did gets through.
             if let banner = i.banner, banner.showsWhileHidden { return .banner(banner) }
@@ -46,6 +52,7 @@ nonisolated enum IslandResolver {
         if i.isDragInProgress { return .banner(.dropTarget) }
         if i.isAnchorTargeted { return .banner(.anchorTarget) }
         if let banner = i.banner { return .banner(banner) }
+        if i.recordingActive { return .compact(.recording) }
         if i.countdownActive { return .compact(.timer) }
         if i.stopwatchActive { return .compact(.stopwatch) }
         if i.nowPlayingActive { return .compact(.nowPlaying) }

@@ -28,7 +28,7 @@ struct WidgetBoardBenchTests {
         let board = ProcessInfo.processInfo.environment["NI_BENCH_WIDGET"].flatMap(Int.init)
             .map { WidgetBoard(widgets: [WidgetBoard.standard.widgets[$0]]) } ?? .standard
         func host() -> NSView {
-            NSHostingView(rootView: WidgetBoardView(board: board, thumbnails: ThumbnailCache())
+            NSHostingView(rootView: WidgetBoardView(board: board)
                 .frame(width: size.width, height: size.height)
                 .environment(model)
                 .environment(\.colorScheme, .dark))

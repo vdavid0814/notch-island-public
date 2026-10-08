@@ -487,10 +487,6 @@ struct ActivitiesSettingsPage: View {
                 }
             }
 
-            if model.power.hasBattery {
-                BatteryPageSection(settings: $preferences.battery)
-            }
-
             Section("Shelf and Timer") {
                 Toggle(isOn: $preferences.shelfEnabled) {
                     InfoLabel("Shelf", "Drag files onto the notch to keep them at hand, then drag them out or AirDrop them.")
@@ -540,49 +536,6 @@ struct ActivitiesSettingsPage: View {
                     }
                 }
             }
-        }
-    }
-}
-
-/// The battery page's chart (the header's battery opens the page): its style, range, colours and
-/// what it marks. The chart's context menu sets the style and range too.
-private struct BatteryPageSection: View {
-    @Binding var settings: BatteryDisplaySettings
-
-    var body: some View {
-        Section {
-            Picker(selection: $settings.style) {
-                ForEach(BatteryChartStyle.allCases, id: \.self) { Text($0.title).tag($0) }
-            } label: {
-                InfoLabel("Chart", "Bars: the level at the end of each quarter hour, as the iPhone shows it. Area and Line: every reading.")
-            }
-            .choiceBar()
-            Picker(selection: $settings.range) {
-                ForEach(BatteryChartRange.allCases, id: \.self) { Text($0.title).tag($0) }
-            } label: {
-                InfoLabel("Shows", "Today from midnight, or the last 24 or 48 hours (in half hours).")
-            }
-            .choiceBar()
-            LabeledContent {
-                HStack(spacing: 12) {
-                    ColorWell(color: $settings.normalColor).help("On battery")
-                    ColorWell(color: $settings.chargingColor).help("Charging")
-                    ColorWell(color: $settings.lowColor).help("Below 20 %")
-                }
-            } label: {
-                InfoLabel("Colours", "On battery, while charging, and below 20 % on battery. Automatic: white, green and red.")
-            }
-            Toggle(isOn: $settings.showsGaps) {
-                InfoLabel("Mark gaps", "Hatching where nothing is known: the Mac asleep, or NotchIsland not running.")
-            }
-            Toggle(isOn: $settings.shadesDisplayOff) {
-                InfoLabel("Shade display off", "A faint band where the displays were off.")
-            }
-            Toggle(isOn: $settings.showsCaptions) {
-                InfoLabel("Captions", "When the battery was last charged, over the chart, and the percentages beside it.")
-            }
-        } header: {
-            InfoLabel("Battery Page", "Click the battery at the top of the open island: the level, how long it lasts, the battery's health and the day's charge.")
         }
     }
 }

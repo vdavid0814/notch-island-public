@@ -42,14 +42,18 @@ nonisolated struct WidgetBoard: Sendable, Codable, Equatable {
         }
     }
 
-    /// Now Playing on the left, the timer over the shelf on the right: the page this app shipped with.
+    /// Now Playing on the left; the time and Wi-Fi, the stopwatch and the volume on the right.
     static let standard = WidgetBoard(widgets: [
         IslandWidget(kind: .nowPlaying, frame: GridRect(column: 0, row: 0, width: 7, height: 3),
                      options: IslandWidgetKind.nowPlaying.defaultOptions),
-        IslandWidget(kind: .timer, frame: GridRect(column: 7, row: 0, width: 5, height: 2),
-                     options: IslandWidgetKind.timer.defaultOptions),
-        IslandWidget(kind: .shelf, frame: GridRect(column: 7, row: 2, width: 5, height: 1),
-                     options: IslandWidgetKind.shelf.defaultOptions),
+        IslandWidget(kind: .dateTime, frame: GridRect(column: 7, row: 0, width: 3, height: 1),
+                     options: IslandWidgetKind.dateTime.defaultOptions),
+        IslandWidget(kind: .wifi, frame: GridRect(column: 10, row: 0, width: 2, height: 1),
+                     options: IslandWidgetKind.wifi.defaultOptions),
+        IslandWidget(kind: .stopwatch, frame: GridRect(column: 7, row: 1, width: 5, height: 1),
+                     options: IslandWidgetKind.stopwatch.defaultOptions),
+        IslandWidget(kind: .volume, frame: GridRect(column: 7, row: 2, width: 5, height: 1),
+                     options: IslandWidgetKind.volume.defaultOptions),
     ])
 
     // MARK: Finding widgets
@@ -135,11 +139,10 @@ nonisolated struct WidgetBoard: Sendable, Codable, Equatable {
 
     // MARK: Changing it
 
-    /// Adds a new instance of the kind where there is room; nil when nothing fits, or the kind is
-    /// not built yet.
+    /// Adds a new instance of the kind where there is room; nil when nothing fits.
     @discardableResult
     mutating func add(_ kind: IslandWidgetKind) -> WidgetID? {
-        guard kind.spec.isImplemented, let rect = freeSlot(for: kind) else { return nil }
+        guard let rect = freeSlot(for: kind) else { return nil }
         let widget = IslandWidget(kind: kind, frame: rect, options: kind.defaultOptions, id: WidgetID())
         widgets.append(widget)
         return widget.id
@@ -187,7 +190,7 @@ nonisolated struct WidgetBoard: Sendable, Codable, Equatable {
         return true
     }
 
-    /// Changes a widget's look (tint, plate, mirroring, style…); its id, kind and frame stay.
+    /// Changes a widget's look (its background, its elements); its id, kind and frame stay.
     mutating func update(_ id: WidgetID, _ change: (inout IslandWidget) -> Void) {
         guard let index = widgets.firstIndex(where: { $0.id == id }) else { return }
         var widget = widgets[index]

@@ -251,7 +251,7 @@ struct SettingsPages: View {
 /// Settings' ground: black where it hangs from the notch, easing over most of the page
 /// into the window's grey. A plain, opaque material: text keeps its contrast whatever is on the
 /// desktop.
-private struct SettingsBackdrop: View {
+struct SettingsBackdrop: View {
     /// Where the fade reaches the window's grey: most of the page, so it reads as light falling
     /// off rather than a band.
     static let fadeLength = 0.7

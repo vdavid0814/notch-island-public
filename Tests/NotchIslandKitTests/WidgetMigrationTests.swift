@@ -13,14 +13,13 @@ private func scratchDefaults() -> (UserDefaults, String) {
     /// A board as version 1 saved it: no versions, no ids, a plate as a flag.
     static let version1 = #"{"widgets":[{"kind":"nowPlaying","frame":{"column":0,"row":0,"width":7,"height":3},"options":["artwork","trackInfo"],"showsPlate":false},{"kind":"stopwatch","frame":{"column":7,"row":0,"width":4,"height":1},"options":[]}]}"#
     /// A board as version 2 saved it: each widget versioned, one per kind.
-    static let version2 = #"{"widgets":[{"version":2,"kind":"timer","frame":{"column":7,"row":0,"width":5,"height":2},"options":["ruler","readout","timerSeconds"],"sizes":{"readout":"large"},"tint":"teal","layout":"automatic","background":"plate","mirrored":true,"plainButtons":true},{"version":2,"kind":"shelf","frame":{"column":7,"row":2,"width":5,"height":1},"options":["previews"],"sizes":{},"tint":"automatic","layout":"automatic","background":"none","mirrored":false,"plainButtons":true}]}"#
+    static let version2 = #"{"widgets":[{"version":2,"kind":"stopwatch","frame":{"column":7,"row":1,"width":5,"height":1},"options":["readout","resetButton"],"sizes":{"readout":"large"},"tint":"teal","layout":"automatic","background":"plate","mirrored":true,"plainButtons":true},{"version":2,"kind":"volume","frame":{"column":7,"row":2,"width":5,"height":1},"options":["levelIcon"],"sizes":{},"tint":"automatic","layout":"automatic","background":"none","mirrored":false,"plainButtons":true}]}"#
 
     @Test func legacyIDsArePinned() {
         // Derived from the kind alone: the same on every Mac, in every build.
-        #expect(WidgetID.legacy(.timer).description == "931627B4-3044-8766-A985-844E4BD29D04")
         #expect(WidgetID.legacy(.nowPlaying).description == "6AC515A9-7464-8E76-B7ED-78195F55CB25")
         // Version 8 (custom), RFC variant.
-        let bytes = WidgetID.legacy(.timer).rawValue.uuid
+        let bytes = WidgetID.legacy(.stopwatch).rawValue.uuid
         #expect(bytes.6 >> 4 == 8 && bytes.8 >> 6 == 0b10)
     }
 
@@ -35,10 +34,10 @@ private func scratchDefaults() -> (UserDefaults, String) {
 
     @Test func version2BecomesVersion3AndRoundTrips() throws {
         let board = try JSONDecoder().decode(WidgetBoard.self, from: Data(Self.version2.utf8))
-        let timer = try #require(board.widget(.legacy(.timer)))
-        #expect(timer.options == [.ruler, .readout, .timerSeconds])
-        #expect(timer.sizes == [.readout: .large] && timer.tint == .teal && timer.mirrored)
-        #expect(board.widget(.legacy(.shelf))?.background == WidgetBackground.none)
+        let stopwatch = try #require(board.widget(.legacy(.stopwatch)))
+        #expect(stopwatch.options == [.readout, .resetButton])
+        #expect(stopwatch.background == .plate)
+        #expect(board.widget(.legacy(.volume))?.background == WidgetBackground.none)
         #expect(WidgetMigration.version(of: Data(Self.version2.utf8)) == 2)
 
         let data = try JSONEncoder().encode(board)
@@ -49,19 +48,19 @@ private func scratchDefaults() -> (UserDefaults, String) {
     }
 
     @Test func outOfBoundsAndOverlappingWidgetsAreParkedNotDropped() throws {
-        let json = #"{"version":3,"grid":{"columns":12,"rows":3,"gap":8},"widgets":[{"kind":"timer","frame":{"column":0,"row":0,"width":5,"height":2},"options":[]},{"kind":"battery","frame":{"column":3,"row":1,"width":3,"height":1},"options":[]},{"kind":"wifi","frame":{"column":11,"row":0,"width":2,"height":1},"options":[]}],"parked":[{"kind":"shelf","frame":{"column":0,"row":2,"width":5,"height":1},"options":[]}],"foreign":[]}"#
+        let json = #"{"version":3,"grid":{"columns":12,"rows":3,"gap":8},"widgets":[{"kind":"stopwatch","frame":{"column":0,"row":0,"width":5,"height":1},"options":[]},{"kind":"dateTime","frame":{"column":3,"row":0,"width":3,"height":1},"options":[]},{"kind":"wifi","frame":{"column":11,"row":0,"width":2,"height":1},"options":[]}],"parked":[{"kind":"volume","frame":{"column":0,"row":2,"width":5,"height":1},"options":[]}],"foreign":[]}"#
         let board = try JSONDecoder().decode(WidgetBoard.self, from: Data(json.utf8))
-        #expect(board.widgets.map(\.kind) == [.timer])
-        #expect(board.parked.map(\.kind) == [.battery, .wifi, .shelf])
+        #expect(board.widgets.map(\.kind) == [.stopwatch])
+        #expect(board.parked.map(\.kind) == [.dateTime, .wifi, .volume])
         // A round trip keeps them where they are.
         let again = try JSONDecoder().decode(WidgetBoard.self, from: JSONEncoder().encode(board))
         #expect(again == board)
     }
 
     @Test func foreignKindsAreKeptVerbatim() throws {
-        let json = #"{"version":3,"widgets":[{"kind":"hologram","frame":{"column":0,"row":0,"width":2,"height":1},"beam":{"power":7.5,"on":true,"colours":["red",null]}},{"kind":"timer","frame":{"column":7,"row":0,"width":5,"height":2},"options":["ruler"]}],"parked":[{"kind":"teleporter","frame":{"column":0,"row":0,"width":1,"height":1}}]}"#
+        let json = #"{"version":3,"widgets":[{"kind":"hologram","frame":{"column":0,"row":0,"width":2,"height":1},"beam":{"power":7.5,"on":true,"colours":["red",null]}},{"kind":"stopwatch","frame":{"column":7,"row":0,"width":5,"height":1},"options":["readout"]}],"parked":[{"kind":"teleporter","frame":{"column":0,"row":0,"width":1,"height":1}}]}"#
         let board = try JSONDecoder().decode(WidgetBoard.self, from: Data(json.utf8))
-        #expect(board.widgets.map(\.kind) == [.timer])
+        #expect(board.widgets.map(\.kind) == [.stopwatch])
         #expect(board.foreign.count == 2)
         let written = try JSONEncoder().encode(board)
         let reread = try JSONDecoder().decode(WidgetBoard.self, from: written)
@@ -73,11 +72,11 @@ private func scratchDefaults() -> (UserDefaults, String) {
     }
 
     @Test func foreignKindsThisBuildKnowsComeBack() throws {
-        // Written to foreign by an older build; this one knows wifi and battery.
-        let json = #"{"version":3,"widgets":[{"kind":"timer","frame":{"column":7,"row":0,"width":5,"height":2},"options":[]}],"foreign":[{"kind":"wifi","frame":{"column":0,"row":0,"width":2,"height":1},"options":[]},{"kind":"battery","frame":{"column":7,"row":0,"width":3,"height":1},"options":[]},{"kind":"hologram","frame":{"column":0,"row":0,"width":2,"height":1}}]}"#
+        // Written to foreign by an older build; this one knows wifi and dateTime.
+        let json = #"{"version":3,"widgets":[{"kind":"stopwatch","frame":{"column":7,"row":0,"width":5,"height":1},"options":[]}],"foreign":[{"kind":"wifi","frame":{"column":0,"row":0,"width":2,"height":1},"options":[]},{"kind":"dateTime","frame":{"column":7,"row":0,"width":3,"height":1},"options":[]},{"kind":"hologram","frame":{"column":0,"row":0,"width":2,"height":1}}]}"#
         let board = try JSONDecoder().decode(WidgetBoard.self, from: Data(json.utf8))
-        #expect(board.widgets.map(\.kind) == [.timer, .wifi])
-        #expect(board.parked.map(\.kind) == [.battery])
+        #expect(board.widgets.map(\.kind) == [.stopwatch, .wifi])
+        #expect(board.parked.map(\.kind) == [.dateTime])
         #expect(board.foreign.count == 1)
         guard case .object(let fields) = try #require(board.foreign.first) else { Issue.record("not an object"); return }
         #expect(fields["kind"] == .string("hologram"))
@@ -103,10 +102,10 @@ private func scratchDefaults() -> (UserDefaults, String) {
         defaults.set(v2, forKey: WidgetStore.key)
 
         let store = WidgetStore(defaults: defaults)
-        #expect(store.board.contains(.legacy(.timer)))
+        #expect(store.board.contains(.legacy(.stopwatch)))
         // Reading alone writes nothing.
         #expect(defaults.data(forKey: WidgetMigration.backupKey) == nil)
-        store.update(.legacy(.timer)) { $0.tint = .pink }
+        store.update(.legacy(.stopwatch)) { $0.background = .tinted }
         #expect(defaults.data(forKey: WidgetStore.key) == v2)   // not yet: the write waits
         store.flush()
         #expect(defaults.data(forKey: WidgetMigration.backupKey) == v2)
@@ -115,19 +114,19 @@ private func scratchDefaults() -> (UserDefaults, String) {
 
         // A later store, a later write: the backup stays the version 2 board.
         let later = WidgetStore(defaults: defaults)
-        later.update(.legacy(.timer)) { $0.tint = .red }
+        later.update(.legacy(.stopwatch)) { $0.background = .none }
         later.flush()
         #expect(defaults.data(forKey: WidgetMigration.backupKey) == v2)
-        #expect(WidgetStore(defaults: defaults).board.widget(.legacy(.timer))?.tint == .red)
+        #expect(WidgetStore(defaults: defaults).board.widget(.legacy(.stopwatch))?.background == WidgetBackground.none)
     }
 
     @MainActor @Test func writesWaitForTheDelayAndFlushWritesAtOnce() async throws {
         let (defaults, name) = scratchDefaults()
         defer { UserDefaults.standard.removePersistentDomain(forName: name) }
         let store = WidgetStore(defaults: defaults)
-        let added = store.add(.battery)
+        let added = store.add(.wifi)
         #expect(added == nil)   // the standard board is full
-        store.remove(.legacy(.shelf))
+        store.remove(.legacy(.volume))
         #expect(defaults.data(forKey: WidgetStore.key) == nil)
         // Written once the delay is over (waited for generously: the tests run side by side).
         for _ in 0..<50 where defaults.data(forKey: WidgetStore.key) == nil {
@@ -166,10 +165,10 @@ private func scratchDefaults() -> (UserDefaults, String) {
     @Test func kindLimitsConvertToOtherGrids() {
         let fine = BoardGrid(columns: 24, rows: 6, gap: 6)
         #expect(fine.minimum(for: .nowPlaying) == IslandWidgetKind.nowPlaying.minimumSize)
-        #expect(fine.defaultSize(for: .timer) == IslandWidgetKind.timer.defaultSize)
+        #expect(fine.defaultSize(for: .stopwatch) == IslandWidgetKind.stopwatch.defaultSize)
         #expect(fine.maximum(for: .wifi) == GridSize(width: 8, height: 4))
         let coarse = BoardGrid(columns: 8, rows: 2, gap: 8)
-        #expect(coarse.minimum(for: .timer) == IslandWidgetKind.timer.minimumSize)
+        #expect(coarse.minimum(for: .stopwatch) == IslandWidgetKind.stopwatch.minimumSize)
         #expect(coarse.maximum(for: .wifi) == IslandWidgetKind.wifi.maximumSize)
         for grid in [fine, coarse, BoardGrid(columns: 10, rows: 5, gap: 8)] {
             for kind in IslandWidgetKind.allCases {
@@ -185,7 +184,7 @@ private func scratchDefaults() -> (UserDefaults, String) {
         var board = WidgetBoard.standard
         board.setGrid(BoardGrid(columns: 24, rows: 6, gap: 8))
         #expect(board.widget(.legacy(.nowPlaying))?.frame == GridRect(column: 0, row: 0, width: 14, height: 6))
-        #expect(board.widget(.legacy(.timer))?.frame == GridRect(column: 14, row: 0, width: 10, height: 4))
+        #expect(board.widget(.legacy(.stopwatch))?.frame == GridRect(column: 14, row: 2, width: 10, height: 2))
         #expect(board.parked.isEmpty)
         board.setGrid(.standard)
         #expect(board == WidgetBoard.standard)
@@ -194,10 +193,10 @@ private func scratchDefaults() -> (UserDefaults, String) {
     @Test func sharedEdgesStayShared() {
         var board = WidgetBoard.standard
         board.setGrid(BoardGrid(columns: 10, rows: 3, gap: 8))
-        let nowPlaying = board.widget(.legacy(.nowPlaying))!.frame, timer = board.widget(.legacy(.timer))!.frame
-        let shelf = board.widget(.legacy(.shelf))!.frame
-        #expect(nowPlaying.maxColumn == timer.column && timer.column == shelf.column)
-        #expect(timer.maxColumn == 10 && shelf.maxColumn == 10 && timer.maxRow == shelf.row)
+        let nowPlaying = board.widget(.legacy(.nowPlaying))!.frame, stopwatch = board.widget(.legacy(.stopwatch))!.frame
+        let volume = board.widget(.legacy(.volume))!.frame
+        #expect(nowPlaying.maxColumn == stopwatch.column && stopwatch.column == volume.column)
+        #expect(stopwatch.maxColumn == 10 && volume.maxColumn == 10 && stopwatch.maxRow == volume.row)
     }
 
     @Test func aCoarserGridParksWhatCannotFit() {
@@ -225,42 +224,42 @@ private func scratchDefaults() -> (UserDefaults, String) {
     @Test func aShorterGridShrinksBeforeItParks() {
         var board = WidgetBoard.standard
         board.setGrid(BoardGrid(columns: 12, rows: 2, gap: 8))
-        // 3 rows → 2: Now Playing 7 × 2, the timer 5 × 1 (round(2 · 2 / 3) = 1), the shelf under it.
+        // 3 rows → 2: Now Playing 7 × 2, the stopwatch 5 × 1; what no longer fits beside them is parked.
         #expect(board.widget(.legacy(.nowPlaying))?.frame == GridRect(column: 0, row: 0, width: 7, height: 2))
-        #expect(board.widget(.legacy(.timer))?.frame.size == GridSize(width: 5, height: 1))
-        #expect(board.widgets.count + board.parked.count == 3)
+        #expect(board.widget(.legacy(.stopwatch))?.frame.size == GridSize(width: 5, height: 1))
+        #expect(board.widgets.count + board.parked.count == 5)
     }
 }
 
 @Suite struct WidgetInstanceTests {
     @Test func aKindMayBeOnTheBoardTwice() throws {
         var board = WidgetBoard(widgets: [])
-        let firstResult = board.add(.timer)
+        let firstResult = board.add(.stopwatch)
         let first = try #require(firstResult)
-        let secondResult = board.add(.timer)
+        let secondResult = board.add(.stopwatch)
         let second = try #require(secondResult)
-        #expect(first != second && board.instances(of: .timer).count == 2)
-        #expect(board.first(of: .timer)?.id == first)
-        board.update(second) { $0.tint = .green }
-        #expect(board.widget(first)?.tint == .automatic && board.widget(second)?.tint == .green)
+        #expect(first != second && board.instances(of: .stopwatch).count == 2)
+        #expect(board.first(of: .stopwatch)?.id == first)
+        board.update(second) { $0.background = .tinted }
+        #expect(board.widget(first)?.background == .plate && board.widget(second)?.background == .tinted)
         board.remove(first)
-        #expect(board.instances(of: .timer).map(\.id) == [second])
+        #expect(board.instances(of: .stopwatch).map(\.id) == [second])
     }
 
     @Test func duplicateCopiesTheLookNearTheOriginal() throws {
         var board = WidgetBoard.standard
-        board.remove(.legacy(.shelf))
-        board.update(.legacy(.timer)) {
-            $0.tint = .mint
-            $0.style.format.showsSeconds = true
+        board.remove(.legacy(.volume))
+        board.update(.legacy(.stopwatch)) {
+            $0.background = .tinted
+            $0.options.remove(.resetButton)
         }
-        // The only room left is the row under the timer: a 5 × 1 copy (shrunk from 5 × 2).
-        let copyResult = board.duplicate(.legacy(.timer))
+        // The only room left is the row under the stopwatch.
+        let copyResult = board.duplicate(.legacy(.stopwatch))
         let copy = try #require(copyResult)
         let widget = try #require(board.widget(copy))
-        #expect(widget.kind == .timer && widget.tint == .mint && widget.style.format.showsSeconds == true)
+        #expect(widget.kind == .stopwatch && widget.background == .tinted && !widget.shows(.resetButton))
         #expect(widget.frame == GridRect(column: 7, row: 2, width: 5, height: 1))
-        let another = board.duplicate(.legacy(.timer))
+        let another = board.duplicate(.legacy(.stopwatch))
         #expect(another == nil)
     }
 
@@ -277,20 +276,10 @@ private func scratchDefaults() -> (UserDefaults, String) {
         #expect(!moved)
     }
 
-    @Test func reservedKindsAreNeverPlaced() {
-        var board = WidgetBoard(widgets: [])
-        for kind in IslandWidgetKind.allCases where !kind.spec.isImplemented {
-            let added = board.add(kind)
-            #expect(added == nil)
-            #expect(!kind.isOffered)
-        }
-        #expect(board.widgets.isEmpty)
-    }
-
     @Test func routesOpenAKindOrAnInstance() throws {
-        #expect(AppCommand.parse(URL(string: "notchisland://widget/timer")!) == .editWidget(.kind(.timer)))
+        #expect(AppCommand.parse(URL(string: "notchisland://widget/stopwatch")!) == .editWidget(.kind(.stopwatch)))
         #expect(AppCommand.parse(URL(string: "notchisland://widget/nowplaying")!) == .editWidget(.kind(.nowPlaying)))
-        let id = WidgetID.legacy(.timer)
+        let id = WidgetID.legacy(.stopwatch)
         #expect(AppCommand.parse(URL(string: "notchisland://widget/\(id)")!) == .editWidget(.instance(id)))
         #expect(AppCommand.parse(URL(string: "notchisland://widget/\(id.description.lowercased())")!) == .editWidget(.instance(id)))
         #expect(AppCommand.parse(URL(string: "notchisland://widget/nothing")!) == nil)
@@ -298,13 +287,20 @@ private func scratchDefaults() -> (UserDefaults, String) {
 }
 
 @Suite struct WidgetSpecTests {
-    @Test func everyKindHasASpecFromItsFamily() {
-        #expect(IslandWidgetKind.allCases.count == 60)
-        // Every kind is built: none is a placeholder.
-        #expect(IslandWidgetKind.allCases.filter { !$0.spec.isImplemented }.isEmpty)
-        for family in WidgetFamily.allCases {
-            for (kind, spec) in family.specs { #expect(spec.family == family, "\(kind)") }
+    @Test func everyKindHasASpec() {
+        // The six base widgets first, then every control (as Wi-Fi) and level (as Volume) built on them.
+        #expect(Array(IslandWidgetKind.allCases.prefix(6)) == [.wifi, .volume, .dateTime, .stopwatch, .nowPlaying, .systemStats])
+        #expect(IslandWidgetKind.allCases.filter { $0.control == nil && $0.level == nil }
+            == [.dateTime, .stopwatch, .nowPlaying, .systemStats, .worldClock, .clipboard, .battery, .batteryChart,
+                .batteryTime, .batteryHealth, .batteryCycles, .batteryPower, .batteryTemperature, .charger, .batteryLastCharge,
+                .uptime, .diskSpace, .timer, .shelf, .analogClock, .monthCalendar, .batteryUsage, .memory])
+        // The figures are readouts as World Clock is: its parts, styled as its are.
+        for kind in IslandWidgetKind.allCases where kind.isReadout {
+            #expect(kind.spec.texts == [.value, .label] && kind.spec.buttons == [.symbol], "\(kind)")
         }
+        #expect(IslandWidgetKind.allCases.compactMap(\.systemControl).sorted { $0.rawValue < $1.rawValue }
+            == SystemControl.allCases.sorted { $0.rawValue < $1.rawValue })
+        #expect(IslandWidgetKind.allCases.compactMap(\.level) == [.volume, .brightness, .keyboard])
         for kind in IslandWidgetKind.allCases {
             let spec = kind.spec
             #expect(!spec.elements.isEmpty && !spec.title.isEmpty && !spec.summary.isEmpty && spec.iconColors.count == 2, "\(kind)")
@@ -312,65 +308,25 @@ private func scratchDefaults() -> (UserDefaults, String) {
             #expect(kind.minimumSize.width <= kind.defaultSize.width && kind.defaultSize.width <= kind.maximumSize.width)
             #expect(kind.minimumSize.height <= kind.defaultSize.height && kind.defaultSize.height <= kind.maximumSize.height)
             #expect(kind.maximumSize.width <= 12 && kind.maximumSize.height <= 3)
-            if spec.category == .controls { #expect(kind.systemControl != nil && spec.family == .controls) }
+            // Offered, but a control that does not work on this Mac (True Tone on one without it).
+            #expect(kind.isOffered || kind.systemControl.map { !ExtendedControls.isAvailable($0) } == true, "\(kind)")
+            if spec.category == .controls { #expect(kind.control != nil) }
         }
-    }
-
-    @Test func theGalleryOffersTodaysKinds() {
-        // What the gallery offers depends on the Mac (a battery, True Tone, the Apps launcher): the
-        // kinds that need nothing are offered everywhere.
-        let offered = IslandWidgetKind.allCases.filter(\.isOffered)
-        let battery: Set<IslandWidgetKind> = [.batteryTime, .batteryHealth, .batteryCycles, .batteryChart, .batteryPower,
-                                              .batteryTemperature, .charger, .lowPowerMode, .batteryUsage, .batteryScreenTime,
-                                              .batteryLastCharge]
-        let needsTheMac: Set<IslandWidgetKind> = battery.union([.trueTone, .appsLauncher, .missionControl, .showDesktop])
-        #expect(Set(offered).isSuperset(of: Set(IslandWidgetKind.allCases).subtracting(needsTheMac)))
-        #expect(offered.count >= 60 - needsTheMac.count && offered.count <= 60)
-        // The battery's widgets come and go together with the battery (the temperature's with its sensor).
-        let hasBattery = BatteryAvailability.hasBattery
-        for kind in battery.subtracting([.batteryTemperature]) { #expect(kind.isOffered == hasBattery, "\(kind)") }
-        #expect(IslandWidgetKind.batteryTemperature.isOffered == BatteryAvailability.hasTemperature)
         for category in WidgetCategory.allCases {
-            #expect(category.kinds.contains { $0.isOffered }, "\(category)")
+            #expect(!category.kinds.isEmpty, "\(category)")
         }
     }
 
     @Test func todaysElementsAreUnchanged() {
         #expect(IslandWidgetKind.nowPlaying.options == [.artwork, .trackInfo, .artist, .progress, .playbackButtons, .skipButtons,
-                                                         .seekBack, .seekForward])
-        // The seek buttons are off until switched on.
-        #expect(IslandWidgetKind.nowPlaying.defaultOptions == [.artwork, .trackInfo, .artist, .progress, .playbackButtons, .skipButtons])
-        #expect(IslandWidgetKind.timer.defaultOptions == [.ruler, .readout])
+                                                        .seekButtons])
+        // Back and forward are there to be switched on, not on in a new widget.
+        #expect(IslandWidgetKind.nowPlaying.defaultOptions == Set(IslandWidgetKind.nowPlaying.options).subtracting([.seekButtons]))
         #expect(IslandWidgetKind.stopwatch.defaultOptions == [.readout, .resetButton])
-        // The switchable ones: those always drawn (a start button, a slider) have no switch.
-        let sizable = IslandWidgetKind.allCases.flatMap { $0.spec.elements.filter { !$0.isSizable && !$0.isRequired }.map(\.id) }
-        // The shelf's pictures and the battery's chart fill their room whatever their size: no S, M, L.
-        #expect(Set(sizable) == [.label, .value, .addMinute, .timerSeconds, .timerHours, .resetButton, .shelfActions,
-                                 .previews, .chart])
-        #expect(IslandWidgetKind.nowPlaying.spec.element(.skipButtons)?.parts == [ElementID(rawValue: "skipButtons.previous"),
-                                                                                ElementID(rawValue: "skipButtons.next")])
-    }
-
-    @Test func theControlsAddedIn06AreSwitchesOrActions() {
-        let extended: [SystemControl] = [.soundOutput, .outputMute, .trueTone, .stageManager, .lowPowerMode, .screenMirroring,
-                                         .missionControl, .showDesktop, .appsLauncher, .characterViewer, .displaySleep]
-        let switches: Set<SystemControl> = [.outputMute, .trueTone, .stageManager, .lowPowerMode]
-        for control in extended {
-            #expect(!control.title.isEmpty && control.title != control.rawValue)
-            #expect(control.isAction == !switches.contains(control))
-            #expect(!control.symbol(on: true).isEmpty && control.symbol(on: true) != "questionmark")
-            // An action has no state to show, and says what a click does.
-            if control.isAction {
-                #expect(!ExtendedControls.isOn(control))
-                #expect(control.status(on: false) == control.status(on: true))
-            } else {
-                #expect(control.status(on: true) != control.status(on: false))
-            }
-            #expect(!control.status(on: true).isEmpty)
-        }
-        #expect(SystemControl.outputMute.status(on: true) == "Muted")
-        // What opens something has somewhere to open.
-        for control in [SystemControl.screenMirroring, .lowPowerMode] { #expect(ExtendedControls.actionURL(of: control) != nil) }
+        // Those always drawn (a start button, a slider) have no switch.
+        #expect(!IslandWidgetKind.stopwatch.options.contains(.stopwatchButton))
+        #expect(!IslandWidgetKind.volume.options.contains(.levelSlider))
+        #expect(!IslandWidgetKind.wifi.options.contains(.controlButton))
     }
 }
 
@@ -425,209 +381,5 @@ private func scratchDefaults() -> (UserDefaults, String) {
         #expect(preferences.panel == PanelSettings())
         preferences.panel = PanelSettings(widthFactor: 1.3, boardHeightFactor: 1.1)
         #expect(Preferences(defaults: defaults).panel == PanelSettings(widthFactor: 1.3, boardHeightFactor: 1.1))
-    }
-}
-
-@Suite struct WidgetStyleModelTests {
-    static func styled() -> WidgetStyle {
-        var style = WidgetStyle()
-        var title = ElementStyle()
-        title.text.points = 18
-        title.text.weight = .bold
-        title.text.labelOverride = "Now"
-        title.colors[.primary] = .rgb(IslandTheme.RGB(red: 1, green: 0.5, blue: 0), alpha: 0.8)
-        style.elements[.trackInfo] = title
-        var cover = ElementStyle()
-        cover.image.corners = .custom(12)
-        cover.image.placement = .trailing
-        style.elements[.artwork] = cover
-        style.surface.fill = .named(.purple)
-        style.surface.borderWidth = 1
-        style.layout.alignment = .bottomLeading
-        style.layout.order = [.artwork, .trackInfo]
-        style.behaviour.tap = .url("https://example.com")
-        style.format.clock24Hour = true
-        return style
-    }
-
-    @Test func styleAndConfigRoundTrip() throws {
-        let style = Self.styled()
-        #expect(try JSONDecoder().decode(WidgetStyle.self, from: JSONEncoder().encode(style)) == style)
-        var config = WidgetConfig()
-        config.timeZone = "Europe/Budapest"
-        config.apps = ["/Applications/Safari.app"]
-        config.count = 3
-        config.date = Date(timeIntervalSinceReferenceDate: 800_000_000)
-        #expect(try JSONDecoder().decode(WidgetConfig.self, from: JSONEncoder().encode(config)) == config)
-        // An empty style and config are not written at all.
-        let plain = IslandWidget(kind: .timer, frame: GridRect(column: 0, row: 0, width: 5, height: 2), options: [.readout])
-        let object = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(plain)) as? [String: Any])
-        #expect(object["style"] == nil)
-        #expect(object["config"] == nil)
-        #expect(object["id"] as? String == plain.id.description, "\(object)")
-        // A config cleared away from its kind's default stays cleared.
-        var cleared = IslandWidget(kind: .clipboard, frame: GridRect(column: 0, row: 0, width: 4, height: 2), options: [])
-        #expect(cleared.config.count == 3)
-        cleared.config = WidgetConfig()
-        #expect(try JSONDecoder().decode(IslandWidget.self, from: JSONEncoder().encode(cleared)).config == WidgetConfig())
-    }
-
-    @Test func decodingIsLossyFieldByField() throws {
-        let json = #"{"elements":{"trackInfo":{"text":{"weight":"bold","size":{"huge":{}},"lineLimit":"two"},"colors":{"primary":{"theme":{}},"glow":{"accent":{}}}},"artist":"nonsense"},"surface":{"borderWidth":"thick","artworkDim":0.5},"layout":{"order":["artwork",7,"trackInfo"]},"format":{"percentDecimals":1}}"#
-        let style = try JSONDecoder().decode(WidgetStyle.self, from: Data(json.utf8))
-        let title = try #require(style.elements[.trackInfo])
-        #expect(title.text.weight == .bold && title.text.points == nil && title.text.lineLimit == nil)
-        #expect(title.colors == [.primary: .theme])
-        #expect(style.elements[.artist] == nil)
-        #expect(style.surface.borderWidth == nil && style.surface.artworkDim == 0.5)
-        #expect(style.layout.order == [.artwork, .trackInfo])
-        #expect(style.format.percentDecimals == 1)
-        let config = try JSONDecoder().decode(WidgetConfig.self, from: Data(#"{"count":"lots","label":"Tokyo","apps":["a",3]}"#.utf8))
-        #expect(config.count == nil && config.label == "Tokyo" && config.apps == ["a"])
-    }
-
-    @Test func sanitizeClampsAndDropsWhatTheKindLacks() {
-        var style = Self.styled()
-        style.elements[.ruler] = ElementStyle()                         // empty: dropped
-        var stray = ElementStyle()
-        stray.text.italic = true
-        style.elements[.percentage] = stray                              // Now Playing has no percentage
-        style.elements[.trackInfo]?.text.points = 900
-        style.elements[.trackInfo]?.text.lineLimit = 40
-        style.elements[.trackInfo]?.text.labelOverride = "   "
-        style.elements[.trackInfo]?.colors[.primary] = .rgb(IslandTheme.RGB(red: 2, green: -1, blue: 0.5), alpha: 3)
-        style.layout.order = [.percentage, .artwork, .artwork]
-        style.layout.contentScale = 4
-        style.behaviour.tap = .shortcut("")
-        style.format.percentDecimals = 7
-        style.sanitize(for: .nowPlaying)
-        #expect(Set(style.elements.keys) == [.trackInfo, .artwork])
-        let text = style.elements[.trackInfo]!.text
-        #expect(text.points == TextStyle.pointRange.upperBound && text.lineLimit == TextStyle.lineLimitRange.upperBound
-                && text.labelOverride == nil)
-        #expect(style.elements[.trackInfo]!.colors[.primary] == .rgb(IslandTheme.RGB(red: 1, green: 0, blue: 0.5), alpha: 1))
-        #expect(style.layout.order == [.artwork] && style.layout.contentScale == 1.5)
-        #expect(style.behaviour.tap == .standard && style.format.percentDecimals == 2)
-
-        var config = WidgetConfig()
-        config.timeZone = "Mars/Olympus"
-        config.count = 40
-        config.label = "  Tokyo  "
-        config.apps = (0..<12).map { "/Applications/\($0).app" }
-        config.sanitize()
-        #expect(config.timeZone == nil && config.count == 8 && config.label == "Tokyo" && config.apps?.count == 8)
-    }
-
-    @Test func aBoardSanitizesItsWidgetsStyles() throws {
-        var board = WidgetBoard.standard
-        board.update(.legacy(.timer)) { widget in
-            var style = ElementStyle()
-            style.line.thickness = 99
-            widget.style.elements[.ruler] = style
-            widget.style.elements[.artwork] = style
-        }
-        let timer = try #require(board.widget(.legacy(.timer)))
-        #expect(Set(timer.style.elements.keys) == [.ruler] && timer.style.elements[.ruler]?.line.thickness == 16)
-    }
-}
-
-@Suite struct ElementLayoutModelTests {
-    static let wide = LayoutClass(height: .medium, aspect: .wide)
-
-    static func layout() -> CustomLayout {
-        let label = ElementID.custom(UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
-        return CustomLayout(
-            authoredSize: CGSize(width: 320, height: 120), grid: InnerGrid(columns: 12, rows: 4),
-            items: [
-                ElementFrame(id: .artwork, rect: UnitRect(x: 0, y: 0, width: 0.4, height: 1), pinX: .leading, keepsAspect: true),
-                ElementFrame(id: .trackInfo, rect: UnitRect(x: 0.45, y: 0.1, width: 0.55, height: 0.3)),
-                ElementFrame(id: ElementID.skipButtons.part("next"), rect: UnitRect(x: 0.8, y: 0.7, width: 0.2, height: 0.3),
-                             pinX: .trailing, pinY: .trailing),
-                ElementFrame(id: label, rect: UnitRect(x: 0.45, y: 0.45, width: 0.3, height: 0.2), locked: true),
-            ],
-            parked: [.progress],
-            decorations: [label: .label("Live")]
-        )
-    }
-
-    @Test func roundTripsInsideAStyle() throws {
-        var style = WidgetStyle()
-        style.layout.arrangement = .custom(CustomLayouts(authored: Self.wide,
-                                                         variants: [Self.wide: .custom(Self.layout()),
-                                                                    LayoutClass(height: .short, aspect: .wide): .automatic]))
-        let data = try JSONEncoder().encode(style)
-        #expect(try JSONDecoder().decode(WidgetStyle.self, from: data) == style)
-        // Size classes are keys of their own ("medium-wide").
-        #expect(String(decoding: data, as: UTF8.self).contains("\"medium-wide\""))
-        #expect(LayoutClass(name: "tall-narrow") == LayoutClass(height: .tall, aspect: .narrow))
-        #expect(LayoutClass(name: "huge-wide") == nil)
-    }
-
-    @Test func decodingDropsOnlyWhatIsBroken() throws {
-        let json = #"{"authoredSize":[300,100],"grid":{"columns":99,"rows":0},"items":[{"id":"artwork","rect":{"x":0,"y":0,"width":0.5,"height":1},"pinX":"sideways"},{"id":"trackInfo"}],"parked":["progress"],"decorations":{"custom.A":{"shape":{"_0":"circle"}},"custom.B":{"sparkle":{}}}}"#
-        let layout = try JSONDecoder().decode(CustomLayout.self, from: Data(json.utf8))
-        #expect(layout.grid == InnerGrid(columns: 24, rows: 1))
-        #expect(layout.items.map(\.id) == [.artwork] && layout.items[0].pinX == .scale)
-        #expect(layout.decorations == [ElementID(rawValue: "custom.A"): .shape(.circle)])
-    }
-
-    /// The padding a layout was drawn with is kept with it; one saved before it was recorded takes
-    /// the kind's standard padding when sanitized.
-    @Test func theAuthoredPaddingIsKeptOrTakesTheKindsStandard() throws {
-        var layout = Self.layout()
-        layout.authoredPadding = 9
-        #expect(try JSONDecoder().decode(CustomLayout.self, from: JSONEncoder().encode(layout)).authoredPadding == 9)
-        let json = #"{"authoredSize":[300,100],"authoredPadding":"wide","items":[]}"#
-        let unrecorded = try JSONDecoder().decode(CustomLayout.self, from: Data(json.utf8))
-        #expect(unrecorded.authoredPadding == nil)
-        for (kind, padding) in [(IslandWidgetKind.nowPlaying, WidgetMetrics.padding), (.wifi, 4)] {
-            var arrangement = ElementArrangement.custom(CustomLayouts(authored: Self.wide, variants: [Self.wide: .custom(unrecorded)]))
-            arrangement.sanitize(for: kind)
-            guard case .custom(let layouts) = arrangement, case .custom(let sanitized) = layouts.variants[Self.wide] else {
-                Issue.record("\(kind): the layout was dropped")
-                continue
-            }
-            #expect(sanitized.authoredPadding == padding, "\(kind)")
-        }
-    }
-
-    @Test func sanitizeKeepsTheLayoutValidForTheKind() {
-        var layout = Self.layout()
-        let decoration = layout.items[3].id
-        layout.items += [
-            ElementFrame(id: .trackInfo, rect: UnitRect(x: 0, y: 0, width: 1, height: 1)),        // a second title
-            ElementFrame(id: .percentage, rect: UnitRect(x: 0, y: 0, width: 0.2, height: 0.2)),   // not Now Playing's
-            ElementFrame(id: .custom(), rect: UnitRect(x: 0, y: 0, width: 0.2, height: 0.2)),     // no decoration
-        ]
-        layout.items[1].rect = UnitRect(x: 0.9, y: -0.5, width: 0.5, height: 0.001)
-        layout.parked.append(.artwork)                                                          // placed already
-        layout.decorations[ElementID(rawValue: "notCustom")] = .symbol("star")
-        layout.sanitize(for: IslandWidgetKind.nowPlaying.spec, standardPadding: WidgetMetrics.padding)
-
-        #expect(layout.items.map(\.id) == [.artwork, .trackInfo, ElementID.skipButtons.part("next"), decoration])
-        // Some of it over the widget, no thinner than the least: it may reach past the widget's edges.
-        #expect(layout.items[1].rect == UnitRect(x: 0.9, y: -0.5, width: 0.5, height: UnitRect.minimumSide).clamped)
-        #expect(layout.items[1].rect.x == 0.9 && layout.items[1].rect.y == UnitRect.visible - UnitRect.minimumSide)
-        // Every element of the kind is placed or parked; skip counts as placed through its part.
-        #expect(layout.parked == [.progress, .artist, .playbackButtons, .seekBack, .seekForward])
-        #expect(Array(layout.decorations.keys) == [decoration])
-    }
-
-    @Test func kindsWithoutCustomLayoutsLoseThem() {
-        var style = WidgetStyle()
-        style.layout.arrangement = .custom(CustomLayouts(authored: Self.wide, variants: [Self.wide: .custom(Self.layout())]))
-        var siri = style
-        siri.sanitize(for: .assistant)
-        #expect(siri.layout.arrangement == nil)
-        // A decoration's style survives with its layout, and goes with it.
-        let decoration = Self.layout().items[3].id
-        var labelStyle = ElementStyle()
-        labelStyle.text.italic = true
-        style.elements[decoration] = labelStyle
-        var kept = style
-        kept.sanitize(for: .nowPlaying)
-        #expect(kept.elements[decoration] != nil)
-        style.sanitize(for: .assistant)
-        #expect(style.elements[decoration] == nil)
     }
 }

@@ -56,10 +56,10 @@ import Testing
         pages.sync([.home, .timer, .battery, custom])
         #expect(pages.store(for: .home) === home)
         #expect(pages.store(for: .shelf) === home)
-        #expect(pages.store(for: .timer).board.first(of: .timer) != nil)
+        #expect(pages.store(for: .timer).board.widgets.isEmpty)
         #expect(pages.store(for: custom).board.widgets.isEmpty)
 
-        let clock = pages.store(for: custom).add(.clock)
+        let clock = pages.store(for: custom).add(.dateTime)
         let added = try #require(clock)
         #expect(pages.page(containing: added) == custom)
         #expect(!home.board.contains(added))
@@ -70,23 +70,5 @@ import Testing
         pages.sync([.home, .timer, .battery])
         #expect(store.data(forKey: WidgetPages.key(for: custom)) == nil)
         #expect(pages.page(containing: added) == nil)
-    }
-
-    /// Clearing the widgets' data after a change keeps every page's widgets'.
-    @Test func eachPagesWidgetDataIsKept() async throws {
-        let (store, name) = defaults()
-        defer { UserDefaults.standard.removePersistentDomain(forName: name) }
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let instances = WidgetInstanceStore(root: root)
-        let home = WidgetStore(defaults: store)
-        let pages = WidgetPages(home: home, defaults: store)
-        pages.sync([.home, .timer, .battery])
-        let timer = try #require(pages.store(for: .timer).board.first(of: .timer)?.id)
-        try instances.write(Data([1]), "note", for: timer)
-        pages.attach(instances)
-        home.purgeOrphanedInstanceData()
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(instances.read("note", for: timer) == Data([1]))
     }
 }

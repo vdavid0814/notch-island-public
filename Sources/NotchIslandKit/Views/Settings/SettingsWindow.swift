@@ -82,7 +82,7 @@ final class SettingsWindow: NSPanel {
             SettingsPresence.shared.isShown = true
             alphaValue = 0
             ignoresMouseEvents = true
-            orderFrontRegardless()
+            orderIn()
         }
         rehearsed.insert(pane)
         surface.deck.show(pane)
@@ -168,6 +168,46 @@ final class SettingsWindow: NSPanel {
         setFrame(frame, display: false)
     }
 
+    /// Ordered in on every Space, the active one included. Kept for as long as the app runs, the
+    /// window can be held on one Space though it is on all of them: on a full-screen Safari Space
+    /// made just before the app started, only there while the island was on all five, and on every
+    /// other Space Settings grew empty (Oct 7 2026). Its behaviour set again, or `moveToActiveSpace`
+    /// on its way in, did not free it (tried on the live window); moved to the active Space by the
+    /// window server it is on every Space again. Its behaviour is still set again while it is out.
+    private func orderIn() {
+        if !isVisible { rejoinAllSpaces() }
+        orderFrontRegardless()
+        guard !isOnActiveSpace else { return }
+        Log.window.error("settings window ordered in off the active Space: moved to it")
+        moveToActiveSpace()
+        rejoinAllSpaces()
+        orderFrontRegardless()
+    }
+
+    private func rejoinAllSpaces() {
+        collectionBehavior.remove(.canJoinAllSpaces)
+        collectionBehavior.insert(.canJoinAllSpaces)
+    }
+
+    private typealias ConnectionID = @convention(c) () -> Int32
+    private typealias ActiveSpace = @convention(c) (Int32) -> UInt64
+    private typealias MoveToSpace = @convention(c) (Int32, CFArray, UInt64) -> Void
+
+    /// SkyLight's own, not in the headers: looked up once, nothing done on a system without them.
+    private static let skyLight: (ConnectionID, ActiveSpace, MoveToSpace)? = {
+        let all = UnsafeMutableRawPointer(bitPattern: -2)
+        guard let connection = dlsym(all, "SLSMainConnectionID"), let active = dlsym(all, "SLSGetActiveSpace"),
+              let move = dlsym(all, "SLSMoveWindowsToManagedSpace") else { return nil }
+        return (unsafeBitCast(connection, to: ConnectionID.self), unsafeBitCast(active, to: ActiveSpace.self),
+                unsafeBitCast(move, to: MoveToSpace.self))
+    }()
+
+    private func moveToActiveSpace() {
+        guard let (connection, active, move) = Self.skyLight, windowNumber > 0 else { return }
+        let id = connection()
+        move(id, [windowNumber] as CFArray, active(id))
+    }
+
     /// Ordered in, invisible and letting every click through, as Settings starts to grow: what the
     /// window does as it comes on screen again (laying out what changed while it was away, its
     /// controls taking the window's state; one ~250 ms turn, measured) happens while the island
@@ -184,7 +224,7 @@ final class SettingsWindow: NSPanel {
         // Its pictures pick up the live readings now too (clocks, monitors, levels), not in the
         // frame the pages fade in.
         SettingsPresence.shared.isShown = true
-        orderFrontRegardless()
+        orderIn()
     }
 
     /// Settings closed before it had grown: the prestaged window goes again.
@@ -217,7 +257,7 @@ final class SettingsWindow: NSPanel {
         CATransaction.commit()
         clipsToOutline(false)
         surface.show()
-        orderFrontRegardless()
+        orderIn()
         // Not made key: the island keeps the keyboard (Esc closes Settings from there), and this
         // window takes it with the first click in it (a field, the sidebar). Made key at every
         // opening, every control of the page and the sidebar took the key state, and gave it back
@@ -238,6 +278,7 @@ final class SettingsWindow: NSPanel {
         let seen = current.isVisible && current.occlusionState.contains(.visible) && current.alphaValue > 0
             && current.surface.alphaValue > 0 && !current.surface.pagesView.isHidden
         let state = "visible \(current.isVisible), on screen \(current.occlusionState.contains(.visible)), "
+            + "on active space \(current.isOnActiveSpace), "
             + "level \(current.level.rawValue), alpha \(current.alphaValue), ignores clicks \(current.ignoresMouseEvents), "
             + "frame \(current.frame), prestaged \(current.isPrestaged), rehearsing \(current.isRehearsing), "
             + "ordering out \(current.orderingOut != nil), mask \(current.root.layer?.mask != nil); "
@@ -280,7 +321,7 @@ final class SettingsWindow: NSPanel {
             if isVisible { orderOut(nil) }
         } else if wasShownBeforeSuspension {
             wasShownBeforeSuspension = false
-            if model.island.presentation.isSettings { orderFrontRegardless() }
+            if model.island.presentation.isSettings { orderIn() }
         }
     }
 

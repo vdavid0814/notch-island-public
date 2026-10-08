@@ -4,12 +4,11 @@ import SwiftUI
 /// arranged in Settings ▸ Widgets.
 struct HomePage: View {
     var page: ExpandedPage = .home
-    let thumbnails: ThumbnailCache
 
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        WidgetBoardView(board: model.boards.store(for: page).board, thumbnails: thumbnails)
+        WidgetBoardView(board: model.boards.store(for: page).board)
             .contextMenu {
                 Button("Customize Island…", systemImage: "square.grid.3x2") {
                     model.studio.page = page

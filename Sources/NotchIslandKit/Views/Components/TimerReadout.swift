@@ -14,18 +14,24 @@ struct TickingClock: View {
     let anchor: Date
     let countsDown: Bool
     var prefix = ""
+    /// Minutes and seconds however long ("120:16", `IslandFormat.minutesClock`), never hours.
+    var minutesOnly = false
 
     /// Previews (Settings' widget gallery) show the time without ticking.
     @Environment(\.isWidgetPreview) private var isPreview
 
     var body: some View {
         if isPreview {
-            Text(prefix + IslandFormat.clock(Self.value(at: .now, anchor: anchor, countsDown: countsDown)))
+            Text(prefix + format(Self.value(at: .now, anchor: anchor, countsDown: countsDown)))
         } else {
             PanelTimelineView(.periodic(from: phase, by: 1)) { context in
-                Text(prefix + IslandFormat.clock(Self.value(at: context.date, anchor: anchor, countsDown: countsDown)))
+                Text(prefix + format(Self.value(at: context.date, anchor: anchor, countsDown: countsDown)))
             }
         }
+    }
+
+    private func format(_ seconds: TimeInterval) -> String {
+        minutesOnly ? IslandFormat.minutesClock(seconds) : IslandFormat.clock(seconds)
     }
 
     /// A tick boundary in the past: the shown second changes exactly a whole number of seconds
@@ -54,16 +60,18 @@ struct TickingClock: View {
 
 struct CountdownReadout: View {
     let state: CountdownState
+    /// Minutes and seconds however long ("120:16"), never hours (the timer widget without them).
+    var minutesOnly = false
 
     var body: some View {
         switch state {
         case .running(let endDate, _):
-            TickingClock(anchor: endDate, countsDown: true)
+            TickingClock(anchor: endDate, countsDown: true, minutesOnly: minutesOnly)
         case .paused(let remaining, _):
             // Rounded up, as a running countdown shows it: 0:01 until it actually reaches zero.
-            Text(IslandFormat.clock(remaining.rounded(.up)))
+            Text(minutesOnly ? IslandFormat.minutesClock(remaining.rounded(.up)) : IslandFormat.clock(remaining.rounded(.up)))
         case .idle, .finished:
-            Text(IslandFormat.clock(0))
+            Text(minutesOnly ? IslandFormat.minutesClock(0) : IslandFormat.clock(0))
         }
     }
 }

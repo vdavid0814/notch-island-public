@@ -10,6 +10,10 @@ struct ArtworkView: View {
     let image: NSImage?
     let bundleIdentifier: String?
     var minimumRadius: CGFloat
+    /// The cover as a SwiftUI picture, not on its own layer (`CoverLayer`): what is drawn over it
+    /// cuts it (a mask), which an AppKit layer is not — a cover grown over its widget is cut to the
+    /// widget's outline. A new track's cover then comes in at once.
+    var drawsAsPicture = false
 
     @State private var appIcon: NSImage?
     @Environment(\.widgetRenderMode) private var renderMode
@@ -19,7 +23,7 @@ struct ArtworkView: View {
         // and is clipped, so a non-square cover never spills over its neighbours.
         Color.clear
             .overlay {
-                if let image, renderMode == .canvas {
+                if let image, renderMode == .canvas || drawsAsPicture {
                     // A picture of the cover as its layer fills it: drawn off screen too (the
                     // Customize transition's snapshot), which a layer is not.
                     Image(nsImage: image)

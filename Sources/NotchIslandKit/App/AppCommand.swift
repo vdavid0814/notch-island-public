@@ -14,10 +14,6 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case airPods
     /// The card for the AirPods' noise control changing (`demo/airpodsmode?mode=anc|transparency|adaptive|off`).
     case airPodsMode(AirPodsListeningMode)
-    /// The timer widget's ruler moves on to its next unit (hours → minutes → seconds).
-    case timerUnit
-    /// The battery page on a made-up day (`BatteryHistory.demoRecords`), never written to the history.
-    case batteryHistory
     /// Siri opened on its app gallery (as ⌘Space then ⌘1).
     case siriApps
     /// Siri opened on the clipboard history (as ⌘Space then ⌘4).
@@ -29,13 +25,12 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     /// Holds every island spring this long after its start (nil: runs them again), so single frames
     /// of a transition can be compared.
     case freeze(TimeInterval?)
-    /// In the open Customize editor, picks an element (`demo/select?element=trackInfo`; none: the widget).
-    case select(ElementID?)
-    /// Flies a widget from the stage into its Customize editor, as its Customize button does
-    /// (`demo/customize?kind=timer`; Settings ▸ Widgets must be open).
-    case flyIn(IslandWidgetKind)
     /// The banner and landing outline of a window dragged to the notch (`demo/anchortarget[?on=0]`).
     case anchorTarget(Bool)
+    /// The island as while the screen is recorded, without recording (`demo/recording[?on=0]`).
+    case recording(Bool)
+    /// The newest recording's thumbnail in the screen's corner (`demo/recordingthumbnail`).
+    case recordingThumbnail
 }
 
 /// The widget a `widget/…` link means: the first on the board of a kind, or one instance.
@@ -56,10 +51,6 @@ nonisolated enum AppCommand: Sendable, Equatable {
     case showSettingsPane(IslandSettingsPane)
     /// A widget's editor in Settings ▸ Widgets (`widget/timer`, `widget/<id>`).
     case editWidget(WidgetTarget)
-    /// A widget's Customize editor (`widget/timer/customize`, `widget/<id>/customize`).
-    case customizeWidget(WidgetTarget)
-    /// Back from the Customize editor to the stage (`customize/close`).
-    case closeCustomize
     /// The widget editor (Customize Island).
     case customize
     /// ⌘Space (Siri or Spotlight), from the notch.
@@ -73,6 +64,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
     /// Window Anchor: the window in front goes under the notch (`anchor/front`); the held one is
     /// let go (`anchor/release`).
     case anchorFrontWindow, releaseAnchoredWindow
+    /// Starts or stops recording the screen (`record`), as the Screen Recording widget does.
+    case toggleRecording
     case demo(DemoCommand)
 
     static let scheme = "notchisland"
@@ -90,10 +83,10 @@ nonisolated enum AppCommand: Sendable, Equatable {
     /// caller can log them) instead of guessing.
     ///
     ///     open[?page=home|shelf|timer|battery]   close   pin   settings[/general|widgets|activities|permissions|about]
-    ///     customize   customize/close   widget/<kind>|<id>[/customize]   siri   diagnostics/send   diagnostics/baseline
+    ///     customize   widget/<kind>|<id>   siri   diagnostics/send   diagnostics/baseline
     ///     media/play|pause|toggle|next|previous
     ///     timer[?minutes=N]   timer/cancel   stopwatch
-    ///     demo/media|charging|unplug|low|timerdone|drop|shelf|batteryhistory|reset
+    ///     demo/media|charging|unplug|low|timerdone|drop|shelf|reset
     ///     demo/volume[?level=0…1]   demo/brightness[?level=0…1]
     ///     demo/hover[?inside=1|0]   demo/state   demo/surface?style=smoked|black|fade   demo/airpods
     ///     demo/freeze[?t=seconds]   demo/anchortarget[?on=0]
@@ -121,16 +114,13 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "pin": return .togglePin
         case "settings": return .showSettings
         case let route where route.hasPrefix("widget/"):
-            var name = String(route.dropFirst("widget/".count))
-            let customizes = name.hasSuffix("/customize")
-            if customizes { name = String(name.dropLast("/customize".count)) }
+            let name = String(route.dropFirst("widget/".count))
             let target: WidgetTarget? = WidgetID(string: name).map { .instance($0) }
                 ?? IslandWidgetKind.allCases.first { $0.rawValue.lowercased() == name }.map { .kind($0) }
-            return target.map { customizes ? .customizeWidget($0) : .editWidget($0) }
+            return target.map { .editWidget($0) }
         case let route where route.hasPrefix("settings/"):
             return IslandSettingsPane.named(String(route.dropFirst("settings/".count))).map { .showSettingsPane($0) }
         case "customize": return .customize
-        case "customize/close": return .closeCustomize
         case "assistant", "siri": return .assistant
         case "diagnostics/send": return .sendDiagnostics
         case "diagnostics/periodic": return .sendPeriodicDiagnostics
@@ -138,6 +128,9 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "anchor/front": return .anchorFrontWindow
         case "anchor/release": return .releaseAnchoredWindow
         case "demo/anchortarget": return .demo(.anchorTarget(query["on"] != "0"))
+        case "demo/recording": return .demo(.recording(query["on"] != "0"))
+        case "demo/recordingthumbnail": return .demo(.recordingThumbnail)
+        case "record": return .toggleRecording
 
         case "media/play": return .media(.play)
         case "media/pause": return .media(.pause)
@@ -177,17 +170,11 @@ nonisolated enum AppCommand: Sendable, Equatable {
             let modes: [String: AirPodsListeningMode] = ["anc": .noiseCancellation, "transparency": .transparency,
                                                          "adaptive": .adaptive, "off": .off]
             return modes[query["mode"]?.lowercased() ?? "anc"].map { .demo(.airPodsMode($0)) }
-        case "demo/timerunit": return .demo(.timerUnit)
-        case "demo/batteryhistory": return .demo(.batteryHistory)
         case "demo/siriapps": return .demo(.siriApps)
         case "demo/siriclipboard": return .demo(.siriClipboard)
         case "demo/siritype": return .demo(.siriType(query["text"] ?? "notch"))
         case "demo/surface":
             return query["style"].flatMap { IslandGlassStyle(rawValue: $0.lowercased()) }.map { .demo(.surface($0)) }
-        case "demo/customize":
-            return IslandWidgetKind.allCases.first { $0.rawValue.lowercased() == query["kind"]?.lowercased() }.map { .demo(.flyIn($0)) }
-        case "demo/select":
-            return .demo(.select(query["element"].flatMap { $0.isEmpty ? nil : ElementID(rawValue: $0) }))
         case "demo/freeze":
             guard let raw = query["t"] else { return .demo(.freeze(nil)) }
             guard let time = TimeInterval(raw), time >= 0 else { return nil }

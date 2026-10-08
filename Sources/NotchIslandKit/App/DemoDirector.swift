@@ -22,7 +22,6 @@ import SwiftUI
     private var demoCountdown: CountdownState?
     private var demoShelfIDs: Set<ShelfItem.ID> = []
     private var injectedLevels = false
-    private var injectedBattery = false
 
     func run(_ command: DemoCommand, model: AppModel) {
         switch command {
@@ -73,20 +72,23 @@ import SwiftUI
                     model.assistant.query = String(text[...index])
                 }
             }
-        case .timerUnit:
-            NotificationCenter.default.post(name: .demoNextTimerUnit, object: nil)
-        case .batteryHistory:
-            showBatteryHistory(model)
         case .surface(let style):
             withAnimation(.spring(duration: 0.25)) { model.preferences.glassStyle = style }
         case .freeze(let time):
             LeanSpring.frozenTime = time
-        case .flyIn(let kind):
-            if let id = model.widgets.board.first(of: kind)?.id { model.studio.probe.driver?.open(id, animated: true) }
-        case .select(let element):
-            model.studio.session?.selection = element.map { [$0] } ?? []
         case .anchorTarget(let on):
             model.anchor.demoTarget(on)
+        case .recording(let on):
+            model.recorder.demo(on)
+        case .recordingThumbnail:
+            // The last movie this run, else the newest "Screen Recording …" where they are saved.
+            let folder = ScreenRecorder.saveDirectory()
+            let newest = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey]))?
+                .filter { $0.lastPathComponent.hasPrefix("Screen Recording") && $0.pathExtension == "mov" }
+                .max { ($0.creationDate ?? .distantPast) < ($1.creationDate ?? .distantPast) }
+            if let url = model.recorder.lastMovie ?? newest {
+                model.recordingThumbnail.show(url, display: model.metrics?.displayID)
+            }
         }
     }
 
@@ -124,33 +126,12 @@ import SwiftUI
         model.controller.expand(page: .shelf, pinned: false, userInitiated: true)
     }
 
-    /// The day up to now, the level where it ends (on battery, 5 h 40 min left, or charging, as
-    /// the day has it at this hour), and the battery page.
-    private func showBatteryHistory(_ model: AppModel) {
-        let records = BatteryHistory.demoRecords(now: Date(), calendar: .autoupdatingCurrent)
-        let last = records.last { $0.kind.carriesLevel }
-        let charging = last?.isCharging ?? false
-        var state = PowerState.demo(level: Int(last?.level ?? 76), charging: charging, minutes: charging ? 72 : 340)
-        if last?.flags.contains(.pluggedIn) == true, !charging {
-            state.isPluggedIn = true
-            state.isCharged = last?.level == 100
-            state.minutesRemaining = nil
-        }
-        injectedBattery = true
-        model.power.injectDemo(state, event: nil)
-        model.battery.injectDemo((records, BatteryDetails.demo(power: state)))
-        model.controller.expand(page: .battery, pinned: false, userInitiated: true)
-    }
-
     private func reset(_ model: AppModel) {
         dropTask?.cancel()
         endDrop(model)
         model.media.injectDemo(nil, playing: false)
         model.power.injectDemo(nil, event: nil)
-        if injectedBattery {
-            injectedBattery = false
-            model.battery.injectDemo(nil)
-        }
+        model.recorder.demo(false)
         if injectedLevels {
             injectedLevels = false
             // Silent and in place: restarting the level services here used to report the first
@@ -217,11 +198,6 @@ private extension PowerState {
     }
 }
 
-extension Notification.Name {
-    /// `demo/timerunit`: the timer widget switches its ruler's unit, as a tap on the marker does.
-    static let demoNextTimerUnit = Notification.Name("com.davidvarga.notchisland.demo.nextTimerUnit")
-}
-
 extension DemoDirector {
     /// Each segmented control in the app's windows as AppKit has it: its frame against the width
     /// it wants (how the bars' first-click widening was found).
@@ -239,4 +215,8 @@ extension DemoDirector {
         }
         for window in NSApp.windows where window.isVisible { window.contentView.map(walk) }
     }
+}
+
+private extension URL {
+    var creationDate: Date? { (try? resourceValues(forKeys: [.creationDateKey]))?.creationDate }
 }

@@ -53,12 +53,17 @@ nonisolated extension AssistantCalculator {
         let there = calendar.dateComponents([.year, .month, .day], from: date)
         let days = Calendar(identifier: .gregorian).dateComponents([.day], from: here, to: there).day ?? 0
         // Universal time by its own name (the system files it under GMT).
-        let city = zone.identifier == "GMT" ? "UTC" : TimeReadings.city(zone)
+        let city = zone.identifier == "GMT" ? "UTC" : Self.city(zone)
         switch days {
         case 0: return "\(time) \(city)"
         case 1...: return String(localized: "\(time) \(city), the next day")
         default: return String(localized: "\(time) \(city), the day before")
         }
+    }
+
+    /// The city a time zone is named after ("Europe/Budapest" → "Budapest").
+    private static func city(_ zone: TimeZone) -> String {
+        zone.identifier.split(separator: "/").last.map { $0.replacingOccurrences(of: "_", with: " ") } ?? zone.identifier
     }
 
     /// A time zone by its city ("tokyo", "new york"), a common short name ("nyc", "la") or an

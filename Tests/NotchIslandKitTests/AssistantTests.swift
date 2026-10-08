@@ -18,10 +18,10 @@ import Testing
         // Only the field: the top inset, the 40 pt field and the bottom inset.
         #expect(field.height == CGFloat(28 + 8 + 40 + 12))
         // Four rows exactly: four rows and their spacing, one inset between, and the last row as
-        // far above the bottom as the rows are in from the side (30 − 16 = 14, not the field's
+        // far above the bottom as the rows are in from the side (28 − 16 = 12, as the field's
         // 12): its capsule is concentric with the panel's corners.
-        #expect(layout.assistantRowInset == 14)
-        #expect(fourRows.height == field.height + 8 + 4 * 32 + 3 * 2 + 2)
+        #expect(layout.assistantRowInset == 12)
+        #expect(fourRows.height == field.height + 8 + 4 * 32 + 3 * 2)
         #expect(list.height == 28 + IslandLayout.assistantPageHeight)
         // All seven suggestions fill the list.
         #expect(field.height < fourRows.height && fourRows.height < list.height && suggestions.height == list.height)
@@ -448,45 +448,44 @@ import Testing
 
 @Suite struct WidgetStyleTests {
     @Test func oldBoardsDecodeWithDefaults() throws {
-        let json = #"{"widgets":[{"kind":"timer","frame":{"column":7,"row":0,"width":5,"height":2},"options":["ruler","readout","bogus"]}]}"#
+        let json = #"{"widgets":[{"kind":"stopwatch","frame":{"column":7,"row":0,"width":5,"height":1},"options":["resetButton","readout","bogus"]}]}"#
         let board = try JSONDecoder().decode(WidgetBoard.self, from: Data(json.utf8))
-        let timer = try #require(board.first(of: .timer))
-        #expect(timer.options == [.ruler, .readout])
-        #expect(timer.tint == .automatic && timer.showsPlate && !timer.mirrored)
+        let stopwatch = try #require(board.first(of: .stopwatch))
+        #expect(stopwatch.options == [.resetButton, .readout])
+        #expect(stopwatch.background == .plate)
     }
 
     @Test func styleRoundTripsAndKeepsTheFrame() throws {
         var board = WidgetBoard.standard
-        board.update(.legacy(.timer)) { widget in
-            widget.tint = .teal
-            widget.mirrored = true
+        board.update(.legacy(.stopwatch)) { widget in
+            widget.background = .none
             widget.frame = GridRect(column: 0, row: 0, width: 1, height: 1)   // ignored
         }
         let data = try JSONEncoder().encode(board)
         let decoded = try JSONDecoder().decode(WidgetBoard.self, from: data)
-        let timer = try #require(decoded.widget(.legacy(.timer)))
-        #expect(timer.tint == .teal && timer.mirrored)
-        #expect(timer.frame == WidgetBoard.standard.first(of: .timer)?.frame)
+        let stopwatch = try #require(decoded.widget(.legacy(.stopwatch)))
+        #expect(stopwatch.background == .none)
+        #expect(stopwatch.frame == WidgetBoard.standard.first(of: .stopwatch)?.frame)
     }
 
-    @Test func everyControlIsItsOwnWidget() {
-        let controls = WidgetCategory.controls.kinds
-        #expect(controls.count == SystemControl.allCases.count)
-        #expect(Set(controls.compactMap(\.systemControl)) == Set(SystemControl.allCases))
-        for kind in controls {
-            #expect(kind.minimumSize == GridSize(width: 1, height: 1))
-            #expect(kind.options == [.controlName, .controlStatus])
-        }
+    @Test func wifiIsAControlWidget() {
+        #expect(WidgetCategory.controls.kinds.first == .wifi)
+        // Control Center's controls and the screen recording.
+        #expect(WidgetCategory.controls.kinds.count == SystemControl.allCases.count + 1)
+        #expect(WidgetCategory.controls.kinds.last == .screenRecording)
+        #expect(IslandWidgetKind.wifi.systemControl == .wifi)
+        #expect(IslandWidgetKind.wifi.minimumSize == GridSize(width: 1, height: 1))
+        #expect(IslandWidgetKind.wifi.options == [.controlName, .controlStatus])
         var board = WidgetBoard(widgets: [])
-        let wifi = board.add(.wifi), bluetooth = board.add(.bluetooth)
-        #expect(wifi != nil && bluetooth != nil && board.first(of: .wifi)?.frame.size == GridSize(width: 2, height: 1))
+        let wifi = board.add(.wifi)
+        #expect(wifi != nil && board.first(of: .wifi)?.frame.size == GridSize(width: 2, height: 1))
     }
 
     @Test func anUnknownWidgetDoesNotLoseTheBoard() throws {
         // A board saved by the version with one combined Controls widget.
-        let json = #"{"widgets":[{"kind":"controls","frame":{"column":0,"row":0,"width":5,"height":1},"options":[]},{"kind":"timer","frame":{"column":7,"row":0,"width":5,"height":2},"options":["ruler"]}]}"#
+        let json = #"{"widgets":[{"kind":"controls","frame":{"column":0,"row":0,"width":5,"height":1},"options":[]},{"kind":"stopwatch","frame":{"column":7,"row":0,"width":5,"height":1},"options":["readout"]}]}"#
         let board = try JSONDecoder().decode(WidgetBoard.self, from: Data(json.utf8))
-        #expect(board.widgets.map(\.kind) == [.timer])
+        #expect(board.widgets.map(\.kind) == [.stopwatch])
         // Kept as it was, for a build that knows it.
         #expect(board.foreign.count == 1)
     }
@@ -686,9 +685,9 @@ import Testing
         // "Cancel Timer" only with a timer, a widget's editor only for one on the board.
         #expect(!model.rows.contains(.command(.cancelTimer)))
         model.timerIsActive = { true }
-        model.widgetKinds = { [.timer, .timer] }
+        model.widgetKinds = { [.stopwatch, .stopwatch] }
         #expect(model.rows.contains(.command(.cancelTimer)))
-        #expect(model.rows.filter { $0 == .command(.editWidget(.timer)) }.count == 1)
+        #expect(model.rows.filter { $0 == .command(.editWidget(.stopwatch)) }.count == 1)
     }
 
     @Test func windowAnchorRowsFollowWhetherItCanRunAndHoldsAWindow() async {
@@ -778,10 +777,10 @@ import Testing
         var commands: [AppCommand] = []
         model.onCommand = { commands.append($0) }
         model.timerIsActive = { true }
-        model.widgetKinds = { [.timer] }
+        model.widgetKinds = { [.stopwatch] }
         for (query, row) in [("timer 10", AssistantRow.command(.timer(minutes: 10))), ("10 min timer", .command(.timer(minutes: 10))),
                              ("keep island open", .command(.keepOpen)), ("cancel timer", .command(.cancelTimer)),
-                             ("customize timer", .command(.editWidget(.timer))), ("island settings widgets", .command(.settings(.widgets))),
+                             ("customize stopwatch", .command(.editWidget(.stopwatch))), ("island settings widgets", .command(.settings(.widgets))),
                              ("open island", .command(.page(.home)))] {
             model.query = query
             await model.settle()
@@ -790,7 +789,7 @@ import Testing
             model.activateSelection()
         }
         #expect(commands == [.startTimer(minutes: 10), .startTimer(minutes: 10), .togglePin, .cancelTimer,
-                             .editWidget(.kind(.timer)), .showSettingsPane(.widgets), .open(.home)])
+                             .editWidget(.kind(.stopwatch)), .showSettingsPane(.widgets), .open(.home)])
         // A typed timer comes first, even before an answer to a "question" of three words.
         model.query = "10 min timer"
         #expect(model.rows.first == .command(.timer(minutes: 10)))

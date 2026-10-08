@@ -28,6 +28,26 @@ import Testing
         #expect(IslandResolver.resolve(inputs) == .expanded(.timer))
     }
 
+    /// Recording outranks the ongoing activities but not a notice; the pointer opens its card, the
+    /// panel only when asked for.
+    @Test func recordingShowsRoundTheNotchAndItsCardOnOpen() {
+        var inputs = IslandInputs(countdownActive: true, stopwatchActive: true, nowPlayingActive: true, recordingActive: true)
+        #expect(IslandResolver.resolve(inputs) == .compact(.recording))
+        inputs.banner = .power(.connected)
+        #expect(IslandResolver.resolve(inputs) == .banner(.power(.connected)))
+        inputs.wantsExpanded = true
+        inputs.page = .shelf
+        #expect(IslandResolver.resolve(inputs) == .expanded(.recording))
+        inputs.wantsPanelWhileRecording = true
+        #expect(IslandResolver.resolve(inputs) == .expanded(.shelf))
+        // The card is no page of the picker, and a little larger than the pill.
+        #expect(!ExpandedPage.allCases.contains(.recording) && !ExpandedPage.recording.isBoard)
+        let layout = IslandLayout(notch: CGSize(width: 185, height: 32), scale: .standard)
+        let pill = layout.size(for: .compact(.recording)), card = layout.size(for: .expanded(.recording))
+        #expect(pill.height == 32 && pill.width > layout.size(for: .compact(.timer)).width)
+        #expect(card.width >= pill.width && card.height > pill.height && card.height < layout.size(for: .expanded(.home)).height)
+    }
+
     @Test(arguments: ExpandedPage.allCases)
     func expandedCarriesThePage(page: ExpandedPage) {
         let inputs = IslandInputs(wantsExpanded: true, page: page, banner: .level(.volume))
@@ -96,7 +116,7 @@ import Testing
         #expect(standard.size(for: .expanded(.home)) == CGSize(width: 600, height: 188))
         #expect(large.size(for: .expanded(.home)) == CGSize(width: 690, height: 212))
         #expect(compact.size(for: .expanded(.home)) == CGSize(width: 540, height: 172))
-        #expect(large.bottomRadius(for: .expanded(.shelf)) == 30 * 1.15)
+        #expect(large.bottomRadius(for: .expanded(.shelf)) == 28 * 1.15)
         #expect(large.shoulderRadius(for: .expanded(.shelf)) == 10)
         // Header band (height minus the scaled page) always equals the notch height.
         for scale in IslandScale.allCases {

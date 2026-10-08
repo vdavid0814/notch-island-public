@@ -62,6 +62,9 @@ nonisolated enum CompactActivity: Sendable, Equatable {
     case timer
     case stopwatch
     case nowPlaying
+    /// The screen is being recorded (`ScreenRecorder`): a red line round the notch, the time in one
+    /// ear and a red dot in the other.
+    case recording
 }
 
 /// A page of the panel: one of the island's own (home, the shelf, the timer, the battery) or one
@@ -82,6 +85,9 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
     static let timer = ExpandedPage(own: "timer")
     /// The battery's charge over the day, its health and the adapter (only on a Mac with a battery).
     static let battery = ExpandedPage(own: "battery")
+    /// While the screen is recorded, what the pointer over the notch opens instead of the panel: the
+    /// time and Stop (`RecordingCard`). Never in the picker, never stored.
+    static let recording = ExpandedPage(own: "recording")
 
     /// The island's own pages, in the panel's order; the user's follow them (`HeaderLayout.customPages`).
     static let allCases: [ExpandedPage] = [.home, .shelf, .timer, .battery]
@@ -99,7 +105,7 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
 
     /// Drawn as a board of widgets the user arranges: home, the timer's and the battery's, and the
     /// user's own (the shelf is its own).
-    var isBoard: Bool { self != .shelf }
+    var isBoard: Bool { self != .shelf && self != .recording }
 
     var id: String { rawValue }
 
@@ -122,6 +128,7 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
         case .shelf: "Shelf"
         case .timer: "Timer"
         case .battery: "Battery"
+        case .recording: "Recording"
         default: CustomPage.catalog.withLock { $0[self]?.title } ?? "Page"
         }
     }
@@ -132,6 +139,7 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
         case .shelf: "tray"
         case .timer: "timer"
         case .battery: "battery.100percent"
+        case .recording: "record.circle"
         default: CustomPage.catalog.withLock { $0[self]?.symbol } ?? CustomPage.defaultSymbol
         }
     }

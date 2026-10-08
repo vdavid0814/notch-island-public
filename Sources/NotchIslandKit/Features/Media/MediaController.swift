@@ -161,8 +161,16 @@ import AppKit
     // MARK: Sources
 
     /// The source whose snapshot is on screen: commands go to the player the user is looking at.
+    /// While the adapter is healthy the scriptable source only listens (no pulls): Music's own
+    /// reports then carry no position, so for the track the adapter reports too, the adapter's
+    /// snapshot is shown — Music saying "playing" a moment before it showed its stale clock (the
+    /// line jumped to where it last read it, then back).
     private var shownKind: MediaSourceKind? {
-        MediaSourcePolicy.shown(adapter: snapshots[.adapter], scriptable: snapshots[.scriptable])
+        if adapterHealthy, let adapter = snapshots[.adapter], let scriptable = snapshots[.scriptable],
+           adapter.item.title == scriptable.item.title, adapter.item.artist == scriptable.item.artist {
+            return .adapter
+        }
+        return MediaSourcePolicy.shown(adapter: snapshots[.adapter], scriptable: snapshots[.scriptable])
     }
 
     private var activeSource: (any MediaSource)? {

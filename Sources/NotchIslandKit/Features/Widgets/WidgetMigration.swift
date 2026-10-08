@@ -42,13 +42,19 @@ nonisolated enum WidgetMigration {
 
     /// Elements that did not exist in boards saved before elements (version 1): they are switched
     /// on there, so an old widget keeps looking the way it did.
+    /// Parts always drawn before version 4, a switch of their own since: switched on in a widget saved
+    /// before, so it keeps them (the calendar's days and weekdays).
+    static func elementsSwitchableInVersion4(_ kind: IslandWidgetKind) -> Set<ElementID> {
+        switch kind {
+        case .monthCalendar: [.monthGrid, .monthWeekdays]
+        default: []
+        }
+    }
+
     static func elementsAddedInVersion2(_ kind: IslandWidgetKind) -> Set<ElementID> {
         switch kind {
         case .nowPlaying: [.artist, .playbackButtons]
         case .stopwatch: [.readout]
-        case .shelf: [.shelfCount]
-        case .battery: [.batteryGlyph]
-        case .assistant: [.assistantLabel]
         default: []
         }
     }

@@ -1,66 +1,41 @@
 import SwiftUI
 
-extension EnvironmentValues {
-    /// Drawn as a picture (the widget store, the editor's stage): nothing is read from the system
-    /// that could ask for a permission, and switches show as on.
-    @Entry var isWidgetPreview = false
-    /// A moment the widgets show in place of their ticking clock (the snapshots); nil is now.
-    @Entry var widgetDate: Date?
-}
-
 /// One widget on its background, laid out for exactly `size`. A right-click edits it (Settings ▸
 /// Widgets).
-///
-/// Its style is resolved here, once per body evaluation, and handed to its elements with its
-/// corners (`\.widgetStyle`, `\.widgetCorners`): both are equatable, so an evaluation that
-/// changes neither re-renders nothing below. Its surface is handed them as values.
 struct IslandWidgetView: View {
-    /// As given; drawn as `drawn` (a custom layout's unlocked sizes in its style).
-    let given: IslandWidget
+    let widget: IslandWidget
     let size: CGSize
-    let thumbnails: ThumbnailCache
 
     @Environment(\.controlSize) private var controlSize
     @Environment(\.isWidgetPreview) private var isPreview
     @Environment(\.widgetBoard) private var board
     @Environment(\.widgetRenderMode) private var renderMode
+    @Environment(\.drawsWidgetSurface) private var drawsSurface
+    @Environment(\.widgetLayerPass) private var layerPass
     @Environment(AppModel.self) private var model
 
-    init(widget: IslandWidget, size: CGSize, thumbnails: ThumbnailCache) {
-        given = widget
-        self.size = size
-        self.thumbnails = thumbnails
-    }
-
     var body: some View {
-        let padding = WidgetMetrics.padding(for: given)
+        let padding = WidgetMetrics.padding(for: widget)
         let inner = CGSize(width: max(0, size.width - 2 * padding), height: max(0, size.height - 2 * padding))
-        // In a custom layout, with the sizes its elements were unlocked at (`drawn(in:scale:)`).
-        let widget = given.drawn(in: inner, scale: model.layout.factor)
-        let isSingleRow = inner.height < WidgetMetrics.singleRowHeight
-        let accent = accent(widget)
-        let style = ResolvedWidgetStyle.resolve(widget.style)
-        let corners = WidgetCorners(outer: Self.outerCorners(widget, size: size, board: board), padding: padding)
-        let artwork = style.usesArtwork ? model.media.artworkColor.map { Color($0) } : nil
-        scaled(widget, inner)
-            // Its glass controls take a new accent only as they are made: made again for one.
-            .id(widget.tint)
+        let accent = accent
+        let corners = Self.outerCorners(widget, size: size, board: board)
+        content(inner)
             .frame(width: inner.width, height: inner.height)
-            .controlSize(isSingleRow ? .small : Metrics.Control.smaller(controlSize))
+            .overlay {
+                if !widget.figures.isEmpty { WidgetFiguresLayer(widget: Self.adapted(widget, size: size)) }
+            }
+            .controlSize(inner.height < WidgetMetrics.singleRowHeight ? .small : Metrics.Control.smaller(controlSize))
             .modifier(OptionalTint(color: accent))
             .padding(padding)
             .frame(width: size.width, height: size.height)
+            .environment(\.widgetShape, WidgetShape(size: size, corners: corners))
+            .coordinateSpace(.named(WidgetShape.space))
             .canvasPicture(renderMode == .canvas)
             .background {
-                WidgetSurface(widget: widget, size: size, accent: accent, style: style, corners: corners, artworkColor: artwork)
+                if drawsSurface, layerPass != .overlay { WidgetSurface(widget: widget, size: size, accent: accent, corners: corners) }
             }
-            .environment(\.widgetStyle, style)
-            .environment(\.widgetCorners, corners)
-            .environment(\.widgetArtworkColor, artwork)
-            .behaviour(of: widget)
             .contextMenu {
                 if !isPreview, renderMode == .live {
-                    Button("Customize \(widget.kind.title)…", systemImage: "paintbrush") { model.customizeWidget(widget.id) }
                     Button("Edit \(widget.kind.title)…", systemImage: "slider.horizontal.3") { model.editWidget(widget.id) }
                     Button("Duplicate", systemImage: "plus.square.on.square") {
                         if (model.boards.store(containing: widget.id) ?? model.widgets).duplicate(widget.id) == nil { NSSound.beep() }
@@ -72,104 +47,159 @@ struct IslandWidgetView: View {
 
     static let neutralAccent = Color(white: 0.42)
 
-    /// The widget's own colour; for Now Playing on automatic, the colour of the cover.
-    private func accent(_ widget: IslandWidget) -> Color? {
-        if let color = widget.tint.color { return color }
-        // The cover's colour only on a coloured, gradient or artwork background; on a plate (or
-        // none) the controls stay as neutral as the plate: a grey, not the system's blue.
-        if widget.kind == .nowPlaying {
-            if [.tinted, .gradient, .artwork].contains(widget.background) {
-                if let cover = model.media.artworkColor { return Color(cover) }
-            } else {
-                return Self.neutralAccent
-            }
-        }
-        return nil
+    /// The system's accent; for Now Playing, the colour of the cover on a coloured background, and
+    /// on a plate (or none) a grey as neutral as the plate.
+    private var accent: Color? {
+        guard widget.kind == .nowPlaying else { return nil }
+        guard widget.background == .tinted else { return Self.neutralAccent }
+        return model.media.artworkColor.map { Color($0) }
     }
 
     /// On the panel's board, concentric with the panel where the widget sits in its bottom corner;
-    /// elsewhere (a picture in Settings) the standard corners; the style's radius when it sets one.
-    /// The background is drawn in them, and what sits in its corners is concentric with them.
+    /// elsewhere (a picture in Settings) the standard corners.
     static func outerCorners(_ widget: IslandWidget, size: CGSize, board: WidgetBoardShape?) -> RectangleCornerRadii {
         let square = WidgetMetrics.isRound(widget) ? CGSize(width: min(size.width, size.height), height: min(size.width, size.height)) : size
         return ConcentricGeometry.outer(for: widget.frame, grid: board?.grid ?? .standard, size: square,
-                                        boardCorner: board?.cornerRadius ?? WidgetMetrics.cornerRadius,
-                                        custom: widget.style.surface.cornerRadius.map { CGFloat($0) })
+                                        boardCorner: board?.cornerRadius ?? WidgetMetrics.cornerRadius)
     }
 
-    /// Laid out smaller or larger and drawn at the widget's size (the style's content scale), the
-    /// way the editor's canvas magnifies the island: every element keeps its proportions. A custom
-    /// layout scales its elements itself (`ResolvedArrangement`).
-    @ViewBuilder private func scaled(_ widget: IslandWidget, _ inner: CGSize) -> some View {
-        if let scale = widget.style.layout.contentScale.map({ CGFloat($0) }), scale != 1, widget.style.layout.arrangement == nil {
-            let room = CGSize(width: inner.width / scale, height: inner.height / scale)
-            content(widget, room)
-                .frame(width: room.width, height: room.height)
-                .scaleEffect(scale)
-        } else {
-            content(widget, inner)
+    /// `widget` with its pictures where their fit puts them (`ImageLook.Fit`), drawn `size` large:
+    /// the scale and offset that grow them to its edges or over all of it. As stored where they keep
+    /// their own size.
+    /// Adapted first to `size` where Customize placed its parts at another (`adapted(to:size:)`).
+    static func resolved(_ widget: IslandWidget, size: CGSize) -> IslandWidget {
+        var widget = adapted(widget, size: size)
+        // One cell that is its one part: that part where the widget puts it, as large as it makes it.
+        if widget.isOneElement {
+            widget.offsets = [:]
+            widget.scales = [:]
+        }
+        guard widget.imageLooks.values.contains(where: { $0.fit != .own }) else { return widget }
+        let padding = WidgetMetrics.padding(for: widget)
+        let inner = CGSize(width: max(0, size.width - 2 * padding), height: max(0, size.height - 2 * padding))
+        switch widget.kind {
+        case .nowPlaying: return NowPlayingWidget.placingArtwork(widget, inner: inner, padding: padding)
+        default: return widget
         }
     }
 
-    /// Each family routes its own kinds (`Views/Widgets/Families/`), so a kind is added there.
-    @ViewBuilder private func content(_ widget: IslandWidget, _ inner: CGSize) -> some View {
-        switch widget.kind.spec.family {
-        case .nowPlaying: arranged(widget, NowPlayingFamily(widget: widget, size: inner), inner)
-        case .timers: arranged(widget, TimerFamily(widget: widget, size: inner), inner)
-        case .levels: arranged(widget, LevelFamily(widget: widget, size: inner), inner)
-        case .battery: arranged(widget, BatteryFamily(widget: widget, size: inner), inner)
-        case .controls: arranged(widget, ControlFamily(widget: widget, size: inner), inner)
-        case .time: arranged(widget, TimeFamily(widget: widget, size: inner), inner)
-        case .system: arranged(widget, SystemFamily(widget: widget, size: inner), inner)
-        case .tools: arranged(widget, ToolFamily(widget: widget, size: inner, thumbnails: thumbnails), inner)
-        case .airPods: arranged(widget, AirPodsFamily(widget: widget, size: inner), inner)
+    /// `widget`, drawn `size` large, with its parts as Customize placed them at its design size
+    /// taken along to this one (`IslandWidget.adapted(keepsPlacement:)`): kept where both sizes
+    /// are laid out alike, left to the layout where not.
+    static func adapted(_ widget: IslandWidget, size: CGSize) -> IslandWidget {
+        let design = widget.effectiveDesignSize
+        guard design != widget.frame.size, design.width > 0, design.height > 0,
+              widget.frame.width > 0, widget.frame.height > 0 else { return widget }
+        let padding = WidgetMetrics.padding(for: widget)
+        // The design size in points, from this one (cell for cell).
+        let inner = CGSize(width: max(0, size.width - 2 * padding), height: max(0, size.height - 2 * padding))
+        let designInner = CGSize(width: max(0, size.width * CGFloat(design.width) / CGFloat(widget.frame.width) - 2 * padding),
+                                 height: max(0, size.height * CGFloat(design.height) / CGFloat(widget.frame.height) - 2 * padding))
+        var designed = widget
+        designed.frame.width = design.width
+        designed.frame.height = design.height
+        let sameLayout = layout(of: widget, inner: inner) == layout(of: designed, inner: designInner)
+        var textWidth: Double?
+        if widget.kind == .nowPlaying {
+            let now = NowPlayingWidget.textColumnWidth(widget, inner: inner)
+            let then = NowPlayingWidget.textColumnWidth(widget, inner: designInner)
+            if then > 0 { textWidth = Double(now / then) }
+        }
+        return widget.adapted(keepsPlacement: sameLayout, textWidth: textWidth)
+    }
+
+    /// Which of its layouts a widget uses at its size (`inner`, inside its padding): Now Playing's
+    /// row or its column; a control's lone button, its wide tile or its tall one; a level's slider
+    /// or ring; the battery's ring, its row or its column; a readout's, the clock's and the
+    /// system's row or column. Where two sizes differ in it, parts moved at one are not taken along.
+    static func layout(of widget: IslandWidget, inner: CGSize) -> Int {
+        if widget.kind.control != nil {
+            let label = widget.shows(.controlName) || widget.shows(.controlStatus)
+            guard label, ControlWidget.hasTileRoom(widget, inner: inner) else { return 0 }
+            return inner.height >= ControlWidget.tallTileHeight && inner.width < inner.height * 1.6 ? 1 : 2
+        }
+        if widget.kind.level != nil { return LevelWidget.isRing(inner) ? 0 : 1 }
+        if widget.kind.isReadout { return ReadingWidget.isTall(inner) ? 0 : 1 }
+        switch widget.kind {
+        case .nowPlaying: return inner.height < WidgetMetrics.singleRowHeight ? 0 : 1
+        case .battery: return BatteryWidget.isRing(inner) ? 0 : BatteryWidget.isTall(inner) ? 1 : 2
+        case .dateTime: return DateTimeWidget.isTall(inner) ? 0 : 1
+        case .systemStats: return inner.height >= 56 ? 0 : inner.width >= 200 ? 1 : 2
+        case .timer: return TimerWidget.showsRuler(widget, inner: inner) ? 0 : 1
+        case .shelf: return ShelfWidget.hasPreviewRoom(inner: inner) ? 0 : 1
+        case .analogClock:
+            return switch ClockFaceWidget.captionPlace(widget, inner: inner) {
+            case .under: 0
+            case .beside: 1
+            case .none: 2
+            }
+        case .monthCalendar: return MonthCalendarWidget.hasTitleRoom(inner: inner) ? 0 : 1
+        default: return 0
         }
     }
 
-    /// A family that draws its elements one by one (`WidgetFamilyElements`) may be laid out freely
-    /// (`ArrangedFamily`); any other draws its own stacks. Chosen by type, when the view is built.
-    private func arranged<Family: View>(_ widget: IslandWidget, _ family: Family, _ inner: CGSize) -> Family { family }
-
-    private func arranged<Family: View & WidgetFamilyElements>(_ widget: IslandWidget, _ family: Family, _ inner: CGSize) -> ArrangedFamily<Family> {
-        ArrangedFamily(family: family, widget: widget, size: inner)
-    }
-}
-
-extension View {
-    /// On the editor's canvas: a picture — nothing read from the system, and nothing in it answers a
-    /// click, so no click there sets the volume or sends a command — and the space its elements'
-    /// frames are measured in (`WidgetFrameProbe`). On the island, the view itself.
-    @ViewBuilder func canvasPicture(_ isCanvas: Bool) -> some View {
-        if isCanvas {
-            environment(\.isWidgetPreview, true)
-                .allowsHitTesting(false)
-                .coordinateSpace(.named(WidgetFrameProbe.space))
-        } else {
-            self
+    /// Whether `element` has room at this size: one switched on that has none is not drawn
+    /// (Customize shows it off then).
+    static func hasRoom(for element: ElementID, in widget: IslandWidget, size: CGSize) -> Bool {
+        let padding = WidgetMetrics.padding(for: widget)
+        let inner = CGSize(width: max(0, size.width - 2 * padding), height: max(0, size.height - 2 * padding))
+        switch widget.kind {
+        case .nowPlaying:
+            if element == .seekButtons {
+                var shown = widget
+                shown.options.insert(.seekButtons)
+                return NowPlayingWidget.controlRow(shown, inner: inner).showsSeek
+            }
+            return NowPlayingWidget.hasRoom(for: element, inner: inner)
+        case .timer: return element != .ruler || TimerWidget.rulerSpace(inner: inner) > 0
+        case .shelf:
+            if element == .previews { return ShelfWidget.hasPreviewRoom(inner: inner) }
+            return element != .shelfActions || ShelfWidget.hasActionRoom(inner: inner)
+        case .analogClock:
+            if element != .label { return true }
+            var shown = widget
+            shown.options.insert(.label)
+            return ClockFaceWidget.captionPlace(shown, inner: inner) != .none
+        case .monthCalendar:
+            guard element == .label else { return true }
+            var shown = widget
+            shown.options.insert(.label)
+            return MonthCalendarWidget.showsTitle(shown, inner: inner)
+        default:
+            if widget.kind.control != nil { return ControlWidget.hasRoom(for: element, in: widget, inner: inner) }
+            if widget.kind.level != nil { return LevelWidget.hasRoom(for: element, inner: inner) }
+            return true
         }
     }
-}
 
-extension View {
-    /// The widget's behaviour (its tap, haptic, dimming) where its style sets any; else the view itself.
-    @ViewBuilder func behaviour(of widget: IslandWidget) -> some View {
-        if widget.style.behaviour == BehaviourStyle() {
-            self
-        } else {
-            modifier(WidgetBehaviourModifier(widget: widget))
-        }
-    }
-}
-
-/// The widget's own accent, when it has one (otherwise the system's).
-struct OptionalTint: ViewModifier {
-    let color: Color?
-
-    func body(content: Content) -> some View {
-        if let color {
-            content.tint(color)
-        } else {
-            content
+    @ViewBuilder private func content(_ inner: CGSize) -> some View {
+        switch widget.kind {
+        case .dateTime: DateTimeWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .stopwatch: StopwatchWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .nowPlaying:
+            NowPlayingWidget(widget: Self.resolved(widget, size: size), size: inner,
+                             outline: WidgetShape(size: size, corners: Self.outerCorners(widget, size: size, board: board)))
+        case .systemStats: SystemStatsWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .worldClock: WorldClockWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .clipboard: ClipboardWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .battery: BatteryWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .batteryChart: BatteryChartWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .batteryTime, .batteryHealth, .batteryCycles, .batteryPower, .batteryTemperature, .charger, .batteryLastCharge:
+            BatteryFigureWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .uptime: UptimeWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .timer: TimerWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .shelf: ShelfWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .analogClock: ClockFaceWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .monthCalendar: MonthCalendarWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .batteryUsage: DailyUsageWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .diskSpace: DiskSpaceWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .memory: MemoryWidget(widget: Self.resolved(widget, size: size), size: inner)
+        default:
+            if let control = widget.kind.control {
+                ControlWidget(control: control, widget: Self.resolved(widget, size: size), size: inner)
+            } else if let level = widget.kind.level {
+                LevelWidget(level: level, widget: Self.resolved(widget, size: size), size: inner)
+            }
         }
     }
 }

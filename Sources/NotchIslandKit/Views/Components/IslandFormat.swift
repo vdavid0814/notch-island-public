@@ -19,6 +19,13 @@ nonisolated enum IslandFormat {
         return text
     }
 
+    /// Minutes and seconds however many minutes there are: "5:00", "120:16" (the timer without
+    /// hours, as its ruler sets it).
+    static func minutesClock(_ seconds: TimeInterval) -> String {
+        let whole = max(0, Int(seconds.isFinite ? seconds.rounded(.down) : 0))
+        return "\(whole / 60):" + String(format: "%02d", whole % 60)
+    }
+
     private struct ClockKey: Hashable {
         var seconds: Int
         var hours: Bool
@@ -124,3 +131,29 @@ nonisolated struct PowerCopy: Sendable, Equatable {
         }
     }
 }
+/// The last 256 measurements, oldest out first.
+nonisolated struct MeasureCache<Key: Hashable, Value> {
+    static var capacity: Int { 256 }
+
+    private var values: [Key: Value] = [:]
+    private var order: [Key] = []
+    private var next = 0
+
+    subscript(key: Key) -> Value? {
+        get { values[key] }
+        set {
+            guard let newValue else { return }
+            if values.updateValue(newValue, forKey: key) != nil { return }
+            if order.count < Self.capacity {
+                order.append(key)
+            } else {
+                values[order[next]] = nil
+                order[next] = key
+                next = (next + 1) % Self.capacity
+            }
+        }
+    }
+
+    var count: Int { values.count }
+}
+

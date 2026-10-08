@@ -706,3 +706,22 @@ private let t0: UInt32 = 1_790_000_000
         #expect(BatteryUsage.comparison(days[0], among: Array(days.prefix(2)), today: today) == nil, "one other day is too few")
     }
 }
+
+@Suite struct BatteryWidgetTimeTests {
+    private func state(charging: Bool = false, plugged: Bool = false, charged: Bool = false, minutes: Int? = nil) -> PowerState {
+        PowerState(hasBattery: true, level: 80, isCharging: charging, isPluggedIn: plugged, isCharged: charged,
+                   minutesRemaining: minutes, isLowPowerMode: false)
+    }
+
+    /// The time left alone is never blank on power: charging, charged, or waiting to charge.
+    @Test @MainActor func onPowerItSaysWhatTheBatteryDoes() {
+        #expect(BatteryWidget.remaining(state(charging: true, plugged: true)) == "Charging")
+        #expect(BatteryWidget.remaining(state(plugged: true, charged: true)) == "Charged")
+        #expect(BatteryWidget.remaining(state(plugged: true)) == "On Hold")
+        #expect(BatteryWidget.remaining(state(minutes: 192)) == "3h 12m left")
+        #expect(BatteryWidget.remaining(state(minutes: 192), short: true) == "3h 12m")
+        // Off the charger, before the system has an estimate: never blank.
+        #expect(BatteryWidget.remaining(state()) == "Calculating…")
+        #expect(BatteryWidget.remaining(state(), short: true) == "—")
+    }
+}

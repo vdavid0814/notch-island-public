@@ -194,6 +194,12 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         bottomRadius(for: .assistant(.gallery)) - Metrics.Expanded.pageBottomInset
     }
 
+    /// Each ear of the recording pill: room for the time ("12:34") at a small size beside the notch.
+    var recordingEar: CGFloat { ear + 16 }
+    /// The recording card under the notch (`RecordingCard`): the time and Stop on one row.
+    static let recordingCardDetailHeight: CGFloat = 54
+    static let recordingCardMinimumWidth: CGFloat = 320
+
     /// Width of each ear beside the notch in compact and banner: as narrow as the
     /// glyph allows — the compact shoulder (6), the glyph's outer inset (4), the
     /// glyph itself (notch height − 2 × 4) and the clearance from the notch (4).
@@ -204,6 +210,8 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         switch p {
         case .idle:
             return notch
+        case .compact(.recording):
+            return CGSize(width: notch.width + 2 * recordingEar, height: notch.height)
         case .compact:
             // Never taller than the notch: a taller pill reads as a window stuck to the screen.
             return CGSize(width: notch.width + 2 * ear, height: notch.height)
@@ -229,6 +237,9 @@ nonisolated struct IslandLayout: Sendable, Equatable {
                 width: max(notch.width + 2 * ear, Self.bannerMinimumWidth),
                 height: notch.height + Self.bannerDetailHeight
             )
+        case .expanded(.recording):
+            return CGSize(width: max(notch.width + 2 * recordingEar, Self.recordingCardMinimumWidth),
+                          height: notch.height + Self.recordingCardDetailHeight)
         case .expanded:
             let f = factor
             let screen = screen == .zero ? Self.fallbackScreen : screen
@@ -301,8 +312,10 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         // A little rounder than macOS's volume card under it.
         case .banner(.levelCovering): Self.coveringBottomRadius
         case .banner(.airPods) where Self.coversAirPodsCard: SystemVolumeCard.Kind.airPods.radius
-        case .banner: 24
-        case .expanded, .assistant, .settings: 30 * factor
+        case .banner, .expanded(.recording): 24
+        // The widgets' corners (`WidgetMetrics.cornerRadius`) and the page's inset under them, so
+        // the board's bottom corners are concentric with the panel's and as round as every widget's.
+        case .expanded, .assistant, .settings: 28 * factor
         }
     }
 
@@ -313,7 +326,7 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         case .compact, .banner(.levelPill): 6
         case .banner(.levelCovering): Self.coveringShoulder
         case .banner(.airPods) where Self.coversAirPodsCard: Self.coveringShoulder
-        case .banner: 8
+        case .banner, .expanded(.recording): 8
         case .expanded, .assistant, .settings: 10
         }
     }

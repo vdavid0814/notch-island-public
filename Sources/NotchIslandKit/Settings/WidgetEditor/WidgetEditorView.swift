@@ -17,7 +17,6 @@ struct WidgetEditorView: View {
 
 struct BoardEditor: View {
     @Binding var selection: WidgetID?
-    let thumbnails: ThumbnailCache
     /// Widgets picked together with ⌘-click, edited as one (two or more; empty otherwise).
     var group: Binding<Set<WidgetID>> = .constant([])
     /// A widget was clicked (not dragged): Settings opens its editor.
@@ -64,9 +63,6 @@ struct BoardEditor: View {
                         .opacity(showsGrid ? 0.55 : 1)
                 }
             }
-            // The board's space in AppKit, for the Customize transition to fly from.
-            .background { StageAnchor(probe: model.studio.probe, geometry: geometry) }
-            .background { StudioPhaseReporter(probe: model.studio.probe, phase: model.studio.phase, report: \.stageReport) }
             .coordinateSpace(.named(BoardSpace.name))
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
         }
@@ -102,13 +98,10 @@ struct BoardEditor: View {
         let isSelected = selection == widget.id || isGrouped
         let showsHandles = selection == widget.id && group.wrappedValue.count < 2
 
-        // Flying into its Customize editor or back: the flier stands in for it.
-        let isFlying = model.studio.customizing == widget.id && model.studio.phase != .idle
         ZStack(alignment: .topLeading) {
-            IslandWidgetView(widget: widget, size: contentFrame.size, thumbnails: thumbnails)
-                // A picture, as the editor's canvas draws it: no live glass, nothing ticking.
+            IslandWidgetView(widget: widget, size: contentFrame.size)
+                // A picture: no live glass, nothing ticking.
                 .environment(\.widgetRenderMode, .canvas)
-                .opacity(isFlying ? 0 : 1)
                 .allowsHitTesting(false)
                 .overlay {
                     RoundedRectangle(cornerRadius: min(WidgetMetrics.cornerRadius, contentFrame.height / 2), style: .continuous)
@@ -306,12 +299,8 @@ struct WidgetIcon: View {
             .fill(LinearGradient(colors: kind.iconColors, startPoint: .top, endPoint: .bottom))
             .overlay {
                 Group {
-                    if let control = kind.systemControl {
-                        ControlGlyph(control: control, on: true, size: side * 0.46)
-                    } else {
-                        Image(systemName: kind.systemImage)
-                            .font(.system(size: side * 0.46, weight: .semibold))
-                    }
+                    Image(systemName: kind.systemImage)
+                        .font(.system(size: side * 0.46, weight: .semibold))
                 }
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
@@ -324,28 +313,4 @@ struct WidgetIcon: View {
 extension IslandWidgetKind {
     /// The app icon's gradient (`WidgetKindSpec.iconColors`).
     var iconColors: [Color] { spec.iconColors.map(\.color) }
-}
-
-/// A view over the stage's board (top-left origin): the board's space in AppKit, for the Customize
-/// transition, and the board's geometry to find each widget in it.
-private struct StageAnchor: NSViewRepresentable {
-    let probe: StudioProbe
-    let geometry: WidgetBoardGeometry
-
-    func makeNSView(context: Context) -> FlippedView {
-        let view = FlippedView()
-        probe.stageView = view
-        probe.boardGeometry = geometry
-        return view
-    }
-
-    func updateNSView(_ view: FlippedView, context: Context) {
-        probe.stageView = view
-        probe.boardGeometry = geometry
-    }
-
-    final class FlippedView: NSView {
-        override var isFlipped: Bool { true }
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    }
 }

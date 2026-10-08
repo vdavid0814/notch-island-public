@@ -1,12 +1,8 @@
 import Foundation
 
-/// One element of a widget (its title, a button, a ring…), by name. The names are the ones boards
-/// have been saved with since version 1, so an old board decodes one to one. What an element is in a
-/// given kind — its title, role, samples — is that kind's `ElementSpec`.
-///
-/// Parts of an element are `<element>.<part>` (`skipButtons.previous`); decorations the user adds
-/// in a custom layout are `custom.<uuid>`.
-nonisolated struct ElementID: RawRepresentable, Hashable, Codable, CodingKeyRepresentable, Sendable, Identifiable {
+/// One element of a widget (its title, a button, a slider…), by name. The names are the ones boards
+/// have been saved with since version 1, so an old board decodes one to one.
+nonisolated struct ElementID: RawRepresentable, Hashable, Codable, Sendable, Identifiable {
     let rawValue: String
 
     init(rawValue: String) { self.rawValue = rawValue }
@@ -23,67 +19,101 @@ nonisolated struct ElementID: RawRepresentable, Hashable, Codable, CodingKeyRepr
         try container.encode(rawValue)
     }
 
-    static let customPrefix = "custom."
-
-    /// A decoration of a custom layout.
-    static func custom(_ uuid: UUID = UUID()) -> ElementID { ElementID(rawValue: customPrefix + uuid.uuidString) }
-
-    var isCustom: Bool { rawValue.hasPrefix(Self.customPrefix) }
-
-    /// A part of this element (`skipButtons.previous`).
-    func part(_ name: String) -> ElementID { ElementID(rawValue: rawValue + "." + name) }
-
+    // Wi-Fi.
+    static let controlButton = ElementID(rawValue: "controlButton")
+    static let controlName = ElementID(rawValue: "controlName")
+    static let controlStatus = ElementID(rawValue: "controlStatus")
+    // Volume.
+    static let levelIcon = ElementID(rawValue: "levelIcon")
+    static let levelValue = ElementID(rawValue: "levelValue")
+    static let levelSlider = ElementID(rawValue: "levelSlider")
+    // Date & Time and the stopwatch.
+    static let readout = ElementID(rawValue: "readout")
+    static let dateLine = ElementID(rawValue: "dateLine")
+    static let resetButton = ElementID(rawValue: "resetButton")
+    static let stopwatchButton = ElementID(rawValue: "stopwatchButton")
     // Now Playing.
     static let artwork = ElementID(rawValue: "artwork")
     static let trackInfo = ElementID(rawValue: "trackInfo")
     static let artist = ElementID(rawValue: "artist")
     static let progress = ElementID(rawValue: "progress")
+    /// The times under the progress line, each styled on its own (`ProgressLook`).
+    static let elapsedTime = ElementID(rawValue: "elapsedTime")
+    static let remainingTime = ElementID(rawValue: "remainingTime")
     static let playbackButtons = ElementID(rawValue: "playbackButtons")
     static let skipButtons = ElementID(rawValue: "skipButtons")
-    /// Back and forward by some seconds (`ButtonSpec.seconds`).
-    static let seekBack = ElementID(rawValue: "seekBack")
-    static let seekForward = ElementID(rawValue: "seekForward")
-    // Timer, stopwatch and the time.
-    static let ruler = ElementID(rawValue: "ruler")
-    static let readout = ElementID(rawValue: "readout")
-    static let addMinute = ElementID(rawValue: "addMinute")
-    /// The timer is set in seconds too, and in hours (`TimerDraftUnits`).
-    static let timerSeconds = ElementID(rawValue: "timerSeconds")
-    static let timerHours = ElementID(rawValue: "timerHours")
-    static let resetButton = ElementID(rawValue: "resetButton")
-    // Shelf.
-    static let previews = ElementID(rawValue: "previews")
-    static let shelfCount = ElementID(rawValue: "shelfCount")
-    static let shelfActions = ElementID(rawValue: "shelfActions")
-    // Battery.
-    static let batteryGlyph = ElementID(rawValue: "batteryGlyph")
-    static let percentage = ElementID(rawValue: "percentage")
-    static let timeRemaining = ElementID(rawValue: "timeRemaining")
-    // Volume and brightness.
-    static let levelIcon = ElementID(rawValue: "levelIcon")
-    static let levelValue = ElementID(rawValue: "levelValue")
-    /// A control widget's name and its On / Off (shown when it is wider than its button).
-    static let controlName = ElementID(rawValue: "controlName")
-    static let controlStatus = ElementID(rawValue: "controlStatus")
-    // Siri.
-    static let assistantLabel = ElementID(rawValue: "assistantLabel")
-    // Date & Time, System.
-    static let dateLine = ElementID(rawValue: "dateLine")
+    /// Previous and next, each moved on its own (`skipButtons` switches both).
+    static let previousButton = ElementID(rawValue: "previousButton")
+    static let nextButton = ElementID(rawValue: "nextButton")
+    /// Back and forward by some seconds (`IslandWidget.seekSeconds`): the switch, and its two buttons.
+    static let seekButtons = ElementID(rawValue: "seekButtons")
+    static let seekBackButton = ElementID(rawValue: "seekBackButton")
+    static let seekForwardButton = ElementID(rawValue: "seekForwardButton")
+    // System.
     static let cpuLoad = ElementID(rawValue: "cpuLoad")
     static let memoryLoad = ElementID(rawValue: "memoryLoad")
-    // A reading, its caption, its symbol and its chart: the elements of a kind that shows one value. A family
-    // adds its own elements in an `ElementID` extension in its spec file.
+    /// The texts of the system's lines: each one's name and value (`ProgressLook.Part`).
+    static let cpuTitle = ElementID(rawValue: "cpuTitle")
+    static let cpuValue = ElementID(rawValue: "cpuValue")
+    static let memoryTitle = ElementID(rawValue: "memoryTitle")
+    static let memoryValue = ElementID(rawValue: "memoryValue")
+    // A readout (World Clock and its kin): the value, its caption and its symbol.
     static let value = ElementID(rawValue: "value")
     static let label = ElementID(rawValue: "label")
     static let symbol = ElementID(rawValue: "symbol")
-    /// A chart of the reading over time.
+    // Battery: the battery (or its ring), the percentage and the time left.
+    static let batteryGlyph = ElementID(rawValue: "batteryGlyph")
+    /// The battery as a ring (about square): a button in Customize, its charge round its edge.
+    static let batteryRing = ElementID(rawValue: "batteryRing")
+    static let percentage = ElementID(rawValue: "percentage")
+    static let timeRemaining = ElementID(rawValue: "timeRemaining")
+    /// A chart (Battery Chart).
     static let chart = ElementID(rawValue: "chart")
-    /// An analog clock's face, a month's grid of days, a list of events.
+    // Clipboard: each copy's text and its symbol, a part of its own; the symbols' switch.
+    static let clipSymbols = ElementID(rawValue: "clipSymbols")
+    // Timer: the ruler (a scale to set by scrolling), the time (`readout`), its action (Start,
+    // Pause, Resume, Done), Cancel while it counts, and +1.
+    static let ruler = ElementID(rawValue: "ruler")
+    static let timerActions = ElementID(rawValue: "timerActions")
+    static let timerCancel = ElementID(rawValue: "timerActions.cancel")
+    static let addMinute = ElementID(rawValue: "addMinute")
+    /// The unit's name beside the ruler's marker ("min", "sec", "hr"): its switch, and its text
+    /// (styled from the panel under Customize's editor, never moved in the editor itself).
+    static let rulerUnit = ElementID(rawValue: "ruler.unit")
+    /// The switches that let the time be set in hours, and in seconds (a part of the time picked,
+    /// the ruler sets it).
+    static let timerHours = ElementID(rawValue: "timerHours")
+    static let timerSeconds = ElementID(rawValue: "timerSeconds")
+    // Shelf: the files to drag out; the tray and the count (one switch); AirDrop and Clear (one switch).
+    static let previews = ElementID(rawValue: "previews")
+    static let shelfTray = ElementID(rawValue: "shelfCount.tray")
+    static let shelfCount = ElementID(rawValue: "shelfCount")
+    static let shelfActions = ElementID(rawValue: "shelfActions")
+    static let shelfAirDrop = ElementID(rawValue: "shelfActions.airDrop")
+    static let shelfClear = ElementID(rawValue: "shelfActions.clear")
+    // Clock Face: the dial, its seconds hand's switch; the caption is `label`.
     static let face = ElementID(rawValue: "face")
+    static let secondsHand = ElementID(rawValue: "secondsHand")
+    // Calendar: the month's days (its name is `label`).
     static let monthGrid = ElementID(rawValue: "monthGrid")
-    static let eventList = ElementID(rawValue: "eventList")
-    // Tools.
-    static let appIcons = ElementID(rawValue: "appIcons")
-    static let clipList = ElementID(rawValue: "clipList")
-    static let photo = ElementID(rawValue: "photo")
+    /// The days' numbers in it: a text of the grid's own (its type, size and colour).
+    static let monthDays = ElementID(rawValue: "monthGrid.days")
+    /// The weekdays' letters over the days: a switch of the grid's.
+    static let monthWeekdays = ElementID(rawValue: "monthGrid.weekdays")
+    // Daily Usage: the day picked under the percentage (the title is `label`, the bars `chart`).
+    static let usageDay = ElementID(rawValue: "usageDay")
+
+    /// The `row`th copy's text (from 1).
+    static func clipText(_ row: Int) -> ElementID { ElementID(rawValue: "clipText\(row)") }
+
+    /// The `row`th copy's symbol, a button (from 1).
+    static func clipSymbol(_ row: Int) -> ElementID { ElementID(rawValue: "clipSymbol\(row)") }
+
+    /// The copy a Clipboard part is of (from 1); nil for any other part.
+    var clipRow: Int? {
+        for prefix in ["clipText", "clipSymbol"] where rawValue.hasPrefix(prefix) {
+            return Int(rawValue.dropFirst(prefix.count))
+        }
+        return nil
+    }
 }

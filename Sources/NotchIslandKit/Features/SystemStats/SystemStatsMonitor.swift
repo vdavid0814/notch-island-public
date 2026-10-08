@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// Processor and memory load for the System widget.
+/// Processor and memory load for the System and Memory widgets.
 ///
 /// Energy: nothing runs unless a System widget is on screen (`startObserving` / `stopObserving`
 /// count them); then one Mach call each every two seconds, with a generous timer tolerance so the
@@ -12,6 +12,9 @@ import Foundation
     /// 0…1 of physical memory in use (app, wired and compressed pages, as Activity Monitor's
     /// "Memory Used").
     private(set) var memory: Double = 0
+    /// The same in bytes (nil until read), for the Memory widget; changes of under 8 MB are left out.
+    private(set) var memoryBytes: UInt64?
+    let physicalMemory = ProcessInfo.processInfo.physicalMemory
 
     static let interval: TimeInterval = 2
 
@@ -47,7 +50,13 @@ import Foundation
             }
             previousTicks = ticks
         }
-        if let used = Self.memoryUsed(), abs(used - memory) > 0.005 { memory = used }
+        if let bytes = Self.memoryUsedBytes() {
+            if memoryBytes.map({ max($0, bytes) - min($0, bytes) >= Self.memoryStep }) ?? true { memoryBytes = bytes }
+            if physicalMemory > 0 {
+                let used = min(max(Double(bytes) / Double(physicalMemory), 0), 1)
+                if abs(used - memory) > 0.005 { memory = used }
+            }
+        }
     }
 
     /// Busy and total ticks over all cores (user + system + nice are busy; idle is not).
@@ -66,7 +75,10 @@ import Foundation
         return (busy, busy + idle)
     }
 
-    nonisolated static func memoryUsed() -> Double? {
+    static let memoryStep: UInt64 = 8 << 20
+
+    /// Memory in use, as Activity Monitor's "Memory Used".
+    nonisolated static func memoryUsedBytes() -> UInt64? {
         var info = vm_statistics64()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.stride / MemoryLayout<integer_t>.stride)
         let result = withUnsafeMutablePointer(to: &info) {
@@ -78,10 +90,8 @@ import Foundation
         var pageSize: vm_size_t = 0
         host_page_size(mach_host_self(), &pageSize)
         // App memory (internal − purgeable) + wired + compressed.
-        let app = UInt64(info.internal_page_count) - UInt64(info.purgeable_count)
-        let used = (app + UInt64(info.wire_count) + UInt64(info.compressor_page_count)) * UInt64(pageSize)
-        let total = ProcessInfo.processInfo.physicalMemory
-        guard total > 0 else { return nil }
-        return min(max(Double(used) / Double(total), 0), 1)
+        let resident = UInt64(info.internal_page_count), purgeable = UInt64(info.purgeable_count)
+        let app = resident > purgeable ? resident - purgeable : 0
+        return (app + UInt64(info.wire_count) + UInt64(info.compressor_page_count)) * UInt64(pageSize)
     }
 }

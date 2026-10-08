@@ -6,9 +6,8 @@ import SwiftUI
 /// - **Stage**: a Mac desktop (the default macOS wallpaper, or the user's own) with its menu bar,
 ///   and the open island hanging from the notch at its real size. The widgets are arranged right
 ///   there — drag to move, drag a corner to resize, everything snaps to the grid.
-/// - **Inspector** (a widget is selected): the widget's own system — its size as presets, its
-///   layout, colour and background, and every element inside it, each with its own switch and
-///   size.
+/// - **Inspector** (a widget is selected): its background, and a tile for each element inside it
+///   that switches it on or off.
 /// - **Gallery** (nothing selected): every built-in widget as a compact card with a live preview,
 ///   grouped by category. Nothing is downloaded or bought: Add puts the widget on the island and
 ///   selects it, Edit selects one that is already there.
@@ -17,7 +16,6 @@ struct WidgetsSettingsPage: View {
     @State private var selection: WidgetID?
     /// Two or more widgets picked with ⌘-click: edited together.
     @State private var group: Set<WidgetID> = []
-    @State private var thumbnails = ThumbnailCache()
     @State private var notice: String?
     @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
 
@@ -25,7 +23,7 @@ struct WidgetsSettingsPage: View {
         ScrollViewReader { scroller in
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    StudioStage(selection: $selection, group: $group, thumbnails: thumbnails, backdrop: $backdrop, notice: notice)
+                    StudioStage(selection: $selection, group: $group, backdrop: $backdrop, notice: notice)
                         .id(StudioAnchor.stage)
                     Group {
                         let picked = group.filter { model.editedWidgets.board.contains($0) }
@@ -67,9 +65,6 @@ struct WidgetsSettingsPage: View {
                 .padding(.bottom, 28)
             }
             .scrollIndicators(.automatic)
-            .onChange(of: model.studio.stageScrollRequest) {
-                withAnimation(.easeInOut(duration: SettingsSurfaceView.stageScroll)) { scroller.scrollTo(StudioAnchor.stage, anchor: .top) }
-            }
         }
         .onAppear(perform: takeRequestedEdit)
         .onChange(of: model.editingWidget) { takeRequestedEdit() }
@@ -157,7 +152,6 @@ private struct StagePick: Equatable {
 private struct StudioStage: View {
     @Binding var selection: WidgetID?
     @Binding var group: Set<WidgetID>
-    let thumbnails: ThumbnailCache
     @Binding var backdrop: DesktopBackdropStyle
     let notice: String?
 
@@ -214,13 +208,13 @@ private struct StudioStage: View {
             // In a graph of its own: the live widgets on it (clocks, readings) keep ticking, and
             // each tick would otherwise update all of Settings (`IsolatedHosting`). Handed over
             // again only when the picked widgets change: the model (the board, the layout) is
-            // observed inside, and the thumbnails' cache is the same object throughout.
+            // observed inside.
             // Shown smaller inside its own graph, not by scaling the host: AppKit hit-tests a
             // scaled view where it was laid out, and clicks near the island's edges missed.
             IsolatedHosting(size: CGSize(width: (room.width * fit).rounded(), height: (room.height * fit).rounded()),
                             input: StagePick(selection: selection, group: group, mode: mode, room: room, fit: fit),
                             pausesWithSettings: true) {
-                StageIsland(selection: $selection, group: $group, thumbnails: thumbnails, room: room, fit: fit)
+                StageIsland(selection: $selection, group: $group, room: room, fit: fit)
                     .environment(model)
                     .environment(\.appearsActive, true)
             }
@@ -294,7 +288,6 @@ private struct StudioStage: View {
 private struct StageIsland: View {
     @Binding var selection: WidgetID?
     @Binding var group: Set<WidgetID>
-    let thumbnails: ThumbnailCache
     /// The room it is drawn in, hanging from its top: its own size, or in Size mode the largest it
     /// may get.
     let room: CGSize
@@ -335,7 +328,7 @@ private struct StageIsland: View {
                             .fill(.black)
                             .frame(width: layout.notch.width, height: layout.notch.height)
                     }
-                BoardEditor(selection: $selection, thumbnails: thumbnails, group: $group, showsGrid: mode == .size)
+                BoardEditor(selection: $selection, group: $group, showsGrid: mode == .size)
                     // Only the Widgets mode arranges them.
                     .allowsHitTesting(mode == .widgets)
                     .opacity(mode == .topBar ? 0.4 : 1)
@@ -352,7 +345,6 @@ private struct StageIsland: View {
         .environment(\.colorScheme, .dark)
         .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
         .frame(width: room.width, height: room.height, alignment: .top)
-        .background { StageRoomAnchor(probe: model.studio.probe, scale: fit) }
         .overlay {
             if mode == .size { SizeStageOverlay(island: size, room: room, base: base) }
         }
@@ -363,26 +355,20 @@ private struct StageIsland: View {
 
 // MARK: - Group inspector
 
-/// Two or more widgets picked with ⌘-click: the look they can share — colour, background and its
-/// strength — set on all of them at once. A setting the widgets differ in shows nothing marked
-/// until it is chosen.
+/// Two or more widgets picked with ⌘-click: the background, set on all of them at once — with the
+/// same one, its strength and its colour too, shown as the first of them has them. A setting the
+/// widgets differ in shows nothing marked until it is chosen.
 private struct GroupInspector: View {
     let ids: Set<WidgetID>
     @Binding var selection: WidgetID?
     @Binding var group: Set<WidgetID>
 
     @Environment(AppModel.self) private var model
+    @State private var isMixing = false
 
     var body: some View {
         let widgets = model.editedWidgets.board.widgets.filter { ids.contains($0.id) }
-        let tints = Set(widgets.map(\.tint))
         let backgrounds = Set(widgets.map(\.background))
-        // Only backgrounds every picked widget offers (Artwork is Now Playing's own); one chosen in
-        // Customize (a gradient, a picture) only while every picked widget has it.
-        let offered = WidgetBackground.allCases.filter { background in
-            (!background.needsCustomize || backgrounds == [background]) && widgets.allSatisfy { $0.kind.backgrounds.contains(background) }
-        }
-        let strengths = widgets.filter { $0.background.hasOpacity }.map(\.effectiveBackgroundOpacity)
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 14) {
                 HStack(spacing: -10) {
@@ -414,42 +400,27 @@ private struct GroupInspector: View {
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
             }
-            StudioCard("Look", subtitle: "Applies to every picked widget.") {
-                VStack(alignment: .leading, spacing: 14) {
-                    LabeledSetting("Accent Colour") {
-                        TintWell(selection: tints.count == 1 ? tints.first : nil, automaticHint: "each widget's own") { tint in
-                            apply { $0.tint = tint }
-                        }
+            StudioCard("Background", subtitle: "Applies to every picked widget.") {
+                Picker("Background", selection: Binding(
+                    get: { backgrounds.count == 1 ? backgrounds.first : nil },
+                    set: { (new: WidgetBackground?) in
+                        guard let new else { return }
+                        withAnimation(.spring(duration: 0.4, bounce: 0.18)) { apply { $0.background = new } }
                     }
-                    LabeledSetting("Background") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Picker("Background", selection: Binding(
-                                get: { backgrounds.count == 1 ? backgrounds.first : nil },
-                                set: { (new: WidgetBackground?) in
-                                    guard let new else { return }
-                                    withAnimation(.spring(duration: 0.4, bounce: 0.18)) {
-                                        apply {
-                                            $0.background = new
-                                            $0.backgroundOpacity = nil
-                                        }
-                                    }
-                                }
-                            )) {
-                                ForEach(offered) { Text($0.title).tag(Optional($0)) }
-                            }
-                            .choiceBar()
-                            .labelsHidden()
-                            .fixedSize()
-                            if !strengths.isEmpty {
-                                BackgroundOpacitySlider(value: strengths.reduce(0, +) / Double(strengths.count)) { value in
-                                    apply { if $0.background.hasOpacity { $0.backgroundOpacity = value } }
-                                }
-                                .transition(.opacity.combined(with: .offset(y: -8)))
-                            }
-                        }
-                    }
+                )) {
+                    ForEach(WidgetBackground.allCases) { Text($0.title).tag(Optional($0)) }
+                }
+                .choiceBar()
+                .labelsHidden()
+                .fixedSize()
+                // All on the same plate or colour: how strong, and which colour, for all of them.
+                if backgrounds.count == 1, backgrounds.first != WidgetBackground.none, let first = widgets.first {
+                    BackgroundSettings(widget: first, isMixing: $isMixing) { change in apply(change) }
+                        .transition(.opacity)
                 }
             }
+            .animation(.spring(duration: 0.35, bounce: 0.12), value: backgrounds)
+            .animation(.spring(duration: 0.35, bounce: 0.12), value: isMixing)
         }
     }
 
@@ -462,213 +433,278 @@ private struct GroupInspector: View {
 
 // MARK: - Inspector
 
-/// One widget's own system: size, look, and each element inside it.
+/// One widget's own settings, in one card: its background as a bar across the card (with its
+/// strength, and the Colour background's colour, under it), and its elements as a row of equal
+/// tiles under that — a tile lit while its element shows, a click switches
+/// it. Size and place are set on the stage itself (drag, corner handles, arrow keys).
 private struct WidgetInspector: View {
     let id: WidgetID
     @Binding var selection: WidgetID?
     @Binding var notice: String?
 
     @Environment(AppModel.self) private var model
+    /// The card's inside: the bar and the tiles are made exactly as wide.
+    @State private var width: CGFloat = 0
+    /// The colour mixer open under the Colour background's settings.
+    @State private var isMixing = false
+
+    static let inset: CGFloat = 20
+    static let spacing: CGFloat = 10
+    /// Narrower tiles go onto two rows.
+    static let tileMinimum: CGFloat = 104
 
     var body: some View {
         if let widget = model.editedWidgets.board.widget(id) {
-            let kind = widget.kind
             VStack(alignment: .leading, spacing: 16) {
                 header(widget)
-                HStack(alignment: .top, spacing: 16) {
-                    // Size and place are set on the stage itself (drag, corner handles, arrow keys).
-                    StudioCard("Look") { lookCard(widget) }
-                        .frame(maxWidth: .infinity)
-                    if !kind.options.isEmpty {
-                        StudioCard("Elements", subtitle: "What the widget shows, and how large.") {
-                            VStack(spacing: 0) {
-                                ForEach(Array(kind.spec.elements.enumerated()), id: \.element.id) { index, element in
-                                    if index > 0 { Divider().opacity(0.5) }
-                                    ElementRow(element: element, widget: widget) { change in
-                                        withAnimation(Motion.content) { model.editedWidgets.update(id, change) }
-                                    }
-                                }
-                            }
+                VStack(alignment: .leading, spacing: 18) {
+                    section("Background") {
+                        Picker("Background", selection: Binding(get: { widget.background }, set: { background in
+                            withAnimation(.spring(duration: 0.4, bounce: 0.18)) { model.editedWidgets.update(id) { $0.background = background } }
+                        })) {
+                            ForEach(WidgetBackground.allCases) { Text($0.title).tag($0) }
                         }
-                        .frame(maxWidth: .infinity)
+                        .choiceBar(width: width > 0 ? width : nil)
+                        .labelsHidden()
+                        .fixedSize()
+                        if widget.background != .none {
+                            BackgroundSettings(widget: widget, isMixing: $isMixing) { change in
+                                model.editedWidgets.update(id, change)
+                            }
+                            .transition(.opacity.combined(with: .offset(y: -6)))
+                        }
                     }
+                    .animation(.spring(duration: 0.35, bounce: 0.12), value: widget.background)
+                    .animation(.spring(duration: 0.35, bounce: 0.12), value: isMixing)
+                    let switchable = widget.kind.spec.elements.filter { !$0.isRequired }
+                    if !switchable.isEmpty {
+                        Divider().opacity(0.5)
+                        section("Elements", note: alwaysShown(widget.kind)) { tiles(switchable, widget) }
+                    }
+                }
+                .padding(Self.inset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self) { ($0.size.width - 2 * Self.inset).rounded(.down) } action: { width = $0 }
+                .background(SettingsPalette.card, in: .rect(cornerRadius: SettingsForm.cardRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: SettingsForm.cardRadius, style: .continuous).strokeBorder(SettingsPalette.cardStroke)
                 }
             }
         }
     }
 
+    private func section<Content: View>(_ title: String, note: String? = nil, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title).font(.headline)
+                Spacer(minLength: 12)
+                if let note {
+                    Text(note).font(.caption).foregroundStyle(SettingsPalette.secondary)
+                }
+            }
+            content()
+        }
+    }
+
+    /// What it shows always, beside what can be switched ("Always shown: Slider").
+    private func alwaysShown(_ kind: IslandWidgetKind) -> String? {
+        // Clipboard's copies are its rows (Settings ▸ Rows), not parts to list.
+        let always = kind.spec.elements.filter { $0.isRequired && $0.id.clipRow == nil }.map(\.title)
+        return always.isEmpty ? nil : "Always shown: \(ListFormatter.localizedString(byJoining: always))"
+    }
+
+    /// One row of equal tiles; where they would be too narrow, two rows of equal tiles.
+    private func tiles(_ elements: [ElementSpec], _ widget: IslandWidget) -> some View {
+        let fitsOneRow = width <= 0 || (width - CGFloat(elements.count - 1) * Self.spacing) / CGFloat(elements.count) >= Self.tileMinimum
+        let columns = fitsOneRow ? elements.count : (elements.count + 1) / 2
+        let rows = stride(from: 0, to: elements.count, by: columns).map { Array(elements[$0..<min($0 + columns, elements.count)]) }
+        return VStack(spacing: Self.spacing) {
+            ForEach(rows.indices, id: \.self) { row in
+                HStack(spacing: Self.spacing) {
+                    ForEach(rows[row], id: \.id) { element in
+                        ElementTile(element: element, isOn: widget.shows(element.id)) { on in
+                            withAnimation(Motion.content) { model.editedWidgets.setOption(element.id, on, for: id) }
+                        }
+                    }
+                    // A shorter last row keeps the tiles' width.
+                    ForEach(0..<(columns - rows[row].count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
+                }
+            }
+        }
+    }
+
+    /// The icon's side: as tall as the buttons beside it, Remove and Done over Customize.
+    static let headerHeight: CGFloat = 56
+    /// The name and the line under it grow with the icon (20 and 12 pt beside the 52 pt icon of the
+    /// other pages' headers), so the three keep their proportions.
+    static var headerScale: CGFloat { headerHeight / 52 }
+
+    /// The widget's icon and name; on the right Remove and Done, level with the icon's top, and
+    /// Customize under them, as wide as the two and level with the icon's bottom.
     private func header(_ widget: IslandWidget) -> some View {
         let kind = widget.kind
         return HStack(spacing: 14) {
-            WidgetIcon(kind: kind, side: 52)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(kind.title).font(.system(size: 20, weight: .bold))
+            WidgetIcon(kind: kind, side: Self.headerHeight)
+            VStack(alignment: .leading, spacing: 2 * Self.headerScale) {
+                Text(kind.title).font(.system(size: (20 * Self.headerScale).rounded(), weight: .bold))
                 Text("\(kind.category.title) · \(widget.frame.width) × \(widget.frame.height)")
-                    .font(.callout)
+                    .font(.system(size: (12 * Self.headerScale).rounded()))
                     .foregroundStyle(SettingsPalette.secondary)
             }
             Spacer()
-            Button("Remove", systemImage: "minus.circle", role: .destructive) {
-                selection = nil
-                withAnimation(.spring(duration: 0.3)) { model.editedWidgets.remove(id) }
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Button("Remove", systemImage: "minus.circle", role: .destructive) {
+                        selection = nil
+                        withAnimation(.spring(duration: 0.3)) { model.editedWidgets.remove(id) }
+                    }
+                    Button("Done") { selection = nil }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                }
+                Spacer(minLength: 0)
+                Button { model.studio.customizing = id } label: {
+                    Label("Customize…", systemImage: "paintbrush").frame(maxWidth: .infinity)
+                }
+                .help("The widget large, with everything it can be set to beside it")
             }
-            .controlSize(.large)
-            Button("Customize…", systemImage: "paintbrush") { model.studio.probe.driver?.open(id, animated: true) }
-                .controlSize(.large)
-                .help("Every look of the widget and of each element in it")
-            Button("Done") { selection = nil }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut(.defaultAction)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(height: Self.headerHeight)
         }
     }
 
-    // MARK: Look
+}
 
-    private func lookCard(_ widget: IslandWidget) -> some View {
-        let kind = widget.kind
-        return VStack(alignment: .leading, spacing: 14) {
-            if !kind.layouts.isEmpty {
-                LabeledSetting("Layout") {
-                    HStack(spacing: 8) {
-                        ForEach(kind.layouts) { layout in
-                            LayoutOption(layout: layout, isSelected: widget.layout == layout) {
-                                withAnimation(Motion.content) { model.editedWidgets.update(id) { $0.layout = layout } }
-                            }
-                        }
+/// The plate's strength; the Colour background's colour and strength, side by side, the colour
+/// mixed in the mixer that opens under them.
+struct BackgroundSettings: View {
+    let widget: IslandWidget
+    /// One under the other (a narrow panel), not side by side.
+    var stacked = false
+    @Binding var isMixing: Bool
+    let change: ((inout IslandWidget) -> Void) -> Void
+
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let colours = widget.background == .tinted
+        VStack(alignment: .leading, spacing: 12) {
+            if stacked {
+                if colours { colour }
+                opacity
+            } else {
+                HStack(spacing: 24) {
+                    if colours {
+                        colour.frame(maxWidth: .infinity)
                     }
+                    opacity.frame(maxWidth: .infinity)
                 }
             }
-            LabeledSetting("Accent Colour") {
-                TintWell(selection: widget.tint, automaticHint: kind == .nowPlaying ? "from the artwork" : "the system's accent",
-                         purpose: kind.accentPurpose) { tint in
-                    withAnimation(Motion.content) { model.editedWidgets.update(id) { $0.tint = tint } }
-                }
-            }
-            LabeledSetting("Background") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Picker("Background", selection: Binding(get: { widget.background }, set: { background in
-                        withAnimation(.spring(duration: 0.4, bounce: 0.18)) {
-                            model.editedWidgets.update(id) {
-                                $0.background = background
-                                $0.backgroundOpacity = nil
-                            }
-                        }
-                    })) {
-                        ForEach(kind.backgrounds.filter { !$0.needsCustomize || $0 == widget.background }) { Text($0.title).tag($0) }
-                    }
-                    .choiceBar()
-                    .labelsHidden()
-                    .fixedSize()
-                    // Plate, Colour and Artwork have a strength; it slides out under the picker.
-                    if widget.background.hasOpacity {
-                        BackgroundOpacitySlider(value: widget.effectiveBackgroundOpacity) { value in
-                            model.editedWidgets.update(id) { $0.backgroundOpacity = value }
-                        }
-                        .transition(.asymmetric(
-                            insertion: .opacity.combined(with: .offset(y: -8)).combined(with: .scale(scale: 0.97, anchor: .topLeading)),
-                            removal: .opacity
-                        ))
-                    }
-                }
-            }
-            if kind == .nowPlaying {
-                LabeledSetting("Buttons") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle(isOn: Binding(get: { widget.plainButtons }, set: { on in
-                            withAnimation(.spring(duration: 0.4, bounce: 0.18)) {
-                                model.editedWidgets.update(id) { $0.plainButtons = on }
-                            }
-                        })) {
-                            Text("Colourless buttons")
-                            Text("All three in the plain glass, like the plate.")
-                                .foregroundStyle(SettingsPalette.secondary)
-                        }
-                        .toggleStyle(.switch)
-                        .tint(Color.islandControlAccent)
-                        if !widget.plainButtons {
-                            VStack(alignment: .leading, spacing: 12) {
-                                ForEach(TransportButton.allCases) { button in
-                                    ButtonLookRow(button: button, look: widget.look(of: button)) { look in
-                                        model.editedWidgets.update(id) { $0.buttonLooks[button.rawValue] = look }
-                                    }
-                                }
-                            }
-                            .transition(.asymmetric(
-                                insertion: .opacity.combined(with: .offset(y: -8)).combined(with: .scale(scale: 0.97, anchor: .topLeading)),
-                                removal: .opacity
-                            ))
-                        }
-                    }
-                }
-            }
-            if kind.canMirror {
-                Toggle(isOn: Binding(get: { widget.mirrored }, set: { on in
-                    withAnimation(Motion.content) { model.editedWidgets.update(id) { $0.mirrored = on } }
-                })) {
-                    Text("Swap sides")
-                    Text(kind == .nowPlaying ? "Artwork on the right." : "The two halves change places.")
-                        .foregroundStyle(SettingsPalette.secondary)
-                }
-                .toggleStyle(.switch)
-                .tint(Color.islandControlAccent)
+            if colours, isMixing {
+                ColorMixer(rgb: Binding(get: { widget.backgroundColor ?? model.preferences.theme.rgb },
+                                        set: { rgb in change { $0.backgroundColor = rgb } }), compact: stacked)
+                    .padding(stacked ? 12 : 18)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.white.opacity(0.04), in: .rect(cornerRadius: 16, style: .continuous))
+                    .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1) }
+                    .transition(.scale(scale: 0.9, anchor: .top).combined(with: .opacity))
             }
         }
+        .onChange(of: colours) { if !colours { isMixing = false } }
+    }
+
+    /// The colour: its swatch and name, back to automatic, and the mixer.
+    private var colour: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(widget.backgroundColor?.color ?? .islandAccent)
+                .overlay { Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1) }
+                .frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Colour").font(.callout)
+                Text(widget.backgroundColor?.hex ?? (widget.kind == .nowPlaying ? "Automatic — the artwork's" : "Automatic — the theme's"))
+                    .font(.caption)
+                    .foregroundStyle(SettingsPalette.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if widget.backgroundColor != nil {
+                Button("Automatic") {
+                    withAnimation(Motion.content) { change { $0.backgroundColor = nil } }
+                }
+                .controlSize(.small)
+            }
+            Button {
+                isMixing.toggle()
+            } label: {
+                Label(isMixing ? "Done" : "Mix", systemImage: isMixing ? "checkmark" : "paintpalette.fill")
+            }
+            .controlSize(.small)
+        }
+    }
+
+    /// The strength, 0–100 %, snapped to whole percents so a slow drag does not rewrite the board for
+    /// every pixel.
+    private var opacity: some View {
+        let value = widget.effectiveBackgroundOpacity
+        return HStack(spacing: 10) {
+            Text("Opacity").font(.callout)
+            Slider(value: Binding(get: { value }, set: { new in
+                let snapped = (new * 100).rounded() / 100
+                if snapped != value { change { $0.backgroundOpacity = snapped } }
+            }), in: 0...1) {
+                Text("Opacity")
+            }
+            .labelsHidden()
+            .tint(Color.islandAccent)
+            ReservedWidthText(value.formatted(.percent.precision(.fractionLength(0))),
+                              fitting: [Double(1).formatted(.percent.precision(.fractionLength(0)))])
+                .foregroundStyle(SettingsPalette.secondary)
+                .monospacedDigit()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Background opacity")
     }
 }
 
-/// One element of a widget: its switch, and its size while it is shown.
-private struct ElementRow: View {
+/// One element of a widget as a tile: its symbol over its name, lit in the theme's colour while the
+/// element shows. A click switches it.
+private struct ElementTile: View {
     let element: ElementSpec
-    let widget: IslandWidget
-    let change: ((inout IslandWidget) -> Void) -> Void
+    let isOn: Bool
+    let set: (Bool) -> Void
+
+    @State private var isHovered = false
 
     var body: some View {
-        let option = element.id
-        let on = widget.shows(option)
-        HStack(spacing: 10) {
-            Image(systemName: element.symbol)
-                .font(.system(size: 12, weight: .semibold))
-                // On the accent, the colour that reads on it (black on the white theme's).
-                .foregroundStyle(on ? Color.onIslandAccent : SettingsPalette.secondary)
-                .frame(width: 26, height: 26)
-                .background(on ? AnyShapeStyle(Color.islandAccent.gradient) : AnyShapeStyle(.white.opacity(0.08)),
-                            in: .rect(cornerRadius: 7, style: .continuous))
-            Text(element.title)
-                .foregroundStyle(on ? .primary : SettingsPalette.secondary)
-            Spacer(minLength: 8)
-            if element.isSizable, on {
-                Picker("Size", selection: Binding(get: { widget.size(of: option) }, set: { size in
-                    change { widget in
-                        // Laid out freely, its size is its rectangle: that grows or shrinks.
-                        let factor = Double(size.factor / widget.size(of: option).factor)
-                        LayoutEdit.scale(option, by: factor, in: &widget.style.layout.arrangement)
-                        widget.sizes[option] = size
-                    }
-                })) {
-                    ForEach(ElementSize.allCases) { size in
-                        Text(size.title).tag(size).help(size.accessibilityTitle)
-                    }
-                }
-                .choiceBar()
-                .labelsHidden()
-                .fixedSize()
-                .controlSize(.small)
-                .transition(.opacity)
+        Button { set(!isOn) } label: {
+            VStack(spacing: 7) {
+                Image(systemName: element.symbol)
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(height: 22)
+                Text(element.title)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
-            Toggle(element.title, isOn: Binding(get: { on }, set: { new in
-                change { widget in
-                    if new { widget.options.insert(option) } else { widget.options.remove(option) }
-                    // Laid out freely: on the widget or in its tray with it.
-                    LayoutEdit.setShown(option, new, role: element.role, parts: element.parts, in: &widget.style.layout.arrangement)
-                }
-            }))
-            .toggleStyle(.switch)
-            .tint(Color.islandControlAccent)
-            .labelsHidden()
-            .controlSize(.small)
+            .foregroundStyle(isOn ? AnyShapeStyle(.primary) : AnyShapeStyle(SettingsPalette.secondary))
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 74)
+            .background(isOn ? Color.islandAccent.opacity(0.2) : .white.opacity(isHovered ? 0.07 : 0.04),
+                        in: .rect(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(isOn ? Color.islandAccent : .white.opacity(0.06), lineWidth: isOn ? 1.5 : 1)
+            }
+            .contentShape(.rect(cornerRadius: 12))
         }
-        .padding(.vertical, 7)
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .help(isOn ? "Shown: click to hide" : "Hidden: click to show")
+        .accessibilityRepresentation {
+            Toggle(element.title, isOn: Binding(get: { isOn }, set: set))
+        }
     }
 }
 
@@ -810,7 +846,7 @@ private struct GalleryCard: View {
                 Text(kind.title)
                     .font(.system(size: 12.5, weight: .semibold))
                     .lineLimit(1)
-                    // A long name (Screen Mirroring, Battery Health) a little smaller rather than cut.
+                    // A long name a little smaller rather than cut.
                     .minimumScaleFactor(0.72)
                 Spacer(minLength: 4)
                 AddWidgetButton(isAdded: isAdded, add: add, open: open)
@@ -898,7 +934,6 @@ struct WidgetPreview: View {
     let maxSize: CGSize
 
     @Environment(AppModel.self) private var model
-    @State private var thumbnails = ThumbnailCache()
 
     /// As long as the SwiftUI fade it replaces.
     static let fadeIn: TimeInterval = 0.2
@@ -911,8 +946,7 @@ struct WidgetPreview: View {
         let scale = min(1, maxSize.width / size.width, maxSize.height / size.height)
         IsolatedFillHosting(input: PreviewInput(kind: kind, rect: rect, size: size, scale: scale), fadeIn: Self.fadeIn, isPicture: true,
                             pausesWithSettings: true) {
-            IslandWidgetView(widget: IslandWidget(kind: kind, frame: rect, options: kind.defaultOptions),
-                             size: size, thumbnails: thumbnails)
+            IslandWidgetView(widget: IslandWidget(kind: kind, frame: rect, options: kind.defaultOptions), size: size)
                 .environment(\.isWidgetPreview, true)
                 .environment(\.colorScheme, .dark)
                 .allowsHitTesting(false)
@@ -954,7 +988,7 @@ extension WidgetCategory {
         case .time: "timer"
         case .controls: "switch.2"
         case .battery: "battery.75percent"
-        case .system: "sun.max.fill"
+        case .system: "cpu"
         case .tools: "wrench.and.screwdriver.fill"
         }
     }
@@ -992,29 +1026,5 @@ struct NativeSearchField: NSViewRepresentable {
             guard let field = notification.object as? NSSearchField else { return }
             text.wrappedValue = field.stringValue
         }
-    }
-}
-
-/// A view filling the stage's room (top-left origin): the room's place in AppKit, and the scale
-/// the stage shows it at (about its top centre), for the Customize transition.
-private struct StageRoomAnchor: NSViewRepresentable {
-    let probe: StudioProbe
-    let scale: CGFloat
-
-    func makeNSView(context: Context) -> RoomView {
-        let view = RoomView()
-        probe.roomView = view
-        probe.roomScale = scale
-        return view
-    }
-
-    func updateNSView(_ view: RoomView, context: Context) {
-        probe.roomView = view
-        probe.roomScale = scale
-    }
-
-    final class RoomView: NSView {
-        override var isFlipped: Bool { true }
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }

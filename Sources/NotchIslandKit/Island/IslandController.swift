@@ -112,6 +112,8 @@ nonisolated extension BannerKind {
     /// Set when the island closes under a resting pointer: hovering must not
     /// reopen it until the pointer has left once.
     private var suppressHoverOpenUntilExit = false
+    /// While recording, the panel was asked for: it shows instead of the recording card until it closes.
+    private var wantsPanelWhileRecording = false
     /// `demo/hover`: a pointer that exists only for the controller, wherever the real one is.
     private var isPointerSimulated = false
     /// A full-screen window covers the notch screen (see `setHidden`).
@@ -231,6 +233,9 @@ nonisolated extension BannerKind {
 
     func expand(page: ExpandedPage? = nil, pinned: Bool = false, userInitiated: Bool) {
         hoverDwell.cancel()
+        // A page asked for by name (a file dragged to the shelf, `open?page=`) is the panel, also
+        // while recording; the pointer and a plain open bring the recording card then.
+        if page != nil, model.recorder.isRecording { wantsPanelWhileRecording = true }
         if let page, model.island.page != page, model.availablePages.contains(page) { model.island.page = page }
         if pinned, !model.island.isPinned { model.island.isPinned = true }
         // Opened without a page asked for, on one the user has since hidden from the picker: the
@@ -249,6 +254,22 @@ nonisolated extension BannerKind {
         pointerHasVisited = pointerInside
         closeTimer.cancel()
         unvisitedTimer.cancel()
+        inputsChanged()
+    }
+
+    // MARK: Recording
+
+    /// The recording card's own click: the panel, as without a recording.
+    func openPanelWhileRecording() {
+        guard !wantsPanelWhileRecording else { return }
+        wantsPanelWhileRecording = true
+        inputsChanged()
+    }
+
+    /// The recording ended: its card closes (the panel, if that was open, stays).
+    func recordingStopped() {
+        if case .expanded(.recording) = model.island.presentation { close(releasingPin: true) }
+        wantsPanelWhileRecording = false
         inputsChanged()
     }
 
@@ -371,6 +392,7 @@ nonisolated extension BannerKind {
     /// gesture, when the user has that on (Settings ▸ Siri). Only on a closed island (idle, pill or
     /// notice): an open panel's own scroll views keep their scrolling.
     func scrolled(_ event: NSEvent) -> Bool {
+        if case .expanded(let page) = model.island.presentation, page != .recording { return swipedPages(event) }
         let settings = model.preferences.siri
         guard settings.swipeOpens, !model.island.presentation.isOpen else { return false }
         // A new gesture (or a wheel turned again after a pause) starts from zero.
@@ -392,6 +414,46 @@ nonisolated extension BannerKind {
             openAssistant()
         }
         return true
+    }
+
+    // MARK: Swipe between pages
+
+    /// Sideways scroll collected over the open panel (points; to the right positive, the fingers' way).
+    private var pageSwipe: CGFloat = 0
+    private var pageSwipeFired = false
+    private var lastPageSwipeEvent: TimeInterval = 0
+    /// How far two fingers go sideways to turn a page.
+    static let pageSwipeDistance: CGFloat = 50
+
+    /// Two fingers swiped sideways on the open panel turn its page, once per gesture, in the
+    /// picker's order: to the left the next, to the right the one before (as the trackpad turns
+    /// pages elsewhere). What scrolls by itself under the fingers — the timer's ruler, the shelf's
+    /// files — is an AppKit scroll view that takes the scroll first: it moves, the page does not.
+    private func swipedPages(_ event: NSEvent) -> Bool {
+        guard event.hasPreciseScrollingDeltas else { return false }
+        if event.phase == .began || (event.phase.isEmpty && event.momentumPhase.isEmpty
+                                     && event.timestamp - lastPageSwipeEvent > 0.35) {
+            pageSwipe = 0
+            pageSwipeFired = false
+        }
+        lastPageSwipeEvent = event.timestamp
+        if event.phase == .ended || event.phase == .cancelled || !event.momentumPhase.isEmpty { return pageSwipeFired }
+        // Mostly sideways only: an up-or-down scroll is left alone.
+        guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else { return pageSwipeFired }
+        let fingersRight = event.isDirectionInvertedFromDevice ? event.scrollingDeltaX : -event.scrollingDeltaX
+        pageSwipe += fingersRight
+        guard !pageSwipeFired, abs(pageSwipe) >= Self.pageSwipeDistance else { return true }
+        pageSwipeFired = true
+        turnPage(by: pageSwipe < 0 ? 1 : -1)
+        return true
+    }
+
+    /// The page `step` away in the picker, if there is one (no wrapping round).
+    func turnPage(by step: Int) {
+        let pages = model.pickerPages
+        guard let index = pages.firstIndex(of: model.panelPage), pages.indices.contains(index + step) else { return }
+        model.island.page = pages[index + step]
+        model.haptics.play(.tick)
     }
 
     // MARK: Drag and drop
@@ -495,7 +557,9 @@ nonisolated extension BannerKind {
             isAnchorTargeted: isAnchorTargeted,
             countdownActive: model.timers.isCountdownActive,
             stopwatchActive: model.timers.isStopwatchActive,
-            nowPlayingActive: model.preferences.showNowPlaying && model.media.isActive
+            nowPlayingActive: model.preferences.showNowPlaying && model.media.isActive,
+            recordingActive: model.recorder.isRecording,
+            wantsPanelWhileRecording: wantsPanelWhileRecording
         )
     }
 
@@ -612,6 +676,7 @@ nonisolated extension BannerKind {
         if releasingPin, model.island.isPinned { model.island.isPinned = false }
         guard wantsExpanded else { return }
         wantsExpanded = false
+        wantsPanelWhileRecording = false
         inputsChanged()
     }
 

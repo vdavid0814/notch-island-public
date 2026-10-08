@@ -2,10 +2,21 @@ import AppKit
 
 /// Application lifecycle for the agent app.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// SIGTERM (`kill`, `pkill`, a relaunch): quit as from the menu, so what waits to be written
+    /// is written (the battery's last readings, a board change) and the run ends as a quit, not a
+    /// crash. Killed outright, the battery history lost its readings since the last write and
+    /// the next launch began with a gap.
+    private var termination: (any DispatchSourceSignal)?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `LSUIElement` already makes the bundle an agent; setting the policy as well keeps the
         // raw binary (run from `.build` during development) out of the Dock and the app switcher.
         NSApp.setActivationPolicy(.accessory)
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { NSApp.terminate(nil) }
+        source.resume()
+        termination = source
         AppModel.shared.start()
     }
 

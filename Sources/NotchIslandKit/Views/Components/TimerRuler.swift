@@ -12,18 +12,25 @@ struct TimerRuler: View {
     var range: ClosedRange<Int> = 0...120
     var minimum = 1
     var unit: TimerUnit = .minutes
-    /// Under the marker: the unit's name, as a button that moves on to the next unit (nil: the
-    /// plain marker).
+    /// A click on the marker (or the unit's name beside it) moves on to the next unit (nil: none).
     var nextUnit: (() -> Void)?
+    /// The unit's name beside the marker, as its text style sets it (nil: the marker alone).
+    var unitName: RulerUnitName?
     /// While a timer runs the ruler shows the remaining minutes and cannot be moved.
     var isEditable = true
     var showsLabels = true
     var tint: Color = Self.tint
+    /// The ticks' ends (`RulerLook.ends`).
+    var ends: ButtonLook.Corners = .round
     /// Called when the user starts or ends moving it (keeps the island open meanwhile).
     var onInteraction: (Bool) -> Void = { _ in }
     /// The centre marker's size; short rulers (the smallest island sizes) use a smaller one so the
     /// ticks keep their height.
     var markerSize: CGFloat = 9
+    /// The pointer is over what the ruler is in (its widget): the scroll view is ready before the
+    /// fingers reach the ruler. A two-finger scroll begun on the resting picture was not the scroll
+    /// view's (it takes a gesture from its start): the first swipe did nothing.
+    var isAwake = false
 
     nonisolated static let tickSpacing: CGFloat = 8
     static let tint = Color.orange
@@ -34,40 +41,43 @@ struct TimerRuler: View {
         minimum: Int = 1,
         unit: TimerUnit = .minutes,
         nextUnit: (() -> Void)? = nil,
+        unitName: RulerUnitName? = nil,
         isEditable: Bool = true,
         showsLabels: Bool = true,
         tint: Color = Self.tint,
+        ends: ButtonLook.Corners = .round,
         onInteraction: @escaping (Bool) -> Void = { _ in },
-        markerSize: CGFloat = 9
+        markerSize: CGFloat = 9,
+        isAwake: Bool = false
     ) {
         _minutes = minutes
         self.range = range
         self.minimum = minimum
         self.unit = unit
         self.nextUnit = nextUnit
+        self.unitName = unitName
         self.isEditable = isEditable
         self.showsLabels = showsLabels
         self.tint = tint
+        self.ends = ends
         self.onInteraction = onInteraction
         self.markerSize = markerSize
+        self.isAwake = isAwake
     }
 
     var body: some View {
         VStack(spacing: markerSize < 9 ? 1 : 2) {
-            // A new scale per unit: it cross-fades in on its own value while the marker below
-            // stays put (the whole ruler used to swap, so two markers slid across each other).
+            // A new scale per unit, at once (one fading in left the ruler blank a moment, its
+            // numbers out of step with the time's), while the marker below stays put.
             RestingRulerTrack(minutes: $minutes, range: range, minimum: minimum, isEditable: isEditable,
-                              showsLabels: showsLabels, tint: tint, onInteraction: onInteraction)
+                              showsLabels: showsLabels, tint: tint, ends: ends, isAwake: isAwake, onInteraction: onInteraction)
                 .id(unit)
-                // The old scale goes at once and the new one fades in: two scales cross-fading
-                // showed a double row of ticks.
-                .transition(.asymmetric(
-                    insertion: .opacity.combined(with: .scale(scale: 0.97)),
-                    removal: .identity
-                ))
+                .transition(.identity)
+                // The scale alone: the unit's name under it keeps what it draws below its line
+                // (an underline) and where it is moved.
+                .clipped()
             marker
         }
-        .clipped()
         .accessibilityElement()
         .accessibilityLabel("Timer length")
         .accessibilityValue("\(minutes) \(unit.accessibilityTitle)")
@@ -85,14 +95,11 @@ struct TimerRuler: View {
     /// (changing in place), tappable to move on to the next unit.
     private var marker: some View {
         Image(systemName: "arrowtriangle.up.fill")
-            .font(.system(size: nextUnit == nil ? markerSize : markerSize * 0.78))
+            .font(.system(size: unitName == nil ? markerSize : markerSize * 0.78))
             .foregroundStyle(tint)
             .overlay(alignment: .leading) {
-                if nextUnit != nil {
-                    Text(unit.shortTitle)
-                        .font(.system(size: markerSize, weight: .semibold, design: .rounded))
-                        .foregroundStyle(tint)
-                        .fixedSize()
+                if let unitName {
+                    unitName.label(unit.shortTitle, size: markerSize, tint: tint)
                         .transaction { $0.animation = nil }
                         .offset(x: markerSize * 1.1)
                 }
@@ -106,6 +113,68 @@ struct TimerRuler: View {
 
     private func clamp(_ value: Int) -> Int {
         min(max(value, max(range.lowerBound, minimum)), range.upperBound)
+    }
+}
+
+/// The unit's name beside the ruler's marker ("min", "sec", "hr") as its text style sets it: its
+/// type (rounded where the style leaves the typeface at Default), its colour (the ruler's where
+/// Automatic), its box (a width and height of its own, the letters shrunk to fit), and moved by
+/// `offset`. With `reportsFrame` it tells Customize's panel where it is drawn (`RulerUnitFrameKey`).
+struct RulerUnitName: Equatable {
+    var style: TextStyle = .plain
+    var offset: ElementOffset = .zero
+    /// The colour where the style's is Automatic; nil: the ruler's.
+    var color: Color?
+    var reportsFrame = false
+
+    /// Its own size beside a marker `markerSize` large.
+    static func points(markerSize: CGFloat) -> CGFloat { markerSize }
+
+    /// Medium: Bold makes it bold.
+    static let weight = NSFont.Weight.medium
+
+    func label(_ text: String, size: CGFloat, tint: Color) -> some View {
+        var style = style
+        if style.design == .standard { style.design = .rounded }
+        let font = style.font(size: Self.points(markerSize: size), weight: Self.weight)
+        let fill: Color = switch style.color {
+        case .custom(let rgb): rgb.color
+        default: color ?? tint
+        }
+        return Group {
+            if let box = style.box {
+                Text(text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.3)
+                    .frame(width: CGFloat(box.width), height: CGFloat(box.height), alignment: style.alignment.frameAlignment)
+            } else {
+                Text(text).fixedSize()
+            }
+        }
+        .font(Font(font))
+        .underline(style.isUnderlined)
+        .strikethrough(style.isStruckThrough)
+        .foregroundStyle(fill)
+        .background {
+            if reportsFrame {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: RulerUnitFrameKey.self, value: proxy.frame(in: .named(RulerUnitFrameKey.space)))
+                }
+            }
+        }
+        .offset(x: offset.x, y: offset.y)
+    }
+}
+
+/// Where the unit's name is drawn, in `space` (Customize's panel for the ruler).
+struct RulerUnitFrameKey: PreferenceKey {
+    static let space = "rulerParts"
+
+    static var defaultValue: CGRect { .zero }
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero { value = next }
     }
 }
 
@@ -125,6 +194,7 @@ private struct RulerTrack: View {
     let isEditable: Bool
     let showsLabels: Bool
     let tint: Color
+    let ends: ButtonLook.Corners
     let onInteraction: (Bool) -> Void
 
     @State private var scrolled: Int?
@@ -132,13 +202,14 @@ private struct RulerTrack: View {
     @State private var phase: ScrollPhase = .idle
 
     init(minutes: Binding<Int>, range: ClosedRange<Int>, minimum: Int, isEditable: Bool, showsLabels: Bool,
-         tint: Color, onInteraction: @escaping (Bool) -> Void) {
+         tint: Color, ends: ButtonLook.Corners, onInteraction: @escaping (Bool) -> Void) {
         _minutes = minutes
         self.range = range
         self.minimum = minimum
         self.isEditable = isEditable
         self.showsLabels = showsLabels
         self.tint = tint
+        self.ends = ends
         self.onInteraction = onInteraction
         _scrolled = State(initialValue: minutes.wrappedValue)
     }
@@ -161,7 +232,7 @@ private struct RulerTrack: View {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
                     ForEach(first...range.upperBound, id: \.self) { minute in
-                        Tick(minute: minute, isPast: minute > minutes, showsLabel: showsLabels, tint: tint)
+                        Tick(minute: minute, isPast: minute > minutes, showsLabel: showsLabels, tint: tint, ends: ends)
                             .frame(width: spacing)
                             .id(minute)
                     }
@@ -171,7 +242,7 @@ private struct RulerTrack: View {
                     if !landmarks.isEmpty {
                         HStack(spacing: 0) {
                             ForEach(landmarks, id: \.self) { minute in
-                                Tick(minute: minute, isPast: minute > minutes, showsLabel: showsLabels, tint: tint)
+                                Tick(minute: minute, isPast: minute > minutes, showsLabel: showsLabels, tint: tint, ends: ends)
                                     .frame(width: spacing)
                             }
                         }
@@ -274,6 +345,7 @@ private struct Tick: View {
     let isPast: Bool
     let showsLabel: Bool
     let tint: Color
+    let ends: ButtonLook.Corners
 
     static let labelFont = Font.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit()
     /// The label line's height (10-pt rounded semibold), so unlabelled ticks line up.
@@ -296,7 +368,7 @@ private struct Tick: View {
                 }
                 .frame(width: TimerRuler.tickSpacing, height: Self.labelHeight)
             }
-            Capsule()
+            RoundedRectangle(cornerRadius: ends.radius(height: Self.width), style: .continuous)
                 .fill(style)
                 .frame(width: Self.width)
                 .frame(maxHeight: .infinity)
@@ -336,23 +408,25 @@ private struct RestingRulerTrack: View {
     let isEditable: Bool
     let showsLabels: Bool
     let tint: Color
+    let ends: ButtonLook.Corners
+    let isAwake: Bool
     let onInteraction: (Bool) -> Void
 
     @State private var isHovered = false
     @State private var isInteracting = false
 
     var body: some View {
-        let live = !isEditable || isHovered || isInteracting
+        let live = !isEditable || isHovered || isInteracting || isAwake
         ZStack {
             if live {
                 RulerTrack(minutes: $minutes, range: range, minimum: minimum, isEditable: isEditable,
-                           showsLabels: showsLabels, tint: tint) { interacting in
+                           showsLabels: showsLabels, tint: tint, ends: ends) { interacting in
                     isInteracting = interacting
                     onInteraction(interacting)
                 }
             } else {
                 RulerPicture(value: min(max(minutes, max(range.lowerBound, minimum)), range.upperBound),
-                             range: range, showsLabels: showsLabels, tint: tint)
+                             range: range, showsLabels: showsLabels, tint: tint, ends: ends)
             }
         }
         .onHover { isHovered = $0 }
@@ -369,6 +443,7 @@ struct RulerPicture: View {
     let range: ClosedRange<Int>
     let showsLabels: Bool
     let tint: Color
+    var ends: ButtonLook.Corners = .round
 
     var body: some View {
         GeometryReader { proxy in
@@ -380,7 +455,7 @@ struct RulerPicture: View {
             ZStack(alignment: .topLeading) {
                 ForEach(minutes, id: \.self) { minute in
                     let rect = columns.capsule(minute, height: proxy.size.height)
-                    Capsule()
+                    RoundedRectangle(cornerRadius: ends.radius(height: Tick.width), style: .continuous)
                         .fill(tint.opacity(minute > value ? 0.35 : 1))
                         .frame(width: rect.width, height: rect.height)
                         .offset(x: rect.minX, y: rect.minY)

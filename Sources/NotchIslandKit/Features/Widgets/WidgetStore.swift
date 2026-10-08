@@ -18,20 +18,12 @@ import Foundation
     @ObservationIgnored let key: String
     /// The board it starts with and is reset to.
     @ObservationIgnored let seed: WidgetBoard
-    /// The widgets whose data is kept when the orphans are removed: every page's, once the pages
-    /// are several (`WidgetPages`); by default this board's.
-    @ObservationIgnored var keeping: (() -> Set<WidgetID>)?
     /// The board as an earlier version stored it, backed up before it is first overwritten.
     @ObservationIgnored private var legacyData: Data?
     @ObservationIgnored private var pendingWrite: Task<Void, Never>?
-    /// Each instance's larger data (`WidgetInstanceStore`). Nil until the app starts (`AppModel.start`),
-    /// so a test's store never touches the user's folders.
-    @ObservationIgnored private(set) var instances: WidgetInstanceStore?
 
-    init(defaults: UserDefaults = .standard, instances: WidgetInstanceStore? = nil, key: String = WidgetStore.key,
-         seed: WidgetBoard = .standard) {
+    init(defaults: UserDefaults = .standard, key: String = WidgetStore.key, seed: WidgetBoard = .standard) {
         self.defaults = defaults
-        self.instances = instances
         self.key = key
         self.seed = seed
         let data = defaults.data(forKey: key)
@@ -42,36 +34,16 @@ import Foundation
     /// Every widget of the board, the parked ones too.
     var ids: Set<WidgetID> { Set((board.widgets + board.parked).map(\.id)) }
 
-    /// Keeps each instance's data in `store` from now on, and removes what belongs to no widget.
-    func attach(_ store: WidgetInstanceStore) {
-        instances = store
-        purgeOrphanedInstanceData()
-    }
-
-    /// Removes the folders of widgets that are gone, at background priority.
-    func purgeOrphanedInstanceData() {
-        guard let instances else { return }
-        let ids = keeping?() ?? ids
-        Task.detached(priority: .background) { instances.purge(keeping: ids) }
-    }
-
-    /// Whether a volume or brightness widget needs the level readers running.
-    var needsLevels: Bool { board.contains(.volume) || board.contains(.brightness) }
+    /// Whether a volume widget needs the level readers running.
+    var needsLevels: Bool { board.contains(.volume) }
 
     @discardableResult
     func add(_ kind: IslandWidgetKind) -> WidgetID? { board.add(kind) }
 
     @discardableResult
-    func duplicate(_ id: WidgetID) -> WidgetID? {
-        let copy = board.duplicate(id)
-        if let copy, let instances { Task.detached(priority: .utility) { instances.copy(from: id, to: copy) } }
-        return copy
-    }
+    func duplicate(_ id: WidgetID) -> WidgetID? { board.duplicate(id) }
 
-    func remove(_ id: WidgetID) {
-        board.remove(id)
-        if let instances { Task.detached(priority: .utility) { instances.purge(id) } }
-    }
+    func remove(_ id: WidgetID) { board.remove(id) }
 
     @discardableResult
     func setFrame(_ rect: GridRect, for id: WidgetID) -> Bool { board.setFrame(rect, for: id) }
@@ -93,10 +65,7 @@ import Foundation
     @discardableResult
     func restore(_ id: WidgetID) -> Bool { board.restore(id) }
 
-    func reset() {
-        board = seed
-        purgeOrphanedInstanceData()
-    }
+    func reset() { board = seed }
 
     /// The board and its stored copy gone (a page the user took away).
     func erase() {

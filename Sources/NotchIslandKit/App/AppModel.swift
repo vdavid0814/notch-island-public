@@ -26,9 +26,10 @@ import Observation
     /// The newest version from GitHub, downloaded from About.
     let updater = AppUpdater()
     let stats = SystemStatsMonitor()
-    let network = NetworkMonitor()
-    /// The AirPods' batteries as last reported (the AirPods Battery widget).
-    let airPodsBattery = AirPodsBatteryStore()
+    /// The Screen Recording widget's recorder; the island shows it while it records.
+    let recorder = ScreenRecorder()
+    /// The saved movie in the screen's corner, as macOS shows its own recordings.
+    @ObservationIgnored let recordingThumbnail = RecordingThumbnail()
     let levels = LevelsController()
     let shelf = ShelfStore()
     let timers = TimerStore()
@@ -41,9 +42,9 @@ import Observation
     let assistant = AssistantModel()
     /// What the user copied, for Siri's Clipboard (⌘4).
     let clipboard = ClipboardHistory()
-    /// Control Center switches for the Controls and Keyboard widgets.
+    /// Control Center switches (the Wi-Fi widget, the top bar's toggles).
     let controls = SystemControls()
-    /// The coming events, read only while a widget or Spotlight shows them.
+    /// The coming events, read only while Spotlight shows them.
     let calendar = CalendarService()
     @ObservationIgnored private let commandSpaceTap = CommandSpaceTap()
     /// Whether ⌘Space is really caught (About ▸ Permissions shows it).
@@ -100,7 +101,6 @@ import Observation
         if studio.page == page { studio.page = .home }
         if island.page == page { island.page = .home }
         boards.sync(preferences.header.orderedPages)
-        boards.home.purgeOrphanedInstanceData()
     }
 
     /// The pages the top bar's picker offers, in the user's order (`HeaderLayout`). A hidden page
@@ -153,6 +153,9 @@ import Observation
         haptics = Haptics(preferences: preferences)
         controller = IslandController(model: self)
         assistant.onClose = { [weak self] in self?.controller.closeAssistant() }
+        recorder.onStop = { [weak self] in self?.controller.recordingStopped() }
+        recorder.onStart = { [weak self] in self?.recordingThumbnail.dismiss(animated: false) }
+        recorder.onSaved = { [weak self] url, display in self?.recordingThumbnail.show(url, display: display) }
         assistant.onCommand = { [weak self] command in
             guard let self else { return }
             if case .open = command {
@@ -257,11 +260,8 @@ import Observation
         activity.start()
         launchAtLogin.refresh()
         power.start()
-        airPodsBattery.connectedOutputs = { [weak self] in self?.airPods.connectedOutputs ?? [] }
-        airPods.onRemember = { [weak self] in self?.airPodsBattery.note($0) }
         airPods.start()
         shelf.pruneMissingInBackground()
-        boards.attach(.standard)
 
         // The window controller must exist before the island controller applies its first
         // presentation, because it stages the panel in `willTransition`.
@@ -374,12 +374,6 @@ import Observation
             editWidget(widgets.board.first(of: kind)?.id)
         case .editWidget(.instance(let id)):
             editWidget(boards.page(containing: id) != nil ? id : nil)
-        case .customizeWidget(.kind(let kind)):
-            if let id = widgets.board.first(of: kind)?.id { customizeWidget(id) }
-        case .customizeWidget(.instance(let id)):
-            if boards.page(containing: id) != nil { customizeWidget(id) }
-        case .closeCustomize:
-            studio.probe.driver?.close()
         case .customize:
             showCustomize()
         case .assistant:
@@ -401,6 +395,8 @@ import Observation
             anchor.anchorFront()
         case .releaseAnchoredWindow:
             anchor.release()
+        case .toggleRecording:
+            recorder.toggle(display: metrics?.displayID)
         case .demo(let demoCommand):
             demo.run(demoCommand, model: self)
         }
@@ -428,19 +424,6 @@ import Observation
         editingWidget = id
         settingsPane = .widgets
         showSettings()
-    }
-
-    /// The widget's Customize editor: from the island's menu or a link, faded in over Settings
-    /// (flown in only from the stage, where the widget is seen).
-    func customizeWidget(_ id: WidgetID) {
-        if let page = boards.page(containing: id) { studio.page = page }
-        settingsPane = .widgets
-        if island.presentation.isSettings, let driver = studio.probe.driver {
-            driver.open(id, animated: false)
-        } else {
-            studio.customizing = id
-            showSettings()
-        }
     }
 
     /// Lets go of the window held under the notch.

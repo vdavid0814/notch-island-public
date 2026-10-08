@@ -306,3 +306,11 @@ nonisolated enum DisplaySleep {
         return IORegistryEntrySetCFProperty(entry, "IORequestIdle" as CFString, kCFBooleanTrue) == KERN_SUCCESS
     }
 }
+
+/// Whether this Mac has a battery, read once; and whether the system shows its temperature to apps
+/// (older Macs may not: no Temperature widget there).
+nonisolated enum BatteryAvailability {
+    static let hasBattery = PowerMonitor.readIOKit().hasBattery
+    static let hasTemperature = hasBattery
+        && BatteryProbe.properties().flatMap { BatteryProbe.temperature(properties: $0, pack: BatteryProbe.packData()) } != nil
+}

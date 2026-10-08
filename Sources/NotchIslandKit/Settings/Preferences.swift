@@ -40,7 +40,6 @@ import Foundation
         static let showAirPods = prefix + "showAirPods"
         static let siri = prefix + "siri"
         static let panel = prefix + "panel"
-        static let battery = prefix + "battery"
         static let header = prefix + "header"
         static let levelDuration = prefix + "levelDuration"
         static let airPodsDuration = prefix + "airPodsDuration"
@@ -138,13 +137,6 @@ import Foundation
     private static func catalogue(_ header: HeaderLayout) {
         CustomPage.catalog.withLock { $0 = Dictionary(header.customPages.map { ($0.page, $0) }) { first, _ in first } }
     }
-    /// The battery page's chart: its style, range, colours and what it marks.
-    var battery: BatteryDisplaySettings {
-        didSet {
-            guard battery != oldValue, let data = try? JSONEncoder().encode(battery) else { return }
-            defaults.set(data, forKey: Key.battery)
-        }
-    }
     /// How the bars beside the notch move while music plays, on battery.
     var musicBars: MusicBarsStyle { didSet { defaults.set(musicBars.rawValue, forKey: Key.musicBars) } }
     /// … and on the charger (or a Mac without a battery).
@@ -227,8 +219,6 @@ import Foundation
         let header = defaults.data(forKey: Key.header).flatMap { try? JSONDecoder().decode(HeaderLayout.self, from: $0) } ?? .standard
         Self.catalogue(header)
         self.header = header
-        battery = defaults.data(forKey: Key.battery).flatMap { try? JSONDecoder().decode(BatteryDisplaySettings.self, from: $0) }
-            ?? BatteryDisplaySettings()
         let duration = defaults.object(forKey: Key.animationDuration) as? Double ?? Motion.defaultDuration
         animationDuration = min(
             max(duration.isFinite ? duration : Motion.defaultDuration, Motion.durationRange.lowerBound),
