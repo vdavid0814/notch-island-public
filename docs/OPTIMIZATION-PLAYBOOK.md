@@ -100,7 +100,9 @@ Settings inside the island's window.
 October 9 2026: the panel's opening at background priority (`MainThrift.lowPower`, half the energy,
 but every opening hitched 200 ms instead of 83); the hidden kept panel at a near-zero opacity
 instead of 0 (SwiftUI still drops what lies outside the notch-sized window); Customize's steps in
-as `visualEffect` instead of `offset`/`opacity` (closing cheaper, opening +150 ms of CPU).
+as `visualEffect` instead of `offset`/`opacity` (closing cheaper, opening +150 ms of CPU); Customize's
+first ink reading 0.65 s later in a `Task(priority: .background)` on the main actor (the opening went
+from ~650 to 2200–2900: the main thread's work moved to the performance cores).
 
 ## 6. Keep the look and the motion identical
 
