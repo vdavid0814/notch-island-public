@@ -18,7 +18,7 @@ second, seconds with keyboard or mouse input left out) and `phases.py` (energy p
 | Rest with music, while the tap analyses (~3 s in 8 on battery) | 0.26–0.34 | **0.10–0.49** |
 | Moving the mouse while a full-screen app is up | **6.3–6.7** | **1.3** |
 | Opening Settings from the gear (General), A/B | 187–297 | 203–350 (no change) |
-| Closing Settings with a widget picked in Widgets | **1460–1930** | **189–210**, then ~185 for a second, unseen, 1 s later |
+| Closing Settings with a widget picked in Widgets | **1460–1930** | **162–167**, then 100–185 for a second, unseen, 1 s later |
 | Opening Customize (Timer) by its button, A/B | **1820–2460** | **685–1250** (the higher one first after launch) |
 | Closing Customize, A/B | 500–610 | **230–320** |
 | Memory at rest, Settings prepared | 236 MB | 202–208 MB |
@@ -52,7 +52,11 @@ second, seconds with keyboard or mouse input left out) and `phases.py` (energy p
 - **A click is not a URL**: driven by `notchisland://`, Settings' opening read 70–85, by the gear
   250–300 — the click's priority carries into its turn (performance cores). Customize read 2600
   only by its button. Measure both.
-- **Left over, above 100**: opening Customize (its graph and ~60 native controls are built at every
+- **Left over, above 100**: in Settings ▸ Widgets, letting go of a picked widget (Done) **1760–2040**
+  and picking one 300–480: the gallery (54 cards, each preview a hosting view of its own, one a
+  frame) is built again or taken down each time, because the inspector takes its place in an
+  `if`/`else`. Keeping the gallery alive under the inspector would end it, but the swap's animation
+  would have to be redone to look the same — left for a decision. Opening Customize (its graph and ~60 native controls are built at every
   opening, ~450 ms); opening Settings from the panel (~200–350 by the gear); the panel's own opening by hover (60–150,
   most of it the header's native page picker and every layer drawn again, because SwiftUI drops
   what lies outside the notch-sized resting window); Siri's app gallery (65–185).
