@@ -165,10 +165,12 @@ class DeferringHostingView<Content: View>: NSHostingView<Content> {
         return super.hitTest(point)
     }
 
-    /// Taken out of its superview while Settings is closed and put back as it opens
-    /// (`SettingsPresence`): Settings is kept, and a live picture in it (the widget gallery's
-    /// previews, the studio's island) followed the models it reads unseen — a volume change, a
-    /// timer finishing — and redrew. Out of the window, it does nothing.
+    /// Hidden while Settings is closed and shown again as it opens (`SettingsPresence`): Settings is
+    /// kept, and a live picture in it (the widget gallery's previews, the studio's island) stands
+    /// still meanwhile. It used to be taken out of the window instead: putting the gallery's 54
+    /// previews and the stage back at every opening and taking them out at every close was most of
+    /// opening and closing Settings on Widgets (measured: ~110 → ~80 and ~205 → ~180), while a
+    /// change they follow (a volume change) costs the same hidden.
     var pausesWithSettings = false {
         didSet {
             guard pausesWithSettings != oldValue else { return }
@@ -181,42 +183,10 @@ class DeferringHostingView<Content: View>: NSHostingView<Content> {
     }
 
     private var presenceObserver: (any NSObjectProtocol)?
-    /// While Settings shows another page than this picture's: put back once its page is shown.
-    private var pageObserver: (any NSObjectProtocol)?
-    private weak var pausedIn: NSView?
-
-    private func stopWaitingForPage() {
-        if let pageObserver { NotificationCenter.default.removeObserver(pageObserver) }
-        pageObserver = nil
-    }
 
     private func followPresence() {
-        if SettingsPresence.shared.isShown {
-            guard let container = pausedIn, superview == nil else { return }
-            // On a page Settings does not show: it stays out until that page is shown. Put back
-            // at every opening, the gallery's 54 previews and the stage went into the window
-            // with any page, a third of an opening's work (measured).
-            if container.isHiddenOrHasHiddenAncestor {
-                if pageObserver == nil {
-                    pageObserver = NotificationCenter.default.addObserver(
-                        forName: SettingsPageDeckView.pageShown, object: nil, queue: .main
-                    ) { [weak self] _ in
-                        MainActor.assumeIsolated { self?.followPresence() }
-                    }
-                }
-                return
-            }
-            stopWaitingForPage()
-            pausedIn = nil
-            frame = container.bounds
-            container.addSubview(self)
-            container.needsLayout = true
-        } else {
-            stopWaitingForPage()
-            guard let container = superview, pausedIn == nil else { return }
-            pausedIn = container
-            removeFromSuperview()
-        }
+        let hidden = !SettingsPresence.shared.isShown
+        if isHidden != hidden { isHidden = hidden }
     }
 }
 

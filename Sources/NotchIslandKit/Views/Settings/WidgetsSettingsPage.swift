@@ -22,6 +22,8 @@ struct WidgetsSettingsPage: View {
     @State private var viewportHeight: CGFloat = 0
     @State private var inspectorHeight: CGFloat = 0
     @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
+    /// Letting go of the picks once the page has gone (`pickResetDelay`).
+    @State private var pendingReset: Timer?
 
     var body: some View {
         ScrollViewReader { scroller in
@@ -112,21 +114,50 @@ struct WidgetsSettingsPage: View {
         // Kept between visits (`SettingsPageDeck`): left as a page that goes, and shown again as
         // a new one, with nothing picked.
         .onSettingsPageVisit(shown: {
+            // Shown again before the picks were let go: let go now, before it is drawn.
+            if let reset = pendingReset {
+                reset.invalidate()
+                pendingReset = nil
+                forgetPicks()
+            }
             takeRequestedEdit()
             noteSizeEntry()
         }, hidden: {
             left()
-            var quiet = Transaction()
-            quiet.disablesAnimations = true
-            withTransaction(quiet) {
-                selection = nil
-                group = []
-                notice = nil
+            // Nothing picked when it is shown again — but let go a moment later, unseen, on the
+            // efficiency cores: with a widget picked, the gallery comes back in its place (54 cards
+            // and their previews built again), which in the close's own turn was most of closing
+            // Settings (~1 s of CPU, Energy Impact ~1600–1900, measured). A run-loop timer, so the
+            // lowered priority holds for its turn.
+            pendingReset?.invalidate()
+            pendingReset = nil
+            guard selection != nil || !group.isEmpty || notice != nil else { return }
+            let reset = Timer(timeInterval: Self.pickResetDelay, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    pendingReset = nil
+                    MainThrift.lowPower(for: 1.5)
+                    forgetPicks()
+                }
             }
+            RunLoop.main.add(reset, forMode: .common)
+            pendingReset = reset
         })
         .task(id: notice) {
             guard notice != nil else { return }
             try? await Task.sleep(for: .seconds(4))
+            notice = nil
+        }
+    }
+
+    /// After the page has gone (Settings' close takes ~0.4 s).
+    private static let pickResetDelay: TimeInterval = 1
+
+    private func forgetPicks() {
+        var quiet = Transaction()
+        quiet.disablesAnimations = true
+        withTransaction(quiet) {
+            selection = nil
+            group = []
             notice = nil
         }
     }
@@ -1014,12 +1045,15 @@ private struct GalleryCard: View {
 @MainActor enum GalleryPreviewQueue {
     /// Between two previews: one display frame.
     static let spacing: Duration = .milliseconds(16)
+    /// While Settings is closed (the gallery coming back unseen after a widget was picked): short
+    /// turns far apart, each on the efficiency cores, instead of a second of them back to back.
+    static let unseenSpacing: Duration = .milliseconds(120)
     private static var nextTurn = ContinuousClock.now
 
     static func turn() async {
         let now = ContinuousClock.now
         let slot = max(now, nextTurn)
-        nextTurn = slot + spacing
+        nextTurn = slot + (SettingsPresence.shared.isShown ? spacing : unseenSpacing)
         if slot > now { try? await Task.sleep(until: slot, tolerance: .milliseconds(2)) }
     }
 }

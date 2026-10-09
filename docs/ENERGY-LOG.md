@@ -17,10 +17,12 @@ second, seconds with keyboard or mouse input left out) and `phases.py` (energy p
 | Rest with music, between analyses | 0.01–0.3 | **0.01–0.03** (reads 0.0) |
 | Rest with music, while the tap analyses (~3 s in 8 on battery) | 0.26–0.34 | **0.10–0.49** |
 | Moving the mouse while a full-screen app is up | **6.3–6.7** | **1.3** |
-| Opening Settings from the gear (General) | 246–298 | **181–210** |
-| Closing Settings | 71–74 | **56–63** |
-| Opening Customize (Timer) by its button | **2150–2800** | **645–670** (first after launch ~1200) |
-| Closing Customize | 360–430 | **206–227** |
+| Opening Settings from the gear (General), A/B | 187–297 | 203–350 (no change) |
+| Opening Settings on Widgets | 107–134 | **50–105** |
+| Closing Settings from Widgets | 200–214 | **172–192** |
+| Closing Settings with a widget picked in Widgets | **1460–1930** | **189–210**, then ~185 for a second, unseen, 1 s later |
+| Opening Customize (Timer) by its button, A/B | **1820–2460** | **685–1250** (the higher one first after launch) |
+| Closing Customize, A/B | 500–610 | **230–320** |
 | Memory at rest, Settings prepared | 236 MB | 202–208 MB |
 
 - **About's permissions read every 2 s, forever**: a `.task` loop in the kept (hidden) About page
@@ -34,8 +36,14 @@ second, seconds with keyboard or mouse input left out) and `phases.py` (energy p
   now come from a listen-only event tap on a thread of its own (`BandPointerWatch`) and reach the
   main thread only near the notch, in the band, or while the strip is up or the menu bar yielded
   (a global monitor stays the fallback). Covering and uncovering checked by hand: unchanged.
-- **Settings' live pictures** (the gallery's 54 previews, the stage) went back into the window at
-  every opening, on any page: now only those of the page shown, the rest when their page is.
+- **Settings' live pictures** (the gallery's 54 previews, the stage) were taken out of the window at
+  every close and put back at every opening: now they are hidden and shown again (a volume change
+  with Settings closed costs the same, ~11).
+- **Closing Settings with a widget picked**: the page lets go of the pick so it shows again with
+  nothing picked, and the gallery (54 cards and their previews) came back in the close's own turn,
+  ~1 s of CPU. It now lets go 1 s after the page has gone, at background priority, and the previews
+  come back 120 ms apart while Settings is closed (one display frame apart while it is shown);
+  shown again before that, it lets go at once.
 - **Customize**: the widget grew into place (0.9 → 1) inside its sharp `drawingGroup` picture, so
   the enlarged widget was drawn again on the CPU at every frame of the spring (~10 ms a frame); it
   now scales outside the picture. The Open Widgets list (hidden until asked for, a quarter of an
@@ -45,7 +53,7 @@ second, seconds with keyboard or mouse input left out) and `phases.py` (energy p
   250–300 — the click's priority carries into its turn (performance cores). Customize read 2600
   only by its button. Measure both.
 - **Left over, above 100**: opening Customize (its graph and ~60 native controls are built at every
-  opening, ~450 ms); opening Settings from the panel; the panel's own opening by hover (60–150,
+  opening, ~450 ms); opening Settings from the panel (~200–350 by the gear); the panel's own opening by hover (60–150,
   most of it the header's native page picker and every layer drawn again, because SwiftUI drops
   what lies outside the notch-sized resting window); Siri's app gallery (65–185).
 - **Rest, the rare spike**: about every 4–8 minutes 100–230 for a second, all of it energy other
