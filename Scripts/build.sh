@@ -113,13 +113,15 @@ codesign --verify --strict "$APP"
 codesign -dv "$APP" 2>&1 | sed 's/^/    /'
 
 # Symbols for Sentry: a release build's dSYM next to the app, uploaded when sentry-cli and a token
-# are there (SENTRY_AUTH_TOKEN; org and project from Support/telemetry.json), so crashes read as
-# NotchIsland's functions and lines.
+# are there (SENTRY_AUTH_TOKEN, or `sentry-cli login --url https://de.sentry.io` once, which keeps it
+# in ~/.sentryclirc; org and project from Support/telemetry.json), so crashes read as NotchIsland's
+# functions and lines.
 if [[ "$CONFIG" == release ]]; then
   DSYM="$ROOT/build/NotchIsland.app.dSYM"
   rm -rf "$DSYM"
   dsymutil "$APP/Contents/MacOS/NotchIsland" -o "$DSYM" 2>/dev/null && echo "==> symbols: ${DSYM#"$ROOT"/}"
-  if [[ -d "$DSYM" && -n "${SENTRY_AUTH_TOKEN:-}" && -f "$TELEMETRY_JSON" ]] && command -v sentry-cli >/dev/null; then
+  if [[ -d "$DSYM" && ( -n "${SENTRY_AUTH_TOKEN:-}" || -f "$HOME/.sentryclirc" ) && -f "$TELEMETRY_JSON" ]] \
+     && command -v sentry-cli >/dev/null; then
     ORG="$(/usr/bin/plutil -extract sentryOrg raw -o - "$TELEMETRY_JSON" 2>/dev/null || true)"
     PROJECT="$(/usr/bin/plutil -extract sentryProject raw -o - "$TELEMETRY_JSON" 2>/dev/null || true)"
     URL="$(/usr/bin/plutil -extract sentryURL raw -o - "$TELEMETRY_JSON" 2>/dev/null || echo https://de.sentry.io)"
