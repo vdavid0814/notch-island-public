@@ -26,33 +26,161 @@ Swift 6, SwiftUI, macOS 27.
 
 ## What's new in v0.8
 
-The open island sized by its cells, notch styles you can save and open again, and a new Size
-editor.
-
-- **The panel is made of cells**: Settings ▸ Widgets ▸ Size sets square cells of one size, the gap
-  between them, and how many columns and rows. Drag the island's edges (or the Width and Height
-  sliders) to add or take away one column or row at a time: widgets keep their cells, so they
-  never change shape, they only grow or shrink with them. Smaller cells fit more widgets in the
-  same room. Up to 18 columns and 6 rows; anything that no longer fits goes to **Didn't Fit**,
-  never lost.
-- **A new Size editor**: the Cells and Panel cards sit at the bottom of the window with **Reset
-  Size** and **Ready-made Size** under them, and the desktop behind the island unfolds down to
-  them. **Reset Size** puts back exactly what you had when you opened Size: the cells, the size
-  and every widget where it was. **Ready-made Size** opens out of its button with the same
-  pictures as General ▸ Size when open.
-- **Notch styles**: **Save Notch Style** beside the Widgets title keeps the whole island: every
-  page's widgets with their looks and places, the top bar and its pages, the size, the surface,
-  the colour, the music bars and the volume's style. **Open Notch Styles** lists them: rename
-  them, see a picture of each, open one (Undo takes the widgets back) or delete them.
-- **Widgets**: drag one from the gallery onto the island and it lands where you drop it, looking
-  like the widgets already there. On smaller cells a widget is the same widget drawn smaller, not
-  squeezed. A button now takes clicks over its whole shape. The grid shows its cells as dots.
-- **Screen recording**: macOS's Stop in the menu bar goes away as soon as the movie is saved, and
-  Move and Delete in the thumbnail's menu work on the Desktop and in Documents too.
-- **The recording card**: a larger timer and a red Stop side by side.
+NotchIsland 0.8 is the biggest update so far. Every widget was rebuilt from the ground up on a
+handful of building blocks, there is a completely new **Customize** editor to style every part of a
+widget, the open island is now made of **cells** you size yourself, and you can save the whole
+island as a **notch style** and switch between styles at any time.
 
 > [!WARNING]
-> This version uses even more energy than 0.7.3.2 and may have more bugs.
+> This version uses even more energy than 0.7.3.2 and may have more bugs. A lot was rebuilt at
+> once: if something looks or behaves wrong, please send it from Settings ▸ About ▸ Report a Bug.
+
+### Widgets, rebuilt from the ground up
+
+Widgets used to be 60-odd separate designs. In 0.8 they are built on **six bases**, and every
+widget is one of them, so they all look, size and behave alike, and everything you can do with
+one base you can do with every widget made of it:
+
+- **Button**: a control you press or switch (Wi-Fi, Dark Mode, Screen Recording…).
+- **Slider**: a level you drag (Volume, Display and Keyboard Brightness).
+- **Label**: text that keeps itself current (Date & Time).
+- **Live number with buttons**: a running value and its controls (Stopwatch, Timer).
+- **Composite**: several parts working together (Now Playing).
+- **Chart**: values over time (System, Battery Chart, Daily Usage).
+
+On top of them come readouts, a ring, a list, a ruler, a row of files, a clock dial and a day grid.
+
+**54 widgets** in six categories:
+
+- **Media**: Now Playing, Volume.
+- **Time**: Date & Time, Stopwatch, Timer, World Clock, Clock Face, Calendar.
+- **Controls**: Wi-Fi, Bluetooth, AirDrop, Dark Mode, Night Shift, Keep Awake, Microphone, Mute,
+  Sound Output, True Tone, Stage Manager, Low Power Mode, Screen Mirroring, Mission Control, Show
+  Desktop, Apps, Emoji & Symbols, Display Sleep, Lock Screen, Focus, Screenshot, Calculator,
+  Voice Memos, Notes, Clock, Home, and the new **Screen Recording**.
+- **Battery**: Battery, Battery Chart, Daily Usage, Battery Time, Battery Health, Charge Cycles,
+  Power, Temperature, Charger, Last Charge.
+- **System**: System, the new **Memory**, Display Brightness, Keyboard Brightness, Uptime, Disk
+  Space.
+- **Tools**: Siri, Clipboard, Shelf.
+
+#### New widgets
+
+- **Screen Recording**: one click records the screen the notch is on, with the pointer and without
+  the island itself. While it records, a thin red line, the time and a red dot run around the
+  notch; rest the pointer on it for the time and a large red **Stop**. When it is saved, a
+  thumbnail slides in at the bottom right as macOS's own does: click it to open the movie, drag it
+  to the right to put it away, drag it anywhere else to use the file, or right-click for the usual
+  menu (Save to Desktop / Documents, Show in Finder, Delete…). macOS's Stop in the menu bar now
+  goes away as soon as the movie is saved.
+- **Memory**: how much memory is in use, counted as Activity Monitor counts it.
+
+#### Widgets that changed
+
+- **Timer**: scroll the ruler to a length and start it. The ruler has a look of its own (colour,
+  tick ends, material, corners), you can switch on hours and seconds, and **+1** adds a minute.
+- **Clock Face**: the dial is styled like any button (symbol size, position, colour, edge), here or
+  in another city.
+- **Daily Usage**: its bars take the Battery Chart's look; the three colours mean light, moderate
+  and heavy days.
+- **Shelf**: choose how many files it shows (2–4); they are square tiles that fill the widget and
+  are laid out again when you resize it, never stretched. AirDrop and Clear appear from four
+  columns.
+- **Battery**: the time left fits at any size, and on power it says **Charged** or **On Hold**, or
+  **Calculating…** while macOS works it out.
+- **Every button** now takes clicks over its whole drawn shape, not only around its symbol.
+- **Smaller cells** show a widget as the same widget drawn smaller, never squeezed or with parts
+  left out.
+
+#### Not back yet
+
+Screen Time, Up Next, Countdown, Network, AirPods Battery, Shortcut, App Launcher and Photo Frame
+are not rebuilt yet. If you had them on your island they are **kept, not deleted**, and come back
+in the version that brings them back.
+
+### The new Customize editor
+
+Pick a widget in Settings ▸ Widgets (or right-click it on the island ▸ **Edit…**) and choose
+**Customize…**. Customize grows out of the notch over the whole of Settings: the widget sits in the middle on graph paper, as large as the
+room allows, with panels around it.
+
+- **Pick any part** of the widget in the editor (a title, a time, a button, the progress line, a
+  chart, the ruler, a calendar's days) and set it in the panel on the right:
+  - **Texts**: size, style and typeface, how many lines it may take and how it shrinks to fit,
+    alignment, colour, and a background of its own with its corners.
+  - **Buttons**: material (Liquid Glass or solid), shape and corners, fill, and the symbol's
+    colour, size and position.
+  - **Progress lines**: the bar, the knob, the ends, the played and the remaining colour, and
+    where the times sit.
+  - **Charts**: colours for low, medium and high, percent lines and corners.
+  - **Rulers and day grids**: colour, ticks, ends, fill and material.
+- **Move and resize** each part on the editor; it snaps to guides and to the widget's edges, and
+  parts in a corner stay concentric with the widget's corner. **Below / Above** decides which part
+  is drawn over another where they overlap, and **Copy Size / Paste Size** makes one part exactly
+  as large as another.
+- **The widget itself**: its background, the background's colour and strength, and the widget's
+  own settings (a city for a clock, how many files for the Shelf, and so on).
+- **Undo and Redo** (⌘Z, ⌘⇧Z), **Before / After** to compare with how the widget looked when you
+  opened it, **Reset Element** and **Reset Widget**.
+- **Save Widget / Open Widgets**: keep a look as a named version and open it again on any widget of
+  the same kind. The list opens out of its button: rename versions in place, see a picture of each
+  on hover, open one (Undo takes it back), delete one or all.
+
+### Settings ▸ Widgets
+
+- **Drag a widget from the gallery** straight onto the island: it lands where you drop it (or the
+  nearest free place) and takes the background most of your widgets already have, so it matches.
+- **Undo and Redo** on the island too (⌘Z, ⌘⇧Z): moving, resizing, adding and removing widgets.
+- The **page picker** in the stage's header now picks the page you are editing, like the one under
+  the stage.
+
+#### A new Size editor: the panel is made of cells
+
+The open island is now a board of **square cells**: you choose their size, the gap between them and
+how many columns and rows there are, and the panel is exactly as large as they make it.
+
+- **Drag the island's edges** (or the Width and Height sliders) to add or take away one column or row
+  at a time. Widgets keep their cells, so they never change shape: they only grow or shrink with
+  the cells.
+- **Cell size**: smaller cells fit more widgets in the same room, larger ones fewer and larger. The
+  **gap** keeps the panel's size and leaves the widgets a little smaller or larger.
+- Up to **18 columns** and **6 rows**, cells from 27 to 60 pt. A widget that no longer fits goes to
+  **Didn't Fit**, with its look kept, and can be put back when there is room.
+- **Reset Size** puts back exactly what you had when you opened Size: the cells, the gap, the
+  columns and rows, the ready-made size and every widget where it was.
+- **Ready-made Size** opens out of its button with a picture of the island at each size, from Extra
+  Small to Extra Large.
+- The editor was redesigned: the island's desktop unfolds down to the controls at the bottom of the
+  window when you switch to Size, and the grid's cells are shown as dots.
+
+#### Notch styles
+
+**Save Notch Style** (beside the Widgets title) keeps the **whole island** as it looks right now:
+
+- every page's widgets, each with its look, its parts and its place,
+- the top bar and its pages,
+- the cells, the gap and the ready-made size,
+- the island's surface, its colour, the music bars and the volume's style.
+
+**Open Notch Styles** lists them: rename them in place, rest the pointer on one to see its home
+page, **Open** one to switch the whole island to it (the one in use says **Current**), or delete one
+or all. Keep a calm style for work and a busy one for the weekend, and switch in one click.
+
+### The island
+
+- **Swipe between pages**: a two-finger sideways swipe on the open panel turns its pages. The
+  Timer's ruler and the Shelf's files keep their own scrolling.
+- **The recording card**: while recording, the notch shows a larger timer and a red Liquid Glass
+  **Stop** side by side.
+- Settings shows the app's real icon.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8 in place and keeps Accessibility, Input Monitoring
+and your other permissions: it is signed exactly as 0.7.3.x. Or download **NotchIsland.dmg** from the link at the top
+and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ## What's new in v0.7.3.2
 
