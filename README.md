@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.1 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -23,6 +23,46 @@ How much energy each animation and the idle state take, measured before and afte
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.8.1
+
+NotchIsland 0.8.1 is an energy update. Nothing looks or works differently: the same island, the
+same Settings and the same Customize, for less energy. Every number below is Activity Monitor's
+Energy Impact for the worst second, measured overnight on a MacBook Air M5, old and new back to back.
+
+### At rest
+
+- **0.0 at rest without music.** Settings ▸ About kept reading every permission every two seconds,
+  even with Settings closed (six privacy-database requests and the Music, Spotify and Bluetooth
+  checks each time). It now reads them only while About is on screen and System Settings is open
+  (and for a minute after an Allow prompt).
+- **With music:** between the equalizer's listening windows it reads 0.0; while it listens, at most
+  about 0.5. Over 45 minutes of music: median 0.02, 99 % of seconds under 0.41, a short spike only
+  at track changes.
+- **Full-screen apps:** while one is open, every mouse move anywhere on the screen woke NotchIsland
+  (about 6.5 for as long as the mouse moved). Now about 1.3; the menu bar stays covered near the
+  notch exactly as before.
+
+### Settings and Customize
+
+- **Opening Customize:** 1800–2500 → 700–1250. **Closing it:** 500–600 → 230–320. The widget no
+  longer draws itself again at every frame as it grows into place, the Open Widgets list is built a
+  moment after Customize has come in, and Customize is taken down on the efficiency cores.
+- **Closing Settings with a widget picked** in Settings ▸ Widgets: 1500–1900 → about 165.
+
+### Still to do
+
+Still above 100: letting go of a widget in Settings ▸ Widgets (Done), opening Customize, opening
+Settings from the gear, the panel opening on hover, and Siri's app gallery. Memory at rest is about
+205–230 MB with Settings prepared. The details and the method are in
+[docs/ENERGY-LOG.md](docs/ENERGY-LOG.md).
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.1 in place and keeps your permissions (signed
+exactly as 0.8). Or download **NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ## What's new in v0.8
 
