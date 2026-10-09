@@ -102,7 +102,9 @@ but every opening hitched 200 ms instead of 83); the hidden kept panel at a near
 instead of 0 (SwiftUI still drops what lies outside the notch-sized window); Customize's steps in
 as `visualEffect` instead of `offset`/`opacity` (closing cheaper, opening +150 ms of CPU); Customize's
 first ink reading 0.65 s later in a `Task(priority: .background)` on the main actor (the opening went
-from ~650 to 2200–2900: the main thread's work moved to the performance cores).
+from ~650 to 2200–2900: the main thread's work moved to the performance cores). Settings' live pictures hidden
+instead of taken out of the window while it is closed (Settings itself cheaper, every track change
+~28 → ~42: the hidden previews followed the music).
 
 ## 6. Keep the look and the motion identical
 

@@ -18,8 +18,6 @@ second, seconds with keyboard or mouse input left out) and `phases.py` (energy p
 | Rest with music, while the tap analyses (~3 s in 8 on battery) | 0.26–0.34 | **0.10–0.49** |
 | Moving the mouse while a full-screen app is up | **6.3–6.7** | **1.3** |
 | Opening Settings from the gear (General), A/B | 187–297 | 203–350 (no change) |
-| Opening Settings on Widgets | 107–134 | **50–105** |
-| Closing Settings from Widgets | 200–214 | **172–192** |
 | Closing Settings with a widget picked in Widgets | **1460–1930** | **189–210**, then ~185 for a second, unseen, 1 s later |
 | Opening Customize (Timer) by its button, A/B | **1820–2460** | **685–1250** (the higher one first after launch) |
 | Closing Customize, A/B | 500–610 | **230–320** |
@@ -36,9 +34,11 @@ second, seconds with keyboard or mouse input left out) and `phases.py` (energy p
   now come from a listen-only event tap on a thread of its own (`BandPointerWatch`) and reach the
   main thread only near the notch, in the band, or while the strip is up or the menu bar yielded
   (a global monitor stays the fallback). Covering and uncovering checked by hand: unchanged.
-- **Settings' live pictures** (the gallery's 54 previews, the stage) were taken out of the window at
-  every close and put back at every opening: now they are hidden and shown again (a volume change
-  with Settings closed costs the same, ~11).
+- **Settings' live pictures stay taken out of the window while it is closed.** Hidden instead (kept
+  in the window), opening Settings on Widgets went ~110 → ~80 and closing ~205 → ~180, but every
+  track change with Settings closed went ~28 → ~42 (the hidden previews followed it): reverted,
+  music is the more frequent case. Putting back only the pictures of the page shown changed
+  nothing measurable either (A/B).
 - **Closing Settings with a widget picked**: the page lets go of the pick so it shows again with
   nothing picked, and the gallery (54 cards and their previews) came back in the close's own turn,
   ~1 s of CPU. It now lets go 1 s after the page has gone, at background priority, and the previews
