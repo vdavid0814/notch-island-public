@@ -63,6 +63,10 @@ second, seconds with keyboard or mouse input left out) and `phases.py` (energy p
 - **Rest, the rare spike**: about every 4–8 minutes 100–230 for a second, all of it energy other
   processes billed to the app (its own CPU 0, no wake-up), at moments Music (paused, a moving
   cover) decoded video. Not traced to its source yet.
+- **45 minutes at rest with music** (final build, on battery): 2700 one-second readings, median 0.02,
+  90 % 0.23, 99 % 0.41; the only seconds above 3 were the 13 track changes (18–47, ~55–75 ms of CPU
+  each) and two billed ones (11.6, 4.4). Memory 229 → 230 MB over the 45 minutes (no growth; the
+  instance had been through Settings, Customize and Siri before).
 - **Memory**: 202–208 MB with Settings prepared (18 MB before it is): the Widgets page ~90 MB
   (its 54 previews ~31 MB, cards ~26 MB, stage ~30 MB), General ~44, Spotlight ~25, Live
   Activities ~15, About ~8 — nearly all SwiftUI view graphs.
