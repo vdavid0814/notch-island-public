@@ -235,7 +235,7 @@ nonisolated extension BannerKind {
         hoverDwell.cancel()
         // A page asked for by name (a file dragged to the shelf, `open?page=`) is the panel, also
         // while recording; the pointer and a plain open bring the recording card then.
-        if page != nil, model.recorder.isRecording { wantsPanelWhileRecording = true }
+        if page != nil, model.recorder.isRecording || model.updater.notice != nil { wantsPanelWhileRecording = true }
         if let page, model.island.page != page, model.availablePages.contains(page) { model.island.page = page }
         if pinned, !model.island.isPinned { model.island.isPinned = true }
         // Opened without a page asked for, on one the user has since hidden from the picker: the
@@ -269,6 +269,13 @@ nonisolated extension BannerKind {
     /// The recording ended: its card closes (the panel, if that was open, stays).
     func recordingStopped() {
         if case .expanded(.recording) = model.island.presentation { close(releasingPin: true) }
+        wantsPanelWhileRecording = false
+        inputsChanged()
+    }
+
+    /// The update notice was closed: its card closes with it.
+    func updateNoticeEnded() {
+        if case .expanded(.update) = model.island.presentation { close(releasingPin: true) }
         wantsPanelWhileRecording = false
         inputsChanged()
     }
@@ -392,7 +399,7 @@ nonisolated extension BannerKind {
     /// gesture, when the user has that on (Settings ▸ Siri). Only on a closed island (idle, pill or
     /// notice): an open panel's own scroll views keep their scrolling.
     func scrolled(_ event: NSEvent) -> Bool {
-        if case .expanded(let page) = model.island.presentation, page != .recording { return swipedPages(event) }
+        if case .expanded(let page) = model.island.presentation, !page.isNoticeCard { return swipedPages(event) }
         let settings = model.preferences.siri
         guard settings.swipeOpens, !model.island.presentation.isOpen else { return false }
         // A new gesture (or a wheel turned again after a pause) starts from zero.
@@ -559,7 +566,8 @@ nonisolated extension BannerKind {
             stopwatchActive: model.timers.isStopwatchActive,
             nowPlayingActive: model.preferences.showNowPlaying && model.media.isActive,
             recordingActive: model.recorder.isRecording,
-            wantsPanelWhileRecording: wantsPanelWhileRecording
+            wantsPanelWhileRecording: wantsPanelWhileRecording,
+            updateNoticeActive: model.updater.notice != nil
         )
     }
 

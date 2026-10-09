@@ -41,6 +41,28 @@ import Security
 
     nonisolated static let assetName = "NotchIsland.dmg"
     nonisolated static let updatedFromKey = "ni.update.from"
+    /// The version whose notice the user closed (✕): not shown again; a newer one is.
+    nonisolated static let dismissedKey = "ni2.update.dismissed"
+    /// The first look for a new version after launch, and then how often.
+    static let firstCheckDelay: Duration = .seconds(60)
+    /// Twice a day: one small request to GitHub each time.
+    static let checkInterval: Duration = .seconds(12 * 3600)
+
+    /// A notice in the notch that a new version is out (`UpdateCompact`): from the first check that
+    /// finds one until it is installed or closed. While it installs, it stays to show how far.
+    var notice: Release? {
+        switch state {
+        case .available(let release), .downloading(let release, _), .installing(let release, _), .relaunching(let release),
+             .differentSigner(let release, _), .manual(let release, _):
+            return release.version == dismissedVersion ? nil : release
+        default:
+            return nil
+        }
+    }
+    private(set) var dismissedVersion: String? = UserDefaults.standard.string(forKey: AppUpdater.dismissedKey)
+    /// A demo's made-up release (`notchisland://demo/update`): Update does not install it.
+    private(set) var isDemo = false
+    @ObservationIgnored private var checks: Task<Void, Never>?
 
     init() {
         let defaults = UserDefaults.standard
@@ -48,6 +70,61 @@ import Security
             defaults.removeObject(forKey: Self.updatedFromKey)
             if from != current { updatedFrom = from }
         }
+    }
+
+    /// Looks for a new version a minute after launch, then every 12 hours, at background priority
+    /// (one small request to GitHub; nothing runs in between).
+    func startAutomaticChecks() {
+        guard checks == nil else { return }
+        checks = Task(priority: .background) { [weak self] in
+            var delay = Self.firstCheckDelay
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: delay, tolerance: delay / 10) } catch { return }
+                guard let self else { return }
+                // A check already showing its result, or an install under way, is left alone.
+                if case .idle = self.state { await self.check() }
+                else if case .upToDate = self.state { await self.check() }
+                else if case .failed = self.state { await self.check() }
+                delay = Self.checkInterval
+            }
+        }
+    }
+
+    /// The notice's ✕: this version is not offered in the notch again (About still has it).
+    func dismissNotice() {
+        guard let version = notice?.version else { return }
+        dismissedVersion = version
+        if !isDemo { UserDefaults.standard.set(version, forKey: Self.dismissedKey) }
+        if isDemo { endDemo() }
+        Log.app.notice("update notice \(version, privacy: .public) closed")
+    }
+
+    /// The notice's Update: installs it (a demo's release only logs).
+    func installFromNotice() {
+        guard case .available(let release) = state else { return }
+        guard !isDemo else {
+            Log.app.notice("demo update: Update pressed")
+            return
+        }
+        Task { await install(release) }
+    }
+
+    /// `notchisland://demo/update`: a made-up newer release, to see the notice.
+    func injectDemo(_ on: Bool) {
+        if on {
+            isDemo = true
+            dismissedVersion = nil
+            state = .available(Release(version: "9.9.9", diskImage: URL(string: "https://example.invalid/NotchIsland.dmg")!, notes: ""))
+        } else {
+            endDemo()
+        }
+    }
+
+    private func endDemo() {
+        guard isDemo else { return }
+        isDemo = false
+        dismissedVersion = UserDefaults.standard.string(forKey: Self.dismissedKey)
+        state = .idle
     }
 
     var isBusy: Bool {

@@ -25,16 +25,17 @@ struct RecordingCompact: View {
         }
         .overlay {
             RecordingOutline(bottomRadius: layout.bottomRadius(for: .compact(.recording)),
-                             shoulderRadius: layout.shoulderRadius(for: .compact(.recording)))
+                             shoulderRadius: layout.shoulderRadius(for: .compact(.recording)),
+                             opacity: RecordingStyle.compactOutlineOpacity)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Recording the screen"))
     }
 }
 
-/// The pointer over the notch while recording: how long it has been recording, beside a red dot,
-/// and Stop on red-tinted Liquid Glass — the two as tall as each other, on one line. A click
-/// anywhere else on it opens the panel.
+/// The pointer over the notch while recording: how long it has been recording and Stop on
+/// red-tinted Liquid Glass — the two as tall as each other, on one line (the red dot is the pill's;
+/// here Stop is the red). A click anywhere else on it opens the panel.
 struct RecordingCard: View {
     @Environment(AppModel.self) private var model
 
@@ -49,9 +50,6 @@ struct RecordingCard: View {
         VStack(spacing: 0) {
             Color.clear.frame(height: layout.notch.height)
             HStack(spacing: 10) {
-                Circle()
-                    .fill(RecordingStyle.red)
-                    .frame(width: 10, height: 10)
                 RecordingTime(since: model.recorder.startedAt)
                     .font(.system(size: 28, weight: .semibold, design: .rounded).monospacedDigit())
                     .lineLimit(1)
@@ -102,12 +100,14 @@ struct RecordingTime: View {
 struct RecordingOutline: View {
     let bottomRadius: CGFloat
     let shoulderRadius: CGFloat
+    var opacity = RecordingStyle.outlineOpacity
+    var color = RecordingStyle.red
 
     static let lineWidth: CGFloat = 4
 
     var body: some View {
         IslandShape(bottomRadius: bottomRadius, shoulderRadius: shoulderRadius)
-            .stroke(RecordingStyle.red.opacity(RecordingStyle.outlineOpacity), lineWidth: Self.lineWidth)
+            .stroke(color.opacity(opacity), lineWidth: Self.lineWidth)
             .mask {
                 VStack(spacing: 0) {
                     Color.clear.frame(height: Self.lineWidth / 2)
@@ -122,6 +122,8 @@ struct RecordingOutline: View {
 enum RecordingStyle {
     /// The system's recording red.
     static let red = Color(red: 1, green: 0.23, blue: 0.19)
-    /// The line round the notch: 40 % see-through.
+    /// The line round the card: 40 % see-through.
     static let outlineOpacity = 0.6
+    /// Round the pill, where it stays for the whole recording: 20 % more see-through (60 %).
+    static let compactOutlineOpacity = 0.4
 }

@@ -351,6 +351,7 @@ import Observation
         installTransitionHaptics()
         observeFeatures()
         diagnostics.start(model: self)
+        updater.startAutomaticChecks()
         // The liquid card's frames for where macOS's card is expected, once the launch has settled.
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(20))

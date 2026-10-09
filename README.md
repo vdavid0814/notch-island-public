@@ -42,6 +42,11 @@ without apps, and replaces the diagnostics reports with Sentry and Mixpanel.
   are remembered, and names typed without spaces match ("appstore" finds App Store).
 - **Currency conversions** offer to turn themselves on (Settings ▸ Spotlight ▸ Currencies) instead
   of listing nothing.
+- **Updates show in the notch.** When a new version is out, the notch says "update available" with
+  a green dot, like a screen recording in red; point at it for **Update** or ✕ (that version is not
+  offered again). NotchIsland looks for one twice a day.
+- **Screen recording:** the card under the pointer no longer repeats the red dot, and the line round
+  the notch is fainter while it records.
 - The volume keys are no longer reported as broken while the Mac is locked; the update's signature
   check no longer runs on the main thread.
 

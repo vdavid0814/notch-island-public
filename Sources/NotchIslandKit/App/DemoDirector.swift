@@ -80,6 +80,8 @@ import SwiftUI
             model.anchor.demoTarget(on)
         case .recording(let on):
             model.recorder.demo(on)
+        case .update(let on):
+            model.updater.injectDemo(on)
         case .crash:
             guard UserDefaults.standard.bool(forKey: DiagnosticsCenter.referenceKey) else {
                 Log.app.notice("demo/crash ignored: not the developer's Mac")

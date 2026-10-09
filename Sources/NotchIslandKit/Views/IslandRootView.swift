@@ -141,7 +141,7 @@ private struct IslandContentStack: View {
 
     var body: some View {
         // The recording card is no page of the panel: it swaps in as the pill and the banners do.
-        let shownPage: ExpandedPage? = if case .expanded(let page) = presentation, page != .recording { page } else { nil }
+        let shownPage: ExpandedPage? = if case .expanded(let page) = presentation, !page.isNoticeCard { page } else { nil }
         // On a canvas-sized base, as an overlay: the kept panel is larger than a small island's
         // window, and as the stack's own size it grew the root past the window, which then sat
         // the pill 67 pt above the screen for as long as the panel was kept (seen, measured).
@@ -263,6 +263,8 @@ private struct IslandContent: View {
             BannerView(kind: kind)
         case .expanded(.recording):
             RecordingCard()
+        case .expanded(.update):
+            UpdateCard()
         case .expanded(let page):
             ExpandedView(page: page, thumbnails: thumbnails)
         case .assistant:
@@ -278,7 +280,8 @@ extension IslandPresentation {
     /// surface (the header stays put) and swap only their page area; everything else follows
     /// `contentKey`.
     nonisolated var surfaceKey: String {
-        isExpanded && self != .expanded(.recording) ? "expanded" : contentKey
+        if case .expanded(let page) = self, page.isNoticeCard { return contentKey }
+        return isExpanded ? "expanded" : contentKey
     }
 }
 

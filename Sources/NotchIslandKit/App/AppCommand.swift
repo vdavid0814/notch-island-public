@@ -34,6 +34,8 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     /// Crashes the app on purpose (`demo/crash`), to check that a crash reaches Sentry
     /// symbolicated. Only on the developer's Mac (`ni2.diagnostics.reference`); ignored elsewhere.
     case crash
+    /// A made-up newer release, to see the update notice (`demo/update[?on=0]`); Update does nothing.
+    case update(Bool)
 }
 
 /// The widget a `widget/…` link means: the first on the board of a kind, or one instance.
@@ -134,6 +136,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "demo/recording": return .demo(.recording(query["on"] != "0"))
         case "demo/recordingthumbnail": return .demo(.recordingThumbnail)
         case "demo/crash": return .demo(.crash)
+        case "demo/update": return .demo(.update(query["on"] != "0"))
         case "record": return .toggleRecording
 
         case "media/play": return .media(.play)

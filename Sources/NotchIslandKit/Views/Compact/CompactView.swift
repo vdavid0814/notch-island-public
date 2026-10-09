@@ -26,6 +26,8 @@ struct CompactView: View {
             TimerCompact(mode: .stopwatch, split: split, height: layout.notch.height, glyphSide: glyphSide)
         case .recording:
             RecordingCompact(split: split, height: layout.notch.height, glyphSide: glyphSide)
+        case .update:
+            UpdateCompact(split: split, height: layout.notch.height, glyphSide: glyphSide)
         }
     }
 }

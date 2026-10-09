@@ -223,3 +223,39 @@ nonisolated final class MixpanelStub: URLProtocol, @unchecked Sendable {
         #expect(!off.isEnabled)
     }
 }
+
+@Suite struct UpdateNoticeTests {
+    @Test func theNoticeIsAPillBelowTimersAndAboveMusic() {
+        var inputs = IslandInputs()
+        inputs.updateNoticeActive = true
+        inputs.nowPlayingActive = true
+        #expect(IslandResolver.resolve(inputs) == .compact(.update))
+        inputs.countdownActive = true
+        #expect(IslandResolver.resolve(inputs) == .compact(.timer))
+        inputs.countdownActive = false
+        inputs.recordingActive = true
+        #expect(IslandResolver.resolve(inputs) == .compact(.recording))
+    }
+
+    @Test func thePointerOpensItsCardUnlessThePanelWasAskedFor() {
+        var inputs = IslandInputs()
+        inputs.updateNoticeActive = true
+        inputs.wantsExpanded = true
+        #expect(IslandResolver.resolve(inputs) == .expanded(.update))
+        inputs.wantsPanelWhileRecording = true
+        #expect(IslandResolver.resolve(inputs) == .expanded(.home))
+        // Over a running timer's pill the pointer opens the panel, as without the notice.
+        inputs.wantsPanelWhileRecording = false
+        inputs.countdownActive = true
+        #expect(IslandResolver.resolve(inputs) == .expanded(.home))
+        #expect(!ExpandedPage.update.isBoard && ExpandedPage.update.isNoticeCard)
+    }
+
+    @MainActor @Test func closingTheNoticeHidesThatVersionOnly() {
+        let updater = AppUpdater()
+        updater.injectDemo(true)
+        #expect(updater.notice?.version == "9.9.9")
+        updater.dismissNotice()
+        #expect(updater.notice == nil)
+    }
+}

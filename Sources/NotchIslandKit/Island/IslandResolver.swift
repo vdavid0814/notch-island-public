@@ -29,9 +29,11 @@ nonisolated struct IslandInputs: Sendable, Equatable {
     var nowPlayingActive: Bool = false
     /// The screen is being recorded (`ScreenRecorder`).
     var recordingActive: Bool = false
-    /// While recording, the panel was asked for (a page by name, or from the recording card): it
-    /// opens instead of the card.
+    /// While recording or offering an update, the panel was asked for (a page by name, or from the
+    /// card): it opens instead of the card.
     var wantsPanelWhileRecording: Bool = false
+    /// A new version is offered in the notch (`AppUpdater.notice`).
+    var updateNoticeActive: Bool = false
 }
 
 nonisolated enum IslandResolver {
@@ -42,8 +44,12 @@ nonisolated enum IslandResolver {
     static func resolve(_ i: IslandInputs) -> IslandPresentation {
         if i.wantsAssistant { return .assistant(i.assistantRoom) }
         if i.wantsSettings { return .settings }
-        // While recording, the pointer opens the recording card; the panel only when asked for.
-        if i.wantsExpanded { return .expanded(i.recordingActive && !i.wantsPanelWhileRecording ? .recording : i.page) }
+        // While recording (or offering an update in the pill), the pointer opens its card; the
+        // panel only when asked for.
+        if i.wantsExpanded {
+            if !i.wantsPanelWhileRecording, let card = i.noticeCard { return .expanded(card) }
+            return .expanded(i.page)
+        }
         if i.isHidden {
             // Only the direct answer to something the user just did gets through.
             if let banner = i.banner, banner.showsWhileHidden { return .banner(banner) }
@@ -55,7 +61,19 @@ nonisolated enum IslandResolver {
         if i.recordingActive { return .compact(.recording) }
         if i.countdownActive { return .compact(.timer) }
         if i.stopwatchActive { return .compact(.stopwatch) }
+        // Above what plays (it stays until installed or closed), below a running timer.
+        if i.updateNoticeActive { return .compact(.update) }
         if i.nowPlayingActive { return .compact(.nowPlaying) }
         return .idle
+    }
+}
+
+nonisolated extension IslandInputs {
+    /// The card the pointer opens instead of the panel: the recording's, or the update's when its
+    /// pill is the one showing.
+    var noticeCard: ExpandedPage? {
+        if recordingActive { return .recording }
+        if updateNoticeActive, !countdownActive, !stopwatchActive { return .update }
+        return nil
     }
 }

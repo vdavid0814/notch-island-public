@@ -65,6 +65,9 @@ nonisolated enum CompactActivity: Sendable, Equatable {
     /// The screen is being recorded (`ScreenRecorder`): a red line round the notch, the time in one
     /// ear and a red dot in the other.
     case recording
+    /// A new version is out (`AppUpdater.notice`): the recording's pill in green, "update
+    /// available" in one ear and a green dot in the other.
+    case update
 }
 
 /// A page of the panel: one of the island's own (home, the shelf, the timer, the battery) or one
@@ -88,6 +91,12 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
     /// While the screen is recorded, what the pointer over the notch opens instead of the panel: the
     /// time and Stop (`RecordingCard`). Never in the picker, never stored.
     static let recording = ExpandedPage(own: "recording")
+    /// While a new version is offered, what the pointer over the notch opens: Update and ✕
+    /// (`UpdateCard`). Never in the picker, never stored.
+    static let update = ExpandedPage(own: "update")
+
+    /// The cards the pointer opens over an ongoing notice instead of the panel.
+    var isNoticeCard: Bool { self == .recording || self == .update }
 
     /// The island's own pages, in the panel's order; the user's follow them (`HeaderLayout.customPages`).
     static let allCases: [ExpandedPage] = [.home, .shelf, .timer, .battery]
@@ -105,7 +114,7 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
 
     /// Drawn as a board of widgets the user arranges: home, the timer's and the battery's, and the
     /// user's own (the shelf is its own).
-    var isBoard: Bool { self != .shelf && self != .recording }
+    var isBoard: Bool { self != .shelf && !isNoticeCard }
 
     var id: String { rawValue }
 
@@ -129,6 +138,7 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
         case .timer: "Timer"
         case .battery: "Battery"
         case .recording: "Recording"
+        case .update: "Update"
         default: CustomPage.catalog.withLock { $0[self]?.title } ?? "Page"
         }
     }
@@ -140,6 +150,7 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
         case .timer: "timer"
         case .battery: "battery.100percent"
         case .recording: "record.circle"
+        case .update: "arrow.down.circle"
         default: CustomPage.catalog.withLock { $0[self]?.symbol } ?? CustomPage.defaultSymbol
         }
     }
