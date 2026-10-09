@@ -14,6 +14,12 @@ struct WidgetVersionsMenu: View {
     @State private var listHeight: CGFloat = 0
     /// The list in the box: in a moment after the box starts growing, out before it shrinks.
     @State private var contentIn = false
+    /// The list is built a moment after Customize has come in, on the efficiency cores, not with
+    /// it: hidden until asked for, it was a quarter of every opening's energy (measured).
+    @State private var hasList = false
+    @State private var listBuild: Timer?
+    /// After Customize's steps in.
+    static let listDelay: TimeInterval = 0.9
 
     static let width: CGFloat = 360
     static let radius: CGFloat = 16
@@ -29,7 +35,7 @@ struct WidgetVersionsMenu: View {
         .help("The saved versions of this kind of widget: open one, rename or delete it")
         .opacity(isOpen ? 0 : 1)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { buttonSize = $0 }
-        .overlay(alignment: .topLeading) {
+        .overlay(alignment: .topLeading) { if hasList {
             WidgetVersionsPanel(widget: widget, versions: versions, editing: editing, close: toggle)
                 .frame(width: Self.width)
                 .fixedSize(horizontal: false, vertical: true)
@@ -60,14 +66,44 @@ struct WidgetVersionsMenu: View {
                 .opacity(isOpen ? 1 : 0)
                 .allowsHitTesting(isOpen)
                 .controlSize(.regular)
-        }
+        } }
         // Closed from elsewhere (another widget picked): the list goes with it.
         .onChange(of: isOpen) { _, open in
             if !open, contentIn { withAnimation(.easeIn(duration: 0.12)) { contentIn = false } }
         }
+        .onAppear(perform: buildListSoon)
+        .onDisappear {
+            listBuild?.invalidate()
+            listBuild = nil
+        }
+    }
+
+    /// A run-loop timer, not a task: its turn runs at background quality of service
+    /// (`MainThrift.lowPower`), which a main-actor task's priority would override.
+    private func buildListSoon() {
+        guard !hasList, listBuild == nil else { return }
+        let timer = Timer(timeInterval: Self.listDelay, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                listBuild = nil
+                guard !hasList else { return }
+                MainThrift.lowPower(for: 0.4)
+                hasList = true
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        listBuild = timer
     }
 
     private func toggle() {
+        // Asked for before it was built: built now, and opened a turn later, once laid out (the box
+        // unfolds to the list's height as it always did).
+        guard hasList else {
+            listBuild?.invalidate()
+            listBuild = nil
+            hasList = true
+            DispatchQueue.main.async { toggle() }
+            return
+        }
         if editing.showsVersions {
             withAnimation(.easeIn(duration: 0.12)) { contentIn = false }
             withAnimation(.spring(duration: 0.38, bounce: 0.08).delay(0.06)) { editing.showsVersions = false }

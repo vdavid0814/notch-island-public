@@ -1,4 +1,5 @@
 import AppKit
+import Synchronization
 
 /// Keeps a full-screen app's menu bar out of sight while the pointer goes into the notch.
 ///
@@ -29,6 +30,8 @@ import AppKit
     var coverClicked: () -> Void = {}
 
     private var monitors: [Any] = []
+    /// The moves from other apps, off the main thread (nil: a global event monitor has them).
+    private var pointerWatch: BandPointerWatch?
     private var cover: BandCoverPanel?
     private var geometry: BandCoverPolicy.Geometry?
     private var state = BandCoverPolicy.State()
@@ -39,7 +42,16 @@ import AppKit
     func setActive(_ active: Bool) {
         if active, monitors.isEmpty {
             let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
-            if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
+            // The moves everywhere else come through a listen-only tap on a thread of its own, which
+            // wakes the main thread only near the notch or in the band (`BandPointerWatch`). A global
+            // monitor ran a whole main run-loop turn (a Core Animation commit included) for every
+            // move anywhere on the screen while a full-screen app was up: Energy Impact ~6.5 for as
+            // long as the mouse moved (measured).
+            let watch = BandPointerWatch { [weak self] in self?.update() }
+            if watch.start() {
+                pointerWatch = watch
+                monitors.append(watch)
+            } else if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
                 self?.update()
             }) {
                 monitors.append(global)
@@ -53,10 +65,12 @@ import AppKit
             invalidateGeometry()
             // The pointer may already be at the notch (a swipe into a full-screen space).
             update()
-            Log.window.notice("menu-bar guard on")
+            Log.window.notice("menu-bar guard on\(self.pointerWatch == nil ? " (event monitor)" : "", privacy: .public)")
         } else if !active, !monitors.isEmpty {
-            for monitor in monitors { NSEvent.removeMonitor(monitor) }
+            for monitor in monitors where !(monitor is BandPointerWatch) { NSEvent.removeMonitor(monitor) }
             monitors.removeAll()
+            pointerWatch?.stop()
+            pointerWatch = nil
             tick.cancel()
             state = BandCoverPolicy.State()
             setCovered(false, at: NSEvent.mouseLocation, reason: "guard off")
@@ -82,19 +96,42 @@ import AppKit
     }
 
     isolated deinit {
-        for monitor in monitors { NSEvent.removeMonitor(monitor) }
+        for monitor in monitors where !(monitor is BandPointerWatch) { NSEvent.removeMonitor(monitor) }
+        pointerWatch?.stop()
     }
 
     private func invalidateGeometry() {
         guard let screen = screen(), let notch = notchRect() else {
             geometry = nil
+            pointerWatch?.watch(nil, everywhere: true)
             return
         }
-        geometry = BandCoverPolicy.Geometry(
+        let geometry = BandCoverPolicy.Geometry(
             screen: screen.frame,
             band: FullscreenMonitor.menuBarBand(of: screen) + 1,
             notch: notch
         )
+        self.geometry = geometry
+        watchPointer()
+    }
+
+    /// What the pointer watch must report: moves where the policy can change its mind (the zone, the
+    /// band, a display above the band's x range), and every move while the strip is up or the menu
+    /// bar is yielded (leaving those is decided anywhere).
+    private func watchPointer() {
+        guard let pointerWatch else { return }
+        guard let geometry else {
+            pointerWatch.watch(nil, everywhere: true)
+            return
+        }
+        let zone = geometry.zone
+        let band = geometry.bandRect
+        // Up to the top of everything above the band: a display arranged over the notch screen.
+        let interest = zone.union(band).union(CGRect(x: zone.minX, y: zone.maxY, width: zone.width, height: 100_000))
+        let primaryHeight = NSScreen.screens.first?.frame.maxY ?? geometry.screen.maxY
+        // CoreGraphics' global coordinates: the primary display's top-left origin, y down.
+        let flipped = CGRect(x: interest.minX, y: primaryHeight - interest.maxY, width: interest.width, height: interest.height)
+        pointerWatch.watch(flipped.insetBy(dx: -2, dy: -2), everywhere: state.covered || state.yielded)
     }
 
     /// Judges the pointer now, and again after the policy's hold time if it asked for one.
@@ -104,6 +141,7 @@ import AppKit
         let decision = BandCoverPolicy.decide(pointer: pointer, geometry: geometry, islandOpen: isIslandOpen(),
                                               state: &state, now: .now)
         setCovered(decision.covered, at: pointer, reason: decision.reason)
+        watchPointer()
         if let recheck = decision.recheckAfter {
             tick.schedule(after: recheck) { [weak self] in self?.update() }
         } else {
@@ -124,6 +162,103 @@ import AppKit
         }
         Log.window.notice("menu-bar band \(covered ? "covered" : "uncovered", privacy: .public) at \(Int(pointer.x), privacy: .public),\(Int(pointer.y), privacy: .public) (\(reason, privacy: .public))")
     }
+}
+
+/// The pointer's moves for `NotchBandGuard`, from a listen-only event tap on a thread of its own: the
+/// main thread hears of a move only inside `region` (CoreGraphics global coordinates), when the
+/// pointer has just left it, or with `everywhere`, and then once per turn however many moves came.
+/// A listen-only tap delays no event; it needs no permission for mouse moves.
+nonisolated final class BandPointerWatch: @unchecked Sendable {
+    private struct Shared {
+        var region: CGRect?
+        var everywhere = true
+        var wasInside = false
+        var pending = false
+    }
+
+    private let shared = Mutex(Shared())
+    private let onMove: @MainActor () -> Void
+    private var port: CFMachPort?
+    private var runLoop: CFRunLoop?
+    private var thread: Thread?
+
+    init(onMove: @escaping @MainActor () -> Void) {
+        self.onMove = onMove
+    }
+
+    /// Starts the tap and its thread; false if the system refused the tap.
+    func start() -> Bool {
+        let ready = DispatchSemaphore(value: 0)
+        var started = false
+        let thread = Thread { [self] in
+            let mask = (1 << CGEventType.mouseMoved.rawValue) | (1 << CGEventType.leftMouseDragged.rawValue)
+                | (1 << CGEventType.rightMouseDragged.rawValue) | (1 << CGEventType.otherMouseDragged.rawValue)
+            guard let port = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEventTap, options: .listenOnly,
+                                               eventsOfInterest: CGEventMask(mask), callback: bandPointerTapCallback,
+                                               userInfo: Unmanaged.passUnretained(self).toOpaque()) else {
+                ready.signal()
+                return
+            }
+            let source = CFMachPortCreateRunLoopSource(nil, port, 0)
+            let loop = CFRunLoopGetCurrent()
+            CFRunLoopAddSource(loop, source, .commonModes)
+            self.port = port
+            self.runLoop = loop
+            started = true
+            ready.signal()
+            CFRunLoopRun()
+        }
+        thread.name = "com.davidvarga.notchisland.band-pointer"
+        thread.qualityOfService = .utility
+        self.thread = thread
+        thread.start()
+        ready.wait()
+        return started
+    }
+
+    func stop() {
+        if let port { CGEvent.tapEnable(tap: port, enable: false); CFMachPortInvalidate(port) }
+        if let runLoop { CFRunLoopStop(runLoop) }
+        port = nil
+        runLoop = nil
+        thread = nil
+    }
+
+    func watch(_ region: CGRect?, everywhere: Bool) {
+        shared.withLock {
+            $0.region = region
+            $0.everywhere = everywhere || region == nil
+        }
+    }
+
+    fileprivate func received(_ type: CGEventType, _ event: CGEvent) {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let port { CGEvent.tapEnable(tap: port, enable: true) }
+            return
+        }
+        let location = event.location
+        let forward = shared.withLock { state -> Bool in
+            let inside = state.region?.contains(location) ?? true
+            let wanted = state.everywhere || inside || state.wasInside
+            state.wasInside = inside
+            guard wanted, !state.pending else { return false }
+            state.pending = true
+            return true
+        }
+        guard forward else { return }
+        DispatchQueue.main.async { [self] in
+            shared.withLock { $0.pending = false }
+            MainActor.assumeIsolated { onMove() }
+        }
+    }
+}
+
+nonisolated private func bandPointerTapCallback(_ proxy: CGEventTapProxy, _ type: CGEventType, _ event: CGEvent,
+                                                 _ userInfo: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
+    if let userInfo {
+        Unmanaged<BandPointerWatch>.fromOpaque(userInfo).takeUnretainedValue().received(type, event)
+    }
+    return Unmanaged.passUnretained(event)
 }
 
 /// When the band is covered. Pure, so the rules are testable without a screen.

@@ -85,9 +85,13 @@ struct WidgetElementEditor: View {
                                        height: WidgetMetrics.isRound(widget) ? min(natural.width, natural.height) : natural.height)
                         }
                     }
-                    .scaleEffect(scale * (isIn ? 1 : 0.9))
+                    .scaleEffect(scale)
                     .frame(width: proxy.size.width, height: proxy.size.height)
             }
+            // Growing into place outside the sharp picture: inside it, every frame of the spring drew
+            // the whole enlarged widget again on the CPU (~10 ms a frame for ~30 frames, measured).
+            // The picture is drawn once at its final size and scaled about the same centre.
+            .scaleEffect(isIn ? 1 : 0.9)
             .allowsHitTesting(false)
             .overlay {
                 ElementGuides(frames: currentFrames(of: shown), active: activeGuide, selected: editing.selected,

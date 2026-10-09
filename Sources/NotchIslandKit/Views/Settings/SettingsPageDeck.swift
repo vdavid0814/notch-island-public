@@ -42,6 +42,9 @@ private struct SettingsPageVisitWatch: ViewModifier {
 /// not a representable in the sidebar's graph: SwiftUI took a representable out of the window
 /// whenever Settings closed, and every page was laid out again when it came back.
 final class SettingsPageDeckView: NSView {
+    /// A page was unhidden: its live pictures kept out of the window come back (`DeferringHostingView`).
+    nonisolated static let pageShown = Notification.Name("NotchIsland.settingsPageShown")
+
     private let model: AppModel
     private var pages: [IslandSettingsPane: (host: DeferringHostingView<AnyView>, visit: SettingsPageVisit)] = [:]
     private(set) var shown: IslandSettingsPane?
@@ -71,6 +74,7 @@ final class SettingsPageDeckView: NSView {
         }
         let page = pages[pane] ?? make(pane)
         page.host.isHidden = false
+        NotificationCenter.default.post(name: Self.pageShown, object: self)
         page.host.scrollToTop()
         page.visit.count += 1
         page.visit.isShown = true

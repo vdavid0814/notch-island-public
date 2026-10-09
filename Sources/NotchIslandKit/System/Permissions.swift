@@ -26,6 +26,7 @@ import ApplicationServices
 
     @ObservationIgnored private var relay: DistributedNotificationRelay?
     @ObservationIgnored private var recheckTask: Task<Void, Never>?
+    @ObservationIgnored private var activation: (any NSObjectProtocol)?
     @ObservationIgnored private var hasPrompted = false
 
     init() {}
@@ -36,11 +37,24 @@ import ApplicationServices
         relay = DistributedNotificationRelay(name: Notification.Name("com.apple.accessibility.api")) { [weak self] in
             self?.scheduleRechecks()
         }
+        // Input Monitoring posts nothing when it is switched on: while either is still missing,
+        // it is read again whenever another app comes forward (back from System Settings), instead
+        // of polling.
+        activation = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.accessibilityTrusted || !self.inputMonitoringAllowed else { return }
+                self.refresh()
+            }
+        }
     }
 
     func stop() {
         relay?.invalidate()
         relay = nil
+        if let activation { NSWorkspace.shared.notificationCenter.removeObserver(activation) }
+        activation = nil
         recheckTask?.cancel()
         recheckTask = nil
     }

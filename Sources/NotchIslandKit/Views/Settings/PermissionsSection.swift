@@ -11,6 +11,9 @@ struct PermissionsSection: View {
     @State private var resetting: PermissionKind?
     @State private var confirmingReset: PermissionKind?
     @State private var didExpandNeeded = false
+    /// The kept About page is built unseen and stays alive while Settings is closed: the reads run
+    /// only while it is shown (they ran every 2 s all the time, six TCC requests each).
+    @Environment(\.settingsPageVisit) private var visit
 
     var body: some View {
         let rows = PermissionKind.allCases.map { kind in
@@ -40,13 +43,45 @@ struct PermissionsSection: View {
         } footer: {
             Text("Open a row to see what each permission turns on and where its switch is. NotchIsland works without any of them; each one only turns on the features it lists. Updates keep them: the same app, signed the same way, replaces itself in place.")
         }
-        .task {
-            // Read every couple of seconds while About is on screen (nothing pushes most of them).
-            while !Task.isCancelled {
-                refresh()
+        // Read once as the page is built (so it is ready when first shown), at once as it is shown
+        // (in the same update: no frame with stale rows), then every couple of seconds while it
+        // stays on screen (nothing pushes most of them).
+        .onAppear { refresh() }
+        .onSettingsPageVisit(shown: { refresh() })
+        // A switch can only flip in System Settings (or through `tccutil`, which `reset` reads
+        // after): the polling runs only while it is open too, so About at rest costs nothing.
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { note in
+            if Self.isSystemSettings(note) { systemSettingsOpen = true; refresh() }
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { note in
+            if Self.isSystemSettings(note) { systemSettingsOpen = false; refresh() }
+        }
+        .task(id: promptWatch) {
+            guard promptWatch > 0 else { return }
+            for _ in 0..<30 {
                 try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                refresh()
             }
         }
+        .task(id: (visit?.isShown ?? true) && systemSettingsOpen) {
+            guard visit?.isShown ?? true, systemSettingsOpen else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                refresh()
+            }
+        }
+    }
+
+    @State private var promptWatch = 0
+    @State private var systemSettingsOpen = !NSRunningApplication
+        .runningApplications(withBundleIdentifier: PermissionsSection.systemSettingsID).isEmpty
+
+    nonisolated static let systemSettingsID = "com.apple.systempreferences"
+
+    private static func isSystemSettings(_ note: Notification) -> Bool {
+        (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier == systemSettingsID
     }
 
     private func refresh() {
@@ -182,6 +217,8 @@ struct PermissionsSection: View {
     }
 
     private func allow(_ kind: PermissionKind) {
+        // macOS's own prompt can change a permission without System Settings: read for a minute.
+        promptWatch += 1
         switch kind {
         case .accessibility: model.permissions.promptOrOpenAccessibilitySettings()
         case .inputMonitoring: model.permissions.requestInputMonitoring()

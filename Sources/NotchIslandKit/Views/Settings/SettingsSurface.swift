@@ -120,7 +120,7 @@ final class SettingsSurfaceView: NSView {
     /// Customize while it is open or on its way out; built as it opens, gone once it has closed.
     private var customizeHost: NSHostingView<AnyView>?
     private var customizePresentation: CustomizePresentation?
-    private var customizeRemoval: DispatchWorkItem?
+    private var customizeRemoval: Timer?
 
     init(model: AppModel, placement: SettingsPlacement) {
         self.model = model
@@ -239,7 +239,7 @@ final class SettingsSurfaceView: NSView {
 
     /// Comes in over the pages, which fade out behind it.
     private func openCustomize(_ id: WidgetID) {
-        customizeRemoval?.cancel()
+        customizeRemoval?.invalidate()
         customizeRemoval = nil
         tearDownCustomize()
         let presentation = CustomizePresentation()
@@ -277,16 +277,23 @@ final class SettingsSurfaceView: NSView {
             context.duration = 0.3
             pagesHost.animator().alphaValue = 1
         }
-        let removal = DispatchWorkItem { [weak self] in
-            self?.customizeRemoval = nil
-            self?.tearDownCustomize()
+        // Taken away once it has gone out, on the efficiency cores: torn down at the main thread's
+        // own priority, its graph's teardown was most of a close (~150 ms on the performance cores,
+        // Energy Impact ~200, measured). A run-loop timer, so the lowered priority holds for the turn.
+        let removal = Timer(timeInterval: WidgetCustomizeView.outDuration, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.customizeRemoval = nil
+                MainThrift.lowPower(for: 0.5)
+                self.tearDownCustomize()
+            }
         }
+        RunLoop.main.add(removal, forMode: .common)
         customizeRemoval = removal
-        DispatchQueue.main.asyncAfter(deadline: .now() + WidgetCustomizeView.outDuration, execute: removal)
     }
 
     private func tearDownCustomize(restoresPages: Bool = true) {
-        customizeRemoval?.cancel()
+        customizeRemoval?.invalidate()
         customizeRemoval = nil
         customizeHost?.removeFromSuperview()
         customizeHost = nil

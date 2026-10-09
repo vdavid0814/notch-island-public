@@ -181,16 +181,38 @@ class DeferringHostingView<Content: View>: NSHostingView<Content> {
     }
 
     private var presenceObserver: (any NSObjectProtocol)?
+    /// While Settings shows another page than this picture's: put back once its page is shown.
+    private var pageObserver: (any NSObjectProtocol)?
     private weak var pausedIn: NSView?
+
+    private func stopWaitingForPage() {
+        if let pageObserver { NotificationCenter.default.removeObserver(pageObserver) }
+        pageObserver = nil
+    }
 
     private func followPresence() {
         if SettingsPresence.shared.isShown {
             guard let container = pausedIn, superview == nil else { return }
+            // On a page Settings does not show: it stays out until that page is shown. Put back
+            // at every opening, the gallery's 54 previews and the stage went into the window
+            // with any page, a third of an opening's work (measured).
+            if container.isHiddenOrHasHiddenAncestor {
+                if pageObserver == nil {
+                    pageObserver = NotificationCenter.default.addObserver(
+                        forName: SettingsPageDeckView.pageShown, object: nil, queue: .main
+                    ) { [weak self] _ in
+                        MainActor.assumeIsolated { self?.followPresence() }
+                    }
+                }
+                return
+            }
+            stopWaitingForPage()
             pausedIn = nil
             frame = container.bounds
             container.addSubview(self)
             container.needsLayout = true
         } else {
+            stopWaitingForPage()
             guard let container = superview, pausedIn == nil else { return }
             pausedIn = container
             removeFromSuperview()
