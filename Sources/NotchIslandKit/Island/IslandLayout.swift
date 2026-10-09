@@ -238,12 +238,14 @@ nonisolated struct IslandLayout: Sendable, Equatable {
 
     /// Each ear of the recording pill: room for the time ("12:34") at a small size beside the notch.
     var recordingEar: CGFloat { ear + 16 }
-    /// Each ear of the update pill: "update available" at the recording time's size.
-    var updateEar: CGFloat { ear + 66 }
+    /// Each ear of the update pill: "update / available" on two small lines.
+    var updateEar: CGFloat { ear + 34 }
     /// The recording card under the notch (`RecordingCard`): the time and Stop on one row.
     /// The update card (`UpdateCard`) takes the same height.
     static let recordingCardDetailHeight: CGFloat = 58
     static let recordingCardMinimumWidth: CGFloat = 320
+    /// The update card: its title, ✕ and Update on one row (wider than its two-line pill).
+    static let updateCardMinimumWidth: CGFloat = 380
 
     /// Width of each ear beside the notch in compact and banner: as narrow as the
     /// glyph allows — the compact shoulder (6), the glyph's outer inset (4), the
@@ -288,7 +290,7 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             return CGSize(width: max(notch.width + 2 * recordingEar, Self.recordingCardMinimumWidth),
                           height: notch.height + Self.recordingCardDetailHeight)
         case .expanded(.update):
-            return CGSize(width: max(notch.width + 2 * updateEar, Self.recordingCardMinimumWidth),
+            return CGSize(width: max(notch.width + 2 * updateEar, Self.updateCardMinimumWidth),
                           height: notch.height + Self.recordingCardDetailHeight)
         case .expanded:
             // Exactly as large as its cells (`PanelLayout`'s pitch) and the insets round them, rounded

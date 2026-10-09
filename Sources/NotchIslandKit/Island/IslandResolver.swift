@@ -59,10 +59,11 @@ nonisolated enum IslandResolver {
         if i.isAnchorTargeted { return .banner(.anchorTarget) }
         if let banner = i.banner { return .banner(banner) }
         if i.recordingActive { return .compact(.recording) }
+        // It stays until the user closes it (✕ on its card) or installs it: above every other
+        // ongoing activity, below only a recording.
+        if i.updateNoticeActive { return .compact(.update) }
         if i.countdownActive { return .compact(.timer) }
         if i.stopwatchActive { return .compact(.stopwatch) }
-        // Above what plays (it stays until installed or closed), below a running timer.
-        if i.updateNoticeActive { return .compact(.update) }
         if i.nowPlayingActive { return .compact(.nowPlaying) }
         return .idle
     }
@@ -73,7 +74,7 @@ nonisolated extension IslandInputs {
     /// pill is the one showing.
     var noticeCard: ExpandedPage? {
         if recordingActive { return .recording }
-        if updateNoticeActive, !countdownActive, !stopwatchActive { return .update }
+        if updateNoticeActive { return .update }
         return nil
     }
 }

@@ -51,14 +51,13 @@ import Security
     /// A notice in the notch that a new version is out (`UpdateCompact`): from the first check that
     /// finds one until it is installed or closed. While it installs, it stays to show how far.
     var notice: Release? {
-        switch state {
-        case .available(let release), .downloading(let release, _), .installing(let release, _), .relaunching(let release),
-             .differentSigner(let release, _), .manual(let release, _):
-            return release.version == dismissedVersion ? nil : release
-        default:
-            return nil
-        }
+        guard let offered, offered.version != dismissedVersion else { return nil }
+        return offered
     }
+    /// The newest version a check found: it stays offered through later checks that fail (no
+    /// network) or are under way, and through an install that failed; until ✕, an installed copy
+    /// or a check finding none newer.
+    private(set) var offered: Release?
     private(set) var dismissedVersion: String? = UserDefaults.standard.string(forKey: AppUpdater.dismissedKey)
     /// A demo's made-up release (`notchisland://demo/update`): Update does not install it.
     private(set) var isDemo = false
@@ -101,7 +100,7 @@ import Security
 
     /// The notice's Update: installs it (a demo's release only logs).
     func installFromNotice() {
-        guard case .available(let release) = state else { return }
+        guard let release = notice, !isBusy else { return }
         guard !isDemo else {
             Log.app.notice("demo update: Update pressed")
             return
@@ -114,7 +113,9 @@ import Security
         if on {
             isDemo = true
             dismissedVersion = nil
-            state = .available(Release(version: "9.9.9", diskImage: URL(string: "https://example.invalid/NotchIsland.dmg")!, notes: ""))
+            let release = Release(version: "9.9.9", diskImage: URL(string: "https://example.invalid/NotchIsland.dmg")!, notes: "")
+            state = .available(release)
+            offered = release
         } else {
             endDemo()
         }
@@ -125,6 +126,7 @@ import Security
         isDemo = false
         dismissedVersion = UserDefaults.standard.string(forKey: Self.dismissedKey)
         state = .idle
+        offered = nil
     }
 
     var isBusy: Bool {
@@ -139,7 +141,9 @@ import Security
         state = .checking
         do {
             let release = try await Self.latestRelease()
-            state = DiagnosticsVersions.isOlder(current, than: release.version) ? .available(release) : .upToDate(release.version)
+            let isNewer = DiagnosticsVersions.isOlder(current, than: release.version)
+            state = isNewer ? .available(release) : .upToDate(release.version)
+            if !isDemo { offered = isNewer ? release : nil }
         } catch {
             state = .failed(String(localized: "GitHub could not be reached. Try again later."))
         }

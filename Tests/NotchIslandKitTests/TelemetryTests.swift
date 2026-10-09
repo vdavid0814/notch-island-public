@@ -225,14 +225,13 @@ nonisolated final class MixpanelStub: URLProtocol, @unchecked Sendable {
 }
 
 @Suite struct UpdateNoticeTests {
-    @Test func theNoticeIsAPillBelowTimersAndAboveMusic() {
+    @Test func theNoticeStaysAboveEveryActivityButARecording() {
         var inputs = IslandInputs()
         inputs.updateNoticeActive = true
         inputs.nowPlayingActive = true
-        #expect(IslandResolver.resolve(inputs) == .compact(.update))
         inputs.countdownActive = true
-        #expect(IslandResolver.resolve(inputs) == .compact(.timer))
-        inputs.countdownActive = false
+        inputs.stopwatchActive = true
+        #expect(IslandResolver.resolve(inputs) == .compact(.update))
         inputs.recordingActive = true
         #expect(IslandResolver.resolve(inputs) == .compact(.recording))
     }
@@ -243,10 +242,6 @@ nonisolated final class MixpanelStub: URLProtocol, @unchecked Sendable {
         inputs.wantsExpanded = true
         #expect(IslandResolver.resolve(inputs) == .expanded(.update))
         inputs.wantsPanelWhileRecording = true
-        #expect(IslandResolver.resolve(inputs) == .expanded(.home))
-        // Over a running timer's pill the pointer opens the panel, as without the notice.
-        inputs.wantsPanelWhileRecording = false
-        inputs.countdownActive = true
         #expect(IslandResolver.resolve(inputs) == .expanded(.home))
         #expect(!ExpandedPage.update.isBoard && ExpandedPage.update.isNoticeCard)
     }
