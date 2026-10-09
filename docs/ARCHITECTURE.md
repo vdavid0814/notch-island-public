@@ -159,8 +159,21 @@ frames, banner changes, feature start/stop and permission changes log at
   once, at most every 6 hours.
 * **Sentry and Mixpanel** (`Features/Telemetry/`, both in the EU). `Support/telemetry.json`
   (git-ignored; keys in `Support/telemetry.example.json`) goes into Info.plist (`NITelemetry`) at
-  build time; without it no reports are sent. `Telemetry` starts with the About switch (and for one
-  delivery when the user sends by hand with it off):
+  build time; without it no reports are sent. `Telemetry` starts with the About switch (on unless
+  the user turned it off; and for one delivery when the user sends by hand with it off), in one of
+  two modes:
+  * **Standard** (default): nothing of Sentry's runs between reports; each delivery starts the SDK
+    without its crash handler, sends (the flow's last steps as breadcrumbs, typed text left out)
+    and closes it. Crashes and hangs come from macOS's own records, the crash reporter's `.ips`
+    and MetricKit, rebuilt as native events (`NativeCrash`: threads of instruction addresses,
+    binaries by UUID and load address) that Sentry symbolicates with the uploaded dSYM. The same
+    crash from both goes once (`.ips` first). At rest 0.25 wakeups/s, as before Sentry.
+  * **Detailed** (About ▸ Detailed Diagnostics, off by default): the SDK runs with its crash
+    handler, App Hang watcher, system breadcrumbs and the flow with what was typed; every report
+    is full and goes whole to Sentry (hourly); energy readings every 2 minutes, one reading past
+    the reference is an anomaly, problems checked every 15 s.
+  * `notchisland://demo/crash` crashes on purpose, only on the developer's Mac
+    (`ni2.diagnostics.reference`), to check a crash reaches Sentry symbolicated.
   * **Sentry** (the `sentry-cocoa` SDK, static): crashes from its crash handler, hangs from
     MetricKit's diagnostics, every likely cause (`DiagnosticsVerdict.Check`) as an issue grouped by
     its id, NotchIsland's own error lines grouped by category and wording, macOS's crash and hang
@@ -168,7 +181,8 @@ frames, banner changes, feature start/stop and permission changes log at
     by hand, a crash, an anomaly or a problem, the user's flow as breadcrumbs with typed text left
     out (`TelemetryMapping.redacted`), and bug reports and requests as user feedback. A cause or
     an error line goes at most once a day per Mac. No tracing, swizzling or automatic breadcrumbs;
-    the SDK's App Hang watcher only with `ni2.telemetry.appHangs` (it tripled the wakeups at rest).
+    the SDK's crash handler and App Hang watcher only in detailed mode (together 0.25 → 3.7 wakeups/s
+    at rest).
   * **Mixpanel** (`MixpanelClient`, no SDK): "App Launched", "Update Installed", and per report a
     "Health Snapshot" (the metrics, each feature's state, the verdict's counts; no paths, nothing
     typed). Events wait in `Application Support/NotchIsland/Mixpanel/queue.json` and go with the

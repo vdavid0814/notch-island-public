@@ -163,16 +163,17 @@ import Testing
         return defaults
     }
 
-    @Test @MainActor func offByDefaultWithAStableInstallID() {
+    @Test @MainActor func onByDefaultOffWhenTurnedOffWithAStableInstallID() {
         let store = defaults()
         let first = DiagnosticsCenter(defaults: store, destinations: DiagnosticsDestinations(), outbox: nil)
-        #expect(!first.isEnabled)
+        // The standard mode costs nothing at rest: on unless the user turns it off.
+        #expect(first.isEnabled && !first.isDetailed)
         #expect(first.sender == "Anonymous")
         first.name = "  Béla  "
-        first.isEnabled = true
+        first.isEnabled = false
         let second = DiagnosticsCenter(defaults: store, destinations: DiagnosticsDestinations(), outbox: nil)
         #expect(second.installID == first.installID)
-        #expect(second.isEnabled)
+        #expect(!second.isEnabled)
         #expect(second.sender == "Béla")
     }
 

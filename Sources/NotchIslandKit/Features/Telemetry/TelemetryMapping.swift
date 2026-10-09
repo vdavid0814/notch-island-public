@@ -124,10 +124,10 @@ nonisolated enum TelemetryMapping {
     }
 
     /// The reasons whose report travels whole (report.txt, report.json, log.txt) as a Sentry event:
-    /// asked for, or something happened. The hourly and launch reports bring only their numbers
-    /// (Mixpanel) and new causes; a full log every hour was the old reports' bulk.
-    static func sendsWholeReport(_ reason: DiagnosticsReason?) -> Bool {
-        guard let reason else { return true }
+    /// asked for, or something happened; in detailed mode every report. In standard mode the
+    /// hourly and launch reports bring only their numbers (Mixpanel) and new causes.
+    static func sendsWholeReport(_ reason: DiagnosticsReason?, detailed: Bool = false) -> Bool {
+        guard let reason, !detailed else { return true }
         switch reason {
         case .manual, .message, .crash, .anomaly, .problem: return true
         case .enabled, .launch, .periodic, .update: return false

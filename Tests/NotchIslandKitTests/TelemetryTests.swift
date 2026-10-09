@@ -157,3 +157,69 @@ nonisolated final class MixpanelStub: URLProtocol, @unchecked Sendable {
 
     override func stopLoading() {}
 }
+
+@Suite struct NativeCrashTests {
+    static let home = "/Users/someone"
+    /// A crash reporter report cut to what is read: header line, then the body.
+    static let ips = """
+    {"app_name":"NotchIsland","timestamp":"2026-10-03 02:21:48.00 +0200","app_version":"0.8.2","build_version":"32","bug_type":"309"}
+    {"exception":{"type":"EXC_BREAKPOINT","signal":"SIGTRAP"},"termination":{"indicator":"Trace/BPT trap: 5"},"faultingThread":1,
+     "threads":[{"frames":[{"imageOffset":16,"imageIndex":1,"symbol":"mach_msg2_trap"}]},
+                {"triggered":true,"queue":"com.apple.main-thread","frames":[{"imageOffset":4096,"imageIndex":0},{"imageOffset":8192,"imageIndex":0},{"imageOffset":32,"imageIndex":1,"symbol":"start"}]}],
+     "usedImages":[{"base":4294967296,"size":9306112,"uuid":"B71A54F0-0BF8-30AE-A026-F79961F614A0","path":"/Users/someone/Downloads/NotchIsland.app/Contents/MacOS/NotchIsland","name":"NotchIsland"},
+                   {"base":6442450944,"size":65536,"uuid":"aaaaaaaa-0000-0000-0000-000000000001","path":"/usr/lib/system/libsystem_kernel.dylib","name":"libsystem_kernel.dylib"},
+                   {"base":7000000000,"size":10,"uuid":"bbbbbbbb-0000-0000-0000-000000000002","path":"/usr/lib/unused.dylib","name":"unused.dylib"}]}
+    """
+
+    @Test func aCrashReportBecomesThreadsOfAddressesInKnownBinaries() throws {
+        let crash = try #require(NativeCrash.ips(Self.ips, home: Self.home))
+        #expect(crash.type == "EXC_BREAKPOINT" && crash.value == "SIGTRAP · Trace/BPT trap: 5")
+        #expect(crash.appVersion == "0.8.2" && crash.appBuild == "32" && crash.date != nil)
+        #expect(crash.threads.map(\.crashed) == [false, true])
+        #expect(crash.threads[1].name == "com.apple.main-thread")
+        let app: UInt64 = 0x1_0000_0000, kernel: UInt64 = 0x1_8000_0000
+        let expected: [UInt64] = [app + 4096, app + 8192, kernel + 32]
+        #expect(crash.threads[1].frames.map(\.instructionAddress) == expected)
+        // The user's name is not in the path; only binaries with frames are listed.
+        #expect(crash.images[0].path == "~/Downloads/NotchIsland.app/Contents/MacOS/NotchIsland")
+        #expect(crash.images[0].uuid == "b71a54f0-0bf8-30ae-a026-f79961f614a0")
+        #expect(crash.usedImages.map(\.name) == ["NotchIsland", "libsystem_kernel.dylib"])
+        #expect(NativeCrash.ips("not a report") == nil)
+    }
+
+    @MainActor @Test func theSentryEventListsFramesOutermostFirstWithTheirBinaries() throws {
+        let crash = try #require(NativeCrash.ips(Self.ips, home: Self.home))
+        let event = Telemetry.event(crash)
+        #expect(event.level == .fatal)
+        #expect(event.releaseName == "com.davidvarga.notchisland@0.8.2+32")
+        let exception = try #require(event.exceptions?.first)
+        #expect(exception.type == "EXC_BREAKPOINT")
+        #expect(exception.threadId?.intValue == 1)
+        #expect(exception.mechanism?.handled?.boolValue == false)
+        let frames = try #require(exception.stacktrace?.frames)
+        #expect(frames.map(\.instructionAddress) == ["0x180000020", "0x100002000", "0x100001000"])
+        #expect(frames.last?.inApp?.boolValue == true)
+        #expect(frames.first?.inApp?.boolValue == false)
+        #expect(event.debugMeta?.map(\.debugID) == ["b71a54f0-0bf8-30ae-a026-f79961f614a0", "aaaaaaaa-0000-0000-0000-000000000001"])
+        #expect(event.debugMeta?.first?.imageAddress == "0x100000000" && event.debugMeta?.first?.type == "macho")
+    }
+
+    @Test func detailedDiagnosticsSendTheWholeReportEveryTime() {
+        #expect(!TelemetryMapping.sendsWholeReport(.periodic))
+        #expect(TelemetryMapping.sendsWholeReport(.periodic, detailed: true))
+        #expect(TelemetryMapping.sendsWholeReport(.launch, detailed: true))
+    }
+
+    @MainActor @Test func onByDefaultButAnEarlierOffStaysOff() {
+        func center(_ setup: (UserDefaults) -> Void) -> DiagnosticsCenter {
+            let defaults = UserDefaults(suiteName: "NativeCrashTests.\(UUID().uuidString)")!
+            setup(defaults)
+            return DiagnosticsCenter(defaults: defaults, destinations: DiagnosticsDestinations(),
+                                     telemetry: Telemetry(config: .none, defaults: defaults, queueFile: nil), outbox: nil)
+        }
+        let fresh = center { _ in }
+        #expect(fresh.isEnabled && !fresh.isDetailed)
+        let off = center { $0.set(false, forKey: DiagnosticsCenter.enabledKey) }
+        #expect(!off.isEnabled)
+    }
+}

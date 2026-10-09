@@ -167,7 +167,12 @@ nonisolated struct EnergySummary: Sendable, Equatable {
 /// work, far apart. The last `capacity` samples (12 hours) are kept in memory.
 final class EnergyMeter {
     static let interval: Duration = .seconds(600)
+    /// Detailed diagnostics: a sample every two minutes (the live check against the reference sees
+    /// a spike within minutes; each sample is a few microseconds).
+    static let detailedInterval: Duration = .seconds(120)
     static let capacity = 73
+    /// How far apart samples are; a change takes effect with the next one.
+    var interval: Duration = EnergyMeter.interval
 
     private(set) var samples: [EnergySample] = []
     /// The sample the process started with (all counters zero at launch).
@@ -214,7 +219,8 @@ final class EnergyMeter {
         take()
         task = Task { [weak self] in
             while !Task.isCancelled {
-                do { try await Task.sleep(for: Self.interval, tolerance: .seconds(60)) } catch { return }
+                guard let interval = self?.interval else { return }
+                do { try await Task.sleep(for: interval, tolerance: interval / 10) } catch { return }
                 self?.take()
             }
         }
@@ -236,7 +242,9 @@ final class EnergyMeter {
         } else {
             samples.append(sample)
         }
-        if samples.count > Self.capacity { samples.removeFirst(samples.count - Self.capacity) }
+        // 12 hours of samples, however far apart.
+        let capacity = max(Self.capacity, Int(Duration.seconds(12 * 3600) / interval) + 1)
+        if samples.count > capacity { samples.removeFirst(samples.count - capacity) }
         return sample
     }
 

@@ -48,9 +48,12 @@ without apps, and replaces the diagnostics reports with Sentry and Mixpanel.
 ### Diagnostics
 
 Crashes, hangs and errors go to the developer through **Sentry**, and the hourly numbers (energy,
-memory, which features run) through **Mixpanel**, both in the EU, under an anonymous id and only
-when Settings ▸ About ▸ **Send Diagnostics to the Developer** is on. Bug reports and ideas go to
-Sentry and, as before, straight to the developer. What is sent is listed under the switch.
+memory, which features run) through **Mixpanel**, both in the EU, under an anonymous id. Settings ▸
+About ▸ **Send Diagnostics to the Developer** is on unless you turn it off, and nothing of it runs
+between reports: no measurable battery use. **Detailed Diagnostics**, off unless you turn it on,
+sends the full report every hour and watches crashes, hangs and energy closely, for tracking down a
+problem (it uses noticeably more battery). Bug reports and ideas go to Sentry and, as before,
+straight to the developer. What is sent is listed under the switches.
 
 ### Updating
 

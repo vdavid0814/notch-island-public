@@ -80,6 +80,13 @@ import SwiftUI
             model.anchor.demoTarget(on)
         case .recording(let on):
             model.recorder.demo(on)
+        case .crash:
+            guard UserDefaults.standard.bool(forKey: DiagnosticsCenter.referenceKey) else {
+                Log.app.notice("demo/crash ignored: not the developer's Mac")
+                return
+            }
+            Log.app.notice("demo/crash: crashing on purpose")
+            Self.crashOnPurpose()
         case .recordingThumbnail:
             // The last movie this run, else the newest "Screen Recording …" where they are saved.
             let folder = ScreenRecorder.saveDirectory()
@@ -219,4 +226,12 @@ extension DemoDirector {
 
 private extension URL {
     var creationDate: Date? { (try? resourceValues(forKeys: [.creationDateKey]))?.creationDate }
+}
+
+extension DemoDirector {
+    /// A crash with NotchIsland's own frames on the stack, so the symbolicated event shows them.
+    @inline(never) static func crashOnPurpose() -> Never {
+        let reason = ["deliberate crash (demo/crash)"]
+        fatalError(reason[Int.random(in: 0..<1)])
+    }
 }

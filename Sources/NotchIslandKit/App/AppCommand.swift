@@ -31,6 +31,9 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case recording(Bool)
     /// The newest recording's thumbnail in the screen's corner (`demo/recordingthumbnail`).
     case recordingThumbnail
+    /// Crashes the app on purpose (`demo/crash`), to check that a crash reaches Sentry
+    /// symbolicated. Only on the developer's Mac (`ni2.diagnostics.reference`); ignored elsewhere.
+    case crash
 }
 
 /// The widget a `widget/…` link means: the first on the board of a kind, or one instance.
@@ -130,6 +133,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "demo/anchortarget": return .demo(.anchorTarget(query["on"] != "0"))
         case "demo/recording": return .demo(.recording(query["on"] != "0"))
         case "demo/recordingthumbnail": return .demo(.recordingThumbnail)
+        case "demo/crash": return .demo(.crash)
         case "record": return .toggleRecording
 
         case "media/play": return .media(.play)

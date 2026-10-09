@@ -26,6 +26,13 @@ Sentry and Mixpanel pointed at a local stand-in server.
   macOS's own reports with the next report).
 - Sessions and MetricKit cost nothing measurable; Mixpanel adds nothing between report cycles.
 
+Later the same night the default became **standard mode**: no Sentry between reports, crashes and
+hangs rebuilt from macOS's `.ips` and MetricKit records. Measured the same way, settled: **0.03 ms/s
+CPU, 0.25–0.26 wakeups/s** (no Sentry thread in `sample`). The crash handler and App Hang watcher
+run only in **detailed mode** (About ▸ Detailed Diagnostics), which also reads energy every 2
+minutes and collects a full report every hour (~21 J each, measured earlier). Detailed mode at rest,
+settled: **0.37 ms/s CPU, 3.76 wakeups/s** (about 15× standard), plus the hourly report.
+
 ## 2026-10-09 (night): rest, the full-screen pointer, Settings and Customize by real clicks
 
 Release builds, on battery from ~02:00 (A/B always in the same state), MacBook Air M5. Rest and

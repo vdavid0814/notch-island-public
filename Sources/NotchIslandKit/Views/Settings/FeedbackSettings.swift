@@ -285,9 +285,14 @@ struct DiagnosticsSection: View {
         Section {
             Toggle(isOn: $diagnostics.isEnabled) {
                 Text("Send Diagnostics to the Developer")
-                Text("At launch, after an update or a crash, when something stops working or uses unusually much energy, and every hour (a short report; the full one every 6 hours). Barely uses battery.")
+                Text("Crashes, hangs and problems, and NotchIsland's energy and memory once an hour. Nothing runs in between: no measurable battery use.")
             }
             .disabled(!diagnostics.sendsReports)
+            Toggle(isOn: $diagnostics.isDetailed) {
+                Text("Detailed Diagnostics")
+                Text("For tracking down a problem: the full report every hour, a closer watch on crashes, hangs and energy (every 2 minutes), and the steps you took, including what you type into Spotlight. Uses noticeably more battery; turn it off once the problem is found.")
+            }
+            .disabled(!diagnostics.sendsReports || !diagnostics.isEnabled)
             SettingsTextField("Your name", text: $diagnostics.name, prompt: Text("Optional, so the developer knows who you are"))
             LabeledContent("Status") {
                 status(diagnostics)
@@ -328,8 +333,9 @@ struct DiagnosticsSection: View {
                 developer's Mac, and anything unusual is reported at once. \
                 Crashes, hangs, errors and the full report go to Sentry; the hourly numbers (energy, memory, which \
                 features run) go to Mixpanel without your location. Both keep the data in the EU, under an anonymous \
-                id (and your name, if you gave one). What you type into Spotlight goes only in a full report, sent \
-                by hand or when something went wrong. \
+                id (and your name, if you gave one). The full report goes when you send one or something went wrong \
+                (every hour with Detailed Diagnostics); what you type into Spotlight only in it, or with Detailed \
+                Diagnostics on. \
                 Never sent: what is on your clipboard, or your passwords.
                 """)
         }

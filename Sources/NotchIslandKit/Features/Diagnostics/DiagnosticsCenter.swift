@@ -13,6 +13,8 @@ import Observation
 /// outbox and sent before the next one.
 @Observable final class DiagnosticsCenter {
     nonisolated static let enabledKey = "ni2.diagnostics"
+    /// About ▸ Detailed Diagnostics (off unless turned on).
+    nonisolated static let detailedKey = "ni2.diagnostics.detailed"
     nonisolated static let nameKey = "ni2.diagnostics.name"
     nonisolated static let installKey = "ni2.diagnostics.install"
     nonisolated static let lastSentKey = "ni2.diagnostics.lastSent"
@@ -86,6 +88,7 @@ import Observation
     /// How often the running app is checked for something broken, and at most one report per
     /// kind of problem in `problemGap`.
     static let problemCheck: Duration = .seconds(60)
+    static let detailedProblemCheck: Duration = .seconds(15)
     static let problemGap: TimeInterval = 3600
     nonisolated static let logLimit = 2_500_000
     static let outboxLimit = 8
@@ -93,6 +96,11 @@ import Observation
     static let anomalyGap: TimeInterval = 6 * 3600
     /// Samples in a row past the reference before an anomaly is reported.
     static let anomalyRun = 2
+    /// Detailed diagnostics: one reading past the reference is enough (its readings are 2 minutes).
+    static let detailedAnomalyRun = 1
+    /// Energy readings starting this soon after launch are not set against the reference.
+    static let launchSettling: TimeInterval = 300
+    var anomalyRun: Int { isDetailed ? Self.detailedAnomalyRun : Self.anomalyRun }
 
     nonisolated enum SendState: Equatable, Sendable {
         case idle
@@ -110,6 +118,22 @@ import Observation
             if isEnabled { startTelemetry() } else { telemetry.stop() }
             guard model != nil else { return }
             if isEnabled { energy.start() } else { energy.stop() }
+            reschedule(firstDelay: .seconds(2), firstReason: .enabled)
+        }
+    }
+    /// Detailed diagnostics (About): Sentry watching all the time, the whole report every hour,
+    /// readings every 2 minutes, problems checked every 15 s. Costs energy; off unless turned on.
+    var isDetailed: Bool {
+        didSet {
+            guard isDetailed != oldValue else { return }
+            defaults.set(isDetailed, forKey: Self.detailedKey)
+            Log.app.notice("detailed diagnostics \(self.isDetailed ? "on" : "off", privacy: .public)")
+            energy.interval = isDetailed ? EnergyMeter.detailedInterval : EnergyMeter.interval
+            guard isEnabled else { return }
+            startTelemetry()
+            guard model != nil else { return }
+            energy.stop()
+            energy.start()
             reschedule(firstDelay: .seconds(2), firstReason: .enabled)
         }
     }
@@ -172,7 +196,10 @@ import Observation
         self.destinations = destinations
         self.telemetry = telemetry ?? Telemetry(defaults: defaults)
         self.outbox = outbox
-        isEnabled = defaults.bool(forKey: Self.enabledKey)
+        // On unless turned off: the standard mode costs nothing at rest. Someone who switched it
+        // off before (the key is there, false) keeps it off.
+        isEnabled = defaults.object(forKey: Self.enabledKey) as? Bool ?? true
+        isDetailed = defaults.bool(forKey: Self.detailedKey)
         name = defaults.string(forKey: Self.nameKey) ?? ""
         lastSent = defaults.object(forKey: Self.lastSentKey) as? Date
         if let id = defaults.string(forKey: Self.installKey) {
@@ -210,6 +237,8 @@ import Observation
         if isEnabled { startTelemetry() }
         if history == nil { history = DiagnosticsHistory(defaults: defaults, version: "\(version) (\(build))") }
         DiagnosticsFlow.onRecord = { [weak self] step in self?.telemetry.breadcrumb(step) }
+        telemetry.flow = { DiagnosticsFlow.steps }
+        energy.interval = isDetailed ? EnergyMeter.detailedInterval : EnergyMeter.interval
         if isEnabled {
             telemetry.track(history?.isNewVersion == true ? "Update Installed" : "App Launched", [
                 "previous_run_unclean": .bool(history?.previousEndedUncleanly ?? false),
@@ -250,7 +279,8 @@ import Observation
     }
 
     private func startTelemetry() {
-        telemetry.start(installID: installID, sender: sender, version: version, build: build)
+        telemetry.start(installID: installID, sender: sender, version: version, build: build,
+                        mode: isDetailed ? .detailed : .standard)
     }
 
     /// Counts the island's presentations (panel, Siri, banners, Settings) since launch.
@@ -318,14 +348,17 @@ import Observation
     private func liveCheck(_ interval: EnergyInterval) {
         // A report being collected is not the app misbehaving.
         guard isEnabled, let baseline = references.baseline, !energy.isCollection(interval) else { return }
+        // The first minutes measure the launch itself (detailed mode's 2-minute readings judged
+        // one alone, and a relaunch read as "unusual behaviour").
+        guard interval.start.timeIntervalSince(launchedAt) >= Self.launchSettling else { return }
         let values: [DiagnosticsMetric: Double] = [
             .recentPowerMW: interval.ownMW, .wakeupsPerSecond: interval.wakeupsPerSecond, .memoryMB: interval.footprintMB,
         ]
         var triggered: [String] = []
         for comparison in DiagnosticsComparison.compare(values, with: baseline) {
             unusualRuns[comparison.metric] = comparison.isUnusual ? unusualRuns[comparison.metric, default: 0] + 1 : 0
-            if unusualRuns[comparison.metric, default: 0] >= Self.anomalyRun {
-                triggered.append(comparison.line + " (\(Self.anomalyRun) readings of 10 minutes in a row)")
+            if unusualRuns[comparison.metric, default: 0] >= anomalyRun {
+                triggered.append(comparison.line + " (\(anomalyRun) reading\(anomalyRun == 1 ? "" : "s") in a row)")
             }
         }
         guard !triggered.isEmpty else { return }
@@ -344,7 +377,8 @@ import Observation
     private func watchProblems() {
         problemWatch = Task { [weak self] in
             while !Task.isCancelled {
-                do { try await Task.sleep(for: Self.problemCheck, tolerance: .seconds(15)) } catch { return }
+                let gap = self?.isDetailed == true ? Self.detailedProblemCheck : Self.problemCheck
+                do { try await Task.sleep(for: gap, tolerance: gap / 4) } catch { return }
                 self?.checkProblems()
             }
         }
@@ -415,7 +449,8 @@ import Observation
         // By hand: the newest version and reference, not an hour-old answer.
         await references.refresh(force: reason == .manual)
         let lastFull = defaults.object(forKey: Self.lastFullKey) as? Date ?? .distantPast
-        let light = Self.isLight(reason, lastFull: lastFull)
+        // Detailed: every report is a full one.
+        let light = !isDetailed && Self.isLight(reason, lastFull: lastFull)
         // The 6-hourly full report reads the log back to the previous full one (the hourly ones
         // bring none): 1 hour of it left five hours of errors unseen.
         let report = await makeReport(logHours: Self.reportLogHours, crashesSince: crashesSince, light: light,
