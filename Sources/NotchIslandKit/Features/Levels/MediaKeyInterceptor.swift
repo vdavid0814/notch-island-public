@@ -310,7 +310,12 @@ nonisolated private final class TapSession {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             // The system switches off a tap it considers slow, or after certain input; these arrive
-            // even though they are not in the mask. Re-enabling is the documented recovery.
+            // even though they are not in the mask. Re-enabling is the documented recovery, but not
+            // once the permission is gone (`CommandSpaceTap.mayReenable`).
+            guard CommandSpaceTap.mayReenable(after: type) else {
+                Log.levels.error("media key tap timed out without Accessibility: left off")
+                return Unmanaged.passUnretained(event)
+            }
             if let port { CGEvent.tapEnable(tap: port, enable: true) }
             Log.levels.notice("media key tap re-enabled after \(type == .tapDisabledByTimeout ? "a timeout" : "user input", privacy: .public)")
             return Unmanaged.passUnretained(event)

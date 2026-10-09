@@ -57,6 +57,20 @@ elif [[ -n "$WEBHOOK" ]]; then
 else
   echo "    no diagnostics webhook: sending reports is disabled in this build"
 fi
+# Sentry and Mixpanel (crashes, errors, the health numbers; EU): Support/telemetry.json, git-ignored
+# (Support/telemetry.example.json shows its keys). Without it the build sends no reports.
+TELEMETRY_JSON="$ROOT/Support/telemetry.json"
+if [[ -f "$TELEMETRY_JSON" ]]; then
+  /usr/libexec/PlistBuddy -c "Add :NITelemetry dict" "$APP/Contents/Info.plist"
+  for key in sentryDSN mixpanelToken mixpanelHost; do
+    value="$(/usr/bin/plutil -extract "$key" raw -o - "$TELEMETRY_JSON" 2>/dev/null || true)"
+    [[ -n "$value" ]] && /usr/libexec/PlistBuddy -c "Add :NITelemetry:$key string $value" "$APP/Contents/Info.plist"
+  done
+  /usr/libexec/PlistBuddy -c "Add :NITelemetry:environment string $CONFIG" "$APP/Contents/Info.plist"
+  echo "==> telemetry: Sentry and Mixpanel from ${TELEMETRY_JSON#"$ROOT"/}"
+else
+  echo "    no Support/telemetry.json: this build sends no diagnostics reports"
+fi
 # The app's icon (Support/AppIcon.png, rendered to .icns): shown in Finder, the Dock and the DMG.
 cp "$ROOT/Support/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 # The energy log and the performance tests behind it: every build and download carries them.
@@ -97,4 +111,22 @@ codesign --force --sign "$IDENTITY" --timestamp=none --entitlements "$ENTITLEMEN
 codesign --verify --strict "$APP"
 
 codesign -dv "$APP" 2>&1 | sed 's/^/    /'
+
+# Symbols for Sentry: a release build's dSYM next to the app, uploaded when sentry-cli and a token
+# are there (SENTRY_AUTH_TOKEN; org and project from Support/telemetry.json), so crashes read as
+# NotchIsland's functions and lines.
+if [[ "$CONFIG" == release ]]; then
+  DSYM="$ROOT/build/NotchIsland.app.dSYM"
+  rm -rf "$DSYM"
+  dsymutil "$APP/Contents/MacOS/NotchIsland" -o "$DSYM" 2>/dev/null && echo "==> symbols: ${DSYM#"$ROOT"/}"
+  if [[ -d "$DSYM" && -n "${SENTRY_AUTH_TOKEN:-}" && -f "$TELEMETRY_JSON" ]] && command -v sentry-cli >/dev/null; then
+    ORG="$(/usr/bin/plutil -extract sentryOrg raw -o - "$TELEMETRY_JSON" 2>/dev/null || true)"
+    PROJECT="$(/usr/bin/plutil -extract sentryProject raw -o - "$TELEMETRY_JSON" 2>/dev/null || true)"
+    URL="$(/usr/bin/plutil -extract sentryURL raw -o - "$TELEMETRY_JSON" 2>/dev/null || echo https://de.sentry.io)"
+    if [[ -n "$ORG" && -n "$PROJECT" ]]; then
+      sentry-cli --url "$URL" debug-files upload --org "$ORG" --project "$PROJECT" "$DSYM" \
+        && echo "==> symbols uploaded to Sentry ($ORG/$PROJECT)"
+    fi
+  fi
+fi
 echo "==> built ${APP#"$ROOT"/}"

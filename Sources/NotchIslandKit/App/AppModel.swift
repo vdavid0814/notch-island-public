@@ -243,6 +243,7 @@ import Observation
         }
         assistant.onFileAccessSettled = { [weak self] in self?.windowController?.assistantNeedsKeyboard() }
         assistant.settings = { [weak preferences] in preferences?.siri ?? SiriSettings() }
+        assistant.enableCurrencies = { [weak preferences] in preferences?.siri.convertsCurrency = true }
         assistant.clipboard = { [weak self] in self?.clipboard.items ?? [] }
         assistant.system = .live(controls: controls, isPinned: { [weak self] in self?.island.isPinned ?? false })
         assistant.timerIsActive = { [weak self] in self?.timers.isCountdownActive ?? false }
@@ -300,6 +301,12 @@ import Observation
         permissions.onChange = { [weak self] in
             self?.commandSpaceTap.retryIfFailed()
             self?.levels.retryInterception()
+        }
+        // A Reset of Accessibility or Input Monitoring: the key taps go before the permission does,
+        // at once (the feature loop follows a moment later, too late).
+        permissions.onHoldKeyTaps = { [weak self] in
+            self?.commandSpaceTap.stop()
+            self?.levels.setInterceptionEnabled(false)
         }
         // Like the system's ⌘Space: opens Siri, and closes it again.
         commandSpaceTap.onPress = { [weak self] in
@@ -750,6 +757,7 @@ import Observation
             levelWidgets: boards.needsLevels,
             replaceSystemHUD: preferences.replaceSystemHUD,
             accessibilityTrusted: permissions.accessibilityTrusted,
+            keyTapsHeld: permissions.keyTapsHeld,
             shelfEnabled: preferences.shelfEnabled,
             suspended: activity.isSuspended,
             hideInFullscreen: preferences.hideInFullscreen,

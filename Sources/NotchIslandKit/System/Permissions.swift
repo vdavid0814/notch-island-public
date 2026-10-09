@@ -14,6 +14,21 @@ import ApplicationServices
     private(set) var inputMonitoringAllowed = false
     /// Accessibility or Input Monitoring changed: refused key taps are tried again.
     @ObservationIgnored var onChange: (() -> Void)?
+    /// The key taps (⌘Space, volume/brightness keys) stay off: a Reset of Accessibility or Input
+    /// Monitoring is under way. A filtering tap left in place as its permission goes stalls every
+    /// key and click on the Mac (Reset froze it until a restart, v0.8.1; the log showed the media
+    /// key tap timing out 10 s after the reset). Let go once the permission is back, after it was
+    /// seen gone.
+    private(set) var keyTapsHeld = false
+    /// Called as the hold starts, before the permission is touched: the taps go at once.
+    @ObservationIgnored var onHoldKeyTaps: (() -> Void)?
+    @ObservationIgnored private var heldFor: PermissionKind?
+    @ObservationIgnored private var heldSawRevoked = false
+    @ObservationIgnored private var holdTimeout: Task<Void, Never>?
+    /// Long enough for macOS to tell that the entry is gone; still allowed then, it never went.
+    nonisolated static let holdLimit: Duration = .seconds(30)
+    /// The tap threads take their taps down on their own run loops: a moment for that.
+    nonisolated static let tapTeardown: Duration = .milliseconds(250)
 
     /// Gaps between the re-reads that follow a notification (so: at 0 s, 0.5 s and 2 s). The trust
     /// flag lands asynchronously: TCC posts first and the process's cached answer catches up a moment
@@ -63,6 +78,13 @@ import ApplicationServices
     func refresh() {
         let trusted = AXIsProcessTrusted()
         let listens = CGPreflightListenEventAccess()
+        if let heldFor {
+            if !(heldFor == .accessibility ? trusted : listens) {
+                heldSawRevoked = true
+            } else if heldSawRevoked {
+                releaseKeyTaps("\(heldFor.tccService) allowed again")
+            }
+        }
         guard trusted != accessibilityTrusted || listens != inputMonitoringAllowed else { return }
         if trusted != accessibilityTrusted {
             accessibilityTrusted = trusted
@@ -104,6 +126,11 @@ import ApplicationServices
     func reset(_ kind: PermissionKind) async {
         guard let bundleID = Bundle.main.bundleIdentifier else { return }
         let service = kind.tccService
+        let holdsTaps = kind == .accessibility || kind == .inputMonitoring
+        if holdsTaps {
+            holdKeyTaps(for: kind)
+            try? await Task.sleep(for: Self.tapTeardown)
+        }
         let status = await Task.detached { () -> Int32 in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
@@ -115,6 +142,7 @@ import ApplicationServices
             return process.terminationStatus
         }.value
         Log.system.notice("permission reset \(service, privacy: .public): \(status, privacy: .public)")
+        if holdsTaps, status != 0 { releaseKeyTaps("reset failed") }
         hasPrompted = false
         hasRequestedListening = false
         refresh()
@@ -154,6 +182,33 @@ import ApplicationServices
         } else {
             openAccessibilitySettings()
         }
+    }
+
+    private func holdKeyTaps(for kind: PermissionKind) {
+        heldFor = kind
+        heldSawRevoked = false
+        if !keyTapsHeld { keyTapsHeld = true }
+        onHoldKeyTaps?()
+        Log.system.notice("key taps held for the \(kind.tccService, privacy: .public) reset")
+        holdTimeout?.cancel()
+        holdTimeout = Task { [weak self] in
+            try? await Task.sleep(for: Self.holdLimit)
+            guard let self, !Task.isCancelled, let held = self.heldFor else { return }
+            // Never seen gone: the reset changed nothing, the permission is still there.
+            if held == .accessibility ? AXIsProcessTrusted() : CGPreflightListenEventAccess() {
+                self.releaseKeyTaps("still allowed after \(Self.holdLimit)")
+            }
+        }
+    }
+
+    private func releaseKeyTaps(_ reason: String) {
+        guard keyTapsHeld else { return }
+        heldFor = nil
+        heldSawRevoked = false
+        holdTimeout?.cancel()
+        holdTimeout = nil
+        keyTapsHeld = false
+        Log.system.notice("key taps let go: \(reason, privacy: .public)")
     }
 
     private func scheduleRechecks() {

@@ -51,6 +51,7 @@ nonisolated struct FeatureState: Sendable, Equatable {
         levelWidgets: Bool = false,
         replaceSystemHUD: Bool,
         accessibilityTrusted: Bool,
+        keyTapsHeld: Bool = false,
         shelfEnabled: Bool,
         suspended: Bool,
         hideInFullscreen: Bool = false,
@@ -74,11 +75,13 @@ nonisolated struct FeatureState: Sendable, Equatable {
         // stay in charge there too.
         fullscreenMonitor = true
         self.fullscreenPresent = fullscreenPresent && !suspended
-        commandSpace = commandSpaceOpensSiri && accessibilityTrusted && !suspended
+        // Held while a permission they need is being reset: a key tap left in place as its
+        // permission goes stalls every key and click on the Mac (`PermissionCenter.reset`).
+        commandSpace = commandSpaceOpensSiri && accessibilityTrusted && !keyTapsHeld && !suspended
         hidden = hideInFullscreen && fullscreenActive && !suspended
         // Hidden for a full-screen video is not such a case: the island still answers the keys there
         // (the level banner is the direct answer to a key press, and shows while hidden).
-        interception = showLevelHUD && replaceSystemHUD && accessibilityTrusted && !suspended
+        interception = showLevelHUD && replaceSystemHUD && accessibilityTrusted && !keyTapsHeld && !suspended
         needsAccessibility = showLevelHUD && replaceSystemHUD && !accessibilityTrusted
         dragMonitor = shelfEnabled
         self.suspended = suspended

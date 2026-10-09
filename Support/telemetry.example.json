@@ -1,0 +1,8 @@
+{
+  "sentryDSN": "https://<key>@<org-id>.ingest.de.sentry.io/<project-id>",
+  "mixpanelToken": "<project token>",
+  "mixpanelHost": "api-eu.mixpanel.com",
+  "sentryOrg": "<org slug, for uploading symbols>",
+  "sentryProject": "<project slug, for uploading symbols>",
+  "sentryURL": "https://de.sentry.io"
+}

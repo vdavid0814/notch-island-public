@@ -4,6 +4,28 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-09 (evening): Sentry and Mixpanel in place of the Discord reports
+
+Release build, diagnostics on, at rest (no input, no music), the app's own `proc_pid_rusage`
+(CPU and interrupt wakeups) over 60–120 s, at least 150 s after launch, each state relaunched.
+Sentry and Mixpanel pointed at a local stand-in server.
+
+| state | CPU ms/s | wakeups/s |
+|---|---|---|
+| Diagnostics off (no Sentry) | 0.02 | 0.20 |
+| Mixpanel only (its queue and batches) | 0.02 | 0.22 |
+| Sentry with its App Hang watcher | 0.25 | 3.69 |
+| Sentry without it (the default) | 0.04–0.12 | 1.25–1.35 |
+| Sentry without its crash handler | 0.06 | 0.32 |
+
+- **App Hang watcher: off.** It wakes the app 2.5 more times a second; hangs come from MetricKit's
+  diagnostics instead (no thread of the app's). `ni2.telemetry.appHangs` turns it on.
+- **Crash handler: on, about one wakeup a second.** SentryCrash's cached-thread monitor refreshes
+  once a minute but sleeps one second at a time between (`sleep(1)` in a loop), and the SDK has no
+  switch for it. `ni2.telemetry.crashHandler` turns the handler off (crashes then come only as
+  macOS's own reports with the next report).
+- Sessions and MetricKit cost nothing measurable; Mixpanel adds nothing between report cycles.
+
 ## 2026-10-09 (night): rest, the full-screen pointer, Settings and Customize by real clicks
 
 Release builds, on battery from ~02:00 (A/B always in the same state), MacBook Air M5. Rest and

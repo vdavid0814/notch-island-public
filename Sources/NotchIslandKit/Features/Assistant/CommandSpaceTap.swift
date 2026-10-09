@@ -119,6 +119,14 @@ import os
         start()
     }
 
+    /// A tap macOS switched off for being slow goes back on only while the app is still trusted: a
+    /// slow tap after the permission went (a Reset, a switch turned off) is one macOS can no longer
+    /// deliver to, and turning it on again held every key and click on the Mac for its timeout,
+    /// again and again. Off, it stays off; the permission's change stops it for good.
+    nonisolated static func mayReenable(after type: CGEventType) -> Bool {
+        type != .tapDisabledByTimeout || AXIsProcessTrusted()
+    }
+
     /// The decision for one key event. Pure, for tests: Space with exactly the chosen modifier
     /// (⌘ by default; no other of Shift, Option, Control, Command, which other shortcuts use) is
     /// ours; its key-up and repeats go with it.
@@ -222,7 +230,7 @@ nonisolated private final class CommandSpaceTapSession {
     func handleFlags(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            if let flagsPort { CGEvent.tapEnable(tap: flagsPort, enable: true) }
+            if let flagsPort, CommandSpaceTap.mayReenable(after: type) { CGEvent.tapEnable(tap: flagsPort, enable: true) }
         case .flagsChanged:
             updateArming(flags: event.flags)
         default:
@@ -234,7 +242,7 @@ nonisolated private final class CommandSpaceTapSession {
     func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            if let port, armed { CGEvent.tapEnable(tap: port, enable: true) }
+            if let port, armed, CommandSpaceTap.mayReenable(after: type) { CGEvent.tapEnable(tap: port, enable: true) }
             return Unmanaged.passUnretained(event)
         case .keyDown, .keyUp:
             let isDown = type == .keyDown

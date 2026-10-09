@@ -24,6 +24,43 @@ Swift 6, SwiftUI, macOS 27.
 
 ---
 
+## What's new in v0.8.2
+
+NotchIsland 0.8.2 fixes a Mac that froze after a permission Reset, Spotlight lists that came back
+without apps, and replaces the diagnostics reports with Sentry and Mixpanel.
+
+### Fixes
+
+- **No more freeze after Reset.** Resetting Accessibility or Input Monitoring in Settings ▸ About
+  could stall every key and click on the Mac until a restart: the volume and ⌘Space key listeners
+  stayed in place as their permission went. They now stop before the reset and come back once the
+  permission is allowed again, and never switch themselves back on without it.
+- **Spotlight always lists your apps.** A search waited for every source at once (Spotlight,
+  files, the dictionary, Contacts); one that did not answer kept every row back, and "xcode" showed
+  only Search the Web. Each source now gets a few seconds and is left out after that; the apps on
+  disk come in at once, apps Spotlight found elsewhere (an Xcode in Downloads, with its Device Hub)
+  are remembered, and names typed without spaces match ("appstore" finds App Store).
+- **Currency conversions** offer to turn themselves on (Settings ▸ Spotlight ▸ Currencies) instead
+  of listing nothing.
+- The volume keys are no longer reported as broken while the Mac is locked; the update's signature
+  check no longer runs on the main thread.
+
+### Diagnostics
+
+Crashes, hangs and errors go to the developer through **Sentry**, and the hourly numbers (energy,
+memory, which features run) through **Mixpanel**, both in the EU, under an anonymous id and only
+when Settings ▸ About ▸ **Send Diagnostics to the Developer** is on. Bug reports and ideas go to
+Sentry and, as before, straight to the developer. What is sent is listed under the switch.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.2 in place and keeps your permissions. Or download
+**NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
+
+---
+
 ## What's new in v0.8.1
 
 NotchIsland 0.8.1 is an energy update. Nothing looks or works differently: the same island, the
@@ -482,9 +519,11 @@ your Mac.
   connection they are kept and sent later.
 
 **Diagnostics** (Settings ▸ About ▸ Diagnostics, off by default)
-- At launch, every 6 hours, after a crash and when NotchIsland uses unusually much energy, a report
-  goes to the developer: the Mac, macOS, displays and sound devices, permissions, every setting and
-  feature's state, whether Spotlight finds your apps, NotchIsland's log and crash reports.
+- Crashes, hangs and errors go to the developer through Sentry, and the hourly numbers (energy,
+  memory, which features run) through Mixpanel, both in the EU, under an anonymous id. A full
+  report (the Mac, macOS, displays and sound devices, permissions, every setting and feature's
+  state, whether Spotlight finds your apps, NotchIsland's log and crash reports) goes when you send
+  one, after a crash and when something stops working or uses unusually much energy.
 - **Energy:** NotchIsland's own use in milliwatts, CPU, wakeups and memory, a reading every 10
   minutes, on battery and on the charger, plus the battery's health and the apps using the most
   energy.

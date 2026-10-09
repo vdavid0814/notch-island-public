@@ -47,7 +47,7 @@ struct FeedbackSection: View {
             if !diagnostics.isConfigured {
                 Text("This build cannot send reports (it was made without the developer's address).")
             } else if draft == nil {
-                Text("Your report goes straight to the developer. Something not working? Report a bug. Missing something? Request a feature.")
+                Text("Your report goes straight to the developer (through Sentry, in the EU). Something not working? Report a bug. Missing something? Request a feature.")
             }
         }
     }
@@ -287,7 +287,7 @@ struct DiagnosticsSection: View {
                 Text("Send Diagnostics to the Developer")
                 Text("At launch, after an update or a crash, when something stops working or uses unusually much energy, and every hour (a short report; the full one every 6 hours). Barely uses battery.")
             }
-            .disabled(!diagnostics.isConfigured)
+            .disabled(!diagnostics.sendsReports)
             SettingsTextField("Your name", text: $diagnostics.name, prompt: Text("Optional, so the developer knows who you are"))
             LabeledContent("Status") {
                 status(diagnostics)
@@ -311,7 +311,7 @@ struct DiagnosticsSection: View {
                 Button("Preview Report…") { Task { await diagnostics.preview() } }
                 Spacer()
                 Button("Send Report Now") { Task { await diagnostics.sendReport(.manual) } }
-                    .disabled(!diagnostics.isConfigured || diagnostics.state == .sending)
+                    .disabled(!diagnostics.sendsReports || diagnostics.state == .sending)
             }
         } header: {
             Text("Diagnostics")
@@ -326,6 +326,10 @@ struct DiagnosticsSection: View {
                 playing, what you typed into Spotlight and the files on the Shelf; whether macOS's Spotlight index has your \
                 apps; NotchIsland's log, crash reports and the hangs or exceptions macOS itself reports. The numbers and settings are compared with the \
                 developer's Mac, and anything unusual is reported at once. \
+                Crashes, hangs, errors and the full report go to Sentry; the hourly numbers (energy, memory, which \
+                features run) go to Mixpanel without your location. Both keep the data in the EU, under an anonymous \
+                id (and your name, if you gave one). What you type into Spotlight goes only in a full report, sent \
+                by hand or when something went wrong. \
                 Never sent: what is on your clipboard, or your passwords.
                 """)
         }

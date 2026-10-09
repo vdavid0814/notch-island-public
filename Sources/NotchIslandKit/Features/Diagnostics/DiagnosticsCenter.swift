@@ -2,7 +2,8 @@ import AppKit
 import Observation
 
 /// Sends the developer diagnostics reports (when the user turned them on in About) and the user's
-/// bug reports and feature requests (always possible).
+/// bug reports and feature requests (always possible). Reports go to Sentry and Mixpanel
+/// (`Telemetry`); bug reports and requests to Sentry and to the developer's Discord.
 ///
 /// Reports go at launch (after a pause, so the launch itself is not slowed; sooner after a crash or
 /// an update), every `periodicInterval` while the app runs, when a new crash report turns up, when a
@@ -106,13 +107,19 @@ import Observation
             guard isEnabled != oldValue else { return }
             defaults.set(isEnabled, forKey: Self.enabledKey)
             Log.app.notice("diagnostics \(self.isEnabled ? "on" : "off", privacy: .public)")
+            if isEnabled { startTelemetry() } else { telemetry.stop() }
             guard model != nil else { return }
             if isEnabled { energy.start() } else { energy.stop() }
             reschedule(firstDelay: .seconds(2), firstReason: .enabled)
         }
     }
     /// The name the user gave so the developer knows who wrote; empty is anonymous.
-    var name: String { didSet { defaults.set(name, forKey: Self.nameKey) } }
+    var name: String {
+        didSet {
+            defaults.set(name, forKey: Self.nameKey)
+            telemetry.setSender(sender, installID: installID)
+        }
+    }
     private(set) var state: SendState = .idle
     private(set) var lastSent: Date?
     /// Deliveries waiting in the outbox.
@@ -122,9 +129,14 @@ import Observation
     private(set) var referencePowerMW: Double?
     private(set) var latestVersion: String?
 
-    /// Where deliveries go; empty in a build made without them (sending is then disabled).
+    /// Where bug reports and requests go besides Sentry (Discord); empty in a build made without.
     let destinations: DiagnosticsDestinations
-    var isConfigured: Bool { destinations.isConfigured }
+    /// Sentry and Mixpanel: the reports, and bug reports and requests too.
+    let telemetry: Telemetry
+    /// Something can be sent (reports need `telemetry`, bug reports either).
+    var isConfigured: Bool { destinations.isConfigured || telemetry.isConfigured }
+    /// Automatic reports can go.
+    var sendsReports: Bool { telemetry.isConfigured }
     let installID: String
     let launchedAt = Date()
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
@@ -154,9 +166,11 @@ import Observation
 
     init(defaults: UserDefaults = .standard,
          destinations: DiagnosticsDestinations = .from(info: Bundle.main.infoDictionary),
+         telemetry: Telemetry? = nil,
          outbox: URL? = DiagnosticsCenter.defaultOutbox) {
         self.defaults = defaults
         self.destinations = destinations
+        self.telemetry = telemetry ?? Telemetry(defaults: defaults)
         self.outbox = outbox
         isEnabled = defaults.bool(forKey: Self.enabledKey)
         name = defaults.string(forKey: Self.nameKey) ?? ""
@@ -192,7 +206,15 @@ import Observation
 
     func start(model: AppModel) {
         self.model = model
+        // First: Sentry's crash handler is in before anything else of the launch can crash.
+        if isEnabled { startTelemetry() }
         if history == nil { history = DiagnosticsHistory(defaults: defaults, version: "\(version) (\(build))") }
+        DiagnosticsFlow.onRecord = { [weak self] step in self?.telemetry.breadcrumb(step) }
+        if isEnabled {
+            telemetry.track(history?.isNewVersion == true ? "Update Installed" : "App Launched", [
+                "previous_run_unclean": .bool(history?.previousEndedUncleanly ?? false),
+            ])
+        }
         installCounter(model)
         if isEnabled { energy.start() }
         if systemWatch == nil {
@@ -224,6 +246,11 @@ import Observation
         problemWatch = nil
         energy.stop()
         history?.markCleanExit()
+        Task { await telemetry.flush() }
+    }
+
+    private func startTelemetry() {
+        telemetry.start(installID: installID, sender: sender, version: version, build: build)
     }
 
     /// Counts the island's presentations (panel, Siri, banners, Settings) since launch.
@@ -247,7 +274,7 @@ import Observation
         launchActivity = nil
         problemWatch?.cancel()
         problemWatch = nil
-        guard isEnabled, isConfigured, model != nil else { return }
+        guard isEnabled, sendsReports, model != nil else { return }
         watchProblems()
         let times = Self.reportTimes(firstDelay: firstDelay, firstReason: firstReason)
         startReports(after: times.loopDelay, reason: times.loopReason)
@@ -350,7 +377,7 @@ import Observation
     private func systemReportArrived(_ line: String) {
         Log.app.notice("diagnostics: system report \(line, privacy: .public)")
         DiagnosticsFlow.record("system report: \(line)")
-        guard isEnabled, isConfigured else { return }
+        guard isEnabled, sendsReports else { return }
         if let last = problemsReported["system"], Date().timeIntervalSince(last) < Self.problemGap { return }
         problemsReported["system"] = Date()
         liveTrigger.append("macOS reported: \(line)")
@@ -397,7 +424,7 @@ import Observation
         let crashes = report.attachments.count(where: \.isCrashReport)
         let kind: DiagnosticsEnvelope.Kind = crashes > 0 ? .crash : reason == .anomaly ? .anomaly : .report
         let sent = envelope(kind: kind, reason: reason, report: report, feedback: nil)
-        let delivered = await deliver(sent)
+        let delivered = await deliverReport(sent, report: report, reason: reason, light: light)
         if delivered {
             remember(sent.verdict)
             defaults.set(Date(), forKey: Self.crashesSeenKey)
@@ -410,6 +437,10 @@ import Observation
     /// A bug report or feature request, with a diagnostics report attached if the user allowed it.
     func sendFeedback(_ feedback: DiagnosticsFeedback, attachDiagnostics: Bool,
                       media: [DiagnosticsMediaFile] = []) async -> Bool {
+        guard isConfigured else {
+            state = .failed("This build has no diagnostics address.")
+            return false
+        }
         let report: DiagnosticsReport
         if attachDiagnostics {
             report = await feedbackReport(for: feedback.kind)
@@ -420,7 +451,14 @@ import Observation
         let kind: DiagnosticsEnvelope.Kind = feedback.kind == .bug ? .bug : .feature
         var envelope = envelope(kind: kind, reason: nil, report: report, feedback: feedback)
         if !media.isEmpty { envelope.media = media }
-        let delivered = await deliver(envelope)
+        // To both: Sentry's user feedback (with the report's files) and the developer's Discord.
+        let toSentry = await withTelemetry { $0.feedback(feedback, envelope: envelope, sender: self.sender) }
+        let toDiscord = destinations.isConfigured ? await deliver(envelope) : false
+        let delivered = toSentry || toDiscord
+        if toSentry, !toDiscord {
+            DiagnosticsMedia.discard(envelope.media ?? [])
+            markSent()
+        }
         if delivered, attachDiagnostics { remember(envelope.verdict) }
         return delivered
     }
@@ -543,9 +581,39 @@ import Observation
         return (error as? URLError).map { offline.contains($0.code) } ?? false
     }
 
-    /// Sends what waits in the outbox, then `envelope`; a failure keeps it in the outbox.
+    /// An automatic report to Sentry and Mixpanel (`Telemetry`).
+    private func deliverReport(_ envelope: DiagnosticsEnvelope, report: DiagnosticsReport, reason: DiagnosticsReason,
+                               light: Bool) async -> Bool {
+        guard sendsReports else {
+            state = .failed("This build has no diagnostics address.")
+            return false
+        }
+        state = .sending
+        let delivered = await withTelemetry { await $0.deliver(report: report, envelope: envelope, reason: reason, light: light) }
+        if delivered {
+            Log.app.notice("diagnostics sent: \(envelope.kind.rawValue, privacy: .public) (\(reason.rawValue, privacy: .public))")
+            markSent()
+        } else {
+            state = .failed("It could not be sent; it will be sent with the next report.")
+        }
+        return delivered
+    }
+
+    /// `body` with Sentry and Mixpanel running: as they are when diagnostics are on; started for
+    /// this one delivery and stopped again when the user sends by hand with them off.
+    private func withTelemetry<T>(_ body: (Telemetry) async -> T) async -> T {
+        if telemetry.isRunning { return await body(telemetry) }
+        startTelemetry()
+        let result = await body(telemetry)
+        await telemetry.flush()
+        telemetry.stop()
+        return result
+    }
+
+    /// Sends what waits in the outbox, then `envelope` to Discord (bug reports and requests); a
+    /// failure keeps it in the outbox.
     private func deliver(_ envelope: DiagnosticsEnvelope) async -> Bool {
-        guard isConfigured else {
+        guard destinations.isConfigured else {
             state = .failed("This build has no diagnostics address.")
             return false
         }

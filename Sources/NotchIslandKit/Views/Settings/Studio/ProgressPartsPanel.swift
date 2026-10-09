@@ -41,6 +41,10 @@ struct ProgressPartsPanel: View {
     static let controlsWidth: CGFloat = 180
     /// A sample track, a third played, so the line's both colours show.
     static let duration: TimeInterval = 210
+    /// A third in, standing still. One clock for good: made in `body` (`at: .now`), every redraw
+    /// was a new clock, and the scrubber's `onChange(of: clock)` fired several times a frame
+    /// (SwiftUI's "tried to update multiple times per frame", in the reports' logs).
+    static let stoppedClock = PlaybackClock(elapsed: duration / 3, at: .distantPast, rate: 0)
     /// Off a part, a press this near it (on screen) still picks it.
     static let reach: CGFloat = 6
     /// As the editor's: lines hold a part lightly.
@@ -67,7 +71,7 @@ struct ProgressPartsPanel: View {
             ZStack {
                 Group {
                     if id == .progress {
-                        PlaybackScrubber(clock: PlaybackClock(elapsed: Self.duration / 3, at: .now, rate: 0), duration: Self.duration,
+                        PlaybackScrubber(clock: Self.stoppedClock, duration: Self.duration,
                                          isPlaying: false, look: look,
                                          elapsedStyle: widget.textStyles[.elapsedTime], remainingStyle: widget.textStyles[.remainingTime])
                     } else if id == .cpuLoad || id == .memoryLoad {

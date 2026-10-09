@@ -15,9 +15,14 @@ let package = Package(
     products: [
         .executable(name: "NotchIsland", targets: ["NotchIsland"]),
     ],
+    dependencies: [
+        // Crashes, hangs and errors (About ▸ Diagnostics, only when the user turned it on).
+        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.30.0"),
+    ],
     targets: [
         .target(
             name: "NotchIslandKit",
+            dependencies: [.product(name: "Sentry", package: "sentry-cocoa")],
             swiftSettings: swiftSettings,
             linkerSettings: [
                 .linkedFramework("AppKit"),

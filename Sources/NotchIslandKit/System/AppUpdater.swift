@@ -84,7 +84,7 @@ import Security
             state = .installing(release, step: String(localized: "Checking the download…"))
             let staged = try await Self.stage(image: image)
             try? FileManager.default.removeItem(at: image)
-            switch Self.verify(staged, version: release.version) {
+            switch await Self.verifyInBackground(staged, version: release.version) {
             case .sameSigner:
                 try await replace(with: staged, release: release)
             case .otherSigner:
@@ -178,6 +178,13 @@ import Security
     // MARK: Checking
 
     nonisolated enum Verdict: Equatable { case sameSigner, otherSigner, invalid(String) }
+
+    /// `verify` off the main thread: checking every sealed file of a whole app takes a while, and
+    /// on the main thread macOS flagged it ("should not be called on the main thread as it may lead
+    /// to UI unresponsiveness", in the reports' logs at each update).
+    @concurrent nonisolated static func verifyInBackground(_ app: URL, version: String) async -> Verdict {
+        verify(app, version: version)
+    }
 
     /// The staged copy is NotchIsland, newer, intact (every file sealed by its signature) and,
     /// for `.sameSigner`, satisfies this copy's own designated requirement: the one macOS keys the

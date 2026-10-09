@@ -9,9 +9,13 @@ import Foundation
     private(set) static var steps: [String] = []
     private static let clock = Date.ISO8601FormatStyle(includingFractionalSeconds: true).time(includingFractionalSeconds: true)
 
+    /// Each step as it is recorded (`Telemetry`'s breadcrumbs, while diagnostics are on).
+    static var onRecord: ((String) -> Void)?
+
     static func record(_ step: String) {
         steps.append("\(Date().formatted(clock)) \(step)")
         if steps.count > capacity { steps.removeFirst(steps.count - capacity) }
+        onRecord?(step)
     }
 
     static func section() -> DiagnosticsReport.Section {
@@ -91,8 +95,17 @@ nonisolated enum DiagnosticsInsights {
         let own = sorted.filter { $0.key.contains("com.davidvarga.notchisland") }
         section.add("NotchIsland's own", own.isEmpty ? "none" : own.map { "\($0.key) \($0.value.count)×" }.joined(separator: ", "))
         for (source, value) in sorted.prefix(12) {
-            section.add("\(value.count)× \(source)", String(value.example.suffix(220)))
+            section.add("\(value.count)× \(source)", example(value.example, source: source))
         }
         return section
+    }
+
+    /// When, where and what the message starts with: the line's end alone ("…face alpha 1.0") told
+    /// nothing, and became a Sentry issue's title.
+    static func example(_ line: Substring, source: String) -> String {
+        guard let range = line.range(of: source) else { return String(line.prefix(220)) }
+        let when = line.prefix(23)
+        let message = line[range.upperBound...].trimmingCharacters(in: .whitespaces)
+        return "\(when) \(source) \(message.prefix(200))"
     }
 }

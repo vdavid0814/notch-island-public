@@ -65,7 +65,7 @@ nonisolated enum AssistantSearch {
             (kMDItemDisplayName == "\(term)*"cdw || kMDItemAlternateNames == "\(term)*"cdw)
             """
         // More than shown: the index's other apps (builds, helpers) are left out afterwards.
-        let indexed = run(predicate, scopes: everywhere, fetch: 80, kind: .app)
+        let indexed = await run(predicate, scopes: everywhere, fetch: 80, kind: .app)
         let onDisk = cachedDiskApps().filter { AssistantMatch.matches($0.name, query) }
         return Array(rank(merged(indexed, onDisk), for: query).prefix(limit))
     }
@@ -92,7 +92,7 @@ nonisolated enum AssistantSearch {
     /// from disk. Spotlight's index misses apps: on a tester's Mac 19 of 28 apps in /Applications
     /// (ChatGPT, Word, Keynote, …) were not in it, and Siri could not find them (report, v0.4.5).
     /// A directory listing of a few folders, about a millisecond.
-    static func diskApps() -> [AssistantHit] {
+    static func diskApps(defaults: UserDefaults = .standard) -> [AssistantHit] {
         let manager = FileManager.default
         let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey, .contentAccessDateKey]
         var hits: [AssistantHit] = []
@@ -121,6 +121,21 @@ nonisolated enum AssistantSearch {
         }
         for scope in appScopes { scan(URL(fileURLWithPath: scope), depth: 1) }
         scan(URL(fileURLWithPath: coreServicesApps), depth: 0)
+        // The apps Spotlight found elsewhere (an Xcode in Downloads), from its last answer: listed
+        // without asking it, so a slow or stuck index no longer loses them. Not looked at on disk
+        // inside a protected folder (Downloads, Desktop, Documents) unless Siri may read files
+        // there: a look would ask for the folder.
+        let readsFolders = defaults.bool(forKey: AssistantModel.filesKey)
+        for path in remembered(defaults) {
+            let url = URL(fileURLWithPath: path)
+            hits.append(AssistantHit(kind: .app, url: url, name: url.deletingPathExtension().lastPathComponent,
+                                     contentType: "com.apple.application-bundle", lastUsed: nil))
+            guard readsFolders || !isProtected(path) else { continue }
+            for tools in ["Contents/Applications", "Contents/Developer/Applications"] {
+                let folder = url.appendingPathComponent(tools, isDirectory: true)
+                if manager.fileExists(atPath: folder.path) { scan(folder, depth: 0) }
+            }
+        }
         for path in coreServicesUserApps.union([finder]).sorted() where manager.fileExists(atPath: path) {
             let name = manager.displayName(atPath: path)
             hits.append(AssistantHit(kind: .app, url: URL(fileURLWithPath: path), name: name.hasSuffix(".app") ? String(name.dropLast(4)) : name,
@@ -129,16 +144,60 @@ nonisolated enum AssistantSearch {
         return hits
     }
 
+    static let rememberedKey = "ni2.siriAppsElsewhere"
+    /// At most this many kept (a Mac with hundreds of copies in build folders keeps a few).
+    static let rememberedLimit = 200
+
+    /// The apps outside the app folders that Spotlight's last full answer listed.
+    static func remembered(_ defaults: UserDefaults = .standard) -> [String] {
+        defaults.stringArray(forKey: rememberedKey) ?? []
+    }
+
+    /// Replaces the kept list with this answer's apps outside the app folders: one that is gone
+    /// leaves it with the next answer.
+    static func remember(_ answer: [AssistantHit], defaults: UserDefaults = .standard) {
+        let elsewhere = answer.map(\.url.path).filter(isElsewhere)
+        let kept = Array(elsewhere.prefix(rememberedLimit))
+        guard kept != remembered(defaults) else { return }
+        defaults.set(kept, forKey: rememberedKey)
+        diskAppsCache.withLock { $0 = nil }
+    }
+
+    /// Not in an app folder (nor inside an app there) and not the system's: what the disk scan
+    /// does not find by itself.
+    static func isElsewhere(_ path: String) -> Bool {
+        guard !path.hasPrefix("/System/"), embeddingApp(path) == nil else { return false }
+        return !appScopes.contains { path.hasPrefix($0 + "/") }
+    }
+
+    /// In a folder macOS asks the user about before an app may look into it.
+    static func isProtected(_ path: String) -> Bool {
+        (["Desktop", "Documents", "Downloads"].map { NSHomeDirectory() + "/" + $0 + "/" } + [iCloudDrive + "/"])
+            .contains { path.hasPrefix($0) }
+    }
+
+    /// The apps on disk, by name, without Spotlight (`AssistantSources.quickApps`).
+    @concurrent static func quickApps() async -> [AssistantHit] {
+        listable(cachedDiskApps()).sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// Apps inside another app only as its own tools (`isListedApp`); NotchIsland itself never (it
+    /// is active while the assistant is open, so it would always come first).
+    static func listable(_ hits: [AssistantHit]) -> [AssistantHit] {
+        let own = Bundle.main.bundleURL.resolvingSymlinksInPath().path
+        return hits.filter { ($0.url.deletingLastPathComponent().path.contains(".app") ? embeddingApp($0.url.path) != nil : true)
+            && $0.url.resolvingSymlinksInPath().path != own }
+    }
+
     /// Every app, most recently used first (the Applications suggestion). Apps inside other apps'
     /// bundles (helpers, Xcode's tools) are left out.
     @concurrent static func allApps() async -> [AssistantHit] {
-        // NotchIsland itself would always come first (it is active while the assistant is open).
-        let own = Bundle.main.bundleURL.resolvingSymlinksInPath().path
-        let hits = merged(run(#"kMDItemContentTypeTree == "com.apple.application-bundle""#, scopes: everywhere, fetch: 4000, kind: .app),
-                          cachedDiskApps())
-            // Inside another app only as its own tools (`isListedApp`).
-            .filter { ($0.url.deletingLastPathComponent().path.contains(".app") ? embeddingApp($0.url.path) != nil : true)
-                && $0.url.resolvingSymlinksInPath().path != own }
+        let predicate = #"kMDItemContentTypeTree == "com.apple.application-bundle""#
+        let answer: [AssistantHit]? = await SourceDeadline.value("Spotlight", within: .seconds(5), fallback: nil) {
+            query(predicate, scopes: everywhere, fetch: 4000, kind: .app)
+        }
+        if let answer { remember(answer) }
+        let hits = listable(merged(answer ?? [], cachedDiskApps()))
         return hits.sorted { a, b in
             let da = a.lastUsed ?? .distantPast, db = b.lastUsed ?? .distantPast
             if da != db { return da > db }
@@ -159,7 +218,7 @@ nonisolated enum AssistantSearch {
         let name = "kMDItemDisplayName == \(pattern)"
         let match = scope.contents && query.count >= 3 ? "(\(name) || kMDItemTextContent == \"\(term)*\"cdw)" : name
         let predicate = "\(match) && \(notApps)"
-        let hits = run(predicate, scopes: scope.paths, fetch: max(40, limit * 3), kind: .file)
+        let hits = await run(predicate, scopes: scope.paths, fetch: max(40, limit * 3), kind: .file)
         // By name first: a file that only says the word comes after the ones called it.
         let named = hits.filter { AssistantMatch.matches($0.name, query, scope.anywhere ? .anywhere : .wordStart) }
         return Array((rank(named, for: query) + rank(hits.filter { !named.contains($0) }, for: query)).prefix(limit))
@@ -169,7 +228,7 @@ nonisolated enum AssistantSearch {
     @concurrent static func recentFiles(limit: Int = 30, scope: FileScope = FileScope()) async -> [AssistantHit] {
         guard !scope.paths.isEmpty else { return [] }
         let predicate = "kMDItemLastUsedDate >= $time.today(-\(max(1, scope.days))) && \(fileFilter)"
-        let hits = run(predicate, scopes: scope.paths, fetch: 400, kind: .file)
+        let hits = await run(predicate, scopes: scope.paths, fetch: 400, kind: .file)
         let sorted = hits.sorted { ($0.lastUsed ?? .distantPast) > ($1.lastUsed ?? .distantPast) }
         return Array(sorted.prefix(limit))
     }
@@ -267,7 +326,15 @@ nonisolated enum AssistantSearch {
             .replacingOccurrences(of: "*", with: "\\*")
     }
 
-    private static func run(_ predicate: String, scopes: [String], fetch: Int, kind: AssistantHit.Kind) -> [AssistantHit] {
+    /// Spotlight's answer, waited for at most `limit` (`SourceDeadline`); none after it.
+    private static func run(_ predicate: String, scopes: [String], fetch: Int, kind: AssistantHit.Kind,
+                            within limit: Duration = SourceDeadline.standard) async -> [AssistantHit] {
+        await SourceDeadline.value("Spotlight", within: limit, fallback: []) {
+            query(predicate, scopes: scopes, fetch: fetch, kind: kind)
+        }
+    }
+
+    private static func query(_ predicate: String, scopes: [String], fetch: Int, kind: AssistantHit.Kind) -> [AssistantHit] {
         guard let query = MDQueryCreate(kCFAllocatorDefault, predicate as CFString, nil, nil) else { return [] }
         MDQuerySetSearchScope(query, scopes as CFArray, 0)
         MDQuerySetMaxCount(query, fetch)

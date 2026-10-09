@@ -188,6 +188,9 @@ nonisolated struct AssistantSources: Sendable {
     var contactsAccess: @Sendable () -> AccessState = { .denied }
     var requestContacts: @Sendable () async -> AccessState = { .denied }
     var bookmarks: @Sendable () async -> [AssistantBookmark] = { [] }
+    /// The apps on disk without Spotlight (the app folders and the apps it found elsewhere before):
+    /// a few milliseconds, listed while Spotlight's full list is still being read.
+    var quickApps: @Sendable () async -> [AssistantHit] = { [] }
     /// The currencies' rates per euro (fetched at most once a day); nil when they cannot be had.
     var rates: @Sendable () async -> [String: Double]? = { nil }
 
@@ -206,6 +209,7 @@ nonisolated struct AssistantSources: Sendable {
         contactsAccess: { ContactsLookup.access() },
         requestContacts: { await ContactsLookup.request() },
         bookmarks: { await BrowserBookmarks.all() },
+        quickApps: { await AssistantSearch.quickApps() },
         rates: { await CurrencyRates.shared.rates() }
     )
 }
@@ -353,6 +357,8 @@ nonisolated struct FileScope: Sendable, Equatable {
     @ObservationIgnored var onCommand: ((AppCommand) -> Void)?
     /// The user's Siri settings, read as they are needed (so a change applies at once).
     @ObservationIgnored var settings: () -> SiriSettings = { SiriSettings() }
+    /// Turns Settings ▸ Spotlight ▸ Currencies on (the offer row for a typed conversion).
+    @ObservationIgnored var enableCurrencies: () -> Void = {}
     /// What the user copied, newest first (Clipboard, ⌘4).
     @ObservationIgnored var clipboard: () -> [ClipboardItem] = { [] }
     /// Pastes a copied item where the user was typing before Siri (the app closes Siri first).
@@ -403,6 +409,11 @@ nonisolated struct FileScope: Sendable, Equatable {
     @ObservationIgnored var returnWait: Duration = .milliseconds(400)
     @ObservationIgnored private var askTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
+    /// How long a query waits for each source (Spotlight, files, the dictionary, Contacts): one
+    /// that does not answer is left out, the others land (`SourceDeadline`). Tests shorten it.
+    @ObservationIgnored var sourceLimit: Duration = .seconds(3)
+    /// This model's own record of the sources that are overdue.
+    @ObservationIgnored private let sourceOwner = UUID().uuidString + ":"
     /// The user moved the selection (keys or pointer): results landing keep that row selected.
     @ObservationIgnored private var selectionIsUsers = false
     /// The pointer put the selection where it is (hovering a row). The lists scroll only a
@@ -541,6 +552,7 @@ nonisolated struct FileScope: Sendable, Equatable {
             // timer ("10 min timer") with them.
             let calculation = (AssistantURL.url(from: text).map { [AssistantRow.openURL($0)] } ?? [])
                 + (calculation(for: text).map { [AssistantRow.calculation($0)] } ?? [])
+                + (!settings.convertsCurrency && AssistantCalculator.currencyQuery(text) != nil ? [AssistantRow.permission(.currencies)] : [])
                 + (settings.showsSystem ? typedTimer(text) : [])
                 + (settings.showsDefinitions && definition?.word.caseInsensitiveCompare(text) == .orderedSame
                    ? [AssistantRow.definition(definition!)] : [])
@@ -1155,6 +1167,11 @@ nonisolated struct FileScope: Sendable, Equatable {
             }
         case .permission(.calendar):
             requestCalendar()
+        case .permission(.currencies):
+            enableCurrencies()
+            calculated = nil
+            // The rates are fetched now (the query is not sent), and the answer replaces the row.
+            search(now: true)
         case .askIntelligence:
             ask()
         case .searchWeb:
@@ -1370,6 +1387,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         let hitLimit = settings.resultsPerKind
         let scope = FileScope(settings)
         let delay = settings.searchDelay
+        let limit = sourceLimit, owner = sourceOwner
         // The app list in memory in every mode (it has the apps Spotlight's name query misses:
         // "device hub" for DeviceHub, v0.4.10), with Spotlight's hits (other names: localized,
         // alternate) merged in.
@@ -1397,13 +1415,23 @@ nonisolated struct FileScope: Sendable, Equatable {
             var foundContacts: [AssistantContact] = []
             var unsupported = false
             if category == .files {
-                foundFiles = text.isEmpty ? await sources.recentFiles(scope) : await sources.files(text, 30, scope)
+                foundFiles = await SourceDeadline.value("files", owner: owner, within: limit, fallback: []) {
+                    text.isEmpty ? await sources.recentFiles(scope) : await sources.files(text, 30, scope)
+                }
             } else {
-                async let apps = Self.apps(text, hitLimit, inMemory: inMemoryApps, sources: sources)
-                async let files = withFiles ? sources.files(text, hitLimit, scope) : []
+                // Each waited for on its own: one that hangs (a privacy prompt nobody sees, a busy
+                // index) no longer keeps the others' rows back.
+                async let apps = Self.apps(text, hitLimit, inMemory: inMemoryApps, sources: sources, owner: owner, limit: limit)
+                async let files = withFiles
+                    ? SourceDeadline.value("files", owner: owner, within: limit, fallback: []) { await sources.files(text, hitLimit, scope) }
+                    : []
                 // A word alone is looked up; the people only once they were allowed.
-                async let definition = settings.showsDefinitions && DictionaryLookup.isWord(text) ? sources.define(text) : nil
-                async let contacts = readsPeople ? sources.contacts(text, hitLimit) : []
+                async let definition = settings.showsDefinitions && DictionaryLookup.isWord(text)
+                    ? SourceDeadline.value("dictionary", owner: owner, within: limit, fallback: nil) { await sources.define(text) }
+                    : nil
+                async let contacts = readsPeople
+                    ? SourceDeadline.value("contacts", owner: owner, within: limit, fallback: []) { await sources.contacts(text, hitLimit) }
+                    : []
                 (foundApps, foundFiles, foundDefinition, foundContacts) = await (apps, files, definition, contacts)
                 // Once per pause, not per keystroke: the recogniser is not free.
                 unsupported = sources.isUnsupportedLanguage(text)
@@ -1441,8 +1469,8 @@ nonisolated struct FileScope: Sendable, Equatable {
 
     /// The root's apps: already matched in memory, or from Spotlight.
     nonisolated private static func apps(_ text: String, _ limit: Int, inMemory: [AssistantHit]?,
-                                         sources: AssistantSources) async -> [AssistantHit] {
-        let indexed = await sources.apps(text, limit)
+                                         sources: AssistantSources, owner: String, limit wait: Duration) async -> [AssistantHit] {
+        let indexed = await SourceDeadline.value("apps", owner: owner, within: wait, fallback: []) { await sources.apps(text, limit) }
         guard let inMemory else { return indexed }
         return Array(AssistantSearch.rank(AssistantSearch.merged(inMemory, indexed), for: text).prefix(limit))
     }
@@ -1465,8 +1493,21 @@ nonisolated struct FileScope: Sendable, Equatable {
         // At utility priority, as the searches: the lists are read by Spotlight and the system's
         // tables off the main thread, and nobody waits on them within a frame (the gallery shows
         // the list it has meanwhile).
+        let limit = sourceLimit, owner = sourceOwner
+        let firstApps = needsApps && allApps.isEmpty
         loadTask = Task(priority: .utility) { [weak self] in
-            async let apps = needsApps ? sources.allApps() : []
+            // Spotlight's full list took 2.9 s on a tester's Mac: the apps on disk are listed first.
+            if firstApps {
+                let quick = await sources.quickApps()
+                if !quick.isEmpty, let self, self.allApps.isEmpty {
+                    self.replaceLists { self.allApps = quick }
+                    if self.category == nil, !self.trimmedQuery.isEmpty { self.search(now: true) }
+                }
+            }
+            // No answer (nil) is not an empty list: the list is read again next time.
+            async let apps: [AssistantHit]? = needsApps
+                ? SourceDeadline.value("app list", owner: owner, within: limit * 3, fallback: nil) { await sources.allApps() }
+                : []
             async let shortcuts = needsShortcuts ? sources.shortcuts() : nil
             async let panes = needsPanes ? sources.settingsPanes() : nil
             async let emoji = needsEmoji ? EmojiIndex.build(sources.emoji) : nil
@@ -1480,7 +1521,7 @@ nonisolated struct FileScope: Sendable, Equatable {
             guard !Task.isCancelled, let self else { return }
             self.loadTask = nil
             self.replaceLists {
-                if needsApps {
+                if needsApps, let foundApps {
                     self.allApps = foundApps
                     self.allAppsRead = Date()
                 }
@@ -1489,8 +1530,14 @@ nonisolated struct FileScope: Sendable, Equatable {
                 if needsEmoji { self.emoji = foundEmoji ?? EmojiIndex([]) }
                 if needsBookmarks { self.bookmarks = foundBookmarks ?? [] }
             }
-            // Asked for something else while this ran (the task is single-flight).
-            self.loadLists(for: self.category, query: self.trimmedQuery)
+            // The list landed after the query was typed: its search ran without it (and without
+            // the apps Spotlight's name query misses), so it runs again with it.
+            if needsApps, foundApps != nil, self.category == nil, !self.trimmedQuery.isEmpty {
+                self.search(now: true)
+            } else {
+                // Asked for something else while this ran (the task is single-flight).
+                self.loadLists(for: self.category, query: self.trimmedQuery)
+            }
         }
     }
 
@@ -1599,6 +1646,7 @@ nonisolated enum AssistantMatch {
         let words = keptWords(of: original)
         let tokens = query.split(whereSeparator: \.isWhitespace)
         let wordStarts = tokens.allSatisfy { token in words.contains { $0.hasPrefix(token) } }
+            || runsOn(words, query.filter { !$0.isWhitespace })
         switch mode {
         case .wordStart:
             return wordStarts
@@ -1639,6 +1687,23 @@ nonisolated enum AssistantMatch {
     }
 
     static func forget() { known.withLock { $0 = Kept() } }
+
+    /// Typed without its spaces, from the start of one of its words: "appstore" is App Store,
+    /// "studiocode" Visual Studio Code (as Spotlight finds them; a tester's "appstore" found
+    /// nothing, v0.5). From three letters on, so "ap" does not match every word starting a-p.
+    static func runsOn(_ words: [Substring], _ compact: String) -> Bool {
+        guard compact.count >= 3, words.count > 1 else { return false }
+        for start in words.indices where compact.hasPrefix(words[start]) || words[start].hasPrefix(compact) {
+            var rest = Substring(compact)
+            for word in words[start...] {
+                if word.hasPrefix(rest) { return true }
+                guard rest.hasPrefix(word) else { break }
+                rest = rest.dropFirst(word.count)
+                if rest.isEmpty { return true }
+            }
+        }
+        return false
+    }
 
     /// The name's words, folded: split at spaces and marks, and where a capital follows a small
     /// letter ("DeviceHub" is "device" and "hub": "device hub" found no app, v0.4.10).

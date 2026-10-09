@@ -113,15 +113,21 @@ enum DiagnosticsAppState {
     private static func health(_ model: AppModel) -> DiagnosticsReport.Section {
         var section = DiagnosticsReport.Section("Feature health")
         let preferences = model.preferences
-        func line(_ name: String, wanted: Bool, running: Bool, _ detail: String = "") {
-            let state = !wanted ? "off (by the user)" : running ? "✅ running" : "⚠︎ wanted but not running"
+        func line(_ name: String, wanted: Bool, running: Bool, paused: Bool = false, _ detail: String = "") {
+            let state = paused ? "paused (locked, asleep or a permission reset)"
+                : !wanted ? "off (by the user)" : running ? "✅ running" : "⚠︎ wanted but not running"
             section.add(name, state + (detail.isEmpty ? "" : " — \(detail)"))
         }
         let media = String(describing: model.media.status)
         line("Now Playing", wanted: preferences.showNowPlaying, running: !media.hasPrefix("off"), media)
         let keys = String(describing: model.levels.interception)
-        line("Volume/brightness keys", wanted: preferences.showLevelHUD && preferences.replaceSystemHUD,
-             running: keys.hasPrefix("active"), keys)
+        // Off on purpose while the Mac is locked or asleep (the system HUD stays in charge) and while
+        // a permission Reset holds the key taps: 73 of 74 "on but not running" verdicts in the
+        // reports were hourly reports from a locked Mac.
+        let keysPaused = model.activity.isSuspended || model.permissions.keyTapsHeld
+        let keysWanted = preferences.showLevelHUD && preferences.replaceSystemHUD
+        line("Volume/brightness keys", wanted: keysWanted && !keysPaused, running: keys.hasPrefix("active"),
+             paused: keysWanted && keysPaused, keys)
         line("⌘Space for Siri", wanted: model.diagnosticsCommandSpaceWanted, running: model.diagnosticsCommandSpaceTapRunning)
         line("Full-screen watch", wanted: preferences.hideInFullscreen, running: model.fullscreen.isRunning,
              "full-screen apps: \(model.fullscreen.fullscreenApps.count)")

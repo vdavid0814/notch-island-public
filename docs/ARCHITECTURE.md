@@ -157,8 +157,25 @@ frames, banner changes, feature start/stop and permission changes log at
   rule's minimum and its factor times the reference (`DiagnosticsMetric.Rule`; the file's `rules`
   override the defaults without a release). Two 10-minute samples in a row past it send a report at
   once, at most every 6 hours.
-* **Discord.** `Scripts/discord-setup.py` builds the channels (alerts; users, bugs and features
-  forums; baseline; how-to) and writes `Support/diagnostics-webhooks.json`, which `Scripts/build.sh`
-  puts in Info.plist (`NIDiagnosticsConfig`). Each Mac gets its own post in the users forum (its id is
-  kept in `ni2.diagnostics.userThread`); bugs and requests get a post in their forum; anything that
-  needs a look gets a line in alerts linking to the details. A failed delivery waits in the outbox.
+* **Sentry and Mixpanel** (`Features/Telemetry/`, both in the EU). `Support/telemetry.json`
+  (git-ignored; keys in `Support/telemetry.example.json`) goes into Info.plist (`NITelemetry`) at
+  build time; without it no reports are sent. `Telemetry` starts with the About switch (and for one
+  delivery when the user sends by hand with it off):
+  * **Sentry** (the `sentry-cocoa` SDK, static): crashes from its crash handler, hangs from
+    MetricKit's diagnostics, every likely cause (`DiagnosticsVerdict.Check`) as an issue grouped by
+    its id, NotchIsland's own error lines grouped by category and wording, macOS's crash and hang
+    reports as attachments, the whole report (report.txt, report.json, log.txt) for a report sent
+    by hand, a crash, an anomaly or a problem, the user's flow as breadcrumbs with typed text left
+    out (`TelemetryMapping.redacted`), and bug reports and requests as user feedback. A cause or
+    an error line goes at most once a day per Mac. No tracing, swizzling or automatic breadcrumbs;
+    the SDK's App Hang watcher only with `ni2.telemetry.appHangs` (it tripled the wakeups at rest).
+  * **Mixpanel** (`MixpanelClient`, no SDK): "App Launched", "Update Installed", and per report a
+    "Health Snapshot" (the metrics, each feature's state, the verdict's counts; no paths, nothing
+    typed). Events wait in `Application Support/NotchIsland/Mixpanel/queue.json` and go with the
+    report cycle (`/track`, `ip=0`), so no timer of its own.
+  * Release builds write `build/NotchIsland.app.dSYM`; with `sentry-cli` and `SENTRY_AUTH_TOKEN`
+    it is uploaded so Sentry symbolicates crashes.
+* **Discord** (bug reports and requests, besides Sentry). `Scripts/discord-setup.py` builds the
+  forums and writes `Support/diagnostics-webhooks.json`, which `Scripts/build.sh` puts in Info.plist
+  (`NIDiagnosticsConfig`); bugs and requests get a post in their forum with a pointer in the Mac's
+  post. A failed delivery waits in the outbox. Automatic reports no longer go there.

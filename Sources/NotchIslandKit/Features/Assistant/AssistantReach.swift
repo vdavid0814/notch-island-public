@@ -45,6 +45,10 @@ nonisolated enum DictionaryLookup {
     @concurrent static func define(_ word: String) async -> AssistantDefinition? {
         let word = word.trimmingCharacters(in: .whitespacesAndNewlines)
         guard isWord(word) else { return nil }
+        return await SourceDeadline.value("Dictionary", fallback: nil) { entry(word) }
+    }
+
+    private static func entry(_ word: String) -> AssistantDefinition? {
         let text = word as CFString
         let range = DCSGetTermRangeInString(nil, text, 0)
         guard range.location != kCFNotFound, range.length >= CFStringGetLength(text) - 1,
@@ -126,15 +130,26 @@ nonisolated struct ContactAction: Sendable, Hashable, Identifiable {
 /// What Spotlight must be allowed before it can list something.
 nonisolated enum AssistantPermission: String, Sendable, Hashable {
     case contacts, calendar
+    /// Settings ▸ Spotlight ▸ Currencies, off: a typed conversion offers to turn it on instead of
+    /// listing nothing (it is off until the user turns it on, so the same query worked on one Mac
+    /// and gave nothing on another, v0.8.1).
+    case currencies
 
     var title: String {
         switch self {
         case .contacts: String(localized: "Show My Contacts…")
         case .calendar: String(localized: "Show My Events…")
+        case .currencies: String(localized: "Convert Currencies (Daily Rates)…")
         }
     }
 
-    var symbol: String { self == .contacts ? "person.2.fill" : "calendar" }
+    var symbol: String {
+        switch self {
+        case .contacts: "person.2.fill"
+        case .calendar: "calendar"
+        case .currencies: "dollarsign.arrow.circlepath"
+        }
+    }
 }
 
 nonisolated enum AccessState: Sendable, Equatable { case notDetermined, denied, granted }
@@ -159,6 +174,10 @@ nonisolated enum ContactsLookup {
     @concurrent static func search(_ query: String, limit: Int) async -> [AssistantContact] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard access() == .granted, !query.isEmpty else { return [] }
+        return await SourceDeadline.value("Contacts", fallback: []) { read(query, limit: limit) }
+    }
+
+    private static func read(_ query: String, limit: Int) -> [AssistantContact] {
         let store = CNContactStore()
         let keys = [CNContactGivenNameKey, CNContactFamilyNameKey, CNContactOrganizationNameKey, CNContactPhoneNumbersKey,
                     CNContactEmailAddressesKey, CNContactIdentifierKey] as [any CNKeyDescriptor]

@@ -563,8 +563,13 @@ final class ManualClock: Clock {
         model.begin()
         model.end()
         #expect(AssistantIcons.diskTidied != nil)
-        // On the background queue: done after a turn of it that follows the tidy's.
-        for _ in 0..<20 where staleCount() > 0 { await Thrifty.runInBackground {} }
+        // On the background queue (background QoS), from a task the main actor starts: under a full
+        // parallel run of the suite that queue gets almost no CPU until the load drops (20 turns
+        // of it, then 5 s, were not enough), so it is waited for until it ran, up to 30 s.
+        let deadline = ContinuousClock.now + .seconds(30)
+        while staleCount() > 0, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
         #expect(staleCount() == 0)
         // Not again within the day.
         #expect(AssistantIcons.tidyDisk() == nil)
