@@ -352,10 +352,9 @@ import Testing
         center.onExpire = { expired.append($0) }
         center.post(.level(.volume), duration: 0.05)
         #expect(center.current == .level(.volume))
-        // Waited for rather than slept on: with every suite drawing on the main actor at once, the
-        // deadline's turn may come late.
-        let deadline = Date.now.addingTimeInterval(10)
-        while center.current != nil, Date.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        // Waited for in turns of the main actor, not in wall-clock time: with every suite on the
+        // main actor at once, 10 s passed before the expiry's turn came (and the wait gave up).
+        for _ in 0..<1000 where center.current != nil { try await Task.sleep(for: .milliseconds(20)) }
         #expect(center.current == nil)
         #expect(expired == [.level(.volume)])
     }

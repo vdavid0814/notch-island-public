@@ -554,8 +554,12 @@ final class ManualClock: Clock {
         }
         let kept = try app("Kept")
         let stale = IconDiskCache(folder: folder)
-        _ = stale.image(forApp: kept, variant: "row 2.0x", style: "Dark|Gone|-|-|Version 1") { IconDiskCacheTests.picture() }
-        func staleCount() -> Int { ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).count }
+        let staleStyle = "Dark|Gone|-|-|Version 1"
+        _ = stale.image(forApp: kept, variant: "row 2.0x", style: staleStyle) { IconDiskCacheTests.picture() }
+        // That one entry: the folder is AssistantIcons' global disk while this runs, and other
+        // suites' Siri models write their current icons into it too (they stay, as they should).
+        let staleFile = folder.appendingPathComponent(IconDiskCache.name(app: kept, variant: "row 2.0x", style: staleStyle))
+        func staleCount() -> Int { FileManager.default.fileExists(atPath: staleFile.path) ? 1 : 0 }
         #expect(staleCount() == 1)
         // Siri opened first, so no prewarm tidied: its close does.
         AssistantIcons.diskTidied = nil
@@ -566,8 +570,8 @@ final class ManualClock: Clock {
         // On the background queue (background QoS), from a task the main actor starts: under a full
         // parallel run of the suite that queue gets almost no CPU until the load drops (20 turns
         // of it, then 5 s, were not enough), so it is waited for until it ran, up to 30 s.
-        let deadline = ContinuousClock.now + .seconds(30)
-        while staleCount() > 0, ContinuousClock.now < deadline {
+        // In turns of the main actor (which starts the tidy's task), not wall-clock time.
+        for _ in 0..<1500 where staleCount() > 0 {
             try? await Task.sleep(for: .milliseconds(20))
         }
         #expect(staleCount() == 0)

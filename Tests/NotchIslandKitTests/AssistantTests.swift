@@ -1008,8 +1008,10 @@ import Testing
     func model(_ sources: AssistantSources = stubSources(), recorder: SystemRecorder) -> AssistantModel {
         let model = AssistantModel(defaults: UserDefaults(suiteName: "AssistantIntentTests.\(UUID().uuidString)")!, sources: sources)
         model.system = recorder.system
-        // Long enough that a busy test machine's search lands first (the slow-search test sets it back).
-        model.returnWait = .seconds(10)
+        // Never before the search lands (the slow-search test sets it back): every main-actor suite
+        // shares one thread, so under a full run 10 s of wall clock passed before the stub search
+        // had its turn, and Return went to the switch.
+        model.returnWait = .seconds(3600)
         model.begin()
         return model
     }
