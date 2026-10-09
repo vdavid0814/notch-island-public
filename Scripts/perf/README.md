@@ -4,6 +4,8 @@
 |---|---|
 | `bench.py <label> <seconds> [full\|opens\|settings\|idle]` | Drives the island through `notchisland://` URLs and samples CPU %, GPU %, footprint and Energy Impact (top's POWER) every second. `NI_APP` picks the app bundle. |
 | `ab.py <out.tsv> <label=app> … -- [scenario …]` | Back-to-back comparison of builds with `anim.py` (A B A B …), one row per scenario and round, then the medians. Refuses a build that still sends diagnostics. |
+| `rest.py <seconds> [label]` | Energy Impact second by second at rest, as Activity Monitor at 1 s shows it (own, GPU, billed to the app), with the seconds that had keyboard or mouse input marked and left out of the summary; `QUIET=1` prints the summary only. |
+| `phases.py <step>=<seconds> …` | Energy, CPU, performance-core ms and the worst 1 s of each step: a `notchisland://` route, or `move:x,y` / `click:x,y` with the real pointer (`ws/mouse`). A click and a URL run differently (the click's priority carries into its turn): measure the real path. |
 | `per_event.py <label>.json` | CPU ms, peak % and peak energy per event type of a `bench.py` run. |
 | `states.py <label> [seconds]` | Steady-state cost of each island state (rest, panels, Siri, Settings pages). |
 | `cpu.py <pid> <seconds>` | CPU % and footprint of any process over a window. |

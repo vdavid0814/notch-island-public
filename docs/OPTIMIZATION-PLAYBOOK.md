@@ -67,6 +67,28 @@ which did not, and how to keep the look identical. The numbers are in `ENERGY-LO
 - **Read ahead, at low priority**: Siri's lists and apps at `.utility` / `.background`, kept for
   30 minutes.
 
+- **Measure the real path, not only the URL**: `phases.py` drives the real pointer (`move:x,y`,
+  `click:x,y`) as well as `notchisland://` steps. A click carries the event's priority into the
+  turn it handles, so its work runs on the performance cores where a URL-driven run (an Apple
+  event) shows less: opening Settings from the gear measured 250–300 where `settings/general`
+  read 70–85; Customize measured 2600 only by a click.
+- **Look at rest while the mouse moves**: global event monitors run a whole main run-loop turn (a
+  Core Animation commit included) for every move anywhere on the screen. Rest with a still mouse
+  can read 0.0 while normal use reads 6–7. A listen-only `CGEventTap` on a thread of its own that
+  hands the main thread only the moves that matter costs a fifth (`BandPointerWatch`).
+- **Kept views can keep working**: a `.task` loop in a kept, hidden Settings page ran for as long as
+  the app did (TCC reads every 2 s). Look for `.task`, timers and observers under anything that is
+  built ahead and kept, and tie them to the page being shown (`settingsPageVisit`).
+- **A `drawingGroup` around an animated scale** draws the whole picture again at every frame on the
+  CPU (`RB_DISABLE_GPU`). Animate the scale outside the picture.
+- **Who invalidates a platform view**: a temporary swizzle of `NSView`'s `needsDisplay` /
+  `needsLayout` / `viewWillMove(toWindow:)` that logs the call stack for one class showed that
+  SwiftUI takes the panel's native page picker out of the window when the window shrinks to the
+  notch, and puts it back (layers, layout, drawing) at every opening.
+- **Ablations by environment switch** (`NI_EXP_…` read once, removed afterwards): hide one part,
+  measure the CPU and energy of the step, compare. Quicker than reading profiles when the work is
+  spread over many small updates.
+
 ## 5. Tried and dropped (measured equal or worse)
 
 An AppKit `NSScrollView` around a SwiftUI page, responsive scrolling, AppKit hover tracking instead
@@ -74,6 +96,11 @@ of `.onHover`, one `onContinuousHover` for the gallery, scrolling the clip view'
 committing the layer scroll every 0.12 s (each commit was 20–24 ms), handing the scroll ends to
 AppKit (Activity Monitor 200 there), moving hosting views between superviews or windows, keeping
 Settings inside the island's window.
+
+October 9 2026: the panel's opening at background priority (`MainThrift.lowPower`, half the energy,
+but every opening hitched 200 ms instead of 83); the hidden kept panel at a near-zero opacity
+instead of 0 (SwiftUI still drops what lies outside the notch-sized window); Customize's steps in
+as `visualEffect` instead of `offset`/`opacity` (closing cheaper, opening +150 ms of CPU).
 
 ## 6. Keep the look and the motion identical
 

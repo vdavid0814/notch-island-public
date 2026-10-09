@@ -4,6 +4,57 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-09 (night): rest, the full-screen pointer, Settings and Customize by real clicks
+
+Release builds, on battery from ~02:00 (A/B always in the same state), MacBook Air M5. Rest and
+steps measured with the new `Scripts/perf/rest.py` (Activity Monitor's 1 s Energy Impact per
+second, seconds with keyboard or mouse input left out) and `phases.py` (energy per step, through
+`notchisland://` or the real pointer). Activity Monitor read alongside.
+
+| | before | now |
+|---|---|---|
+| Rest, no music (seconds reading 0.0) | ~0.1 every other second | **0.0 in 294 of 300 s** (see below) |
+| Rest with music, between analyses | 0.01–0.3 | **0.01–0.03** (reads 0.0) |
+| Rest with music, while the tap analyses (~3 s in 8 on battery) | 0.26–0.34 | **0.10–0.49** |
+| Moving the mouse while a full-screen app is up | **6.3–6.7** | **1.3** |
+| Opening Settings from the gear (General) | 246–298 | **181–210** |
+| Closing Settings | 71–74 | **56–63** |
+| Opening Customize (Timer) by its button | **2150–2800** | **645–670** (first after launch ~1200) |
+| Closing Customize | 360–430 | **206–227** |
+| Memory at rest, Settings prepared | 236 MB | 202–208 MB |
+
+- **About's permissions read every 2 s, forever**: a `.task` loop in the kept (hidden) About page
+  ran from the moment Settings was prepared: six TCC requests, the Automation checks for Music and
+  Spotify and Bluetooth's authorization each time. It now reads as the page is built and shown,
+  every 2 s only while About is shown and System Settings runs, and for a minute after an Allow
+  prompt; Input Monitoring (which posts nothing) is read again when another app comes forward
+  while a permission is still missing.
+- **The full-screen menu-bar guard** (on while a full-screen app is up) had a global mouse monitor:
+  every move anywhere on the screen ran a main run-loop turn with a Core Animation commit. The moves
+  now come from a listen-only event tap on a thread of its own (`BandPointerWatch`) and reach the
+  main thread only near the notch, in the band, or while the strip is up or the menu bar yielded
+  (a global monitor stays the fallback). Covering and uncovering checked by hand: unchanged.
+- **Settings' live pictures** (the gallery's 54 previews, the stage) went back into the window at
+  every opening, on any page: now only those of the page shown, the rest when their page is.
+- **Customize**: the widget grew into place (0.9 → 1) inside its sharp `drawingGroup` picture, so
+  the enlarged widget was drawn again on the CPU at every frame of the spring (~10 ms a frame); it
+  now scales outside the picture. The Open Widgets list (hidden until asked for, a quarter of an
+  opening) is built 0.9 s after Customize has come in, at background priority; a click before that
+  builds it and opens it a turn later. The editor is torn down at background priority.
+- **A click is not a URL**: driven by `notchisland://`, Settings' opening read 70–85, by the gear
+  250–300 — the click's priority carries into its turn (performance cores). Customize read 2600
+  only by its button. Measure both.
+- **Left over, above 100**: opening Customize (its graph and ~60 native controls are built at every
+  opening, ~450 ms); opening Settings from the panel; the panel's own opening by hover (60–150,
+  most of it the header's native page picker and every layer drawn again, because SwiftUI drops
+  what lies outside the notch-sized resting window); Siri's app gallery (65–185).
+- **Rest, the rare spike**: about every 4–8 minutes 100–230 for a second, all of it energy other
+  processes billed to the app (its own CPU 0, no wake-up), at moments Music (paused, a moving
+  cover) decoded video. Not traced to its source yet.
+- **Memory**: 202–208 MB with Settings prepared (18 MB before it is): the Widgets page ~90 MB
+  (its 54 previews ~31 MB, cards ~26 MB, stage ~30 MB), General ~44, Spotlight ~25, Live
+  Activities ~15, About ~8 — nearly all SwiftUI view graphs.
+
 ## 2026-10-02 (night): scrolling Settings ▸ Widgets
 
 Scrolling the widget gallery with the trackpad showed an Energy Impact of 1300–1500 in Activity
