@@ -59,7 +59,12 @@ evening's build (`apps/base.app`), Activity Monitor read alongside.
 ### Left for next time (worst first)
 1. **Customize's opening** (~1260): its side panels' AppKit controls (Liquid Glass switches, slider,
    segmented controls) are drawn again while they slide in (CoreUI display lists, 16-bit soft
-   masks), and the editor's graph paper (`Canvas`) under the scale.
+   masks). Measured at 22 % battery, A/B: without the panels' offset the cycle goes 2.09 → 1.22 J
+   (worst 1 s 804 → 518); their opacity changes nothing. Moving them by `visualEffect` instead of
+   `offset` (frames kept) did not help (2.04 → 2.11 J): the glass is drawn again for its position.
+   What should: each panel in a nested hosting view moved by a Core Animation spring on its layer
+   (SwiftUI's `Spring` gives stiffness and damping), so the app draws nothing while it slides. The
+   editor's graph paper as a picture drawn once changed nothing measurable (3.49 → 3.44 J).
 2. **Siri's app gallery** (worst 1 s ~400) and typed search (~550, most billed by Spotlight's
    daemons); Siri's close (40–80 ms in one turn, ~40 % of it the fade style's shade drawn again).
 3. **Warm hover stress** (~45 mean at one open and close a second): ~120 ms of CPU per cycle — the
