@@ -35,10 +35,18 @@ blurs at every frame across several performance cores (vImage on `dispatch_apply
   without Writing Tools billed the same). Real use sees it once after an update. Warm the build up
   with one URL before measuring.
 
+- **Customize's left panel and top bar slide on the render server** (`RenderServerSlide`): slid by
+  SwiftUI their glass controls were drawn again in every frame (top bar ~0.45 J of an opening and
+  closing, left panel ~0.19 J, measured one at a time). The left panel lives in a view graph of
+  its own; the top bar's list of saved versions grows out of it over the editor, so only a
+  stand-in slides and the bar itself takes over once the spring has settled. Customize opened and
+  closed: 2.07 → 1.48 J, worst 1 s ~780 → ~600 (10.4 J and ~3750 the night before).
+
 ### Left for next time
-- Customize's top bar (~0.45 J of a cycle) and left panel (~0.19 J): their glass controls drawn
-  again while they slide; a nested hosting view moved by a Core Animation spring would avoid it
-  (the top bar's version list grows out of it, over the editor).
+- Customize's opening (~550–600 for one second): what is left is building it (0.5 s on the
+  performance cores, the click's priority), not its motion. Building it ahead when a widget is
+  picked was not done: at background priority one turn of ~1 s would stall Settings just as the
+  user starts on the widget's settings; in pieces, as Settings' pages are, might do.
 - Siri's gallery opening (~190 mJ): SwiftUI building ~50 cells; nothing of the app's own stands out.
 
 ## 2026-10-10 (night): real-pointer stress tests, cold openings, Customize
