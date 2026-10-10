@@ -12,13 +12,17 @@ struct BatteryGlyph: View {
     let tint: StatusTint
     var showsPercentage = true
     var height: CGFloat = 13
+    /// Drawn in this instead of white (the colour set for it in the top bar); low and in Low Power
+    /// Mode it is red and yellow all the same.
+    var color: Color?
 
     var body: some View {
         let level = min(max(level, 0), 100)
         let width = (height * 2.2).rounded()
         let radius = height * 0.3
-        let fill: AnyShapeStyle = tint == .charging ? AnyShapeStyle(.white) : tint.style
-        let empty = AnyShapeStyle(.white.opacity(0.35))
+        let own: AnyShapeStyle = tint == .charging ? AnyShapeStyle(.white) : tint.style
+        let fill: AnyShapeStyle = tint == .charging || tint == .none ? color.map { AnyShapeStyle($0) } ?? own : own
+        let empty = AnyShapeStyle((color ?? .white).opacity(0.35))
         HStack(spacing: height * 0.1) {
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)

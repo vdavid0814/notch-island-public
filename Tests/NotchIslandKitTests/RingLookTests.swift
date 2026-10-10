@@ -148,3 +148,105 @@ import Testing
         #expect(picked.count == 3 && picked[0] == .blue && picked[1] == .yellow && picked[2] == IslandTheme.RGB.rgb(1, 0, 1).color)
     }
 }
+
+/// The top bar's sides, each put back by itself.
+struct HeaderSideResetTests {
+    @Test func aSideGoesBackToItsOwnItemsAndTheOtherKeepsItsOwn() {
+        var bar = HeaderLayout(leading: [.clock, .settings, .pages], trailing: [.siri, .nowPlaying])
+        bar.reset(.leading)
+        // The pages alone on the left; Settings must stay in the bar, so it went to the right; the
+        // clock is out.
+        #expect(bar.leading == [.pages])
+        #expect(bar.trailing == [.siri, .nowPlaying, .settings])
+        bar.reset(.trailing)
+        #expect(bar.leading == [.pages] && bar.trailing == HeaderLayout.standard.trailing)
+        var moved = HeaderLayout(leading: [.battery], trailing: [.pages, .settings])
+        moved.reset(.trailing)
+        // The battery comes back from the left; the pages, which must stay, go there.
+        #expect(moved.trailing == HeaderLayout.standard.trailing && moved.leading == [.pages])
+    }
+}
+
+struct HeaderBarsResetTests {
+    @Test func bothBarsGoBackAndThePagesStay() {
+        var bar = HeaderLayout(leading: [.clock, .settings], trailing: [.pages, .siri], hiddenPages: [.battery],
+                               pageOrder: [.shelf, .home, .timer, .battery])
+        bar.resetBars()
+        #expect(bar.leading == HeaderLayout.standard.leading && bar.trailing == HeaderLayout.standard.trailing)
+        #expect(bar.hiddenPages == [.battery] && bar.pageOrder.first == .shelf)
+    }
+}
+
+struct HeaderTintTests {
+    @Test func eachButtonAndPageKeepsItsOwnColourWithTheBar() throws {
+        var bar = HeaderLayout.standard
+        let fresh = try JSONDecoder().decode(HeaderLayout.self, from: JSONEncoder().encode(bar))
+        #expect(fresh.itemTints.isEmpty && fresh.pageTints.isEmpty && fresh.hasStandardBars)
+        bar.setTint(.rgb(1, 0.5, 0), of: [.item(.settings), .page(.shelf)])
+        bar.setTint(.rgb(0, 0.5, 1), of: [.item(.siri)])
+        bar.place(.toggle(.airDrop), on: .trailing, at: 0)
+        let stored = try JSONDecoder().decode(HeaderLayout.self, from: JSONEncoder().encode(bar))
+        #expect(stored == bar && stored.trailing.first == .toggle(.airDrop))
+        #expect(stored.tint(of: .item(.settings)) == .rgb(1, 0.5, 0) && stored.tint(of: .page(.shelf)) == .rgb(1, 0.5, 0))
+        #expect(stored.tint(of: .item(.siri)) == .rgb(0, 0.5, 1) && stored.tint(of: .item(.pin)) == nil && stored.tint(of: .page(.home)) == nil)
+        // Fifteen: three to a row, five rows, none left over.
+        #expect(HeaderItem.allCases.count == 15 && HeaderItem(rawValue: "toggle.airDrop") == .toggle(.airDrop))
+        // One alone back in its own colour; Reset Bars takes them all.
+        bar.setTint(nil, of: [.item(.siri)])
+        #expect(bar.itemTints.count == 1 && !bar.hasStandardBars)
+        bar.resetBars()
+        #expect(bar.itemTints.isEmpty && bar.pageTints.isEmpty && bar.hasStandardBars)
+    }
+
+    @Test func aPageGoneTakesItsColourAndThePickerHasNone() {
+        var bar = HeaderLayout.standard
+        let page = bar.addCustomPage(title: "Page 2")!
+        bar.setTint(.rgb(1, 0, 0), of: [.page(page), .item(.pages)])
+        bar.sanitize()
+        #expect(bar.pageTints[page] == .rgb(1, 0, 0) && bar.itemTints[.pages] == nil)
+        bar.removeCustomPage(page)
+        #expect(bar.pageTints.isEmpty)
+    }
+}
+
+@MainActor struct HeaderPickTests {
+    @Test func aClickPicksOneAndCommandClickMore() {
+        let studio = WidgetStudio()
+        studio.pick(.item(.settings), adding: false)
+        #expect(studio.headerPicks == [.item(.settings)] && studio.headerSelection == .settings)
+        studio.pick(.page(.shelf), adding: true)
+        #expect(studio.headerPicks == [.item(.settings), .page(.shelf)] && studio.headerSelection == nil)
+        // A plain click on another is that one alone; on the only pick, none.
+        studio.pick(.item(.siri), adding: false)
+        #expect(studio.headerPicks == [.item(.siri)])
+        studio.pick(.item(.siri), adding: false)
+        #expect(studio.headerPicks.isEmpty)
+        studio.pick(.item(.pin), adding: true)
+        studio.pick(.item(.pin), adding: true)
+        #expect(studio.headerPicks.isEmpty)
+    }
+}
+
+@MainActor struct EditHistoryTests {
+    @Test func stepsBackAndForwardAndADragIsOneStep() {
+        var history = EditHistory<Int>()
+        #expect(!history.canUndo && history.undo(from: 0) == nil)
+        history.note(from: 0, to: 1, at: 10)
+        // Within the same drag: no step of its own.
+        history.note(from: 1, to: 2, at: 10.2)
+        history.note(from: 2, to: 3, at: 12)
+        #expect(history.undoStack == [0, 2])
+        #expect(history.undo(from: 3) == 2)
+        // The change the step back itself makes is no step.
+        history.note(from: 3, to: 2, at: 12.1)
+        #expect(history.undoStack == [0] && history.redoStack == [3])
+        #expect(history.undo(from: 2) == 0 && history.redo(from: 0) == 2 && history.redo(from: 2) == 3)
+        history.note(from: 2, to: 3, at: 12.2)
+        #expect(history.undoStack == [0, 2] && !history.canRedo)
+        // Something new after a step back: nothing to make again.
+        _ = history.undo(from: 3)
+        history.note(from: 3, to: 2, at: 12.3)
+        history.note(from: 2, to: 7, at: 20)
+        #expect(history.undoStack == [0, 2] && !history.canRedo)
+    }
+}

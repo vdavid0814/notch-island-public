@@ -21,6 +21,11 @@ struct WidgetsSettingsPage: View {
     /// room they leave, so the controls sit at the window's bottom.
     @State private var viewportHeight: CGFloat = 0
     @State private var inspectorHeight: CGFloat = 0
+    /// The stage's height as drawn: Top Bar mode's page takes the room under it.
+    @State private var stageHeight: CGFloat = 0
+    /// The gallery's own height, as its graph lays it out (`GalleryHost`).
+    @State private var galleryHeight: CGFloat = 400
+    @Environment(\.settingsPageVisit) private var visit
     @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
     /// Letting go of the picks once the page has gone (`pickResetDelay`).
     @State private var pendingReset: Timer?
@@ -32,6 +37,7 @@ struct WidgetsSettingsPage: View {
                     StudioStage(selection: $selection, group: $group, backdrop: $backdrop, notice: notice,
                                 fillHeight: model.studio.mode == .size
                                     ? viewportHeight - Self.topInset - Self.spacing - inspectorHeight - bottomInset : 0)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { stageHeight = $0 }
                         .id(StudioAnchor.stage)
                     // Every mode's content is built once and kept (`ModeDeck`): another mode, a widget
                     // picked or let go, is one of them shown instead of another — nothing is built
@@ -42,7 +48,9 @@ struct WidgetsSettingsPage: View {
                     let inspects = mode == .widgets && (picked.count >= 2 || selection.map { model.editedWidgets.board.contains($0) } == true)
                     let shown: ModeDeck.Slot = mode == .topBar ? .topBar : mode == .size ? .size : inspects ? .inspector : .gallery
                     ModeDeck(shown: shown) {
-                        TopBarInspector()
+                        // As tall as the room under the stage: its Reset is level with the sidebar's foot.
+                        TopBarInspector(height: max(viewportHeight - Self.topInset - stageHeight - Self.spacing - bottomInset,
+                                                    TopBarInspector.minimumHeight))
                             .deckSlot(.topBar, shown: shown)
                         VStack(alignment: .leading, spacing: 16) {
                             SizeInspector()
@@ -51,14 +59,21 @@ struct WidgetsSettingsPage: View {
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { inspectorHeight = $0 }
                         .deckSlot(.size, shown: shown)
                         VStack(alignment: .leading, spacing: 22) {
+                            if model.studio.page == .shelf {
+                                StudioCard("Shelf", subtitle: "Files dropped on the notch wait on this page. It has no widgets to arrange; General switches it on and off.") {
+                                    EmptyView()
+                                }
+                            }
                             ParkedTray()
-                            WidgetStoreView(isShown: shown == .gallery, add: { add($0, scroller: scroller) },
-                                            open: { kind in
-                                                if let id = model.editedWidgets.board.first(of: kind)?.id { select(id, scroller: scroller) }
-                                            })
-                                // Unseen, it is not gone over at all: every change to a widget (a
-                                // drag in Customize) would run its fifty cards' bodies otherwise.
-                                .equatable()
+                            // In a view graph of its own (`GalleryHost`): kept built while another
+                            // mode or a picked widget is shown, but out of this page's graph.
+                            GalleryHost(isShown: shown == .gallery, isShelf: model.studio.page == .shelf, height: galleryHeight,
+                                        model: model, visit: visit,
+                                        add: { add($0, scroller: scroller) },
+                                        open: { kind in
+                                            if let id = model.editedWidgets.board.first(of: kind)?.id { select(id, scroller: scroller) }
+                                        },
+                                        measured: { height in if galleryHeight != height { galleryHeight = height } })
                         }
                         .deckSlot(.gallery, shown: shown)
                         VStack(alignment: .leading, spacing: 0) {
@@ -82,13 +97,16 @@ struct WidgetsSettingsPage: View {
                     // Faded out while the stage switches modes (`WidgetStudio.switchMode`).
                     .opacity(model.studio.contentOpacity)
                 }
-                .padding(.horizontal, 28)
+                // As wide as the pages' room: that is a box beside the sidebar's, as far from the
+                // island's side and its foot as the sidebar is (`SettingsSurfaceView`).
                 .padding(.top, Self.topInset)
                 .padding(.bottom, bottomInset)
                 // A row added or taken away while sizing grows the stage: what is under it glides.
                 .animation(.spring(duration: 0.3, bounce: 0.05), value: model.studio.draft?.panel.rows)
             }
-            .scrollIndicators(.automatic)
+            // Its scroller stands out in the gap beside the room (`SettingsEdgeScroller`): the
+            // room's own ran over the cards at its edge.
+            .scrollIndicators(.hidden)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
             // Size mode's ready-made sizes: out of their button, over the Size cards and buttons.
             .overlayPreferenceValue(ReadyMadeAnchors.self, alignment: .topLeading) { anchors in
@@ -99,7 +117,7 @@ struct WidgetsSettingsPage: View {
                 }
             }
         }
-        .background { BoardUndoKeys(selection: $selection, group: $group) }
+        .background { StudioUndoKeys(selection: $selection, group: $group) }
         .onAppear {
             takeRequestedEdit()
             if model.studio.sizeEntry == nil { noteSizeEntry() }
@@ -176,8 +194,9 @@ struct WidgetsSettingsPage: View {
     }
 
     private static let topInset: CGFloat = 10
-    /// Under the page: in Size mode its controls end where the sidebar does.
-    private var bottomInset: CGFloat { model.studio.mode == .size ? IslandSettingsView.sidebarGap : 28 }
+    /// Under the page: in Size and Top Bar mode its controls end where the pages' room does,
+    /// level with the sidebar's foot.
+    private var bottomInset: CGFloat { model.studio.mode == .widgets ? 28 : 0 }
     private static let spacing: CGFloat = 22
 
     /// Exactly the area the home page gives its board.
@@ -185,7 +204,10 @@ struct WidgetsSettingsPage: View {
 
     private func left() {
         model.studio.draft = nil
-        model.studio.headerSelection = nil
+        model.studio.headerPicks = []
+        model.studio.headerHistory.clear()
+        model.studio.sizeHistory.clear()
+        model.studio.sizeSeen = nil
         model.studio.sizeEntry = nil
         model.studio.closeReadyMade()
         model.studio.showsNotchStyles = false
@@ -193,7 +215,13 @@ struct WidgetsSettingsPage: View {
 
     /// Size mode entered, or shown again: what Reset Size goes back to is what it finds now.
     private func noteSizeEntry() {
-        model.studio.sizeEntry = model.studio.mode == .size ? model.sizeSnapshot() : nil
+        let studio = model.studio
+        studio.sizeEntry = studio.mode == .size ? model.sizeSnapshot() : nil
+        // Each mode's steps back are its own: they end with it (a step back in Size puts every
+        // board back as it was, and must not take what Widgets mode did since with it).
+        studio.sizeSeen = studio.sizeEntry
+        if studio.mode != .size { studio.sizeHistory.clear() }
+        if studio.mode != .topBar { studio.headerHistory.clear() }
     }
 
     /// "Edit …" from a widget's context menu in the island.
@@ -225,9 +253,6 @@ struct WidgetsSettingsPage: View {
 
 private enum StudioAnchor: Hashable { case stage }
 
-/// ⌘Z and ⌘⇧Z on the page: the board edited (its widgets added, moved, resized, restyled, taken
-/// away) back a step and forward again. Only while the page is the one shown and Customize is not
-/// open over it (its own undo is the widget's).
 /// The Widgets page's content under the stage: every mode's, built once and kept, one shown. As
 /// large as the one shown; the others are laid out at its width, unseen and untouchable, so showing
 /// one costs no building and no first layout.
@@ -258,38 +283,177 @@ private extension View {
     }
 }
 
-private struct BoardUndoKeys: View {
+/// The widget gallery in a view graph of its own, as tall as its content.
+///
+/// Kept built while it is not shown — another mode, or a widget picked — so coming back to it builds
+/// nothing. Kept in the page's own graph it made every update of the page go over its fifty cards
+/// and their previews: a pointer's move while something was dragged on the page took 5.6 ms of the
+/// main thread with it there and 2.1 without (measured). In its own graph, hidden while unseen, the
+/// page's updates pass it by; its content is handed to it again only when what it shows changes.
+private struct GalleryHost: NSViewRepresentable {
+    let isShown: Bool
+    /// The shelf's page: nothing is added to it — faint, and not to be clicked.
+    let isShelf: Bool
+    let height: CGFloat
+    let model: AppModel
+    let visit: SettingsPageVisit?
+    let add: (IslandWidgetKind) -> Void
+    let open: (IslandWidgetKind) -> Void
+    /// Its content's height, as laid out.
+    let measured: (CGFloat) -> Void
+
+    fileprivate struct Input: Equatable {
+        var isShown: Bool
+        var isShelf: Bool
+    }
+
+    @MainActor final class Coordinator {
+        fileprivate var input: Input?
+        var add: (IslandWidgetKind) -> Void = { _ in }
+        var open: (IslandWidgetKind) -> Void = { _ in }
+        var measured: (CGFloat) -> Void = { _ in }
+        weak var view: DeferringHostingView<AnyView>?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> DeferringHostingView<AnyView> {
+        follow(context.coordinator)
+        context.coordinator.input = Input(isShown: isShown, isShelf: isShelf)
+        let view = DeferringHostingView(rootView: root(context.coordinator))
+        // Its size comes from here: its width the page's, its height the one it measured.
+        view.sizingOptions = []
+        view.safeAreaRegions = []
+        // Laid out the first time even unseen (the page is built before it is first shown).
+        view.forcesLayout = true
+        view.isHidden = !isShown
+        context.coordinator.view = view
+        return view
+    }
+
+    func updateNSView(_ view: DeferringHostingView<AnyView>, context: Context) {
+        follow(context.coordinator)
+        if view.isHidden == isShown { view.isHidden = !isShown }
+        let input = Input(isShown: isShown, isShelf: isShelf)
+        guard context.coordinator.input != input else { return }
+        context.coordinator.input = input
+        view.rootView = root(context.coordinator)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: DeferringHostingView<AnyView>, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 600, height: max(height, 1))
+    }
+
+    /// What the gallery calls back is the page's as it stands now, whichever content it was built with.
+    private func follow(_ coordinator: Coordinator) {
+        coordinator.add = add
+        coordinator.open = open
+        coordinator.measured = measured
+    }
+
+    private func root(_ coordinator: Coordinator) -> AnyView {
+        AnyView(
+            WidgetStoreView(isShown: isShown, add: { coordinator.add($0) }, open: { coordinator.open($0) })
+                .opacity(isShelf ? 0.35 : 1)
+                .allowsHitTesting(!isShelf)
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded(.up) } action: { height in
+                    coordinator.view?.forcesLayout = false
+                    coordinator.measured(height)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .environment(model)
+                .environment(\.colorScheme, .dark)
+                .environment(\.appearsActive, true)
+                .environment(\.settingsPageVisit, visit)
+                .toggleStyle(.islandSwitch)
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+        )
+    }
+}
+
+/// ⌘Z and ⌘⇧Z on the page, in each of the stage's modes: in Widgets the board edited (its widgets
+/// added, moved, resized, restyled, taken away) back a step and forward again; in Top Bar the bar
+/// (an item moved, added, taken out, a page moved, a colour set); in Size the panel, its ready-made
+/// size and every widget where it was. Only while the page is the one shown and Customize is not
+/// open over it (its own undo is the widget's).
+private struct StudioUndoKeys: View {
     @Binding var selection: WidgetID?
     @Binding var group: Set<WidgetID>
 
     @Environment(AppModel.self) private var model
     @Environment(\.settingsPageVisit) private var visit
 
+    /// What Size mode stores, without the boards (they change with it).
+    private struct SizeKey: Equatable {
+        let panel: PanelSettings
+        let scale: IslandScale
+    }
+
     var body: some View {
         let store = model.editedWidgets
-        let isActive = (visit?.isShown ?? true) && model.studio.customizing == nil && model.studio.mode != .topBar
+        let studio = model.studio
+        let mode = studio.mode
+        let isActive = (visit?.isShown ?? true) && studio.customizing == nil
+        let canUndo = mode == .widgets ? !store.undoStack.isEmpty : mode == .topBar ? studio.headerHistory.canUndo : studio.sizeHistory.canUndo
+        let canRedo = mode == .widgets ? !store.redoStack.isEmpty : mode == .topBar ? studio.headerHistory.canRedo : studio.sizeHistory.canRedo
         ZStack {
-            Button("Undo") { step { store.undo() } }
+            Button("Undo") { step(back: true) }
                 .keyboardShortcut("z", modifiers: .command)
-                .disabled(!isActive || store.undoStack.isEmpty)
-            Button("Redo") { step { store.redo() } }
+                .disabled(!isActive || !canUndo)
+            Button("Redo") { step(back: false) }
                 .keyboardShortcut("z", modifiers: [.command, .shift])
-                .disabled(!isActive || store.redoStack.isEmpty)
+                .disabled(!isActive || !canRedo)
         }
         .opacity(0)
         .frame(width: 0, height: 0)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+        // Top Bar mode: every change of the bar — an item moved, added, taken out, a colour — is
+        // a step to go back.
+        .onChange(of: model.preferences.header) { old, new in
+            if mode == .topBar { studio.headerHistory.note(from: old, to: new) }
+        }
+        // Size mode: the panel or the ready-made size stored (a slider or an edge let go).
+        .onChange(of: SizeKey(panel: model.preferences.panel, scale: model.preferences.scale)) {
+            guard mode == .size else { return }
+            let now = model.sizeSnapshot()
+            if let seen = studio.sizeSeen { studio.sizeHistory.note(from: seen, to: now) }
+            studio.sizeSeen = now
+        }
     }
 
-    private func step(_ change: () -> Bool) {
-        var changed = false
-        withAnimation(.spring(duration: 0.32, bounce: 0.18)) { changed = change() }
-        guard changed else { return NSSound.beep() }
-        // A pick on a widget that is gone ends.
-        let board = model.editedWidgets.board
-        if let id = selection, !board.contains(id) { selection = nil }
-        group = group.filter { board.contains($0) }
+    private func step(back: Bool) {
+        let studio = model.studio
+        switch studio.mode {
+        case .widgets:
+            let store = model.editedWidgets
+            var changed = false
+            withAnimation(.spring(duration: 0.32, bounce: 0.18)) { changed = back ? store.undo() : store.redo() }
+            guard changed else { return NSSound.beep() }
+            // A pick on a widget that is gone ends.
+            let board = store.board
+            if let id = selection, !board.contains(id) { selection = nil }
+            group = group.filter { board.contains($0) }
+        case .topBar:
+            let current = model.preferences.header
+            guard let other = back ? studio.headerHistory.undo(from: current) : studio.headerHistory.redo(from: current) else {
+                return NSSound.beep()
+            }
+            withAnimation(TopBarInspector.settle) { model.preferences.header = other }
+        case .size:
+            let current = model.sizeSnapshot()
+            guard let other = back ? studio.sizeHistory.undo(from: current) : studio.sizeHistory.redo(from: current) else {
+                return NSSound.beep()
+            }
+            withAnimation(.spring(duration: 0.32, bounce: 0.1)) {
+                studio.draft = nil
+                model.restoreSize(other)
+            }
+            // What it is now is where the next change starts from, not a step of its own.
+            studio.sizeSeen = model.sizeSnapshot()
+        }
     }
 }
 
@@ -318,9 +482,11 @@ private struct StudioStage: View {
     var fillHeight: CGFloat = 0
 
     @Environment(AppModel.self) private var model
-    /// The round Stage button's height: the hint's capsule is made as tall, and the stage's lower
-    /// corners concentric with both.
+    /// The mode bar's height: the hint's capsule is made as tall, and the stage's lower corners
+    /// concentric with both.
     @State private var controlHeight: CGFloat = 28
+    /// Top Bar mode's hint, closed with its cross: it stays away.
+    @AppStorage("ni2.studio.topBarHintHidden") private var hidesTopBarHint = false
     /// The stage's own width: an island wider than it is shown smaller, whole.
     @State private var stageWidth: CGFloat = 0
     /// How much smaller the island was shown when sizing began: kept until it ends, so the island
@@ -377,6 +543,18 @@ private struct StudioStage: View {
                     selection = nil
                     group = []
                 }
+                // The stage's own choices, on a right click of its desktop.
+                .contextMenu {
+                    Picker("Wallpaper", selection: $backdrop) {
+                        ForEach(DesktopBackdropStyle.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                    Divider()
+                    Button("Reset to Default Widgets", role: .destructive) {
+                        selection = nil
+                        withAnimation(.spring(duration: 0.35)) { model.editedWidgets.reset() }
+                    }
+                }
             PreviewMenuBar(height: layout.notch.height, notchWidth: island.width, darkText: backdrop.prefersDarkMenuBar,
                            backing: backdrop.menuBarBacking)
                 .allowsHitTesting(false)
@@ -426,6 +604,34 @@ private struct StudioStage: View {
                         group = []
                     }
                 }
+                if mode == .topBar, !hidesTopBarHint {
+                    // On glass, as the notices are; its cross closes it for good.
+                    HStack(spacing: 8) {
+                        Text("Drag and drop icons to edit")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Button {
+                            withAnimation(.easeOut(duration: 0.2)) { hidesTopBarHint = true }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .frame(width: 18, height: 18)
+                                .background(.white.opacity(0.16), in: .circle)
+                                .contentShape(.circle)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Hide this")
+                        .accessibilityLabel("Hide the hint")
+                    }
+                    .padding(.leading, 12)
+                    .padding(.trailing, 5)
+                    .frame(minHeight: controlHeight)
+                    .glassEffect(.regular, in: .capsule)
+                    .layoutPriority(-1)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .leading)))
+                }
                 // What went wrong, for a moment (no room, a widget set aside): nothing otherwise.
                 if let notice {
                     Label(notice, systemImage: "exclamationmark.triangle.fill")
@@ -446,28 +652,8 @@ private struct StudioStage: View {
                 .choiceBar()
                 .labelsHidden()
                 .fixedSize()
-                .help("What the stage edits")
-                Menu {
-                    Picker("Wallpaper", selection: $backdrop) {
-                        ForEach(DesktopBackdropStyle.allCases) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.inline)
-                    Divider()
-                    Button("Reset to Default Widgets", role: .destructive) {
-                        selection = nil
-                        withAnimation(.spring(duration: 0.35)) { model.editedWidgets.reset() }
-                    }
-                } label: {
-                    Label("Stage", systemImage: "ellipsis")
-                }
-                .menuStyle(.button)
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .labelStyle(.iconOnly)
-                .menuIndicator(.hidden)
-                .fixedSize()
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlHeight = $0 }
-                .help("Wallpaper and reset")
+                .help("What the stage edits")
             }
             .padding(Self.controlInset)
             .environment(\.colorScheme, .dark)
@@ -521,9 +707,24 @@ private struct StageIsland: View {
                             .fill(.black)
                             .frame(width: layout.notch.width, height: layout.notch.height)
                     }
-                BoardEditor(selection: $selection, group: $group, showsGrid: mode == .size)
-                    // Only the Widgets mode arranges them.
-                    .allowsHitTesting(mode == .widgets)
+                ZStack {
+                    if model.studio.page == .shelf, mode == .widgets {
+                        // The shelf has no widgets: as it is while empty.
+                        IslandEmptyState(title: "Drop Files Here", systemImage: "tray.and.arrow.down",
+                                         message: "Files you drop on the notch wait here until you drag them out.")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .transition(.opacity)
+                    } else {
+                        BoardEditor(selection: $selection, group: $group, showsGrid: mode == .size)
+                            // Only the Widgets mode arranges them.
+                            .allowsHitTesting(mode == .widgets)
+                            // Another page: its board fades in over the one left (opacity alone, on
+                            // the board built once).
+                            .id(model.studio.page == .shelf ? .home : model.studio.page)
+                            .transition(.opacity)
+                    }
+                }
+                    .animation(.easeOut(duration: 0.22), value: model.studio.page)
                     .opacity(mode == .topBar ? 0.4 : 1)
                     .padding(layout.boardInset)
                     .padding(.top, Metrics.Expanded.pageTopInset)

@@ -120,10 +120,11 @@ nonisolated extension HeaderItem: RawRepresentable, Codable {
 
 /// The switches the top bar can carry.
 nonisolated enum HeaderToggle: String, Sendable, CaseIterable, Codable {
-    case wifi, bluetooth, darkMode, focus
+    case wifi, bluetooth, darkMode, focus, airDrop
 
     var control: SystemControl {
         switch self {
+        case .airDrop: .airDrop
         case .wifi: .wifi
         case .bluetooth: .bluetooth
         case .darkMode: .darkMode
@@ -137,8 +138,16 @@ nonisolated enum HeaderToggle: String, Sendable, CaseIterable, Codable {
         case .bluetooth: String(localized: "Switches Bluetooth on and off. macOS asks for the Bluetooth permission once.")
         case .darkMode: String(localized: "Switches between the light and the dark appearance.")
         case .focus: String(localized: "Opens Focus.")
+        case .airDrop: String(localized: "Opens AirDrop.")
         }
     }
+}
+
+/// Something of the top bar that takes a colour of its own: one of its buttons, or a page's symbol
+/// in the picker.
+nonisolated enum HeaderPart: Hashable, Sendable {
+    case item(HeaderItem)
+    case page(ExpandedPage)
 }
 
 nonisolated enum HeaderSide: String, Sendable, Codable, CaseIterable {
@@ -165,6 +174,10 @@ nonisolated struct HeaderLayout: Sendable, Equatable, Codable {
     var pageOrder: [ExpandedPage]
     /// The pages the user added, each a board of widgets, in the order they were added.
     var customPages: [CustomPage] = []
+    /// The colour set for a button of the bar (its symbol), and for a page's symbol in the picker;
+    /// one not here is drawn in its own.
+    var itemTints: [HeaderItem: IslandTheme.RGB] = [:]
+    var pageTints: [ExpandedPage: IslandTheme.RGB] = [:]
 
     /// The bar as it was before it could be arranged.
     static let standard = HeaderLayout(leading: [.pages], trailing: [.battery, .siri, .pin, .settings])
@@ -179,7 +192,7 @@ nonisolated struct HeaderLayout: Sendable, Equatable, Codable {
         sanitize()
     }
 
-    private enum CodingKeys: String, CodingKey { case version, leading, trailing, hiddenPages, pageOrder, customPages }
+    private enum CodingKeys: String, CodingKey { case version, leading, trailing, hiddenPages, pageOrder, customPages, itemTints, pageTints }
 
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -198,6 +211,14 @@ nonisolated struct HeaderLayout: Sendable, Equatable, Codable {
         self.init(leading: items(.leading) ?? Self.standard.leading, trailing: items(.trailing) ?? Self.standard.trailing,
                   hiddenPages: Set(pages(.hiddenPages) ?? []), pageOrder: pages(.pageOrder) ?? ExpandedPage.allCases,
                   customPages: custom)
+        // By name, as the items and the pages are: one this version does not know drops out alone.
+        for (name, tint) in c.lossy([String: IslandTheme.RGB].self, .itemTints) ?? [:] {
+            if let item = HeaderItem(rawValue: name) { itemTints[item] = tint }
+        }
+        for (name, tint) in c.lossy([String: IslandTheme.RGB].self, .pageTints) ?? [:] {
+            if let page = ExpandedPage(rawValue: name) { pageTints[page] = tint }
+        }
+        sanitize()
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -208,6 +229,12 @@ nonisolated struct HeaderLayout: Sendable, Equatable, Codable {
         try c.encode(orderedPages.filter(hiddenPages.contains).map(\.rawValue), forKey: .hiddenPages)
         try c.encode(pageOrder.map(\.rawValue), forKey: .pageOrder)
         if !customPages.isEmpty { try c.encode(customPages, forKey: .customPages) }
+        if !itemTints.isEmpty {
+            try c.encode(Dictionary(uniqueKeysWithValues: itemTints.map { ($0.key.rawValue, $0.value) }), forKey: .itemTints)
+        }
+        if !pageTints.isEmpty {
+            try c.encode(Dictionary(uniqueKeysWithValues: pageTints.map { ($0.key.rawValue, $0.value) }), forKey: .pageTints)
+        }
     }
 
     // MARK: Reading
@@ -283,6 +310,53 @@ nonisolated struct HeaderLayout: Sendable, Equatable, Codable {
         sanitize()
     }
 
+    /// One side as it was before the bar could be arranged (`standard`): its own items back on it in
+    /// their order, the others taken off it — out of the bar, or to the other side where they must
+    /// stay in it. The other side keeps what else it holds.
+    mutating func reset(_ side: HeaderSide) {
+        let own = Self.standard.items(on: side)
+        let other: HeaderSide = side == .leading ? .trailing : .leading
+        for item in items(on: side) where !own.contains(item) {
+            if !remove(item) { place(item, on: other, at: other == .leading ? leading.count : trailing.count) }
+        }
+        for (index, item) in own.enumerated() { place(item, on: side, at: index) }
+    }
+
+    /// Both sides as they were before the bar could be arranged, every button and page symbol in
+    /// its own colour; the pages and their order stay.
+    mutating func resetBars() {
+        leading = Self.standard.leading
+        trailing = Self.standard.trailing
+        itemTints = [:]
+        pageTints = [:]
+        sanitize()
+    }
+
+    /// Whether `resetBars` would change anything.
+    var hasStandardBars: Bool {
+        leading == Self.standard.leading && trailing == Self.standard.trailing && itemTints.isEmpty && pageTints.isEmpty
+    }
+
+    // MARK: Colours
+
+    /// The colour set for `part`; nil: its own.
+    func tint(of part: HeaderPart) -> IslandTheme.RGB? {
+        switch part {
+        case .item(let item): itemTints[item]
+        case .page(let page): pageTints[page]
+        }
+    }
+
+    /// Sets the colour of each of `parts` (nil: its own again).
+    mutating func setTint(_ tint: IslandTheme.RGB?, of parts: some Sequence<HeaderPart>) {
+        for part in parts {
+            switch part {
+            case .item(let item): itemTints[item] = tint
+            case .page(let page): pageTints[page] = tint
+            }
+        }
+    }
+
     /// Takes `item` out of the bar; false for one that must stay (Settings, the pages).
     @discardableResult
     mutating func remove(_ item: HeaderItem) -> Bool {
@@ -326,6 +400,9 @@ nonisolated struct HeaderLayout: Sendable, Equatable, Codable {
         pageOrder = pageOrder.filter { known.contains($0) && pages.insert($0).inserted }
         pageOrder += (ExpandedPage.allCases + customPages.map(\.page)).filter { !pages.contains($0) }
         hiddenPages = hiddenPages.intersection(known)
+        // A page gone takes its colour with it; the page picker has none of its own (its pages do).
+        pageTints = pageTints.filter { known.contains($0.key) }
+        itemTints[.pages] = nil
         if hiddenPages.isSuperset(of: ExpandedPage.allCases) { hiddenPages.remove(.home) }
     }
 }
@@ -372,6 +449,7 @@ nonisolated struct HeaderFit: Sendable, Equatable {
         case .toggle(.bluetooth): (13.5, 19.5)
         case .toggle(.darkMode): (13, 19)
         case .toggle(.focus): (12.5, 19)
+        case .toggle(.airDrop): (13.5, 20)
         case .anchorWindow: (14.5, 22)
         case .screenshot: (13, 20)
         case .lock: (10, 16.5)

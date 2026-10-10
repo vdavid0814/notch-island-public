@@ -1,9 +1,11 @@
 import AppKit
 import SwiftUI
 
-/// In the stage's bar, in Widgets and Size mode: the page whose board the stage edits — one of
-/// those the island's picker offers (home, the timer's, the battery's, the user's), by its symbol
-/// as the picker shows it — the picked page of the user's to rename, and a new page.
+/// In the stage's bar, in Widgets and Size mode: the page the stage shows — every page the island's
+/// picker offers, in the picker's own order (the top bar's), the shelf among them, by its symbol as
+/// the picker shows it — the picked page of the user's to rename, one of the island's own to take
+/// out of the picker (the shelf is only looked at: it has no widgets to arrange, and is switched
+/// on and off in General), and a new page.
 struct StudioPageBar: View {
     /// Called as the page changes: the picks on the old board end.
     let changed: () -> Void
@@ -12,9 +14,10 @@ struct StudioPageBar: View {
     @State private var isEditing = false
     @State private var isRemoving = false
 
-    /// The pages it offers: the boards among the picker's pages, home always.
+    /// The pages it offers: the picker's, in its order; home always (first, where the picker has
+    /// it hidden).
     static func pages(_ model: AppModel) -> [ExpandedPage] {
-        let offered = model.pickerPages.filter(\.isBoard)
+        let offered = model.pickerPages.filter { $0.isBoard || $0 == .shelf }
         return offered.contains(.home) ? offered : [.home] + offered
     }
 
@@ -25,7 +28,8 @@ struct StudioPageBar: View {
             if pages.count > 1 {
                 Picker("Page", selection: Binding(get: { page }, set: select)) {
                     ForEach(pages) { page in
-                        Label(page.title, systemImage: page.systemImage)
+                        // In the colour set for it in Top Bar mode, as the island's picker has it.
+                        PageSymbolLabel(page: page, tint: model.preferences.header.pageTints[page])
                             .labelStyle(.iconOnly)
                             .help("Edit the \(page.title) page")
                             .tag(page)
@@ -34,9 +38,10 @@ struct StudioPageBar: View {
                 .choiceBar()
                 .labelsHidden()
                 .fixedSize()
-                // A page renamed or given another symbol is the same page: its segment is drawn
-                // again only when the bar is made anew (its picture stayed the old one).
-                .id(model.preferences.header.customPages)
+                // A page renamed, given another symbol or another colour is the same page: its
+                // segment is drawn again only when the bar is made anew (its picture stayed the
+                // old one).
+                .id(PagesLook(custom: model.preferences.header.customPages, tints: model.preferences.header.pageTints))
             }
             if page.isCustom {
                 Button("Edit Page", systemImage: "pencil") { isEditing = true }
@@ -51,7 +56,7 @@ struct StudioPageBar: View {
             }
             // One of the island's own (the battery's, the shelf's…): it has no name or symbol to set,
             // but it can be taken out of the picker here too — unless it is the last one in it.
-            if !page.isCustom, pages.count > 1 {
+            if !page.isCustom, page != .shelf, pages.count > 1 {
                 Button("Remove Page", systemImage: "trash") { isRemoving = true }
                     .help("Take the \(page.title) page out of the island's picker")
                     .popover(isPresented: $isRemoving, arrowEdge: .bottom) {
@@ -67,30 +72,68 @@ struct StudioPageBar: View {
                         }
                     }
             }
-            Button("New Page", systemImage: "plus") {
-                withAnimation(Motion.content) {
-                    if let added = model.addPage() { select(added) }
+            // A new page — and, while any of the island's own is out of the picker, bringing it back.
+            let hidden = model.availablePages.filter { model.preferences.header.hiddenPages.contains($0) }
+            let isFull = model.preferences.header.customPages.count >= CustomPage.limit
+            if hidden.isEmpty {
+                Button("New Page", systemImage: "plus", action: addPage)
+                    .disabled(isFull)
+                    .help(isFull ? "At most \(CustomPage.limit) pages of your own: the picker stays beside the notch"
+                          : "A new page of widgets in the island's picker")
+            } else {
+                Menu {
+                    Button("New Page", systemImage: "plus", action: addPage).disabled(isFull)
+                    Divider()
+                    ForEach(hidden) { page in
+                        Button("Show \(page.title)", systemImage: page.systemImage) {
+                            var layout = model.preferences.header
+                            layout.setPage(page, hidden: false, among: model.availablePages)
+                            withAnimation(Motion.content) { model.preferences.header = layout }
+                        }
+                    }
+                } label: {
+                    Label("Pages", systemImage: "plus")
                 }
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("A new page, or one taken out of the picker back in it")
             }
-            .disabled(model.preferences.header.customPages.count >= CustomPage.limit)
-            .help(model.preferences.header.customPages.count >= CustomPage.limit
-                  ? "At most \(CustomPage.limit) pages of your own: the picker stays beside the notch"
-                  : "A new page of widgets in the island's picker")
         }
         .buttonStyle(.glass)
         .buttonBorderShape(.circle)
         .labelStyle(.iconOnly)
+        // The buttons beside the pages come and go with the page; the page itself is shown at once
+        // (`select`).
+        .animation(Motion.content, value: page)
         // A page no longer offered (hidden in the picker, the battery gone): back to home.
         .onChange(of: pages) { _, pages in
             if !pages.contains(model.studio.page) { select(.home) }
         }
     }
 
+    private func addPage() {
+        withAnimation(Motion.content) {
+            if let added = model.addPage() { select(added) }
+        }
+    }
+
     private func select(_ page: ExpandedPage) {
         guard page != model.studio.page else { return }
         changed()
-        withAnimation(Motion.content) { model.studio.page = page }
+        // At once, with no animation over it: another page is another board — every widget on the
+        // stage and every card's Add or Edit under it — and a spring over all of that was drawn in
+        // a few uneven frames. The stage fades its own board over (`StageIsland`).
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) { model.studio.page = page }
     }
+}
+
+/// What the page bar's segments are drawn from, beside the pages themselves.
+private struct PagesLook: Hashable {
+    let custom: [CustomPage]
+    let tints: [ExpandedPage: IslandTheme.RGB]
 }
 
 /// A page of the user's: its name and its symbol in the picker, and taking it away.
@@ -181,7 +224,7 @@ private struct OwnPageRemoval: View {
         VStack(alignment: .leading, spacing: 10) {
             Label(page.title, systemImage: page.systemImage)
                 .font(.headline)
-            Text("The page leaves the island's picker; its widgets are kept. Top Bar ▸ Pages brings it back.")
+            Text("The page leaves the island's picker; its widgets are kept. The + beside the pages brings it back.")
                 .font(.callout)
                 .foregroundStyle(SettingsPalette.secondary)
                 .fixedSize(horizontal: false, vertical: true)

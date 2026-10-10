@@ -39,6 +39,37 @@ struct ExpandedHeader: View {
     }
 }
 
+extension View {
+    /// One of the top bar's buttons in the colour set for it (Settings ▸ Widgets ▸ Top Bar); nil:
+    /// its own.
+    @ViewBuilder func headerTint(_ tint: IslandTheme.RGB?) -> some View {
+        if let tint { foregroundStyle(tint.color) } else { self }
+    }
+}
+
+/// A page as the pickers show it — the island's, and the one under Settings' stage: its symbol, in
+/// the colour set for it (Settings ▸ Widgets ▸ Top Bar). The system's bar draws a symbol in its own
+/// colour, so a coloured one is handed to it as a picture already in its colours.
+struct PageSymbolLabel: View {
+    let page: ExpandedPage
+    let tint: IslandTheme.RGB?
+
+    var body: some View {
+        if let tint, let image = Self.image(page.systemImage, tint: tint) {
+            Label { Text(page.title) } icon: { Image(nsImage: image) }
+        } else {
+            Label(page.title, systemImage: page.systemImage)
+        }
+    }
+
+    static func image(_ symbol: String, tint: IslandTheme.RGB) -> NSImage? {
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [NSColor(tint.color)]))
+        image?.isTemplate = false
+        return image
+    }
+}
+
 /// One side of the bar: the user's items that exist now and fit beside the notch (`HeaderFit`), in
 /// their order, and a "⋯" menu at the notch's end for the rest.
 struct HeaderEar: View {
@@ -52,10 +83,12 @@ struct HeaderEar: View {
 
     var body: some View {
         let fit = Self.fit(model: model, side: side, room: room, size: controlSize)
+        let tints = model.preferences.header.itemTints
         HStack(spacing: HeaderFit.spacing) {
             if side == .trailing, fit.hasOverflow { HeaderOverflowMenu(items: fit.overflow).allowsHitTesting(!picksStudioPage) }
             ForEach(fit.shown) { item in
                 HeaderItemView(item: item, pages: fit.pages)
+                    .headerTint(tints[item])
                     // On Settings' stage only the page picker works (it picks the board edited).
                     .allowsHitTesting(!picksStudioPage || item == .pages)
             }
@@ -109,7 +142,7 @@ struct HeaderItemView: View {
                 HeaderItemView.perform(.battery, model: model)
             } label: {
                 // Clickable a little beyond the glyph, as tall as the buttons beside it.
-                BatteryIndicator(state: model.power.state)
+                BatteryIndicator(state: model.power.state, color: model.preferences.header.itemTints[.battery]?.color)
                     .padding(Metrics.Spacing.xSmall)
                     .contentShape(.rect)
                     .padding(-Metrics.Spacing.xSmall)
@@ -320,19 +353,22 @@ private struct PagePicker: View {
     var body: some View {
         let island = model.island
         let key = WidthKey(pages: pages, size: controlSize)
+        let tints = model.preferences.header.pageTints
         // A page shown without its segment (the battery's, left out where it would reach under the
         // notch, or a page the user hid): no segment is selected.
         Picker("Page", selection: Binding {
             picksStudioPage ? model.studio.page : model.panelPage
         } set: { page in
             guard picksStudioPage else { return island.page = page }
-            // On Settings' stage: the board edited, as the stage's own page picker sets it. The
-            // shelf has none.
-            guard page.isBoard else { return NSSound.beep() }
-            withAnimation(Motion.content) { model.studio.page = page }
+            // On Settings' stage: the page shown there, as the stage's own page picker sets it (at
+            // once: the stage fades its board over).
+            guard page.isBoard || page == .shelf else { return NSSound.beep() }
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            withTransaction(instant) { model.studio.page = page }
         }) {
             ForEach(pages, id: \.self) { page in
-                Label(page.title, systemImage: page.systemImage)
+                PageSymbolLabel(page: page, tint: tints[page])
                     .labelStyle(.iconOnly)
                     .controlHelp(page.title)
                     .tag(page)
@@ -343,6 +379,8 @@ private struct PagePicker: View {
         .choiceBar()
         .labelsHidden()
         .fixedSize()
+        // A symbol in another colour is another picture: the bar draws it only when made anew.
+        .id(tints)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
             // Written only when it changes: every reader lays out again.
             if Self.widths.values[key] != width { Self.widths.values[key] = width }
@@ -354,10 +392,12 @@ private struct PagePicker: View {
 /// yellow in Low Power Mode, red below 20 %.
 struct BatteryIndicator: View {
     let state: PowerState
+    /// The colour set for it in the top bar; nil: white.
+    var color: Color?
 
     var body: some View {
         // Smaller than the menu bar's, so it sits level with the symbols in the header buttons beside it.
-        BatteryGlyph(level: state.level, isCharging: state.isCharging, tint: state.tint, height: 9)
+        BatteryGlyph(level: state.level, isCharging: state.isCharging, tint: state.tint, height: 9, color: color)
     }
 }
 

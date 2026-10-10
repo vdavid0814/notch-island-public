@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4.2 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4.3 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,42 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.4.3
+
+- **The Top Bar page, made anew.** Settings ▸ Widgets ▸ **Top Bar** shows each side's bar as round
+  chips in their order — the picker's pages in a capsule of their own, dragged along to reorder
+  them — and everything the bar can hold once, in one list, three to a row. Anything is dragged
+  anywhere: into a bar, across to the other, to another place, or out onto the list; the chips make
+  room as it comes and it settles where it is let go. One red **Reset Bars** for both.
+- **A colour for each button.** Click a button or a page's symbol, ⌘-click to pick more, and
+  **Button Colour** opens the colour mixer for the picks; with none picked it colours every button
+  and page. The pages' colours show in the island's picker and in the one under the stage.
+- **⌘Z and ⌘⇧Z in every mode.** Widgets, Top Bar and Size each step back and forward through what
+  was changed there.
+- **AirDrop** is a button of the top bar, and the **shelf** is among the pages under the stage, in
+  the top bar's own order. A page taken out of the picker comes back from the **+** beside them.
+- **Felt on the trackpad.** A chip dragged in Top Bar mode ticks as a place opens for it and as it
+  settles there.
+- **Settings in two boxes.** The page beside the sidebar keeps the same gap to the sidebar, to the
+  island's side and to its foot, and is cut round its lower corners as the sidebar is. Widgets'
+  scroller stands in the gap at the island's side, not over the cards.
+- **The stage's bar.** The ⋯ button is gone — the wallpaper and Reset to Default Widgets are on a
+  right click of the stage's desktop — and Top Bar mode's hint sits on glass and closes with its
+  cross.
+- **Smoother Widgets page.** Another page on the stage fades in at once, and the gallery is kept in
+  a view of its own, so it no longer slows the page while it is out of sight.
+- **Fixed.** Widgets' cards and its scroller no longer reach past the island's rounded lower right
+  corner.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.4.3 in place and keeps your permissions (signed
+exactly as 0.8.4.2). Or download **NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 

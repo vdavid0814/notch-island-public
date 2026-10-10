@@ -419,7 +419,6 @@ struct SettingsPageHeader: View {
             Spacer(minLength: 0)
             if pane == .widgets { NotchStyleButtons() }
         }
-        .padding(.horizontal, pane == .widgets ? 28 : 0)
         .frame(maxWidth: pane == .widgets ? .infinity : 680)
         .frame(maxWidth: .infinity)
         .padding(.top, 18)

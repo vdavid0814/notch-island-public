@@ -57,9 +57,42 @@ final class SettingsPageDeckView: NSView {
 
     override var isFlipped: Bool { true }
 
+    /// The room's lower corners: the sidebar's (its outer one concentric with the island's). What a
+    /// page has at the room's foot — Widgets' cards, its scroller — is cut round them and never
+    /// stands out of the island's own corner. A layer's own rounded corners, which the window
+    /// server cuts as cheaply as the window's.
+    var footRadius: CGFloat = 0 {
+        didSet { if footRadius != oldValue { roundFoot() } }
+    }
+
     override func layout() {
         super.layout()
         for page in pages.values where page.host.frame != bounds { page.host.frame = bounds }
+        roundFoot()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        roundFoot()
+    }
+
+    /// Set again whenever the room is laid out or shown: made before the view is in a window, the
+    /// layer does not yet know which way it runs.
+    private func roundFoot() {
+        guard let layer else { return }
+        // The lower corners, whichever way the view's layer runs.
+        let corners: CACornerMask = layer.isGeometryFlipped || layer.contentsAreFlipped()
+            ? [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] : [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        guard layer.cornerRadius != footRadius || layer.maskedCorners != corners || !layer.masksToBounds else { return }
+        // The view's own switch: AppKit sets the layer's from it.
+        clipsToBounds = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.cornerRadius = footRadius
+        layer.cornerCurve = .continuous
+        layer.maskedCorners = corners
+        layer.masksToBounds = true
+        CATransaction.commit()
     }
 
     /// Shows `pane`, at its top, as a new page was: the page it takes the place of fades out as
@@ -67,6 +100,7 @@ final class SettingsPageDeckView: NSView {
     /// (opacity and a transform): nothing is laid out or drawn again for it, so every frame of it is
     /// cheap. With Reduce Motion, or the first page of all, it is simply there.
     func show(_ pane: IslandSettingsPane) {
+        roundFoot()
         guard pane != shown || pages[pane]?.visit.isShown == false else { return }
         let old = shown.flatMap { $0 != pane ? pages[$0] : nil }
         let leaving = shown
@@ -136,6 +170,12 @@ final class SettingsPageDeckView: NSView {
         page.host.scrollToTop()
         page.visit.count += 1
         page.visit.isShown = true
+    }
+
+    /// The shown page's own scroll view, where its scroller stands out in the gap beside the room
+    /// (`SettingsEdgeScroller`): Widgets', which reaches the room's edges.
+    var edgeScroll: NSScrollView? {
+        shown == .widgets ? pages[.widgets]?.host.firstSubview(of: NSScrollView.self) : nil
     }
 
     func isBuilt(_ pane: IslandSettingsPane) -> Bool { pages[pane] != nil }

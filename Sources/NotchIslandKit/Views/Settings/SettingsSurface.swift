@@ -115,6 +115,8 @@ final class SettingsSurfaceView: NSView {
     private let pagesHost = SettingsPagesView()
     /// The sidebar and the pages, as one view (what fades in when Settings opens).
     var pagesView: NSView { pagesHost }
+    /// Widgets' scroller, in the gap between the pages' room and the island's side.
+    private let edgeScroller = SettingsEdgeScroller()
     /// The sidebar (SwiftUI), under the deck.
     let sidebarHost: DeferringHostingView<AnyView>
     /// Customize while it is open or on its way out; built as it opens, gone once it has closed.
@@ -137,8 +139,11 @@ final class SettingsSurfaceView: NSView {
         }
         pagesHost.addSubview(sidebarHost)
         pagesHost.addSubview(deck)
+        pagesHost.addSubview(edgeScroller)
+        edgeScroller.source = { [weak deck] in deck?.edgeScroll }
         addSubview(pagesHost)
         deck.show(model.settingsPane)
+        followScroll()
         observePane()
         observeCustomizing()
     }
@@ -154,6 +159,7 @@ final class SettingsSurfaceView: NSView {
         alphaValue = 1
         deck.show(model.settingsPane)
         deck.reopen()
+        followScroll()
         // Left faded by a Customize that closed with Settings.
         pagesHost.alphaValue = 1
         pagesHost.fadeInOnRenderServer(duration: IslandSettingsView.pagesFadeIn)
@@ -204,9 +210,31 @@ final class SettingsSurfaceView: NSView {
         sidebarHost.frame = pagesHost.bounds
         // Beside the sidebar, as `SettingsPages` leaves room for it.
         let leading = placement.leading + SettingsPlacement.sidebarWidth
-        let deckFrame = CGRect(x: leading, y: 0, width: max(0, bounds.width - leading), height: bounds.height)
+        // The pages' room is a box as the sidebar is one: as far from it, from the island's own
+        // side (the window is a shoulder wider than the island at each side) and from its foot as
+        // the sidebar is from its side and its foot. What a page has at the room's edge — Widgets'
+        // cards, its scroller — is cut there, round the lower corners, and never stands out of the
+        // island's own corner.
+        let shoulder = max(0, placement.leading - placement.gap)
+        let x = leading + placement.gap
+        let deckFrame = CGRect(x: x, y: 0, width: max(0, bounds.width - x - shoulder - placement.gap),
+                               height: max(0, bounds.height - placement.gap))
         if deck.frame != deckFrame { deck.frame = deckFrame }
+        deck.footRadius = placement.outerRadius
+        // Over the room and the gap beside it, down to the island's foot: its corner is the island's.
+        let scrollerFrame = CGRect(x: deckFrame.minX, y: 0, width: deckFrame.width + placement.gap, height: bounds.height)
+        if edgeScroller.frame != scrollerFrame { edgeScroller.frame = scrollerFrame }
+        edgeScroller.gap = placement.gap
+        edgeScroller.islandRadius = model.layout.bottomRadius(for: .settings)
+        edgeScroller.refresh()
         customizeHost?.frame = bounds
+    }
+
+    /// The scroller in the gap follows the page shown — now, and once more a moment later: a page
+    /// shown for the first time has its scroll view only after it is laid out.
+    private func followScroll() {
+        edgeScroller.refresh()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.edgeScroller.refresh() }
     }
 
     /// The deck shows the pane the sidebar (or a link) picks.
@@ -217,6 +245,7 @@ final class SettingsSurfaceView: NSView {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if self.window?.isVisible == true { self.deck.show(self.model.settingsPane) }
+                self.followScroll()
                 self.observePane()
             }
         }

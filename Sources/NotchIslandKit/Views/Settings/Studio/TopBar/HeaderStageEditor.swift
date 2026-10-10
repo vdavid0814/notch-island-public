@@ -93,7 +93,7 @@ struct HeaderStageEditor: View {
         .environment(\.showsControlHelp, false)
         .environment(\.isHeaderPicture, true)
         .contentShape(.rect)
-        .onTapGesture { model.studio.headerSelection = nil }
+        .onTapGesture { model.studio.headerPicks = [] }
         .focusable()
         .focusEffectDisabled()
         .focused($isFocused)
@@ -101,7 +101,7 @@ struct HeaderStageEditor: View {
             step(press.key == .leftArrow ? -1 : 1) ? .handled : .ignored
         }
         .onDeleteCommand(perform: removeSelected)
-        .onChange(of: model.studio.headerSelection) { _, new in if new != nil { isFocused = true } }
+        .onChange(of: model.studio.headerPicks) { _, new in if !new.isEmpty { isFocused = true } }
         .finishingCancelledDrag(isDragging, finish: finish)
         // From the palette under the stage.
         .dropDestination(for: String.self) { names, location in
@@ -116,7 +116,7 @@ struct HeaderStageEditor: View {
     // MARK: Chips
 
     private func chip(_ item: HeaderItem, pages: [ExpandedPage], width: CGFloat) -> some View {
-        let isSelected = model.studio.headerSelection == item
+        let isSelected = model.studio.headerPicks.contains(.item(item))
         return chipPicture(item, pages: pages, width: width)
             .overlay {
                 // Round the chip, as tall as the side's outline.
@@ -128,7 +128,8 @@ struct HeaderStageEditor: View {
             .onHover { inside in
                 if inside { hovered = item } else if hovered == item { hovered = nil }
             }
-            .onTapGesture { model.studio.headerSelection = item }
+            // Picked alone, or with ⌘ one more: Button Colour under the stage colours the picks.
+            .onTapGesture { model.studio.pick(.item(item), adding: NSEvent.modifierFlags.contains(.command)) }
             .gesture(dragGesture(item, width: width))
             .help(item.isRequired ? "\(item.title): drag to move it" : "\(item.title): drag to move it, down to take it out")
             .accessibilityElement()
@@ -139,6 +140,7 @@ struct HeaderStageEditor: View {
     /// The item as the panel draws it, centred in its room: a picture.
     private func chipPicture(_ item: HeaderItem, pages: [ExpandedPage], width: CGFloat) -> some View {
         HeaderItemView(item: item, pages: pages)
+            .headerTint(model.preferences.header.itemTints[item])
             .allowsHitTesting(false)
             .frame(width: width, height: height)
     }
