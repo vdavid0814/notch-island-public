@@ -21,7 +21,12 @@ struct WidgetCustomizeView: View {
     let close: () -> Void
 
     @Environment(AppModel.self) private var model
+    /// Handed to the panels that slide in a view graph of their own (`RenderServerSlide`).
+    @Environment(\.self) private var environment
     @State private var panelsIn = false
+    /// The top bar's stand-in slides (`RenderServerSlide`) while the panels come in or go out.
+    @State private var topSlides = true
+    @State private var slideGeneration = 0
     @State private var editorIn = false
     @State private var editing = ElementEditing()
     @State private var versions = WidgetVersionStore()
@@ -50,20 +55,40 @@ struct WidgetCustomizeView: View {
             let middle = max(0, proxy.size.width - 2 * placement.leading - 2 * Self.panelWidth - 2 * gap)
             if let widget = model.editedWidgets.board.widget(id) {
                 HStack(spacing: gap) {
-                    CustomizePanel(widget: widget, addFigure: addFigure)
-                        .frame(width: Self.panelWidth)
-                        .frame(maxHeight: .infinity, alignment: .top)
-                        .background(BlackBox(shape: side(leading: true)))
-                        .offset(x: panelsIn ? 0 : -40)
-                        .opacity(panelsIn ? 1 : 0)
+                    // Slid on the render server, in a view graph of its own: slid by SwiftUI, its
+                    // glass controls were drawn again in every frame (`RenderServerSlide`).
+                    RenderServerSlide(isIn: panelsIn, away: CGSize(width: -40, height: 0), spring: Self.panelSpring,
+                                      outDuration: Self.panelOut, environment: environment) {
+                        CustomizePanel(widget: widget, addFigure: addFigure)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            .background(BlackBox(shape: side(leading: true)))
+                    }
+                    .frame(width: Self.panelWidth)
+                    .opacity(panelsIn ? 1 : 0)
                     VStack(spacing: gap) {
-                        CustomizeTopBar(widget: widget, editing: editing, versions: versions, close: close)
-                            .frame(height: top)
-                            .background(BlackBox(shape: box))
-                            .offset(y: panelsIn ? 0 : -24)
-                            .opacity(panelsIn ? 1 : 0)
-                            // Its Open Widget grows into a list down over the editor.
-                            .zIndex(1)
+                        ZStack {
+                            // In place, and the one used once it is: its Open Widgets list grows out
+                            // of it over the editor, outside any frame of its own.
+                            CustomizeTopBar(widget: widget, editing: editing, versions: versions, close: close)
+                                .frame(height: top)
+                                .background(BlackBox(shape: box))
+                                .opacity(topSlides ? 0 : 1)
+                            // While it slides in or out, a stand-in in a view graph of its own slides
+                            // on the render server: slid by SwiftUI, its glass buttons were drawn
+                            // again in every frame (~0.45 J of an opening and closing, measured).
+                            if topSlides {
+                                RenderServerSlide(isIn: panelsIn, away: CGSize(width: 0, height: -24), spring: Self.panelSpring,
+                                                  outDuration: Self.panelOut, environment: environment) {
+                                    CustomizeTopBar(widget: widget, editing: editing, versions: versions, close: close)
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                        .background(BlackBox(shape: box))
+                                }
+                                .frame(height: top)
+                                .opacity(panelsIn ? 1 : 0)
+                            }
+                        }
+                        // Its Open Widget grows into a list down over the editor.
+                        .zIndex(1)
                         // Before and after: the widget as Customize found it, looked at, not edited.
                         editor(editing.showsOriginal ? (editing.original ?? widget) : widget)
                             .allowsHitTesting(!editing.showsOriginal)
@@ -175,9 +200,28 @@ struct WidgetCustomizeView: View {
         editorDelay + editorSpring.settlingDuration(target: 1.0, initialVelocity: 0.0, epsilon: 0.001)
     }
 
+    /// The panels' spring in, and their ease out.
+    static let panelSpring = Spring(duration: 0.5, bounce: 0.14)
+    static let panelOut: TimeInterval = 0.22
+
+    /// When the panels' spring has settled after coming in.
+    static var panelSettles: TimeInterval {
+        panelSpring.settlingDuration(target: 1.0, initialVelocity: 0.0, epsilon: 0.001)
+    }
+
     /// In: the panels, then the editor. Out: all together, quicker.
     private func animate(_ shown: Bool) {
-        withAnimation(shown ? .spring(duration: 0.5, bounce: 0.14) : .easeIn(duration: 0.22)) { panelsIn = shown }
+        withoutAnimation { topSlides = true }
+        if shown {
+            slideGeneration &+= 1
+            let generation = slideGeneration
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(Self.panelSettles))
+                guard generation == slideGeneration, panelsIn else { return }
+                withoutAnimation { topSlides = false }
+            }
+        }
+        withAnimation(shown ? .spring(Self.panelSpring) : .easeIn(duration: Self.panelOut)) { panelsIn = shown }
         withAnimation(shown ? .spring(Self.editorSpring).delay(Self.editorDelay) : .easeIn(duration: 0.22)) { editorIn = shown }
     }
 
@@ -207,7 +251,7 @@ struct WidgetCustomizeView: View {
     /// The widget's own size on the board.
     private func natural(of widget: IslandWidget) -> CGSize {
         WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
-            .frame(for: widget.frame).size
+            .laidSize(for: widget.frame)
     }
 
     /// The widget on graph paper, as large as the editor allows (within its margin), its parts
@@ -215,7 +259,7 @@ struct WidgetCustomizeView: View {
     private func editor(_ widget: IslandWidget) -> some View {
         GeometryReader { proxy in
             let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
-            let natural = geometry.frame(for: widget.frame).size
+            let natural = geometry.laidSize(for: widget.frame)
             let room = CGSize(width: max(proxy.size.width - 2 * Self.editorMargin, 40),
                               height: max(proxy.size.height - 2 * Self.editorMargin, 40))
             let scale = min(room.width / natural.width, room.height / natural.height, 4)
@@ -303,7 +347,7 @@ private struct CustomizePanel: View {
                 .animation(.spring(duration: 0.35, bounce: 0.12), value: isMixing)
                 let switchable = kind.spec.elements.filter { !$0.isRequired }
                 let size = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
-                    .frame(for: widget.frame).size
+                    .laidSize(for: widget.frame)
                 if !switchable.isEmpty {
                     StudioDivider()
                     VStack(alignment: .leading, spacing: 4) {
