@@ -303,10 +303,13 @@ import Observation
             self?.levels.retryInterception()
         }
         // A Reset of Accessibility or Input Monitoring: the key taps go before the permission does,
-        // at once (the feature loop follows a moment later, too late).
+        // at once (the feature loop follows a moment later, too late). Let go, they are refused
+        // until the user allows the app again: tried patiently, not given up after three attempts.
         permissions.onHoldKeyTaps = { [weak self] in
             self?.commandSpaceTap.stop()
             self?.levels.setInterceptionEnabled(false)
+            self?.commandSpaceTap.expectRefusals()
+            self?.levels.expectInterceptionRefusals()
         }
         // Like the system's ⌘Space: opens Siri, and closes it again.
         commandSpaceTap.onPress = { [weak self] in

@@ -132,6 +132,8 @@ import Observation
     /// trusted for Accessibility; otherwise `interception` reports `.needsPermission` / `.off`.
     /// A permission changed: a refused key tap is tried again.
     func retryInterception() { interceptor.retryIfFailed() }
+    /// A permission Reset is under way: the key tap will be refused until the app is allowed again.
+    func expectInterceptionRefusals() { interceptor.expectRefusals() }
 
     func setInterceptionEnabled(_ enabled: Bool) {
         wantsInterception = enabled

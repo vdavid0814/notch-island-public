@@ -33,6 +33,31 @@ import Testing
     }
 }
 
+@Suite struct KeyTapRetriesTests {
+    @Test func aRefusedTapIsTriedThreeTimesThenLeft() {
+        var retries = KeyTapRetries()
+        #expect(retries.next() == .seconds(1))
+        #expect(retries.next() == .seconds(3))
+        #expect(retries.next() == .seconds(8))
+        #expect(retries.next() == nil)
+        retries.reset()
+        #expect(retries.next() == .seconds(1))
+    }
+
+    /// After a Reset the tap is refused until the user allows the app again, which the process's
+    /// own trust flag may never show: it is tried on, and the hold's stop does not end that.
+    @Test func afterAResetItIsTriedPatiently() {
+        let start = ContinuousClock.now
+        var retries = KeyTapRetries()
+        retries.expectRefusals(now: start)
+        retries.reset()
+        for delay in KeyTapRetries.delays { #expect(retries.next(now: start) == delay) }
+        #expect(retries.next(now: start + .seconds(60)) == KeyTapRetries.patientGap)
+        #expect(retries.next(now: start + KeyTapRetries.patientFor - .seconds(1)) == KeyTapRetries.patientGap)
+        #expect(retries.next(now: start + KeyTapRetries.patientFor) == nil)
+    }
+}
+
 @Suite struct SourceDeadlineTests {
     @Test func anAnswerInTimeIsKept() async {
         let value = await SourceDeadline.value("test-fast", within: .seconds(2), fallback: 0) { 42 }

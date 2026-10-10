@@ -25,7 +25,9 @@ import ApplicationServices
     @ObservationIgnored private var heldFor: PermissionKind?
     @ObservationIgnored private var heldSawRevoked = false
     @ObservationIgnored private var holdTimeout: Task<Void, Never>?
-    /// Long enough for macOS to tell that the entry is gone; still allowed then, it never went.
+    /// Long enough for macOS to tell that the entry is gone. Not seen gone by then, the taps are
+    /// let go all the same, and they tell: the process's trust flag can stay on after a Reset
+    /// (0.8.2, macOS 27), and a tap is then refused until the app is allowed again (`KeyTapRetries`).
     nonisolated static let holdLimit: Duration = .seconds(30)
     /// The tap threads take their taps down on their own run loops: a moment for that.
     nonisolated static let tapTeardown: Duration = .milliseconds(250)
@@ -194,9 +196,9 @@ import ApplicationServices
         holdTimeout = Task { [weak self] in
             try? await Task.sleep(for: Self.holdLimit)
             guard let self, !Task.isCancelled, let held = self.heldFor else { return }
-            // Never seen gone: the reset changed nothing, the permission is still there.
+            // Never seen gone: the reset changed nothing, or the flag is stale and the taps find out.
             if held == .accessibility ? AXIsProcessTrusted() : CGPreflightListenEventAccess() {
-                self.releaseKeyTaps("still allowed after \(Self.holdLimit)")
+                self.releaseKeyTaps("not seen revoked in \(Self.holdLimit)")
             }
         }
     }

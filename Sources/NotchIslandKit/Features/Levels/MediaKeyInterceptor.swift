@@ -72,7 +72,7 @@ import os
         wantsRunning = false
         restart?.cancel()
         restart = nil
-        failedAttempts = 0
+        retries.reset()
         if isRunning {
             isRunning = false
             generation &+= 1
@@ -87,14 +87,17 @@ import os
         switch report {
         case .installed:
             Log.levels.notice("media key tap armed — system HUD suppressed")
-            failedAttempts = 0
+            retries.reset()
             state = .active
         case .failed:
-            Log.levels.error("media key tap could not be created")
             isRunning = false
             shared.end()
             state = .failed("The media-key event tap could not be created.")
-            scheduleRetry()
+            if let delay = scheduleRetry() {
+                Log.levels.notice("media key tap refused: trying again in \(delay.components.seconds, privacy: .public) s")
+            } else {
+                Log.levels.error("media key tap could not be created")
+            }
         case .ended:
             Log.levels.error("media key tap run loop ended unexpectedly")
             isRunning = false
@@ -104,23 +107,19 @@ import os
         }
     }
 
-    /// macOS refuses a tap for a moment after the screen is unlocked (seen in reports: every start
-    /// within a second of `screenUnlocked` failed): tried again after 1, 3 and 8 s.
-    private var failedAttempts = 0
-    static let retryDelays: [Duration] = [.seconds(1), .seconds(3), .seconds(8)]
+    /// A refused tap is tried again (`KeyTapRetries`): the wait, or nil when it is left failed.
+    private var retries = KeyTapRetries()
 
-    private func scheduleRetry() {
-        guard wantsRunning, restart == nil, failedAttempts < Self.retryDelays.count else { return }
-        let delay = Self.retryDelays[failedAttempts]
-        failedAttempts += 1
+    private func scheduleRetry() -> Duration? {
+        guard wantsRunning, restart == nil, let delay = retries.next() else { return nil }
         restart = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled else { return }
             self.restart = nil
             guard self.wantsRunning, !self.isRunning else { return }
-            Log.levels.notice("media key tap: trying again")
             self.start()
         }
+        return delay
     }
 
     /// A permission changed: a failed tap gets a fresh set of attempts.
@@ -128,8 +127,13 @@ import os
         guard wantsRunning, !isRunning, case .failed = state else { return }
         restart?.cancel()
         restart = nil
-        failedAttempts = 0
+        retries.reset()
         start()
+    }
+
+    /// A permission Reset is under way: the tap will be refused until the user allows the app again.
+    func expectRefusals() {
+        retries.expectRefusals()
     }
 
     /// One restart a second after an unexpected end, at most once per `restartInterval`, so a tap

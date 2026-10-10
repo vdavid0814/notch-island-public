@@ -25,9 +25,41 @@ import Testing
             2026-09-29 00:00:02.000 E  NotchIsland[1:2] [com.davidvarga.notchisland:levels] listener failed
             2026-09-29 00:00:03.000 Df NotchIsland[1:2] [com.davidvarga.notchisland:app] fine
             """
-        let section = DiagnosticsInsights.errorSection(log)
+        let section = DiagnosticsInsights.errorSection(log, pid: 1)
         #expect(section.entries.first?.value == "[com.davidvarga.notchisland:levels] 1×")
         #expect(section.entries.contains { $0.key == "2× [com.apple.network:connection]" })
+        #expect(!section.entries.contains { $0.key == DiagnosticsInsights.earlierRunsKey })
+    }
+
+    /// 0.8.3's first report carried 0.8.2's refused key taps (another run, two hours earlier) as its
+    /// own finding and as a Sentry issue under 0.8.3.
+    @Test func anEarlierRunsOwnErrorsAreNotThisRuns() {
+        let log = """
+            2026-10-10 10:40:08.231 E  NotchIsland[25315:6d4b79] [com.davidvarga.notchisland:levels] media key tap could not be created
+            2026-10-10 10:40:09.280 E  NotchIsland[25315:6d4b79] [com.davidvarga.notchisland:levels] media key tap could not be created
+            2026-10-10 10:41:58.743 E  NotchIsland[25315:6d4b79] [com.apple.os_debug_log:] assertion failed
+            2026-10-10 12:51:22.627 Df NotchIsland[55904:974424] [com.davidvarga.notchisland:levels] media key tap armed — system HUD suppressed
+            2026-10-10 12:51:40.000 E  NotchIsland[55904:974424] [com.davidvarga.notchisland:media] adapter stream ended
+            """
+        let section = DiagnosticsInsights.errorSection(log, pid: 55904)
+        #expect(section.entries.first?.value == "[com.davidvarga.notchisland:media] 1×")
+        #expect(section.entries.first { $0.key == DiagnosticsInsights.earlierRunsKey }?.value
+                == "[com.davidvarga.notchisland:levels] 2× (last 2026-10-10 10:40:09)")
+        #expect(!section.entries.contains { $0.key.hasSuffix("× [com.davidvarga.notchisland:levels]") })
+        // The system's errors are the window's, whichever run logged them.
+        #expect(section.entries.contains { $0.key == "1× [com.apple.os_debug_log:]" })
+
+        var report = DiagnosticsReport()
+        report.sections = [section]
+        #expect(TelemetryMapping.ownErrors(report).map(\.category) == ["media"])
+        let verdict = DiagnosticsVerdict.make(report: report, metrics: [:], comparisons: [], crashes: 0)
+        #expect(verdict.ownErrors == "1 (media 1)")
+
+        let quiet = DiagnosticsInsights.errorSection(log, pid: 7)
+        #expect(quiet.entries.first?.value == "none")
+        report.sections = [quiet]
+        #expect(TelemetryMapping.ownErrors(report).isEmpty)
+        #expect(DiagnosticsVerdict.make(report: report, metrics: [:], comparisons: [], crashes: 0).ownErrors == "0")
     }
 
     @Test @MainActor func flowKeepsTheLastSteps() {
@@ -261,7 +293,7 @@ import Testing
         let lines = DiagnosticsProbes.errorLines(in: log)
         #expect(lines.count == 2)
         #expect(lines.filter { !DiagnosticsProbes.isKnownNoise($0) }.count == 1)
-        let section = DiagnosticsInsights.errorSection(log)
+        let section = DiagnosticsInsights.errorSection(log, pid: 1)
         #expect(!section.entries.contains { $0.key.contains("com.apple.network") })
         #expect(section.entries.contains { $0.key == "1× [com.davidvarga.notchisland:levels]" })
         let noise = DiagnosticsSystemNoise.section(lines.filter(DiagnosticsProbes.isKnownNoise))

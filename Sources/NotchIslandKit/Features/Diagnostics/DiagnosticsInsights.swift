@@ -80,25 +80,44 @@ nonisolated enum DiagnosticsInsights {
 
     /// The log's errors and faults counted by subsystem and category (NotchIsland's own by
     /// feature), the most frequent first, with one example each.
-    static func errorSection(_ log: String) -> DiagnosticsReport.Section {
+    ///
+    /// NotchIsland's own are this run's only (`pid`): the log reaches back over earlier runs, and
+    /// theirs became this run's findings and Sentry issues under this version (0.8.2's three
+    /// refused key taps, two hours and an update earlier, as 0.8.3's). Earlier runs' are listed
+    /// apart, uncounted; their lines are in log.txt.
+    static func errorSection(_ log: String, pid: Int32 = ProcessInfo.processInfo.processIdentifier) -> DiagnosticsReport.Section {
         var counts: [String: (count: Int, example: Substring)] = [:]
+        var earlier: [String: (count: Int, last: Substring)] = [:]
+        let thisRun = "NotchIsland[\(pid):"
+        let own = "[\(Log.subsystem):"
         // The system's known messages are not errors: they have a section of their own.
         for line in DiagnosticsProbes.errorLines(in: log) where !DiagnosticsProbes.isKnownNoise(line) {
             let found = line.firstRange(of: /\[[A-Za-z][^\]\s]*:[^\]]*\]/).map { String(line[$0]) }
                 ?? (line.contains("(CoreAudio)") ? "(CoreAudio)" : "(other)")
             let source = found
+            if source.hasPrefix(own), !line.contains(thisRun) {
+                earlier[source] = ((earlier[source]?.count ?? 0) + 1, line)
+                continue
+            }
             let entry = counts[source]
             counts[source] = ((entry?.count ?? 0) + 1, entry?.example ?? line)
         }
         var section = DiagnosticsReport.Section("Errors by source")
         let sorted = counts.sorted { $0.value.count > $1.value.count }
-        let own = sorted.filter { $0.key.contains("com.davidvarga.notchisland") }
-        section.add("NotchIsland's own", own.isEmpty ? "none" : own.map { "\($0.key) \($0.value.count)×" }.joined(separator: ", "))
+        let ownSources = sorted.filter { $0.key.hasPrefix(own) }
+        section.add("NotchIsland's own", ownSources.isEmpty ? "none" : ownSources.map { "\($0.key) \($0.value.count)×" }.joined(separator: ", "))
+        if !earlier.isEmpty {
+            // "…:levels] 3× (last 2026-10-10 10:40:12)"
+            section.add(earlierRunsKey, earlier.sorted { $0.value.count > $1.value.count }
+                .map { "\($0.key) \($0.value.count)× (last \($0.value.last.prefix(19)))" }.joined(separator: ", "))
+        }
         for (source, value) in sorted.prefix(12) {
             section.add("\(value.count)× \(source)", example(value.example, source: source))
         }
         return section
     }
+
+    static let earlierRunsKey = "NotchIsland's own, earlier runs (not counted)"
 
     /// When, where and what the message starts with: the line's end alone ("…face alpha 1.0") told
     /// nothing, and became a Sentry issue's title.

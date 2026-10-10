@@ -31,10 +31,9 @@ import os
     /// Set between `start()` and `stop()`: the owner wants the tap, even while it is retried.
     private var wantsRunning = false
     private var retry: Task<Void, Never>?
-    private var failedAttempts = 0
-    /// After a refused tap: tried again this long after each failure, then left failed (a later
-    /// start, an unlock or a permission granted tries again).
-    nonisolated static let retryDelays: [Duration] = [.seconds(1), .seconds(3), .seconds(8)]
+    /// A refused tap is tried again (`KeyTapRetries`), then left failed (a later start, an unlock
+    /// or a permission granted tries again).
+    private var retries = KeyTapRetries()
 
     /// The space bar (`kVK_Space`).
     nonisolated static let spaceKeyCode: Int64 = 49
@@ -76,7 +75,7 @@ import os
         wantsRunning = false
         retry?.cancel()
         retry = nil
-        failedAttempts = 0
+        retries.reset()
         state = .off
         guard isRunning else { return }
         isRunning = false
@@ -88,7 +87,7 @@ import os
     private func received(installed: Bool, generation: UInt64) {
         guard generation == self.generation, isRunning else { return }
         if installed {
-            failedAttempts = 0
+            retries.reset()
             state = .active
             return
         }
@@ -97,15 +96,17 @@ import os
         state = .failed(CGPreflightListenEventAccess()
             ? "macOS refused the keyboard event tap."
             : "Input Monitoring is not allowed, so macOS refused the keyboard event tap.")
-        guard wantsRunning, retry == nil, failedAttempts < Self.retryDelays.count else { return }
-        let delay = Self.retryDelays[failedAttempts]
-        failedAttempts += 1
+        guard wantsRunning, retry == nil else { return }
+        guard let delay = retries.next() else {
+            Log.app.error("⌘Space tap could not be created")
+            return
+        }
+        Log.app.notice("⌘Space tap refused: trying again in \(delay.components.seconds, privacy: .public) s")
         retry = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled else { return }
             self.retry = nil
             guard self.wantsRunning, !self.isRunning else { return }
-            Log.app.notice("⌘Space tap: trying again")
             self.start()
         }
     }
@@ -115,8 +116,13 @@ import os
         guard wantsRunning, !isRunning else { return }
         retry?.cancel()
         retry = nil
-        failedAttempts = 0
+        retries.reset()
         start()
+    }
+
+    /// A permission Reset is under way: the tap will be refused until the user allows the app again.
+    func expectRefusals() {
+        retries.expectRefusals()
     }
 
     /// A tap macOS switched off for being slow goes back on only while the app is still trusted: a
@@ -286,7 +292,7 @@ nonisolated private enum CommandSpaceTapThread {
                 callback: callback,
                 userInfo: Unmanaged.passUnretained(session).toOpaque()
             ) else {
-                Log.app.error("⌘Space tap could not be created")
+                Log.app.notice("⌘Space key tap refused")
                 report(false)
                 return
             }
@@ -299,7 +305,7 @@ nonisolated private enum CommandSpaceTapThread {
                 userInfo: Unmanaged.passUnretained(session).toOpaque()
             ) else {
                 CFMachPortInvalidate(port)
-                Log.app.error("⌘Space modifier tap could not be created")
+                Log.app.notice("⌘Space modifier tap refused")
                 report(false)
                 return
             }
