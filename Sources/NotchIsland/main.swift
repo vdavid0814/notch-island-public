@@ -1,4 +1,5 @@
 import Darwin
+import Foundation
 import MachO
 import NotchIslandKit
 
@@ -31,5 +32,12 @@ if environment.keys.contains(where: { getenv($0) == nil }) {
     if _NSGetExecutablePath(&path, &size) == 0 { execv(path, CommandLine.unsafeArgv) }
     // exec failed: carry on without them.
 }
+
+// macOS 27's AppKit offers every window of an app to Spotlight (window and tab search) whenever
+// its windows change: for the island that is every opening and closing, three items each time,
+// which Spotlight's knowledge daemon then works through at the app's expense (~90 mJ billed per
+// hover opening, 70 % of what an opening cost; measured with `Scripts/perf/serviced.py`). The
+// island's panels are not windows anyone looks for; AppKit's own switch leaves them out.
+UserDefaults.standard.register(defaults: ["NSEnableWindowTabIndexing": false])
 
 NotchIslandApp.main()
