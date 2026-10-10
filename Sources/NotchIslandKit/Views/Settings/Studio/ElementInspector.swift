@@ -427,6 +427,9 @@ struct ElementInspector: View {
     @ViewBuilder private func chart(_ id: ElementID) -> some View {
         let look = widget.chartLook(of: id)
         let element = widget.kind.spec.element(id)
+        // A graph of readings (Fan Control's): the same look, in its own words.
+        let graph = id == .tempGraph || id == .rpmGraph
+        let graphText: ElementID? = id == .tempGraph ? .tempGraphText : id == .rpmGraph ? .rpmGraphText : nil
         HStack(spacing: 10) {
             Image(systemName: element?.symbol ?? "chart.bar")
                 .font(.system(size: 18))
@@ -435,18 +438,21 @@ struct ElementInspector: View {
                 .background(.white.opacity(0.06), in: .rect(cornerRadius: 8, style: .continuous))
             VStack(alignment: .leading, spacing: 1) {
                 Text(element?.title ?? "Chart").font(.headline)
-                Text("Chart").font(.caption).foregroundStyle(SettingsPalette.secondary)
+                Text(graph ? "Graph" : "Chart").font(.caption).foregroundStyle(SettingsPalette.secondary)
             }
             Spacer(minLength: 8)
-            if look != .plain {
+            if look != .plain || graphText.map({ widget.textStyles[$0] != nil }) == true {
                 Button("Reset") {
-                    withAnimation(.spring(duration: 0.4, bounce: 0.18)) { updateChart(id) { $0 = .plain } }
+                    withAnimation(.spring(duration: 0.4, bounce: 0.18)) {
+                        updateChart(id) { $0 = .plain }
+                        if let graphText { update(graphText) { $0 = .plain } }
+                    }
                 }
                 .help("The chart as the widget draws it")
             }
         }
         StudioDivider()
-        section("Corners", caption: "The bars' tops.") {
+        section("Corners", caption: graph ? "The line's joins and the mark at the newest reading." : "The bars' tops.") {
             Picker("Corners", selection: Binding(get: { look.corners }, set: { corners in updateChart(id) { $0.corners = corners } })) {
                 ForEach(ChartLook.Corners.allCases) { Text($0.title).tag($0) }
             }
@@ -457,32 +463,49 @@ struct ElementInspector: View {
         // A day's use (Daily Usage), or how far the battery had run down (the charge chart).
         let usage = widget.kind == .batteryUsage
         StudioDivider()
-        section(usage ? "Light Use" : "Run Down a Lot",
-                caption: usage ? "Days that used under \(PowerState.lowLevel) % of the battery. Automatic: grey, the picked day in its colour."
+        section(graph ? "Low" : usage ? "Light Use" : "Run Down a Lot",
+                caption: graph ? "The line where the readings are low. Automatic: the graph's own colours, cool to hot."
+                    : usage ? "Days that used under \(PowerState.lowLevel) % of the battery. Automatic: grey, the picked day in its colour."
                     : "Bars under \(PowerState.lowLevel) %.") {
             colourChoice(look.lowColor, mixing: .chartLow) { color in updateChart(id) { $0.lowColor = color } }
         }
         StudioDivider()
-        section(usage ? "Some Use" : "Run Down Some",
-                caption: usage ? "Days that used \(PowerState.lowLevel) to \(ChartLook.mediumLevel) %." : "Bars from \(PowerState.lowLevel) to \(ChartLook.mediumLevel) %.") {
+        section(graph ? "Middle" : usage ? "Some Use" : "Run Down Some",
+                caption: graph ? "The line halfway up its range." : usage ? "Days that used \(PowerState.lowLevel) to \(ChartLook.mediumLevel) %." : "Bars from \(PowerState.lowLevel) to \(ChartLook.mediumLevel) %.") {
             colourChoice(look.mediumColor, mixing: .chartMedium) { color in updateChart(id) { $0.mediumColor = color } }
         }
         StudioDivider()
-        section(usage ? "Heavy Use" : "Run Down Little",
-                caption: usage ? "Days that used \(ChartLook.mediumLevel) % or more." : "Bars from \(ChartLook.mediumLevel) % up.") {
+        section(graph ? "High" : usage ? "Heavy Use" : "Run Down Little",
+                caption: graph ? "The line where the readings are high." : usage ? "Days that used \(ChartLook.mediumLevel) % or more." : "Bars from \(ChartLook.mediumLevel) % up.") {
             colourChoice(look.highColor, mixing: .chartHigh) { color in updateChart(id) { $0.highColor = color } }
         }
         StudioDivider()
-        section("Percentages", caption: "Beside the chart, each with its line, where it is wide enough; ones too close to the next are left out.") {
+        section(graph ? "Values" : "Percentages",
+                caption: graph ? "Beside the graph, each with its line, where it is large enough; ones too close to the next are left out."
+                    : "Beside the chart, each with its line, where it is wide enough; ones too close to the next are left out.") {
             HStack(spacing: 10) {
                 Text("Write").font(.callout)
                 Picker("Percentages", selection: Binding(get: { look.percentStep }, set: { step in updateChart(id) { $0.percentStep = step } })) {
-                    ForEach(ChartLook.percentSteps, id: \.self) { Text(ChartLook.title(ofStep: $0)).tag($0) }
+                    ForEach(ChartLook.percentSteps, id: \.self) {
+                        Text(graph ? ChartLook.title(ofGraphStep: $0) : ChartLook.title(ofStep: $0)).tag($0)
+                    }
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
                 .fixedSize()
             }
+        }
+        // A graph's texts (its name, the value now, the values beside it): one type and colour.
+        if let graphText {
+            let style = widget.textStyle(of: graphText)
+            StudioDivider()
+            Text("Texts").font(.subheadline.weight(.semibold))
+            pointSlider("Size", value: style.size ?? Double(WidgetParts.textSize(of: graphText, in: widget, inner: inner)),
+                        in: 6...16, help: "The graph's name; the value now and the values beside it follow it") { points in
+                update(graphText) { $0.size = points }
+            }
+            font(graphText, style, showsSize: false)
+            colour(graphText, style)
         }
     }
 
@@ -877,6 +900,24 @@ struct ElementInspector: View {
                 }
             }
         }
+        // The ring round it (the battery's charge), set as a line is.
+        if widget.kind.spec.rings.contains(id) {
+            let ring = widget.progressLook(of: id)
+            StudioDivider()
+            HStack {
+                Text("Ring").font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                if ring != .plain {
+                    Button("Reset") {
+                        withAnimation(.spring(duration: 0.35, bounce: 0.12)) { updateLine(id) { $0 = .plain } }
+                    }
+                    .controlSize(.small)
+                    .help("The ring as the widget draws it")
+                }
+            }
+            lineLook(id, ring, isRing: true)
+            ringThickness(id, ring)
+        }
     }
 
     /// Where the part is drawn and how large, in the widget's points: the symbol's frame, or its
@@ -1162,15 +1203,17 @@ struct ElementInspector: View {
     @ViewBuilder private func progress(_ id: ElementID) -> some View {
         let look = widget.progressLook(of: id)
         let inner = ProgressLook.Part.allCases.compactMap { $0.textID(in: id) }
+        // Bent round at this size (a dial, a load's or a level's ring): set the same.
+        let isRing = ProgressPartsPanel.isRing(id, inner: self.inner)
         HStack(spacing: 10) {
-            Image(systemName: "slider.horizontal.below.rectangle")
+            Image(systemName: isRing ? "circle.dashed" : "slider.horizontal.below.rectangle")
                 .font(.system(size: 16))
                 .foregroundStyle(SettingsPalette.secondary)
                 .frame(width: 32, height: 32)
                 .background(.white.opacity(0.06), in: .rect(cornerRadius: 8, style: .continuous))
             VStack(alignment: .leading, spacing: 1) {
                 Text(widget.kind.spec.element(id)?.title ?? "Progress").font(.headline)
-                Text(id == .progress ? "Playback line" : "Line").font(.caption).foregroundStyle(SettingsPalette.secondary)
+                Text(id == .progress ? "Playback line" : isRing ? "Ring" : "Line").font(.caption).foregroundStyle(SettingsPalette.secondary)
             }
             Spacer(minLength: 8)
             if look != .plain || inner.contains(where: { widget.textStyles[$0] != nil }) {
@@ -1187,12 +1230,42 @@ struct ElementInspector: View {
         }
         StudioDivider()
         frame(id)
+        lineLook(id, look, isRing: isRing)
+        if isRing { ringThickness(id, look) }
+        // The time picked in the panel under the editor: its type and colour.
+        if let part = editing.progressPart, let text = part.textID(in: id) {
+            let style = widget.textStyle(of: text)
+            StudioDivider()
+            HStack {
+                Text(part.title(in: id)).font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                if style != .plain {
+                    Button("Reset") {
+                        withAnimation(.spring(duration: 0.35, bounce: 0.12)) { update(text) { $0 = .plain } }
+                    }
+                    .controlSize(.small)
+                    .help("This text as the line sets it")
+                }
+            }
+            // From here on the time's text is set: a faint line marks where.
+            Capsule()
+                .fill(Color.white.opacity(0.14))
+                .frame(height: 1)
+            // Sized in the panel under the editor.
+            font(text, style, showsSize: false)
+            colour(text, style)
+        }
+    }
+
+    /// A line's look, the same for one bent round (a ring, a dial): the colour of all of it and of
+    /// the part filled, its ends and the knob where it stands.
+    @ViewBuilder private func lineLook(_ id: ElementID, _ look: ProgressLook, isRing: Bool) -> some View {
         StudioDivider()
-        section("Bar", caption: "The whole line, under the part played.") {
+        section(isRing ? "Ring" : "Bar", caption: isRing ? "The whole ring, under the part filled." : "The whole line, under the part played.") {
             colourChoice(look.trackColor, mixing: .track) { color in updateLine(id) { $0.trackColor = color } }
         }
         StudioDivider()
-        section("Progress", caption: "The part played.") {
+        section(isRing ? "Filled" : "Progress", caption: isRing ? "The part filled. Automatic: the colour of its value." : "The part played.") {
             colourChoice(look.fillColor, mixing: .played) { color in updateLine(id) { $0.fillColor = color } }
         }
         StudioDivider()
@@ -1220,28 +1293,25 @@ struct ElementInspector: View {
             .fixedSize()
             .help("What marks the position: the end of the part played alone, a circle, a capsule or a square")
         }
-        // The time picked in the panel under the editor: its type and colour.
-        if let part = editing.progressPart, let text = part.textID(in: id) {
-            let style = widget.textStyle(of: text)
-            StudioDivider()
-            HStack {
-                Text(part.title(in: id)).font(.subheadline.weight(.semibold))
-                Spacer(minLength: 8)
-                if style != .plain {
-                    Button("Reset") {
-                        withAnimation(.spring(duration: 0.35, bounce: 0.12)) { update(text) { $0 = .plain } }
-                    }
-                    .controlSize(.small)
-                    .help("This time as the line sets it")
-                }
+    }
+
+    /// A ring's thickness (a line's is set by its handles in the panel under the editor; a button's
+    /// ring has none).
+    @ViewBuilder private func ringThickness(_ id: ElementID, _ look: ProgressLook) -> some View {
+        StudioDivider()
+        section("Thickness") {
+            HStack(spacing: 10) {
+                Slider(value: Binding(get: { look.barThickness }, set: { new in
+                    let snapped = (new * 20).rounded() / 20
+                    if snapped != look.barThickness { updateLine(id) { $0.barThickness = snapped } }
+                }), in: ProgressLook.barThicknesses) { Text("Thickness") }
+                .labelsHidden()
+                .tint(Color.islandAccent)
+                ReservedWidthText(look.barThickness.formatted(.percent.precision(.fractionLength(0))),
+                                  fitting: [Double(4).formatted(.percent.precision(.fractionLength(0)))])
+                    .foregroundStyle(SettingsPalette.secondary)
+                    .monospacedDigit()
             }
-            // From here on the time's text is set: a faint line marks where.
-            Capsule()
-                .fill(Color.white.opacity(0.14))
-                .frame(height: 1)
-            // Sized in the panel under the editor.
-            font(text, style, showsSize: false)
-            colour(text, style)
         }
     }
 

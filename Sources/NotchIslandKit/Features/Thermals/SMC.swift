@@ -88,17 +88,24 @@ nonisolated final class SMC: @unchecked Sendable {
     /// Writes `bytes` (as many as the key holds) to `key`. False where the SMC refused: not root,
     /// or a key it does not let anyone set.
     @discardableResult func write(_ key: String, bytes: [UInt8]) -> Bool {
-        guard let code = Self.code(key) else { return false }
+        result(ofWriting: key, bytes: bytes) == Self.success
+    }
+
+    static let success: UInt8 = 0
+
+    /// The SMC's answer to a write: 0 taken, 0x82 refused (macOS holds the fans), 0x84 no such key,
+    /// 0x87 the wrong size; nil where the call itself failed (not root).
+    func result(ofWriting key: String, bytes: [UInt8]) -> UInt8? {
+        guard let code = Self.code(key) else { return nil }
         lock.lock()
         defer { lock.unlock() }
-        guard let info = info(code) else { return false }
+        guard let info = info(code) else { return 0x84 }
         var input = Self.blank()
         Self.put(&input, Offset.key, code)
         Self.put(&input, Offset.dataSize, info.size)
         input[Offset.data8] = Command.writeBytes.rawValue
         for (index, byte) in bytes.prefix(min(Int(info.size), 32)).enumerated() { input[Offset.bytes + index] = byte }
-        guard let output = call(input) else { return false }
-        return output[Offset.result] == 0
+        return call(input).map { $0[Offset.result] }
     }
 
     /// Writes `number` to `key` in the key's own type.

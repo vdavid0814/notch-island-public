@@ -102,8 +102,21 @@ nonisolated struct ElementID: RawRepresentable, Hashable, Codable, Sendable, Ide
     static let monthWeekdays = ElementID(rawValue: "monthGrid.weekdays")
     // Daily Usage: the day picked under the percentage (the title is `label`, the bars `chart`).
     static let usageDay = ElementID(rawValue: "usageDay")
-    // Fan Control: the dial round the fan (its speed is `value`, automatic or manual `label`).
+    // Fan Control: the dial round the fan (its speed is `value`, automatic or manual `label`), the
+    // chip's temperature as a dial of its own, and the graphs of the temperature and the speed.
     static let fanDial = ElementID(rawValue: "fanDial")
+    static let tempDial = ElementID(rawValue: "tempDial")
+    static let tempGraph = ElementID(rawValue: "tempGraph")
+    static let rpmGraph = ElementID(rawValue: "rpmGraph")
+    /// The texts in the dials, each set from its dial's panel (`ProgressLook.Part`): the fan's name
+    /// and its unit ("rpm"), the chip's name and its degrees.
+    static let fanName = ElementID(rawValue: "fanDial.name")
+    static let fanUnit = ElementID(rawValue: "fanDial.unit")
+    static let tempName = ElementID(rawValue: "tempDial.name")
+    static let tempValue = ElementID(rawValue: "tempDial.value")
+    /// A graph's texts (its name, the value now, the values beside it): one style for them all.
+    static let tempGraphText = ElementID(rawValue: "tempGraph.text")
+    static let rpmGraphText = ElementID(rawValue: "rpmGraph.text")
 
     /// The `row`th copy's text (from 1).
     static func clipText(_ row: Int) -> ElementID { ElementID(rawValue: "clipText\(row)") }

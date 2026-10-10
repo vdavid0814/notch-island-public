@@ -35,7 +35,10 @@ struct SystemStatsWidget: View {
                 HStack(spacing: 10) {
                     ForEach(items, id: \.id) { item in
                         StatRing(title: item.title, value: item.value,
-                                 diameter: min(size.height - 4, size.width / CGFloat(max(items.count, 1)) - 10) * 0.86)
+                                 diameter: min(size.height - 4, size.width / CGFloat(max(items.count, 1)) - 10) * 0.86,
+                                 look: widget.progressLook(of: item.id), reportsFrame: reportsParts,
+                                 titleStyle: widget.textStyles[item.id == .cpuLoad ? .cpuTitle : .memoryTitle],
+                                 valueStyle: widget.textStyles[item.id == .cpuLoad ? .cpuValue : .memoryValue])
                             .movableElement(item.id, of: widget)
                     }
                 }
@@ -65,26 +68,37 @@ struct SystemStatsWidget: View {
     }
 }
 
-private struct StatRing: View {
+/// One load as a ring with its value and name inside: the ring drawn as the load's line is
+/// (`ProgressLook`, in the load's colour unless set), the two texts moved and set as its look and
+/// their styles say — the same as beside the line (`StatBar`).
+struct StatRing: View {
     let title: String
     let value: Double
     let diameter: CGFloat
+    var look: ProgressLook = .plain
+    var reportsFrame = false
+    var titleStyle: TextStyle?
+    var valueStyle: TextStyle?
+
+    /// The value's and the name's own sizes in a ring `diameter` wide.
+    static func valuePoints(diameter: CGFloat) -> CGFloat { diameter * 0.22 }
+    static func titlePoints(diameter: CGFloat) -> CGFloat { diameter * 0.14 }
 
     var body: some View {
         let line = max(3, diameter * 0.1)
         ZStack {
-            Circle().stroke(.white.opacity(0.14), lineWidth: line)
-            Circle()
-                .trim(from: 0, to: value)
-                .stroke(StatTint.color(value), style: StrokeStyle(lineWidth: line, lineCap: .round))
-                .rotationEffect(.degrees(-90))
+            // Its line's middle on the ring's edge, as these rings have always been drawn.
+            ProgressRing(fraction: value, diameter: max(diameter, 10) + line, line: line, look: look,
+                         automaticTrack: .white.opacity(0.14), automaticFill: AnyShapeStyle(StatTint.color(value)),
+                         reportsFrame: reportsFrame)
+                .frame(width: max(diameter, 10), height: max(diameter, 10))
             VStack(spacing: 0) {
-                Text(IslandFormat.percent(value))
-                    .font(.system(size: diameter * 0.22, weight: .semibold, design: .rounded).monospacedDigit())
+                RingText(text: Text(IslandFormat.percent(value)), style: valueStyle, size: Self.valuePoints(diameter: diameter),
+                         weight: .semibold, design: .rounded, automatic: AnyShapeStyle(.primary), part: .remaining, look: look,
+                         reportsFrame: reportsFrame)
                     .transaction { $0.animation = nil }
-                Text(title)
-                    .font(.system(size: diameter * 0.14, weight: .medium))
-                    .foregroundStyle(.secondary)
+                RingText(text: Text(title), style: titleStyle, size: Self.titlePoints(diameter: diameter), part: .elapsed, look: look,
+                         reportsFrame: reportsFrame)
             }
             .lineLimit(1)
             .minimumScaleFactor(0.6)

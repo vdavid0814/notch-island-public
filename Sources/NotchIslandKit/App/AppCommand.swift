@@ -71,6 +71,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
     case anchorFrontWindow, releaseAnchoredWindow
     /// Starts or stops recording the screen (`record`), as the Screen Recording widget does.
     case toggleRecording
+    /// The fans back to macOS and Fan Control's helper removed (`fans/remove-helper`).
+    case removeFanHelper
     case demo(DemoCommand)
 
     static let scheme = "notchisland"
@@ -90,7 +92,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
     ///     open[?page=home|shelf|timer|battery]   close   pin   settings[/general|widgets|activities|permissions|about]
     ///     customize   widget/<kind>|<id>   siri   diagnostics/send   diagnostics/baseline
     ///     media/play|pause|toggle|next|previous
-    ///     timer[?minutes=N]   timer/cancel   stopwatch
+    ///     timer[?minutes=N]   timer/cancel   stopwatch   fans/remove-helper
     ///     demo/media|charging|unplug|low|timerdone|drop|shelf|reset
     ///     demo/volume[?level=0…1]   demo/brightness[?level=0…1]
     ///     demo/hover[?inside=1|0]   demo/state   demo/surface?style=smoked|black|fade   demo/airpods
@@ -151,6 +153,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
             return .startTimer(minutes: minutes)
         case "timer/cancel": return .cancelTimer
         case "stopwatch": return .startStopwatch
+        case "fans/remove-helper": return .removeFanHelper
 
         case "demo/media": return .demo(.media)
         case "demo/charging": return .demo(.charging)

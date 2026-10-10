@@ -1018,7 +1018,8 @@ private struct GalleryCard: View {
             RoundedRectangle(cornerRadius: Self.radius, style: .continuous)
                 .strokeBorder(isHovered ? .white.opacity(0.14) : SettingsPalette.cardStroke)
         }
-        .help(kind.summary)
+        // No tooltip of its summary: the card shows it, and the gallery's tooltips stayed where their
+        // card had been once it scrolled (another card's summary over this one).
         // Dragged up onto the stage's island: put where it is let go (`GalleryDrop`).
         .onDrag {
             model.studio.draggedKind = kind

@@ -55,15 +55,31 @@ nonisolated enum ChipSensors {
     }
 }
 
+/// One reading of a series, at its time.
+nonisolated struct SensorSample: Sendable, Equatable {
+    var date: Date
+    var value: Double
+}
+
 /// The chip's temperature, read every two seconds while a widget shows it (Chip Temperature, Fan
-/// Control); nothing is read otherwise.
+/// Control); nothing is read otherwise. Fan Control's graphs keep the last ten minutes of it and of
+/// the fans' speed: every reading while shown, and — once Fan Control is on a board — one every
+/// fifteen seconds while not (`keepHistory`), so the graph has a past when the panel opens.
 @Observable final class ThermalMonitor {
     private(set) var chip: ChipReading?
+    /// The cores' average over the last ten minutes, oldest first.
+    private(set) var temperatures: [SensorSample] = []
+    /// The fans' average speed over the last ten minutes, oldest first.
+    private(set) var speeds: [SensorSample] = []
 
     static let interval: TimeInterval = 2
+    static let historyInterval: TimeInterval = 15
+    /// How far back the graphs reach.
+    nonisolated static let window: TimeInterval = 10 * 60
 
     @ObservationIgnored private var observers = 0
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var historyTimer: Timer?
     @ObservationIgnored private var isReading = false
 
     func startObserving() {
@@ -85,6 +101,35 @@ nonisolated enum ChipSensors {
         timer = nil
     }
 
+    /// Keeps the graphs' past from now on: a reading of the chip and the fans every fifteen seconds
+    /// (skipped while a widget reads them more often).
+    func keepHistory() {
+        guard historyTimer == nil else { return }
+        let timer = Timer(timeInterval: Self.historyInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sampleHistory() }
+        }
+        timer.tolerance = 5
+        RunLoop.main.add(timer, forMode: .common)
+        historyTimer = timer
+        sampleHistory()
+    }
+
+    /// The fans' average speed, as Fan Control read it.
+    func record(speed rpm: Double) {
+        Self.append(SensorSample(date: .now, value: rpm), to: &speeds)
+    }
+
+    private func sampleHistory() {
+        guard timer == nil, !isReading else { return }
+        isReading = true
+        Task {
+            let (chip, fans) = await Task.detached(priority: .utility) { (ChipSensors.read(), FanSensors.read()) }.value
+            isReading = false
+            if let chip { Self.append(SensorSample(date: .now, value: chip.average), to: &temperatures) }
+            if !fans.isEmpty { record(speed: fans.map(\.rpm).reduce(0, +) / Double(fans.count)) }
+        }
+    }
+
     private func sample() {
         guard !isReading else { return }
         isReading = true
@@ -92,9 +137,18 @@ nonisolated enum ChipSensors {
             // The first read walks the SMC's keys (`ChipSensors.coreKeys`): never on the main thread.
             let reading = await Task.detached(priority: .utility) { ChipSensors.read() }.value
             isReading = false
+            if let reading { Self.append(SensorSample(date: .now, value: reading.average), to: &temperatures) }
             // A whole degree's change redraws; tenths would redraw every sample for nothing.
             if let reading, let chip, abs(reading.average - chip.average) < 0.5, abs(reading.hottest - chip.hottest) < 0.5 { return }
             chip = reading
         }
+    }
+
+    /// At most one sample a second; older than the window, dropped.
+    private static func append(_ sample: SensorSample, to series: inout [SensorSample]) {
+        if let last = series.last, sample.date.timeIntervalSince(last.date) < 1 { return }
+        let cut = sample.date.addingTimeInterval(-window - 30)
+        if let first = series.first, first.date < cut { series.removeAll { $0.date < cut } }
+        series.append(sample)
     }
 }

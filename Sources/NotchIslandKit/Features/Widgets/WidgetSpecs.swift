@@ -168,6 +168,7 @@ nonisolated enum WidgetSpecs {
             movable: [.batteryGlyph, .batteryRing, .percentage, .timeRemaining],
             texts: [.percentage, .timeRemaining],
             buttons: [.batteryRing],
+            rings: [.batteryRing],
             isAvailable: { BatteryAvailability.hasBattery }
         ),
         // A chart: the day's charge, the level and the day over it.
@@ -329,21 +330,30 @@ nonisolated enum WidgetSpecs {
             charts: [.chart],
             isAvailable: { BatteryAvailability.hasBattery }
         ),
-        // A dial round a fan: the speed as an arc between the fans' slowest and fastest, turned to
-        // set it; the fan in the middle a button that gives them back to macOS; the speed and the
-        // mode inside it (square) or beside it (wide). Only where there is a fan: MacBook Pro.
+        // A dial round a fan, a dial of the chip's temperature and a graph of it over the last ten
+        // minutes, in a row: the fan dial turned to set the speed, the fan in it a button that gives
+        // the fans back to macOS; the speed's graph beside the temperature's where the widget is wide
+        // (as wide as the panel). Each part moved and resized in Customize — a graph made lower.
+        // Only where there is a fan: MacBook Pro.
         .fanControl: WidgetKindSpec(
-            title: "Fan Control", summary: "The fans' speed. Turn the dial to set it; click the fan for automatic.",
+            title: "Fan Control", summary: "The fans' speed and the chip's temperature. Turn the fan's dial to set it; click the fan for automatic.",
             symbol: "fan.fill", iconColors: [.rgb(0.4, 0.78, 1.0), .rgb(0.12, 0.45, 0.95)], category: .system,
-            minimumSize: GridSize(width: 2, height: 2), defaultSize: GridSize(width: 3, height: 3),
-            maximumSize: GridSize(width: 6, height: 3),
+            minimumSize: GridSize(width: 2, height: 1), defaultSize: GridSize(width: 7, height: 2),
+            maximumSize: GridSize(width: 12, height: 3),
             elements: [
-                ElementSpec(.fanDial, "Dial", symbol: "gauge.with.dots.needle.67percent", isRequired: true),
+                ElementSpec(.fanDial, "Fan", symbol: "fan", isRequired: true),
                 ElementSpec(.value, "Speed", symbol: "number"),
                 ElementSpec(.label, "Automatic or Manual", symbol: "textformat"),
+                ElementSpec(.tempDial, "Temperature", symbol: "thermometer.medium"),
+                ElementSpec(.tempGraph, "Temperature graph", symbol: "chart.xyaxis.line"),
+                ElementSpec(.rpmGraph, "Speed graph", symbol: "waveform.path.ecg", defaultVisible: false),
             ],
-            movable: [.fanDial, .value, .label],
+            movable: [.fanDial, .value, .label, .tempDial, .tempGraph, .rpmGraph],
             texts: [.value, .label],
+            // The dials set as lines are, the graphs as charts are.
+            progressBars: [.fanDial, .tempDial],
+            innerTexts: [.fanName, .fanUnit, .tempName, .tempValue, .tempGraphText, .rpmGraphText],
+            charts: [.tempGraph, .rpmGraph],
             isAvailable: { FanSensors.hasFans }
         ),
     ]

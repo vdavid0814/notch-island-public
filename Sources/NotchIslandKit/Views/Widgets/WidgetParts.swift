@@ -30,7 +30,7 @@ import SwiftUI
             switch widget.kind {
             case .batteryChart: BatteryWidget.percentText(BatteryWidget.sample)
             case .batteryUsage: IslandFormat.percent(0.7)
-            case .fanControl: FanControlWidget.valueText(FanControlWidget.sample)
+            case .fanControl: FanControlWidget.rpmText(FanControlWidget.sample)
             default: Readouts.picture(widget).value
             }
         case .label:
@@ -84,6 +84,7 @@ import SwiftUI
             default: ReadingWidget.captionPoints(inner: inner)
             }
         case .usageDay: DailyUsageWidget.dayPoints(inner: inner)
+        case .tempGraphText, .rpmGraphText: WidgetMetrics.points(inner.height, ratio: 0.11, min: 8, max: 11)
         case .rulerUnit: RulerUnitName.points(markerSize: TimerWidget.rulerSpace(inner: inner) < 30 ? 6 : 9)
         case .monthDays: MonthCalendarWidget.dayPoints(widget, inner: inner)
         case .shelfCount: ShelfWidget.countPoints(inner: inner)

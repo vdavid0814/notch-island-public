@@ -28,6 +28,9 @@ nonisolated struct WidgetKindSpec: Sendable {
     /// The movable parts that are playback lines: Customize sets their colours, ends and knob
     /// (`ProgressLook`).
     var progressBars: [ElementID] = []
+    /// Buttons with a ring round them (the battery's): the ring is drawn as a line is, by a
+    /// `ProgressLook` of its own, set from the button's inspector.
+    var rings: [ElementID] = []
     /// The texts whose box of their own hangs from their top-trailing corner, not their top-leading
     /// one (`WidgetLabel.hangsFromTrailing`): at a row's end (the timer's time), as the box grows it
     /// grows to the left. Customize's editor sizes them so.

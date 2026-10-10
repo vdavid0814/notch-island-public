@@ -6,7 +6,9 @@ import ServiceManagement
 ///
 /// The helper needs the user's yes once: the first time a speed is set it is registered
 /// (`SMAppService.daemon`) and macOS lists it under System Settings ▸ General ▸ Login Items, where
-/// it is switched on. Until then `access` says so and the widget points there.
+/// it is switched on; until then `access` says so and the widget points there. Where macOS will not
+/// register it (a build that is not notarized, on a Mac it was downloaded to), it is installed with
+/// an administrator's password instead (`FanInstaller`), asked for then and there.
 @Observable final class FanCenter {
     /// Whether the helper may be used.
     nonisolated enum Access: Equatable, Sendable {
@@ -14,6 +16,8 @@ import ServiceManagement
         case unknown
         /// Registered; waiting for the switch in Login Items.
         case needsApproval
+        /// Being installed: macOS is asking for an administrator's password.
+        case installing
         case ready
         /// It cannot be used: why.
         case failed(String)
@@ -37,6 +41,9 @@ import ServiceManagement
 
     static let interval: TimeInterval = 1
 
+    /// Each reading's average speed (for the speed graph, `ThermalMonitor.record`).
+    @ObservationIgnored var onRead: ((Double) -> Void)?
+
     @ObservationIgnored private var observers = 0
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var isReading = false
@@ -48,6 +55,17 @@ import ServiceManagement
     /// Requests waiting for the helper to say which build it runs.
     @ObservationIgnored private var waiting: [(any FanHelperProtocol) -> Void] = []
     @ObservationIgnored private var requestedAt = Date.distantPast
+    /// When the request on its way was sent: one never answered is given up (`answerTimeout`).
+    @ObservationIgnored private var sentAt: Date?
+    /// The helper was registered again after it could not be reached (once a run).
+    @ObservationIgnored private var repaired = false
+    /// The installed copy was replaced in this run (once: one that still answers another revision
+    /// is used as it is).
+    @ObservationIgnored private var reinstalled = false
+
+    /// The helper answers within this (holding a fan the first time takes M1–M4 up to fifteen
+    /// seconds); past it the connection is dropped and the next request starts over.
+    static let answerTimeout: TimeInterval = 30
 
     private var daemon: SMAppService { .daemon(plistName: FanHelper.plistName) }
 
@@ -78,6 +96,10 @@ import ServiceManagement
             access = .ready
             if let pending { send(pending) }
         }
+        if isSending, let sentAt, Date.now.timeIntervalSince(sentAt) > Self.answerTimeout {
+            Log.fans.error("fan helper did not answer")
+            unreachable(String(localized: "The fan helper did not answer."))
+        }
         guard !isReading else { return }
         isReading = true
         Task {
@@ -89,9 +111,10 @@ import ServiceManagement
                     && $0.minimum == $1.minimum && $0.maximum == $1.maximum
             }
             if !same { fans = read }
+            if !read.isEmpty { onRead?(read.map(\.rpm).reduce(0, +) / Double(read.count)) }
             // The fans hold what was asked: the dial follows them again. Given up after five
             // seconds (unless still sending, or waiting for the yes in Login Items).
-            if let requested, let fan = read.first, !isSending, pending == nil, access != .needsApproval,
+            if let requested, let fan = read.first, !isSending, pending == nil, access != .needsApproval, access != .installing,
                fan.isManual && abs(fan.fraction(of: fan.target) - requested) < 0.02 || Date.now.timeIntervalSince(requestedAt) > 5 {
                 self.requested = nil
             }
@@ -115,11 +138,13 @@ import ServiceManagement
     func setAutomatic() {
         requested = nil
         pending = nil
+        // A click on the fan after a failure: the next turn of the dial starts over.
+        if case .failed = access { access = .unknown }
         if FanSensors.isSimulated {
             FanSimulator.shared.setAutomatic()
             return sample()
         }
-        guard access == .ready || daemon.status == .enabled else { return }
+        guard access == .ready || FanInstaller.isInstalled || daemon.status == .enabled else { return }
         withHelper { helper in
             helper.setAutomatic { error in
                 Task { @MainActor in
@@ -139,12 +164,14 @@ import ServiceManagement
         pending = rpms
         guard prepare(), !isSending else { return }
         isSending = true
+        sentAt = .now
         let sent = rpms
         pending = nil
         withHelper { helper in
             helper.setSpeeds(sent.map { NSNumber(value: $0) }) { error in
                 Task { @MainActor in
                     self.isSending = false
+                    self.sentAt = nil
                     if let error {
                         Log.fans.error("fan speed: \(error, privacy: .public)")
                         self.access = .failed(error)
@@ -158,9 +185,16 @@ import ServiceManagement
         }
     }
 
-    /// Whether the helper can be used now; registers it the first time, and points at Login Items
-    /// while it waits for the user's yes.
+    /// Whether the helper can be used now; registers it the first time, points at Login Items
+    /// while it waits for the user's yes, and installs it with a password where macOS will not
+    /// register it.
     private func prepare() -> Bool {
+        if access == .installing { return false }
+        // Installed with a password before: used as it is.
+        if FanInstaller.isInstalled {
+            access = .ready
+            return true
+        }
         switch daemon.status {
         case .enabled:
             access = .ready
@@ -169,27 +203,84 @@ import ServiceManagement
             if access != .needsApproval { SMAppService.openSystemSettingsLoginItems() }
             access = .needsApproval
             return false
-        case .notFound:
-            // A build without the helper's plist (`swift run`): nothing to register.
-            access = .failed(String(localized: "This build has no fan helper."))
-            return false
         default:
+            // Not registered yet. macOS reports a daemon it has never seen as `.notFound`, not
+            // `.notRegistered` (0.8.4 took that for a build without the helper and gave up: Fan
+            // Control said Unavailable on every MacBook Pro), so both are registered here.
+            var failure: NSError?
             do {
                 try daemon.register()
                 Log.fans.notice("fan helper registered")
-                access = daemon.status == .enabled ? .ready : .needsApproval
             } catch {
-                // Registered, but waiting for the switch in Login Items.
-                if daemon.status == .requiresApproval {
-                    access = .needsApproval
-                } else {
-                    Log.fans.error("fan helper registration failed: \(error.localizedDescription, privacy: .public)")
-                    access = .failed(error.localizedDescription)
-                    return false
-                }
+                // Registering asks for the user's yes and throws meanwhile ("Operation not
+                // permitted"): the status says whether it went through.
+                failure = error as NSError
             }
-            if access == .needsApproval { SMAppService.openSystemSettingsLoginItems() }
+            switch daemon.status {
+            case .enabled:
+                access = .ready
+            case .requiresApproval:
+                Log.fans.notice("fan helper registered; waiting for Login Items")
+                access = .needsApproval
+                SMAppService.openSystemSettingsLoginItems()
+            default:
+                // macOS will not register it (not notarized, it says no more than "not found"):
+                // installed with a password instead.
+                let reason = failure.map { "\($0.domain) \($0.code): \($0.localizedDescription)" } ?? "status \(daemon.status.rawValue)"
+                Log.fans.notice("fan helper not registered (\(reason, privacy: .public)); installing it with a password")
+                install()
+            }
             return access == .ready
+        }
+    }
+
+    /// Installs the helper with an administrator's password (macOS asks), then sends the speed asked
+    /// for. Cancelled: nothing is held, and the next turn of the dial asks again.
+    private func install() {
+        guard access != .installing else { return }
+        access = .installing
+        connection?.invalidate()
+        connection = nil
+        checkedBuild = false
+        let daemon = daemon
+        Task {
+            // Never both: the registered one and the installed one share a Mach service.
+            if daemon.status != .notFound && daemon.status != .notRegistered { try? await daemon.unregister() }
+            let outcome = await FanInstaller.install()
+            switch outcome {
+            case .done:
+                Log.fans.notice("fan helper installed")
+                access = .ready
+                if let pending { send(pending) }
+            case .cancelled:
+                Log.fans.notice("fan helper: the password was not given")
+                access = .unknown
+                requested = nil
+                pending = nil
+            case .failed(let reason):
+                Log.fans.error("fan helper install failed: \(reason, privacy: .public)")
+                access = .failed(reason)
+                requested = nil
+                pending = nil
+            }
+        }
+    }
+
+    /// Removes the helper, however it was put there (the fans back to macOS first): the registered
+    /// one unregistered, the installed one removed with an administrator's password.
+    func removeHelper() {
+        setAutomatic()
+        connection?.invalidate()
+        connection = nil
+        checkedBuild = false
+        let daemon = daemon
+        Task {
+            if daemon.status != .notFound && daemon.status != .notRegistered { try? await daemon.unregister() }
+            if FanInstaller.isInstalled {
+                let outcome = await FanInstaller.remove()
+                Log.fans.notice("fan helper removed: \(String(describing: outcome), privacy: .public)")
+            }
+            access = .unknown
         }
     }
 
@@ -209,7 +300,21 @@ import ServiceManagement
     /// it is asked to quit first and they go to the one launchd starts next.
     private func helperRuns(_ build: String) {
         guard let helper = proxy() else { return waiting.removeAll() }
-        if build == FanHelper.build {
+        let installed = FanInstaller.isInstalled
+        // An installed copy of another revision: replaced (the password again), once a run; the
+        // speed asked for is sent when it is in.
+        if installed, build != FanHelper.installedBuild, !reinstalled {
+            reinstalled = true
+            Log.fans.notice("fan helper \(build, privacy: .public) is not revision \(FanHelper.revision); installing this one")
+            waiting.removeAll()
+            isSending = false
+            sentAt = nil
+            if pending == nil, let requested {
+                pending = (fans.isEmpty ? FanSensors.read() : fans).map { $0.rpm(at: requested) }
+            }
+            return install()
+        }
+        if installed || build == FanHelper.build {
             checkedBuild = true
             let bodies = waiting
             waiting.removeAll()
@@ -234,12 +339,39 @@ import ServiceManagement
         return connection.remoteObjectProxyWithErrorHandler { error in
             Task { @MainActor in
                 Log.fans.error("fan helper connection: \(error.localizedDescription, privacy: .public)")
-                self.connection?.invalidate()
-                self.connection = nil
-                self.isSending = false
-                self.waiting.removeAll()
+                self.unreachable(error.localizedDescription)
             }
         } as? any FanHelperProtocol
+    }
+
+    /// The helper could not be reached, or never answered: the connection is dropped. The first
+    /// time in a run it is registered again and the speed asked for sent once more — a registration
+    /// left by another copy of the app (moved, or replaced by hand) points at an executable that is
+    /// gone; after that the widget says why.
+    private func unreachable(_ reason: String) {
+        let wasSending = isSending
+        connection?.invalidate()
+        connection = nil
+        checkedBuild = false
+        isSending = false
+        sentAt = nil
+        waiting.removeAll()
+        guard wasSending else { return }
+        guard !repaired, let last = requested, !FanInstaller.isInstalled, daemon.status == .enabled else {
+            access = .failed(reason)
+            requested = nil
+            pending = nil
+            return
+        }
+        repaired = true
+        Log.fans.notice("fan helper unreachable; registering it again")
+        let daemon = daemon
+        Task {
+            try? await daemon.unregister()
+            try? await Task.sleep(for: .milliseconds(500))
+            guard requested == last else { return }
+            setSpeed(last)
+        }
     }
 
     private func connect() -> NSXPCConnection {

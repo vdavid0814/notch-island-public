@@ -359,6 +359,11 @@ import Observation
         observeFeatures()
         diagnostics.start(model: self)
         updater.startAutomaticChecks()
+        // Fan Control's graphs: their past kept once one is on a board (and its readings recorded).
+        fans.onRead = { [weak self] in self?.thermals.record(speed: $0) }
+        if FanSensors.hasFans, boards.snapshot().values.contains(where: { $0.widgets.contains { $0.kind == .fanControl } }) {
+            thermals.keepHistory()
+        }
         // The liquid card's frames for where macOS's card is expected, once the launch has settled.
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(20))
@@ -449,6 +454,8 @@ import Observation
             timers.cancel()
         case .startStopwatch:
             timers.startStopwatch()
+        case .removeFanHelper:
+            fans.removeHelper()
         case .showSettings:
             showSettings()
         case .showSettingsPane(let pane):

@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4.1 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,37 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.4.1
+
+- **Fan Control works on a downloaded copy.** In 0.8.4 the dial said **Unavailable** on most Macs:
+  macOS only takes a background helper from a notarized app, and NotchIsland is not. Now, where
+  macOS will not take it, the first turn of the dial asks for an administrator's password once
+  (macOS's own prompt) and installs the helper that way; where it does take it, Login Items is
+  switched on as before. `open notchisland://fans/remove-helper` removes the helper again.
+- **Fans that stay as set.** Every speed is read back from the fans after it is set, a fan macOS
+  took back (it does over sleep) is held again within three seconds, and one that will not hold is
+  given back to automatic. A fan is never set under its own slowest speed. M5 and M1–M4 are each
+  set the way they want it.
+- **Fan Control, wider.** The chip's temperature as a dial of its own beside the fan's, and graphs
+  of the temperature and the fans' speed over the last ten minutes where the widget is wide.
+- **Rings and dials are set like lines in Customize.** The fan's and the chip's dials, a level's
+  ring (Volume, Brightness), System's rings and the battery's ring take everything a line does:
+  the colour of the ring and of the part filled, round, rounded or sharp ends, a knob, their
+  thickness and size. The texts inside a dial or a System ring are moved and sized in the panel
+  under the editor, each with its own type and colour.
+- **Fan Control's graphs are set like the battery chart.** Their line's corners, the colours of
+  low, middle and high readings, how often a value is written beside them (none, top and bottom,
+  every half, quarter, fifth or tenth), and their texts' type, size and colour.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.4.1 in place and keeps your permissions (signed
+exactly as 0.8.4). Or download **NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 

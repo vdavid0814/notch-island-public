@@ -62,8 +62,12 @@ struct LevelWidget: View {
         Group {
             if let reading = Self.reading(level, model: model, picture: picture) {
                 if isRing {
+                    // The ring drawn as the line is (`ProgressLook`); the symbol and the value inside
+                    // it as the button and the text they are beside the line.
                     LevelRing(value: reading.value, symbol: level.symbol(reading),
                               showsSymbol: widget.shows(.levelIcon), showsValue: widget.shows(.levelValue), size: size,
+                              look: widget.progressLook(of: .levelSlider), symbolLook: widget.buttonLook(of: .levelIcon),
+                              valueStyle: widget.textStyles[.levelValue], reportsFrame: reportsParts,
                               set: set, onInteraction: { model.island.isInteracting = $0 })
                         .disabled(!reading.isAvailable)
                         .movableElement(.levelSlider, of: widget)
@@ -140,6 +144,11 @@ struct LevelRing: View {
     var showsSymbol = true
     var showsValue = true
     let size: CGSize
+    /// The ring as its line's look draws it; the symbol as its button's look, the value in its style.
+    var look: ProgressLook = .plain
+    var symbolLook: ButtonLook = .plain
+    var valueStyle: TextStyle?
+    var reportsFrame = false
     let set: (Double) -> Void
     var onInteraction: (Bool) -> Void = { _ in }
 
@@ -150,22 +159,24 @@ struct LevelRing: View {
         let line = max(3, diameter * 0.1)
         // The number only in a ring large enough to read it.
         let showsNumber = showsValue && diameter >= 44
+        let symbolPoints = diameter * (showsNumber ? 0.24 : 0.34)
         ZStack {
-            Circle().stroke(.white.opacity(0.16), lineWidth: line)
-            Circle()
-                .trim(from: 0, to: value)
-                .stroke(.tint, style: StrokeStyle(lineWidth: line, lineCap: .round))
-                .rotationEffect(.degrees(-90))
+            // Its line's middle on the ring's edge, as these rings have always been drawn.
+            ProgressRing(fraction: value, diameter: diameter + line, line: line, look: look, reportsFrame: reportsFrame)
+                .frame(width: diameter, height: diameter)
             VStack(spacing: 0) {
                 if showsSymbol {
-                    Image(systemName: symbol)
-                        .font(.system(size: diameter * (showsNumber ? 0.24 : 0.34), weight: .semibold))
-                        .contentTransition(.symbolEffect(.replace))
+                    if symbolLook == .plain {
+                        Image(systemName: symbol)
+                            .font(.system(size: symbolPoints, weight: .semibold))
+                            .contentTransition(.symbolEffect(.replace))
+                    } else {
+                        WidgetButtonLabel(look: symbolLook, symbol: symbol, points: symbolPoints)
+                    }
                 }
                 if showsNumber {
-                    Text(IslandFormat.percent(value))
-                        .font(.system(size: diameter * 0.18, weight: .semibold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    RingText(text: Text(IslandFormat.percent(value)), style: valueStyle, size: diameter * 0.18, weight: .semibold,
+                             design: .rounded, part: .remaining, look: look)
                         // The ring moves; the number just changes (a cross-fade per step smeared).
                         .transaction { $0.animation = nil }
                 }

@@ -94,12 +94,31 @@ import Testing
     }
 
     @Test func aClickOnTheFanGivesItBack() {
-        // The fan sits a little over the middle when the speed is under it.
-        let calls = use(manual: true, from: CGPoint(x: 0, y: 6), to: CGPoint(x: 0, y: 6))
+        // The fan sits over the speed (y up here, down in the dial).
+        let icon = FanDial<EmptyView, EmptyView>.iconCenter(diameter: 136, showsTexts: true)
+        let point = CGPoint(x: icon.x, y: -icon.y)
+        let calls = use(manual: true, from: point, to: point)
         #expect(calls.automatic == 1)
         #expect(calls.speeds.isEmpty)
         // Already automatic: nothing to give back.
-        #expect(use(manual: false, from: CGPoint(x: 0, y: 6), to: CGPoint(x: 0, y: 6)).automatic == 0)
+        #expect(use(manual: false, from: point, to: point).automatic == 0)
+    }
+
+    /// The row: the fan's dial, the temperature's, then a graph; the speed's graph beside it only
+    /// where there is room for both (about as wide as the panel).
+    @Test func theRowFillsAsTheWidgetWidens() {
+        var widget = IslandWidget(kind: .fanControl, frame: GridRect(column: 0, row: 0, width: 7, height: 2),
+                                  options: IslandWidgetKind.fanControl.defaultOptions)
+        let narrow = FanControlWidget.layout(widget, inner: CGSize(width: 80, height: 80))
+        #expect(!narrow.showsTempDial && narrow.graphs.isEmpty)
+        let standard = FanControlWidget.layout(widget, inner: CGSize(width: 320, height: 80))
+        #expect(standard.showsTempDial && standard.graphs == [.tempGraph])
+        #expect(!FanControlWidget.hasRoom(for: .rpmGraph, in: widget, inner: CGSize(width: 320, height: 80)))
+        widget.options.insert(.rpmGraph)
+        let full = FanControlWidget.layout(widget, inner: CGSize(width: 560, height: 80))
+        #expect(full.graphs == [.tempGraph, .rpmGraph] && full.graphWidth >= FanControlWidget.Layout.minimumGraph)
+        // Small: the fan alone, without its texts.
+        #expect(!FanControlWidget.hasRoom(for: .value, in: widget, inner: CGSize(width: 80, height: 36)))
     }
 
     @Test func fanControlIsOfferedOnlyWithAFan() {

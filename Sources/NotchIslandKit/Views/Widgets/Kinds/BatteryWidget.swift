@@ -91,7 +91,8 @@ struct BatteryWidget: View {
         return VStack(spacing: Metrics.Spacing.xSmall) {
             if widget.shows(.batteryGlyph) {
                 BatteryRing(level: state.level, isCharging: state.isCharging, tint: state.tint, diameter: diameter,
-                            look: widget.buttonLook(of: .batteryRing), showsPercentage: showsPercent) {
+                            look: widget.buttonLook(of: .batteryRing), ring: widget.progressLook(of: .batteryRing),
+                            showsPercentage: showsPercent) {
                     percentage(state, points: Self.ringPercentPoints(diameter: diameter), inRing: true)
                 }
                 .movableElement(.batteryRing, of: widget)
@@ -175,6 +176,8 @@ struct BatteryRing<Percentage: View>: View {
     let tint: StatusTint
     let diameter: CGFloat
     var look: ButtonLook = .plain
+    /// The ring itself, drawn as a line is (`WidgetKindSpec.rings`).
+    var ring: ProgressLook = .plain
     var showsPercentage = true
     @ViewBuilder let percentage: () -> Percentage
 
@@ -184,11 +187,9 @@ struct BatteryRing<Percentage: View>: View {
         let symbol = isCharging ? "bolt.fill" : "laptopcomputer"
         let symbolPoints = BatteryWidget.ringSymbolPoints(diameter: diameter, showsPercentage: showsPercentage)
         ZStack {
-            Circle().stroke(.white.opacity(0.16), lineWidth: line)
-            Circle()
-                .trim(from: 0, to: CGFloat(level) / 100)
-                .stroke(tint.style, style: StrokeStyle(lineWidth: line, lineCap: .round))
-                .rotationEffect(.degrees(-90))
+            // Its line's middle on the ring's edge, as these rings have always been drawn.
+            ProgressRing(fraction: Double(level) / 100, diameter: diameter + line, line: line, look: ring, automaticFill: tint.style)
+                .frame(width: diameter, height: diameter)
             if look == .plain {
                 VStack(spacing: 0) {
                     // Gives way to the percentage: the two share the ring's inside.

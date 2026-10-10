@@ -1,5 +1,9 @@
 import Foundation
 
+/// A line bent round — a level's, a load's or the battery's ring, the fan's and the chip's dials —
+/// is drawn by the same look (`ProgressRing`): its length is the ring's size, its thickness the
+/// ring's, its ends and knob the ring's, and the two texts are the ones inside it.
+///
 /// How a widget's playback line (Now Playing's progress) is drawn, from Customize: the colour of
 /// the line and of the part played, its ends, the knob at the position, and where the line and the
 /// times under it are and how large (placed in the panel under the editor). Each time's type and
@@ -50,17 +54,24 @@ nonisolated struct ProgressLook: Sendable, Codable, Hashable {
             case (.cpuLoad, .remaining): .cpuValue
             case (.memoryLoad, .elapsed): .memoryTitle
             case (.memoryLoad, .remaining): .memoryValue
+            case (.fanDial, .elapsed): .fanName
+            case (.fanDial, .remaining): .fanUnit
+            case (.tempDial, .elapsed): .tempName
+            case (.tempDial, .remaining): .tempValue
+            // A level has no texts of its line's own.
+            case (.levelSlider, _), (.batteryRing, _): nil
             default: textID
             }
         }
 
         /// What it is called on `line`.
-        func title(in line: ElementID) -> String {
-            guard line == .cpuLoad || line == .memoryLoad else { return title }
-            return switch self {
-            case .bar: title
-            case .elapsed: "Name"
-            case .remaining: "Value"
+        func title(in line: ElementID, isRing: Bool = false) -> String {
+            switch (line, self) {
+            case (_, .bar): isRing ? "Ring" : title
+            case (.cpuLoad, .elapsed), (.memoryLoad, .elapsed), (.fanDial, .elapsed), (.tempDial, .elapsed): "Name"
+            case (.cpuLoad, .remaining), (.memoryLoad, .remaining), (.tempDial, .remaining): "Value"
+            case (.fanDial, .remaining): "Unit"
+            default: title
             }
         }
 

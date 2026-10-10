@@ -134,7 +134,10 @@ struct IslandWidgetView: View {
             case .none: 2
             }
         case .monthCalendar: return MonthCalendarWidget.hasTitleRoom(inner: inner) ? 0 : 1
-        case .fanControl: return FanControlWidget.isWide(inner) ? 1 : 0
+        case .fanControl:
+            // As many parts in the row as fit (both dials, one graph or two).
+            let layout = FanControlWidget.layout(widget, inner: inner)
+            return (layout.showsTempDial ? 1 : 0) + layout.graphs.count * 2
         default: return 0
         }
     }
@@ -166,6 +169,7 @@ struct IslandWidgetView: View {
             var shown = widget
             shown.options.insert(.label)
             return MonthCalendarWidget.showsTitle(shown, inner: inner)
+        case .fanControl: return FanControlWidget.hasRoom(for: element, in: widget, inner: inner)
         default:
             if widget.kind.control != nil { return ControlWidget.hasRoom(for: element, in: widget, inner: inner) }
             if widget.kind.level != nil { return LevelWidget.hasRoom(for: element, inner: inner) }

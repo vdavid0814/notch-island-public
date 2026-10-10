@@ -373,7 +373,7 @@ nonisolated struct IslandWidget: Sendable, Codable, Hashable, Identifiable {
             style.sanitize()
             if style != .plain { result[entry.key] = style }
         }
-        let lines = Set(kind.spec.progressBars)
+        let lines = Set(kind.spec.progressBars).union(kind.spec.rings)
         progressLooks = progressLooks.reduce(into: [:]) { result, entry in
             guard lines.contains(entry.key) else { return }
             var look = entry.value

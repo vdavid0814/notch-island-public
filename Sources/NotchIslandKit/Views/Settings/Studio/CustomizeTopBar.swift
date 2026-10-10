@@ -175,6 +175,10 @@ struct CustomizeTopBar: View {
                             $0.buttonLooks[selected] = nil
                             $0.progressLooks[selected] = nil
                             $0.imageLooks[selected] = nil
+                            $0.chartLooks[selected] = nil
+                            // A graph's texts go back with it.
+                            if selected == .tempGraph { $0.textStyles[.tempGraphText] = nil }
+                            if selected == .rpmGraph { $0.textStyles[.rpmGraphText] = nil }
                             // A line's times go back with it.
                             if $0.kind.spec.progressBars.contains(selected) {
                                 for part in ProgressLook.Part.allCases {
@@ -188,7 +192,7 @@ struct CustomizeTopBar: View {
                 }
                 .disabled(selected.map { widget.offsets[$0] == nil && widget.layers[$0] == nil && widget.scales[$0] == nil
                     && widget.textStyles[$0] == nil && widget.buttonLooks[$0] == nil && widget.progressLooks[$0] == nil
-                    && widget.imageLooks[$0] == nil } ?? true)
+                    && widget.imageLooks[$0] == nil && widget.chartLooks[$0] == nil } ?? true)
                 .help("Put the picked part back where the layout puts it, at its own size")
                 Button {
                     withAnimation(.spring(duration: 0.4, bounce: 0.18)) { update { $0 = Self.fresh(widget) } }

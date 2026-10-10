@@ -1,5 +1,9 @@
 import Foundation
 
+/// A graph of readings (Fan Control's temperature and speed) is set by the same look: its corners
+/// are its line's joins and the mark at the newest reading, its three colours the low, middle and
+/// high readings', and its step how often a value is written beside it.
+///
 /// How a chart is drawn (`WidgetKindSpec.charts`), from Customize's inspector: its bars' corners,
 /// the colour of a bar by how far the battery has run down, and how often a percentage is written
 /// beside it (its dashed lines with them). Every field at its default is the chart as the widget
@@ -70,6 +74,18 @@ nonisolated struct ChartLook: Sendable, Codable, Hashable {
         case 0: String(localized: "None")
         case 100: String(localized: "0 and 100 %")
         default: String(localized: "Every \(step) %")
+        }
+    }
+
+    /// What a step is called for a graph of readings (Fan Control's): shares of its range.
+    static func title(ofGraphStep step: Int) -> String {
+        switch step {
+        case 0: String(localized: "None")
+        case 100: String(localized: "Top and bottom")
+        case 50: String(localized: "Every half")
+        case 25: String(localized: "Every quarter")
+        case 20: String(localized: "Every fifth")
+        default: String(localized: "Every tenth")
         }
     }
 

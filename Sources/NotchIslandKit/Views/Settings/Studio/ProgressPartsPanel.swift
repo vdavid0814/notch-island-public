@@ -64,13 +64,15 @@ struct ProgressPartsPanel: View {
 
     private func canvas(_ look: ProgressLook) -> some View {
         GeometryReader { proxy in
-            let width = max(editing.boxes[id]?.width ?? 170, 40)
-            let height: CGFloat = 40
+            let width = room.width
+            let height = room.height
             // As large as the room allows, a little in from its edges.
             let zoom = max(1, min((proxy.size.width - 24) / width, (proxy.size.height - 24) / height, 6))
             ZStack {
                 Group {
-                    if id == .progress {
+                    if isRing {
+                        ring(look, side: width)
+                    } else if id == .progress {
                         PlaybackScrubber(clock: Self.stoppedClock, duration: Self.duration,
                                          isPlaying: false, look: look,
                                          elapsedStyle: widget.textStyles[.elapsedTime], remainingStyle: widget.textStyles[.remainingTime])
@@ -85,7 +87,7 @@ struct ProgressPartsPanel: View {
                         ScrubTrack(position: 1, duration: 3, look: look, reportsFrame: true) { _ in } commit: {}
                     }
                 }
-                    .frame(width: width)
+                    .frame(width: width, height: isRing ? height : nil)
                     .background {
                         GeometryReader { line in
                             Color.clear.preference(key: LineBoundsKey.self, value: line.frame(in: .named(ProgressPartFramesKey.space)))
@@ -137,6 +139,66 @@ struct ProgressPartsPanel: View {
         .background(Color.white.opacity(0.03), in: .rect(cornerRadius: 12, style: .continuous))
         .clipShape(.rect(cornerRadius: 12, style: .continuous))
         .accessibilityHidden(true)
+    }
+
+    /// The line bent round, as its widget draws it at this size (`ProgressRing`): a level's, a
+    /// load's, the fan's and the chip's dials — each with the texts inside it.
+    static func isRing(_ id: ElementID, inner: CGSize) -> Bool {
+        switch id {
+        case .fanDial, .tempDial: true
+        case .cpuLoad, .memoryLoad: inner.height >= 56
+        case .levelSlider: LevelWidget.isRing(inner)
+        default: false
+        }
+    }
+
+    private var isRing: Bool { Self.isRing(id, inner: inner) }
+
+    /// The widget's inside, as the board draws it.
+    private var inner: CGSize {
+        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
+        let natural = geometry.laidSize(for: widget.frame), padding = WidgetMetrics.padding(for: widget)
+        return CGSize(width: max(0, natural.width - 2 * padding), height: max(0, natural.height - 2 * padding))
+    }
+
+    /// The room the line is drawn in here: as long as in the widget; a ring's square.
+    private var room: CGSize {
+        let box = editing.boxes[id]
+        if isRing {
+            let side = max(min(box?.width ?? 64, box?.height ?? 64), 24)
+            return CGSize(width: side, height: side)
+        }
+        return CGSize(width: max(box?.width ?? 170, 40), height: 40)
+    }
+
+    @ViewBuilder private func ring(_ look: ProgressLook, side: CGFloat) -> some View {
+        switch id {
+        case .fanDial:
+            // Its speed and mode are parts of their own (set in the editor): here faint, for their place.
+            FanDial(fans: FanControlWidget.sample, held: nil, isManual: false, diameter: side, showsTexts: true,
+                    value: widget.shows(.value) ? Text(FanControlWidget.rpmText(FanControlWidget.sample))
+                        .font(.system(size: WidgetMetrics.points(side, ratio: 0.2, min: 8, max: 26), weight: .semibold, design: .rounded))
+                        .foregroundStyle(.tertiary) : nil,
+                    label: widget.shows(.label) ? Text(FanControlWidget.modeText(manual: false, access: .unknown))
+                        .font(.system(size: WidgetMetrics.points(side, ratio: 0.095, min: 7, max: 12), weight: .semibold))
+                        .foregroundStyle(.tertiary) : nil,
+                    look: look, nameStyle: widget.textStyles[.fanName], unitStyle: widget.textStyles[.fanUnit], reportsFrame: true,
+                    set: { _ in }, automatic: {})
+        case .tempDial:
+            TemperatureDial(celsius: 46, diameter: side, number: FanControlWidget.degreeNumber(46, locale: .current),
+                            unit: FanControlWidget.degreeUnit(locale: .current), look: look,
+                            nameStyle: widget.textStyles[.tempName], valueStyle: widget.textStyles[.tempValue], reportsFrame: true)
+        case .cpuLoad, .memoryLoad:
+            StatRing(title: id == .cpuLoad ? "CPU" : "RAM", value: id == .cpuLoad ? 0.23 : 0.61, diameter: side, look: look,
+                     reportsFrame: true, titleStyle: widget.textStyles[id == .cpuLoad ? .cpuTitle : .memoryTitle],
+                     valueStyle: widget.textStyles[id == .cpuLoad ? .cpuValue : .memoryValue])
+        default:
+            // A level's ring, a third full; its symbol and value are the button and the text they are.
+            LevelRing(value: 1.0 / 3, symbol: WidgetParts.buttonSymbol(of: .levelIcon, in: widget, model: model),
+                      showsSymbol: widget.shows(.levelIcon), showsValue: widget.shows(.levelValue), size: CGSize(width: side, height: side),
+                      look: look, symbolLook: widget.buttonLook(of: .levelIcon), valueStyle: widget.textStyles[.levelValue],
+                      reportsFrame: true, set: { _ in })
+        }
     }
 
     /// While a part is dragged: the lines it holds to (yellow), the others' edges near it, the
@@ -277,7 +339,7 @@ struct ProgressPartsPanel: View {
                 result[entry.key] = entry.value
                 return
             }
-            let font = widget.textStyle(of: text).font(size: widget.textStyle(of: text).size.map { CGFloat($0) } ?? basePoints,
+            let font = widget.textStyle(of: text).font(size: widget.textStyle(of: text).size.map { CGFloat($0) } ?? basePoints(entry.key),
                                                       weight: .medium)
             let line = font.lineHeight
             // The line's room over the font's ascender and under its descender, shared out.
@@ -292,8 +354,7 @@ struct ProgressPartsPanel: View {
 
     /// How large the line is drawn here.
     private var zoom: CGFloat {
-        let width = max(editing.boxes[id]?.width ?? 170, 40)
-        return bounds.width > 0 ? bounds.width / width : 1
+        return bounds.width > 0 ? bounds.width / room.width : 1
     }
 
     private func pick(_ part: ProgressLook.Part?) {
@@ -306,7 +367,7 @@ struct ProgressPartsPanel: View {
     private func beginResize(_ part: ProgressLook.Part, _ look: ProgressLook, handle: ButtonSymbolPanel.Handle, zoom: CGFloat) {
         guard let frame = local(part), bounds.width > 0 else { return }
         let others = ProgressLook.Part.allCases.filter { $0 != part }.compactMap { local($0) }
-        let size = part.textID(in: id).map { widget.textStyle(of: $0).size ?? Double(basePoints) } ?? 0
+        let size = part.textID(in: id).map { widget.textStyle(of: $0).size ?? Double(basePoints(part)) } ?? 0
         resizing = Resizing(part: part, handle: handle,
                             geometry: ElementResize(id: id, horizontal: handle.x, vertical: handle.y, start: frame, others: others,
                                                     bounds: CGSize(width: bounds.width / zoom, height: bounds.height / zoom),
@@ -319,6 +380,16 @@ struct ProgressPartsPanel: View {
         let frame = resizing.geometry.frame, start = resizing.frame, look = resizing.look
         guard start.width > 0, start.height > 0 else { return }
         switch resizing.part {
+        case .bar where isRing:
+            // A ring is sized as a whole, about its middle: the handle's opposite side stays.
+            let factor = handle.x != 0 ? frame.width / start.width : frame.height / start.height
+            let length = min(max(look.barLength * Double(factor), ProgressLook.barLengths.lowerBound), ProgressLook.barLengths.upperBound)
+            let grown = start.width * CGFloat(length / look.barLength - 1) / 2
+            updateLine { line in
+                line.barLength = length
+                line.barOffset = ElementOffset(x: (look.barOffset.x + CGFloat(handle.x) * grown).rounded(),
+                                               y: (look.barOffset.y + CGFloat(handle.y) * grown).rounded())
+            }
         case .bar:
             updateLine { line in
                 line.barLength = look.barLength * Double(frame.width / start.width)
@@ -353,19 +424,19 @@ struct ProgressPartsPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             if let part = editing.progressPart {
                 let frame = local(part)
-                Text(part.title(in: id)).font(.subheadline.weight(.semibold))
+                Text(part.title(in: id, isRing: isRing)).font(.subheadline.weight(.semibold))
                 FramePair(title: "Size", first: ("W", frame?.width, { setWidth(part, $0) }),
                           second: ("H", frame?.height, { setHeight(part, $0) }), fieldWidth: 30)
                 FramePair(title: "Position", first: ("X", frame?.minX, { setPosition(part, x: $0) }),
                           second: ("Y", frame?.minY, { setPosition(part, y: $0) }), fieldWidth: 30)
                 if part == .bar {
-                    slider("Length", value: look.barLength, in: ProgressLook.barLengths) { new in updateLine { $0.barLength = new } }
+                    slider(isRing ? LocalizedStringKey("Size") : "Length", value: look.barLength, in: ProgressLook.barLengths) { new in updateLine { $0.barLength = new } }
                     slider("Thickness", value: look.barThickness, in: ProgressLook.barThicknesses) { new in
                         updateLine { $0.barThickness = new }
                     }
                 }
                 if let text = part.textID(in: id) {
-                    let size = widget.textStyle(of: text).size ?? Double(basePoints)
+                    let size = widget.textStyle(of: text).size ?? Double(basePoints(part))
                     HStack(spacing: 8) {
                         Text("Size").font(.callout)
                         Slider(value: Binding(get: { size }, set: { new in
@@ -396,8 +467,9 @@ struct ProgressPartsPanel: View {
                 .buttonBorderShape(.capsule)
                 .help("Where the layout puts it, at its own size")
             } else {
-                Text("Line and times").font(.subheadline.weight(.semibold))
-                Text("Click the line or a time to pick it; drag it to move it, its handles size it.")
+                Text(isRing ? "Ring and texts" : "Line and times").font(.subheadline.weight(.semibold))
+                Text(isRing ? "Click the ring or a text in it to pick it; drag it to move it, its handles size it."
+                     : "Click the line or a time to pick it; drag it to move it, its handles size it.")
                     .font(.caption)
                     .foregroundStyle(SettingsPalette.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -441,7 +513,7 @@ struct ProgressPartsPanel: View {
         if part == .bar {
             updateLine { $0.barLength *= Double(width / frame.width) }
         } else if let text = part.textID(in: id) {
-            let size = widget.textStyle(of: text).size ?? Double(basePoints)
+            let size = widget.textStyle(of: text).size ?? Double(basePoints(part))
             updateText(text) { $0.size = Self.points(size * Double(width / frame.width)) }
         }
     }
@@ -450,9 +522,10 @@ struct ProgressPartsPanel: View {
     private func setHeight(_ part: ProgressLook.Part, _ height: CGFloat) {
         guard let frame = local(part), frame.height > 0, height > 0 else { return }
         if part == .bar {
-            updateLine { $0.barThickness *= Double(height / frame.height) }
+            // A ring is as tall as it is wide.
+            updateLine { if isRing { $0.barLength *= Double(height / frame.height) } else { $0.barThickness *= Double(height / frame.height) } }
         } else if let text = part.textID(in: id) {
-            let size = widget.textStyle(of: text).size ?? Double(basePoints)
+            let size = widget.textStyle(of: text).size ?? Double(basePoints(part))
             updateText(text) { $0.size = Self.points(size * Double(height / frame.height)) }
         }
     }
@@ -466,6 +539,17 @@ struct ProgressPartsPanel: View {
 
     /// The times' own size, as the line sets them.
     /// A text's own size at the line's ends: the times' from the control size, the system's from its rows.
+    private func basePoints(_ part: ProgressLook.Part) -> CGFloat {
+        guard isRing else { return basePoints }
+        let side = room.width
+        return switch (id, part) {
+        case (.tempDial, .remaining): WidgetMetrics.points(side, ratio: 0.2, min: 8, max: 26)
+        case (.fanDial, _), (.tempDial, _): WidgetMetrics.points(side, ratio: 0.095, min: 7, max: 12)
+        case (_, .remaining): StatRing.valuePoints(diameter: side)
+        default: StatRing.titlePoints(diameter: side)
+        }
+    }
+
     private var basePoints: CGFloat {
         if id == .cpuLoad || id == .memoryLoad {
             let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
