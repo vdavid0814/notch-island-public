@@ -4,6 +4,43 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-10 (late morning, on the charger): Siri's cross-fade, the shade drawn once
+
+On the charger the island's content swaps with the blur-replace, which SwiftUI's CPU renderer
+blurs at every frame across several performance cores (vImage on `dispatch_apply`).
+
+| scenario (on the charger, A B A B) | before | after |
+|---|---|---|
+| Siri's gallery opening (mJ) | 242–250 | 188–191 (Siri cross-fades, asked for) |
+| Siri's gallery closing (mJ) | 317–327 → 260–400 | **105–142** (cross-fade, then the shade picture) |
+| Siri's clipboard opening (mJ) | 128–131 | 108 |
+| Panel opening, warm (CPU ms) | 112 | 75 (shade picture) |
+| Hover every 2.2 s, Activity Monitor | — | 9–23 (first, cold opening 54) |
+| Settings opening, own + billed (mJ) | — | 77–87 + ~16 |
+
+- **Siri cross-fades on the charger too** (the user chose: large surfaces cross-fade, the pills and
+  banners keep the blur). The panel's page already left with a plain fade.
+- **The fade style's shade** (`FadeShadeMask`: a gradient under a blurred core) was drawn again on
+  the CPU whenever the surface was drawn anew — as the settled `drawingGroup`, and as live layers
+  while held during a move (Siri's closing at the gallery's size: 253 → 110 mJ with no shade at
+  all). The pictures of the last four sizes on the pixel grid are kept (`FadeShadeCache`), and a
+  held surface uses them. Open panel old and new: 0.34 % of pixels differ (the track's time).
+
+### Measuring traps found
+- **A rebuilt app opened by path** (`open -a <build> notchisland://…`) is registered again with
+  LaunchServices by CoreServicesUIAgent; the `applicationRegistered` notification has Siri's,
+  Shortcuts' and App Intents' daemons (`siriknowledged`, `spotlightknowledged`, `linkd`,
+  `siriactionsd`, `intelligenceflowd`) index the app, ~100–150 mJ billed to it. It looked like
+  Settings' own cost (it is not: Settings opening without the keyboard, without activation, or
+  without Writing Tools billed the same). Real use sees it once after an update. Warm the build up
+  with one URL before measuring.
+
+### Left for next time
+- Customize's top bar (~0.45 J of a cycle) and left panel (~0.19 J): their glass controls drawn
+  again while they slide; a nested hosting view moved by a Core Animation spring would avoid it
+  (the top bar's version list grows out of it, over the editor).
+- Siri's gallery opening (~190 mJ): SwiftUI building ~50 cells; nothing of the app's own stands out.
+
 ## 2026-10-10 (night): real-pointer stress tests, cold openings, Customize
 
 Release builds, MacBook Air M5, on battery (91 → 50 %), music playing, fade style. Measured with
