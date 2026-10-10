@@ -30,6 +30,7 @@ import SwiftUI
             switch widget.kind {
             case .batteryChart: BatteryWidget.percentText(BatteryWidget.sample)
             case .batteryUsage: IslandFormat.percent(0.7)
+            case .fanControl: FanControlWidget.valueText(FanControlWidget.sample)
             default: Readouts.picture(widget).value
             }
         case .label:
@@ -38,6 +39,7 @@ import SwiftUI
             case .analogClock: ClockFaceWidget.caption(widget.config, here: .current)
             case .monthCalendar: MonthGrid(date: .now, calendar: .current, locale: .current).title
             case .batteryUsage: DailyUsageWidget.title
+            case .fanControl: FanControlWidget.modeText(manual: false, access: .unknown)
             default: Readouts.picture(widget).caption
             }
         case .usageDay: String(localized: "Today")
@@ -69,6 +71,7 @@ import SwiftUI
             switch widget.kind {
             case .batteryChart: BatteryChartWidget.valuePoints
             case .batteryUsage: DailyUsageWidget.valuePoints(inner: inner)
+            case .fanControl: FanControlWidget.valuePoints(inner: inner)
             default: ReadingWidget.valuePoints(widget, reading: Readouts.picture(widget), inner: inner)
             }
         case .label:
@@ -77,6 +80,7 @@ import SwiftUI
             case .analogClock: ClockFaceWidget.captionPoints(inner: inner)
             case .monthCalendar: MonthCalendarWidget.titlePoints(inner: inner)
             case .batteryUsage: DailyUsageWidget.titlePoints(inner: inner)
+            case .fanControl: FanControlWidget.labelPoints(inner: inner)
             default: ReadingWidget.captionPoints(inner: inner)
             }
         case .usageDay: DailyUsageWidget.dayPoints(inner: inner)
@@ -95,7 +99,7 @@ import SwiftUI
     static func weight(of id: ElementID, in widget: IslandWidget) -> NSFont.Weight {
         switch id {
         case .trackInfo, .controlName, .value, .percentage: .semibold
-        case .label: widget.kind == .monthCalendar || widget.kind == .batteryUsage ? .semibold : .medium
+        case .label: widget.kind == .monthCalendar || widget.kind == .batteryUsage || widget.kind == .fanControl ? .semibold : .medium
         case .readout: widget.kind == .stopwatch || widget.kind == .timer ? .regular : .semibold
         case .usageDay, .shelfCount, .monthDays: .medium
         case .rulerUnit: RulerUnitName.weight

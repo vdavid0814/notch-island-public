@@ -102,6 +102,8 @@ nonisolated struct ElementID: RawRepresentable, Hashable, Codable, Sendable, Ide
     static let monthWeekdays = ElementID(rawValue: "monthGrid.weekdays")
     // Daily Usage: the day picked under the percentage (the title is `label`, the bars `chart`).
     static let usageDay = ElementID(rawValue: "usageDay")
+    // Fan Control: the dial round the fan (its speed is `value`, automatic or manual `label`).
+    static let fanDial = ElementID(rawValue: "fanDial")
 
     /// The `row`th copy's text (from 1).
     static func clipText(_ row: Int) -> ElementID { ElementID(rawValue: "clipText\(row)") }

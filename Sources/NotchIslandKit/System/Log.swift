@@ -17,6 +17,8 @@ nonisolated enum Log {
     static let shelf = Logger(subsystem: subsystem, category: "shelf")
     static let timers = Logger(subsystem: subsystem, category: "timers")
     static let recording = Logger(subsystem: subsystem, category: "recording")
+    /// Fan Control: the fan helper, its install, and what it set.
+    static let fans = Logger(subsystem: subsystem, category: "fans")
     /// Window Anchor: what was held, put back and let go.
     static let anchor = Logger(subsystem: subsystem, category: "anchor")
     /// Permissions, sleep/wake, power and thermal state, launch at login.

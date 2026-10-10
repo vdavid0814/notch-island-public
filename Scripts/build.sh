@@ -71,6 +71,10 @@ if [[ -f "$TELEMETRY_JSON" ]]; then
 else
   echo "    no Support/telemetry.json: this build sends no diagnostics reports"
 fi
+# The fan helper's launchd job (Fan Control, MacBook Pro): registered from the bundle with
+# SMAppService.daemon, so it lives at Contents/Library/LaunchDaemons and is sealed by the signature.
+mkdir -p "$APP/Contents/Library/LaunchDaemons"
+cp "$ROOT/Support/com.davidvarga.notchisland.fanhelper.plist" "$APP/Contents/Library/LaunchDaemons/"
 # The app's icon (Support/AppIcon.png, rendered to .icns): shown in Finder, the Dock and the DMG.
 cp "$ROOT/Support/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 # The energy log and the performance tests behind it: every build and download carries them.

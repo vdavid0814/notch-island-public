@@ -203,6 +203,8 @@ nonisolated enum WidgetSpecs {
         .uptime: systemReading("Uptime", "How long since the Mac started, and how warm it runs.", symbol: "clock.arrow.circlepath"),
         .diskSpace: systemReading("Disk Space", "Free space on the startup disk.", symbol: "internaldrive.fill"),
         .memory: systemReading("Memory", "How much memory is in use, as Activity Monitor counts it.", symbol: "memorychip"),
+        .chipTemperature: systemReading("Chip Temperature", "How warm the chip runs: its cores on average, and the hottest.",
+                                        symbol: "thermometer.medium", isAvailable: { ChipSensors.isAvailable }),
     ]
 
     private static let mint: [IslandTheme.RGB] = [.rgb(0.36, 0.85, 0.62), .rgb(0.1, 0.62, 0.45)]
@@ -230,9 +232,11 @@ nonisolated enum WidgetSpecs {
                 isAvailable: isAvailable)
     }
 
-    private static func systemReading(_ title: String, _ summary: String, symbol: String) -> WidgetKindSpec {
+    private static func systemReading(_ title: String, _ summary: String, symbol: String,
+                                      isAvailable: @escaping @Sendable () -> Bool = { true }) -> WidgetKindSpec {
         reading(title, summary, symbol: symbol, colors: mint, category: .system,
-                sizes: (GridSize(width: 2, height: 1), GridSize(width: 3, height: 1), GridSize(width: 6, height: 3)))
+                sizes: (GridSize(width: 2, height: 1), GridSize(width: 3, height: 1), GridSize(width: 6, height: 3)),
+                isAvailable: isAvailable)
     }
 
     /// The next bases, each with its first widget: a ruler, a row of files, a dial, a grid of days
@@ -324,6 +328,23 @@ nonisolated enum WidgetSpecs {
             texts: [.label, .value, .usageDay],
             charts: [.chart],
             isAvailable: { BatteryAvailability.hasBattery }
+        ),
+        // A dial round a fan: the speed as an arc between the fans' slowest and fastest, turned to
+        // set it; the fan in the middle a button that gives them back to macOS; the speed and the
+        // mode inside it (square) or beside it (wide). Only where there is a fan: MacBook Pro.
+        .fanControl: WidgetKindSpec(
+            title: "Fan Control", summary: "The fans' speed. Turn the dial to set it; click the fan for automatic.",
+            symbol: "fan.fill", iconColors: [.rgb(0.4, 0.78, 1.0), .rgb(0.12, 0.45, 0.95)], category: .system,
+            minimumSize: GridSize(width: 2, height: 2), defaultSize: GridSize(width: 3, height: 3),
+            maximumSize: GridSize(width: 6, height: 3),
+            elements: [
+                ElementSpec(.fanDial, "Dial", symbol: "gauge.with.dots.needle.67percent", isRequired: true),
+                ElementSpec(.value, "Speed", symbol: "number"),
+                ElementSpec(.label, "Automatic or Manual", symbol: "textformat"),
+            ],
+            movable: [.fanDial, .value, .label],
+            texts: [.value, .label],
+            isAvailable: { FanSensors.hasFans }
         ),
     ]
 

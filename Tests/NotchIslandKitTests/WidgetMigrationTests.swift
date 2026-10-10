@@ -294,7 +294,8 @@ private func scratchDefaults() -> (UserDefaults, String) {
         #expect(IslandWidgetKind.allCases.filter { $0.control == nil && $0.level == nil }
             == [.dateTime, .stopwatch, .nowPlaying, .systemStats, .worldClock, .clipboard, .battery, .batteryChart,
                 .batteryTime, .batteryHealth, .batteryCycles, .batteryPower, .batteryTemperature, .charger, .batteryLastCharge,
-                .uptime, .diskSpace, .timer, .shelf, .analogClock, .monthCalendar, .batteryUsage, .memory])
+                .uptime, .diskSpace, .timer, .shelf, .analogClock, .monthCalendar, .batteryUsage, .memory, .chipTemperature,
+                .fanControl])
         // The figures are readouts as World Clock is: its parts, styled as its are.
         for kind in IslandWidgetKind.allCases where kind.isReadout {
             #expect(kind.spec.texts == [.value, .label] && kind.spec.buttons == [.symbol], "\(kind)")
@@ -309,8 +310,10 @@ private func scratchDefaults() -> (UserDefaults, String) {
             #expect(kind.minimumSize.width <= kind.defaultSize.width && kind.defaultSize.width <= kind.maximumSize.width)
             #expect(kind.minimumSize.height <= kind.defaultSize.height && kind.defaultSize.height <= kind.maximumSize.height)
             #expect(kind.maximumSize.width <= 12 && kind.maximumSize.height <= 3)
-            // Offered, but a control that does not work on this Mac (True Tone on one without it).
-            #expect(kind.isOffered || kind.systemControl.map { !ExtendedControls.isAvailable($0) } == true, "\(kind)")
+            // Offered, but a control that does not work on this Mac (True Tone on one without it), and
+            // Fan Control on a Mac without a fan (a MacBook Air).
+            #expect(kind.isOffered || kind.systemControl.map { !ExtendedControls.isAvailable($0) } == true
+                    || kind == .fanControl && !FanSensors.hasFans, "\(kind)")
             if spec.category == .controls { #expect(kind.control != nil) }
         }
         for category in WidgetCategory.allCases {

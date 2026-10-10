@@ -62,6 +62,11 @@ nonisolated enum IslandWidgetKind: String, Sendable, Codable, CaseIterable, Iden
     case memory
     /// A control: records the screen; the notch shows it meanwhile.
     case screenRecording
+    /// A readout: how warm the chip runs.
+    case chipTemperature
+    /// A dial round a fan (MacBook Pro only): the fans' speed, set by turning it; the fan in its
+    /// middle gives them back to macOS.
+    case fanControl
 
     var id: String { rawValue }
 
@@ -69,7 +74,7 @@ nonisolated enum IslandWidgetKind: String, Sendable, Codable, CaseIterable, Iden
     var isReadout: Bool {
         switch self {
         case .worldClock, .batteryTime, .batteryHealth, .batteryCycles, .batteryPower, .batteryTemperature, .charger,
-             .batteryLastCharge, .uptime, .diskSpace, .memory: true
+             .batteryLastCharge, .uptime, .diskSpace, .memory, .chipTemperature: true
         default: false
         }
     }

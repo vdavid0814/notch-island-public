@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The fan helper (FanHelper.swift): the app's own executable, run as root by launchd when the app
+     asks for its Mach service, registered with SMAppService.daemon and switched on by the user in
+     System Settings ▸ General ▸ Login Items. Only root may set the fans. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.davidvarga.notchisland.fanhelper</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/NotchIsland</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>NotchIsland</string>
+		<string>--fan-helper</string>
+	</array>
+	<key>MachServices</key>
+	<dict>
+		<key>com.davidvarga.notchisland.fanhelper</key>
+		<true/>
+	</dict>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.davidvarga.notchisland</string>
+	</array>
+</dict>
+</plist>

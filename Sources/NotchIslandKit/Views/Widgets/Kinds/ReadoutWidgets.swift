@@ -14,6 +14,7 @@ enum Readouts {
         case .uptime: SystemReadings.uptime(SystemReadings.sampleUptime, thermal: .nominal, locale: locale)
         case .diskSpace: SystemReadings.disk(SystemReadings.sampleDisk, locale: locale)
         case .memory: SystemReadings.memory(SystemReadings.sampleMemory.used, of: SystemReadings.sampleMemory.total, locale: locale)
+        case .chipTemperature: SystemReadings.chip(SystemReadings.sampleChip, name: "Apple M5", locale: locale)
         default:
             BatteryReadings.reading(widget.kind, state: BatteryReadings.sampleState, details: BatteryReadings.sampleDetails,
                                     lastCharge: BatteryReadings.sampleLastCharge(now: now, timeZone: timeZone),
@@ -189,6 +190,19 @@ enum SystemReadings {
     /// 9.6 GB of 16 GB in use.
     static let sampleMemory: (used: UInt64, total: UInt64) = (10_307_921_510, 17_179_869_184)
 
+    /// 46 °C on average, the hottest core 51 °C.
+    static let sampleChip = ChipReading(average: 46, hottest: 51)
+
+    /// The cores' average, and the hottest under it beside the chip's name; the thermometer fuller as
+    /// it warms.
+    static func chip(_ reading: ChipReading?, name: String, locale: Locale) -> WidgetReading {
+        guard let reading else { return WidgetReading("—", caption: name, symbol: "thermometer.medium") }
+        let symbol = reading.average < 45 ? "thermometer.low" : reading.average < 75 ? "thermometer.medium" : "thermometer.high"
+        return WidgetReading(BatteryReadings.temperature(reading.average, locale: locale),
+                             caption: String(localized: "\(ChipSensors.shortName(name)) · Hottest \(BatteryReadings.temperature(reading.hottest, locale: locale))"),
+                             symbol: symbol, widest: BatteryReadings.temperature(188, locale: locale))
+    }
+
     /// The memory in use, in MB under a gigabyte, in GB above (as Activity Monitor writes it), of
     /// the Mac's whole.
     static func memory(_ used: UInt64?, of total: UInt64, locale: Locale) -> WidgetReading {
@@ -292,5 +306,24 @@ struct DiskSpaceWidget: View {
                     space = read
                 }
             }
+    }
+}
+
+/// The chip's temperature, read every two seconds while shown (`ThermalMonitor`, shared with Fan
+/// Control); a sample in a picture.
+struct ChipTemperatureWidget: View {
+    let widget: IslandWidget
+    let size: CGSize
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.isWidgetPreview) private var isPreview
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        let thermals = model.thermals
+        ReadingWidget(widget: widget, size: size,
+                      reading: isPreview ? Readouts.picture(widget, locale: locale)
+                          : SystemReadings.chip(thermals.chip, name: ChipSensors.name, locale: locale))
+            .whileShown { if !isPreview { withoutAnimation { thermals.startObserving() } } } stop: { if !isPreview { thermals.stopObserving() } }
     }
 }

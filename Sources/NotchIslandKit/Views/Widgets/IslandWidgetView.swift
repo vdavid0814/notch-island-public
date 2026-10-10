@@ -134,6 +134,7 @@ struct IslandWidgetView: View {
             case .none: 2
             }
         case .monthCalendar: return MonthCalendarWidget.hasTitleRoom(inner: inner) ? 0 : 1
+        case .fanControl: return FanControlWidget.isWide(inner) ? 1 : 0
         default: return 0
         }
     }
@@ -194,6 +195,8 @@ struct IslandWidgetView: View {
         case .batteryUsage: DailyUsageWidget(widget: Self.resolved(widget, size: size), size: inner)
         case .diskSpace: DiskSpaceWidget(widget: Self.resolved(widget, size: size), size: inner)
         case .memory: MemoryWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .chipTemperature: ChipTemperatureWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .fanControl: FanControlWidget(widget: Self.resolved(widget, size: size), size: inner)
         default:
             if let control = widget.kind.control {
                 ControlWidget(control: control, widget: Self.resolved(widget, size: size), size: inner)

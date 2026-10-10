@@ -26,6 +26,10 @@ import Observation
     /// The newest version from GitHub, downloaded from About.
     let updater = AppUpdater()
     let stats = SystemStatsMonitor()
+    /// The chip's temperature (Chip Temperature, Fan Control), read only while shown.
+    let thermals = ThermalMonitor()
+    /// The fans (Fan Control, MacBook Pro only), read only while shown.
+    let fans = FanCenter()
     /// The Screen Recording widget's recorder; the island shows it while it records.
     let recorder = ScreenRecorder()
     /// The saved movie in the screen's corner, as macOS shows its own recordings.

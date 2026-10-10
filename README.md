@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.3.2 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,32 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.4
+
+Two new widgets in Settings ▸ Widgets ▸ **System**.
+
+- **Fan Control** (MacBook Pro only — a MacBook Air has no fan, so it is not offered there). A dial
+  round a fan: its arc runs from the fans' slowest speed to their fastest, filled as far as they
+  turn now, blue to red, with the speed in rpm and **Auto** or **Manual** under it. Drag anywhere on
+  the dial to hold the fans at that speed (two fans are set alike); click the fan in the middle to
+  give them back to macOS's own automatic control. Wide, it shows the speed, the mode and the chip's
+  temperature beside the dial.
+  Only an administrator process may set the fans, so the first time you set a speed macOS opens
+  System Settings ▸ General ▸ **Login Items**: switch NotchIsland's helper on there once. The fans
+  go back to automatic by themselves when NotchIsland quits, and whenever the chip reaches 95 °C
+  while they are held.
+- **Chip Temperature.** How warm the chip runs: its cores on average, and the hottest of them
+  ("M5 · Hottest 51 °C"). Read every two seconds, only while the panel shows it.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.4 in place and keeps your permissions (signed
+exactly as 0.8.3.2). Or download **NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 

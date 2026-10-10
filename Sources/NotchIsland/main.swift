@@ -18,6 +18,9 @@ import NotchIslandKit
 // Started as the screen recorder (`RecordingHelper`): it records, and quits once the movie is
 // written; the app itself does not start.
 RecordingHelper.runIfAsked()
+// Started by launchd as the fan helper (`FanHelper`, root): it sets the fans for Fan Control and
+// quits when idle; the app itself does not start.
+FanHelper.runIfAsked()
 
 let environment = ["MallocSpaceEfficient": "1", "RB_DISABLE_GPU": "1"]
 if environment.keys.contains(where: { getenv($0) == nil }) {
