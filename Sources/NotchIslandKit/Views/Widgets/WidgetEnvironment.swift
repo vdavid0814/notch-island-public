@@ -61,22 +61,50 @@ nonisolated enum WidgetLayerPass: Sendable {
 /// the size it is shown at — but Liquid Glass draws nothing in such a picture: where the widget has
 /// glass buttons, its background and the glass are drawn under the picture as they are, and the
 /// picture holds the rest. `content` is the widget for a pass, already zoomed and framed.
+///
+/// `still`: the picture drawn once already (`SharpZoom.still`), shown in its place. Customize grows
+/// in and out by a scale around it, and drawn live under a changing scale the whole enlarged picture
+/// was drawn again on the CPU in every frame of it (Activity Monitor ~3700 for an opening, measured).
 struct SharpZoom<Content: View>: View {
     let widget: IslandWidget
+    var still: CGImage? = nil
     @ViewBuilder let content: (WidgetLayerPass) -> Content
+
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         if Self.hasGlass(widget) {
             ZStack {
                 content(.underlay)
                     .environment(\.widgetLayerPass, .underlay)
-                content(.overlay)
-                    .environment(\.widgetLayerPass, .overlay)
-                    .drawingGroup()
+                picture(.overlay)
             }
         } else {
-            content(.all).drawingGroup()
+            picture(.all)
         }
+    }
+
+    @ViewBuilder private func picture(_ pass: WidgetLayerPass) -> some View {
+        if let still {
+            Image(decorative: still, scale: displayScale)
+        } else {
+            content(pass)
+                .environment(\.widgetLayerPass, pass)
+                .drawingGroup()
+        }
+    }
+
+    /// The picture part as `body` draws it, rendered once at `size` with the environment around it.
+    @MainActor static func still(widget: IslandWidget, size: CGSize, environment: EnvironmentValues,
+                                 @ViewBuilder content: (WidgetLayerPass) -> Content) -> CGImage? {
+        let pass: WidgetLayerPass = hasGlass(widget) ? .overlay : .all
+        let renderer = ImageRenderer(content: content(pass)
+            .environment(\.widgetLayerPass, pass)
+            .frame(width: size.width, height: size.height)
+            .environment(\.self, environment))
+        renderer.scale = environment.displayScale
+        renderer.proposedSize = ProposedViewSize(size)
+        return renderer.cgImage
     }
 
     /// A button, a ruler or a grid of days drawn on Liquid Glass.

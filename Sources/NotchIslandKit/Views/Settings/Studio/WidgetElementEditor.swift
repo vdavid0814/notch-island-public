@@ -57,37 +57,66 @@ struct WidgetElementEditor: View {
     /// 64 % less than the 6 points it was (60 %, then 10 % less again): lines hold a part only
     /// lightly.
     private static let release: CGFloat = 2.16
+    /// While Customize grows in or out (a scale around the editor and the widget), the zoomed
+    /// picture drawn once: drawn live, a changing scale had it drawn again on the CPU in every frame
+    /// (`SharpZoom.still`).
+    @State private var still: CGImage?
+    @State private var stillGeneration = 0
+    @Environment(\.self) private var environment
+
+    /// The widget for a pass, zoomed and framed as the editor shows it.
+    private func zoomed(_ pass: WidgetLayerPass, in size: CGSize) -> some View {
+        IslandWidgetView(widget: shown, size: natural)
+            .environment(\.widgetRenderMode, .canvas)
+            .environment(\.isElementEditing, true)
+            .environment(\.linePreview, editing.linePreview)
+            .environment(\.elementOverlaps, overlaps)
+            // Its pictures (an app's icon) made at the resolution they are shown at.
+            .environment(\.displayScale, displayScale * max(scale, 1))
+            .frame(width: natural.width, height: natural.height)
+            .coordinateSpace(.named(ElementFramesKey.space))
+            .overlay {
+                // Without a background the widget has no edge of its own: a faint line shows
+                // where it ends (one point thick however large it is drawn).
+                if widget.background == .none, pass != .underlay {
+                    UnevenRoundedRectangle(cornerRadii: IslandWidgetView.outerCorners(widget, size: natural, board: nil),
+                                           style: .continuous)
+                        .strokeBorder(.white.opacity(0.18), lineWidth: 1 / max(scale, 0.01))
+                        .frame(width: WidgetMetrics.isRound(widget) ? min(natural.width, natural.height) : natural.width,
+                               height: WidgetMetrics.isRound(widget) ? min(natural.width, natural.height) : natural.height)
+                }
+            }
+            .scaleEffect(scale)
+            .frame(width: size.width, height: size.height)
+    }
+
+    /// Customize grows in (or goes out): the picture drawn once, then live again once the scale has
+    /// settled — the in's spring (`WidgetCustomizeView.animate`) with its delay; going out, it goes.
+    private func holdStill(isIn: Bool, size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        still = SharpZoom<AnyView>.still(widget: shown, size: size, environment: environment) { pass in
+            AnyView(zoomed(pass, in: size))
+        }
+        stillGeneration &+= 1
+        let generation = stillGeneration
+        guard isIn else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(WidgetCustomizeView.editorSettles))
+            guard generation == stillGeneration else { return }
+            still = nil
+        }
+    }
+
     /// The picture the ink is read from, this many times the widget's size: a quarter point.
     private static let inkScale: CGFloat = 4
 
     var body: some View {
         GeometryReader { proxy in
             let origin = origin(in: proxy.size)
-            // As sharp as it is shown, its glass buttons' glass drawn as it is (`SharpZoom`).
-            SharpZoom(widget: shown) { pass in
-                IslandWidgetView(widget: shown, size: natural)
-                    .environment(\.widgetRenderMode, .canvas)
-                    .environment(\.isElementEditing, true)
-                    .environment(\.linePreview, editing.linePreview)
-                    .environment(\.elementOverlaps, overlaps)
-                    // Its pictures (an app's icon) made at the resolution they are shown at.
-                    .environment(\.displayScale, displayScale * max(scale, 1))
-                    .frame(width: natural.width, height: natural.height)
-                    .coordinateSpace(.named(ElementFramesKey.space))
-                    .overlay {
-                        // Without a background the widget has no edge of its own: a faint line shows
-                        // where it ends (one point thick however large it is drawn).
-                        if widget.background == .none, pass != .underlay {
-                            UnevenRoundedRectangle(cornerRadii: IslandWidgetView.outerCorners(widget, size: natural, board: nil),
-                                                   style: .continuous)
-                                .strokeBorder(.white.opacity(0.18), lineWidth: 1 / max(scale, 0.01))
-                                .frame(width: WidgetMetrics.isRound(widget) ? min(natural.width, natural.height) : natural.width,
-                                       height: WidgetMetrics.isRound(widget) ? min(natural.width, natural.height) : natural.height)
-                        }
-                    }
-                    .scaleEffect(scale)
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-            }
+            // As sharp as it is shown, its glass buttons' glass drawn as it is (`SharpZoom`); while
+            // it grows in or out, the picture drawn once (`still`).
+            SharpZoom(widget: shown, still: still) { pass in zoomed(pass, in: proxy.size) }
+            .onChange(of: isIn, initial: true) { _, isIn in holdStill(isIn: isIn, size: proxy.size) }
             // Growing into place outside the sharp picture: inside it, every frame of the spring drew
             // the whole enlarged widget again on the CPU (~10 ms a frame for ~30 frames, measured).
             // The picture is drawn once at its final size and scaled about the same centre.

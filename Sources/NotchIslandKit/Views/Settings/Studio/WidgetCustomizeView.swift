@@ -167,10 +167,18 @@ struct WidgetCustomizeView: View {
         UnevenRoundedRectangle(cornerRadii: .uniform(Self.radius), style: .continuous)
     }
 
+    /// The editor's spring in.
+    static let editorSpring = Spring(duration: 0.6, bounce: 0.16)
+    static let editorDelay: TimeInterval = 0.08
+    /// When the editor's scale has settled after coming in (to a thousandth of its move).
+    static var editorSettles: TimeInterval {
+        editorDelay + editorSpring.settlingDuration(target: 1.0, initialVelocity: 0.0, epsilon: 0.001)
+    }
+
     /// In: the panels, then the editor. Out: all together, quicker.
     private func animate(_ shown: Bool) {
         withAnimation(shown ? .spring(duration: 0.5, bounce: 0.14) : .easeIn(duration: 0.22)) { panelsIn = shown }
-        withAnimation(shown ? .spring(duration: 0.6, bounce: 0.16).delay(0.08) : .easeIn(duration: 0.22)) { editorIn = shown }
+        withAnimation(shown ? .spring(Self.editorSpring).delay(Self.editorDelay) : .easeIn(duration: 0.22)) { editorIn = shown }
     }
 
     /// Customize places the widget's parts at the size it is now: placed at another, they are

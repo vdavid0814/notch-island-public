@@ -30,8 +30,12 @@ AWAY = (NX, 420.0)
 def move(x, y, steps=8, ms=8):
     send(f"move {x} {y} {steps} {ms}")
 
-def click(x, y):
-    send(f"click {x} {y}")
+def click(x, y, hold=0.0):
+    if hold:
+        # A held press: some buttons (Customize's Done) let a 50 ms click pass unnoticed.
+        send(f"down {x} {y}"); time.sleep(hold); send(f"up {x} {y}")
+    else:
+        send(f"click {x} {y}")
 
 def hover_cycle(dwell, away):
     def run():
@@ -48,7 +52,17 @@ def settings_cycle():
     click(NX, 600); time.sleep(0.4)
     move(*AWAY); time.sleep(2.5)
 
+CUSTOMIZE = tuple(float(v) for v in os.environ.get("CUSTOMIZE", "1122,431").split(","))
+DONE = tuple(float(v) for v in os.environ.get("DONE", "851,62").split(","))
+
+def customize_cycle():
+    # Settings ▸ Widgets with a widget picked: its Customize… button, then the editor's Done.
+    move(*CUSTOMIZE, 6, 8); click(*CUSTOMIZE, hold=0.12); time.sleep(3.0)
+    move(*DONE, 6, 8); click(*DONE, hold=0.12); time.sleep(3.0)
+
 SCENARIOS = {
+    # Customize opened and closed by its buttons (Settings ▸ Widgets, a widget picked).
+    "customize": (customize_cycle, 2),
     # Settings opened from the panel's gear and closed by a click outside, as a hand does.
     "settings-gear": (settings_cycle, 3),
     # Hover in, the panel opens (hover delay), out again, closes: fast and slow.
