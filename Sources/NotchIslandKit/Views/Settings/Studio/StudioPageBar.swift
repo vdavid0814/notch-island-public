@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// In the stage's bar, in Widgets and Size mode: the page whose board the stage edits — one of
@@ -9,6 +10,7 @@ struct StudioPageBar: View {
 
     @Environment(AppModel.self) private var model
     @State private var isEditing = false
+    @State private var isRemoving = false
 
     /// The pages it offers: the boards among the picker's pages, home always.
     static func pages(_ model: AppModel) -> [ExpandedPage] {
@@ -32,6 +34,9 @@ struct StudioPageBar: View {
                 .choiceBar()
                 .labelsHidden()
                 .fixedSize()
+                // A page renamed or given another symbol is the same page: its segment is drawn
+                // again only when the bar is made anew (its picture stayed the old one).
+                .id(model.preferences.header.customPages)
             }
             if page.isCustom {
                 Button("Edit Page", systemImage: "pencil") { isEditing = true }
@@ -41,6 +46,24 @@ struct StudioPageBar: View {
                             isEditing = false
                             withAnimation(Motion.content) { model.removePage(page) }
                             changed()
+                        }
+                    }
+            }
+            // One of the island's own (the battery's, the shelf's…): it has no name or symbol to set,
+            // but it can be taken out of the picker here too — unless it is the last one in it.
+            if !page.isCustom, pages.count > 1 {
+                Button("Remove Page", systemImage: "trash") { isRemoving = true }
+                    .help("Take the \(page.title) page out of the island's picker")
+                    .popover(isPresented: $isRemoving, arrowEdge: .bottom) {
+                        OwnPageRemoval(page: page) {
+                            isRemoving = false
+                            var layout = model.preferences.header
+                            if layout.setPage(page, hidden: true, among: model.availablePages) {
+                                changed()
+                                withAnimation(Motion.content) { model.preferences.header = layout }
+                            } else {
+                                NSSound.beep()
+                            }
                         }
                     }
             }
@@ -78,14 +101,22 @@ struct CustomPageEditor: View {
     @Environment(AppModel.self) private var model
     @State private var title = ""
     @State private var confirmsRemoval = false
+    @FocusState private var isNameFocused: Bool
 
     private let columns = Array(repeating: GridItem(.fixed(30), spacing: 6), count: 8)
+    private static let inset: CGFloat = 8
 
     var body: some View {
         let custom = model.preferences.header.customPage(page)
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
+            // A capsule, as the buttons round it are.
             TextField("Name", text: $title)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 12)
+                .frame(height: 30)
+                .background(.white.opacity(0.08), in: .capsule)
+                .overlay { Capsule().strokeBorder(.white.opacity(isNameFocused ? 0.3 : 0.1), lineWidth: 1) }
+                .focused($isNameFocused)
                 .onSubmit { model.preferences.header.editCustomPage(page, title: title) }
             Text("Symbol")
                 .font(.system(size: 11, weight: .semibold))
@@ -97,13 +128,9 @@ struct CustomPageEditor: View {
                         Image(systemName: symbol)
                             .font(.system(size: 13, weight: .medium))
                             .frame(width: 30, height: 30)
-                            .background(isPicked ? Color.islandAccent.opacity(0.35) : .white.opacity(0.06),
-                                        in: .rect(cornerRadius: 8, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .strokeBorder(isPicked ? Color.islandAccent : .clear, lineWidth: 1.5)
-                            }
-                            .contentShape(.rect)
+                            .background(isPicked ? Color.islandAccent.opacity(0.35) : .white.opacity(0.06), in: .circle)
+                            .overlay { Circle().strokeBorder(isPicked ? Color.islandAccent : .clear, lineWidth: 1.5) }
+                            .contentShape(.circle)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(symbol)
@@ -118,19 +145,54 @@ struct CustomPageEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Button("Cancel") { withAnimation(Motion.content) { confirmsRemoval = false } }
+                        .buttonStyle(.glass)
                     Spacer(minLength: 0)
                     Button("Delete Page", role: .destructive, action: remove)
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                         .tint(.red)
                 }
+                .buttonBorderShape(.capsule)
             } else {
-                Button("Delete Page…", role: .destructive) { withAnimation(Motion.content) { confirmsRemoval = true } }
+                // Red glass, a capsule as the popover's own corners are round.
+                Button(role: .destructive) { withAnimation(Motion.content) { confirmsRemoval = true } } label: {
+                    Label("Delete Page…", systemImage: "trash").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .tint(.red)
+                .buttonBorderShape(.capsule)
             }
         }
-        .padding(16)
-        .frame(width: 8 * 30 + 7 * 6 + 32)
+        // Half as far from the popover's edges as before (16): the capsules' ends sit round its
+        // corners, and the popover is that much smaller.
+        .padding(Self.inset)
+        .frame(width: 8 * 30 + 7 * 6 + 2 * Self.inset)
         .onAppear { title = custom?.title ?? "" }
         // A name typed and left is kept too.
         .onDisappear { model.preferences.header.editCustomPage(page, title: title) }
+    }
+}
+
+/// One of the island's own pages, taken out of the picker: what that means, and the button.
+private struct OwnPageRemoval: View {
+    let page: ExpandedPage
+    let remove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(page.title, systemImage: page.systemImage)
+                .font(.headline)
+            Text("The page leaves the island's picker; its widgets are kept. Top Bar ▸ Pages brings it back.")
+                .font(.callout)
+                .foregroundStyle(SettingsPalette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(role: .destructive, action: remove) {
+                Label("Remove Page", systemImage: "trash").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent)
+            .tint(.red)
+            .buttonBorderShape(.capsule)
+        }
+        .padding(8)
+        .frame(width: 260)
     }
 }

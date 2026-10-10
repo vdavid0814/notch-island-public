@@ -109,9 +109,8 @@ nonisolated struct ElementID: RawRepresentable, Hashable, Codable, Sendable, Ide
     static let tempGraph = ElementID(rawValue: "tempGraph")
     static let rpmGraph = ElementID(rawValue: "rpmGraph")
     /// The texts in the dials, each set from its dial's panel (`ProgressLook.Part`): the fan's name
-    /// and its unit ("rpm"), the chip's name and its degrees.
+    /// (or its mode) and its speed (`value`), the chip's name and its degrees.
     static let fanName = ElementID(rawValue: "fanDial.name")
-    static let fanUnit = ElementID(rawValue: "fanDial.unit")
     static let tempName = ElementID(rawValue: "tempDial.name")
     static let tempValue = ElementID(rawValue: "tempDial.value")
     /// A graph's texts (its name, the value now, the values beside it): one style for them all.

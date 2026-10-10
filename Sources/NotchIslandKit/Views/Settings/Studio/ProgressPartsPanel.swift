@@ -19,7 +19,13 @@ struct ProgressPartsPanel: View {
     @State private var frames: [ProgressLook.Part: CGRect] = [:]
     @State private var bounds: CGRect = .zero
     /// The part being dragged, and how (in the line's own points).
-    @State private var drag: (part: ProgressLook.Part, geometry: ElementDrag)?
+    @State private var drag: (part: ProgressLook.Part, geometry: ElementDrag, from: ElementOffset)?
+
+    /// The part a drag has moved (not one only pressed): drawn by itself meanwhile.
+    private var movingPart: ProgressLook.Part? {
+        guard let drag, drag.geometry.offset != drag.from else { return nil }
+        return drag.part
+    }
     /// The press began on no part.
     @State private var pressMissed = false
     /// The part being resized: how (in the line's own points), and the look, its frame and a
@@ -39,6 +45,8 @@ struct ProgressPartsPanel: View {
     }
 
     static let controlsWidth: CGFloat = 180
+    /// Round the line in its picture, for a part dragged off it.
+    static let pictureMargin: CGFloat = 90
     /// A sample track, a third played, so the line's both colours show.
     static let duration: TimeInterval = 210
     /// A third in, standing still. One clock for good: made in `body` (`at: .now`), every redraw
@@ -68,43 +76,21 @@ struct ProgressPartsPanel: View {
             let height = room.height
             // As large as the room allows, a little in from its edges.
             let zoom = max(1, min((proxy.size.width - 24) / width, (proxy.size.height - 24) / height, 6))
+            // A part being dragged is drawn by itself over the picture, which is drawn without it:
+            // each is a picture made on the CPU (and put on screen dot by dot, ~25 ms), so neither is
+            // made again while the drag goes on — the part's own picture is only moved, by its layer.
+            // The look is set once, when the drag ends (set at every step, the whole of Customize
+            // followed it: six to eight steps a second, measured).
+            let moving = movingPart
+            let picture = PartsPicture(widget: widget, id: id, look: look, isRing: isRing, room: room, zoom: zoom, canvas: proxy.size,
+                                       basePoints: basePoints, displayScale: displayScale, controlSize: controlSize)
             ZStack {
-                Group {
-                    if isRing {
-                        ring(look, side: width)
-                    } else if id == .progress {
-                        PlaybackScrubber(clock: Self.stoppedClock, duration: Self.duration,
-                                         isPlaying: false, look: look,
-                                         elapsedStyle: widget.textStyles[.elapsedTime], remainingStyle: widget.textStyles[.remainingTime])
-                    } else if id == .cpuLoad || id == .memoryLoad {
-                        // The system's line with its name and value, as the widget draws it.
-                        StatBar(line: id, title: id == .cpuLoad ? "CPU" : "RAM", value: id == .cpuLoad ? 0.23 : 0.61,
-                                textSize: basePoints, titleWidth: 0, look: look, reportsFrame: true,
-                                titleStyle: widget.textStyles[id == .cpuLoad ? .cpuTitle : .memoryTitle],
-                                valueStyle: widget.textStyles[id == .cpuLoad ? .cpuValue : .memoryValue])
-                    } else {
-                        // A line without times (the volume's): the line alone, a third full.
-                        ScrubTrack(position: 1, duration: 3, look: look, reportsFrame: true) { _ in } commit: {}
-                    }
+                picture.showing(.without(moving)).equatable()
+                if let moving, let drag {
+                    picture.showing(.only(moving)).equatable()
+                        .offset(x: (drag.geometry.offset.x - drag.from.x) * zoom, y: (drag.geometry.offset.y - drag.from.y) * zoom)
+                        .allowsHitTesting(false)
                 }
-                    .frame(width: width, height: isRing ? height : nil)
-                    .background {
-                        GeometryReader { line in
-                            Color.clear.preference(key: LineBoundsKey.self, value: line.frame(in: .named(ProgressPartFramesKey.space)))
-                        }
-                    }
-                    .controlSize(Metrics.Control.smaller(controlSize))
-                    .environment(\.widgetRenderMode, .canvas)
-                    .environment(\.isWidgetPreview, true)
-                    .environment(\.reportsProgressParts, true)
-                    // Its pictures made at the resolution they are shown at.
-                    .environment(\.displayScale, displayScale * zoom)
-                    .allowsHitTesting(false)
-                    .scaleEffect(zoom)
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    // Drawn as one picture at the size it is shown at, not its pixels enlarged
-                    // (a line has no glass to lose).
-                    .drawingGroup()
                 guides(zoom: zoom)
                     .allowsHitTesting(false)
                 // Each part's box; the picked one's handles.
@@ -156,7 +142,7 @@ struct ProgressPartsPanel: View {
 
     /// The widget's inside, as the board draws it.
     private var inner: CGSize {
-        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
+        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.preferences.panel.grid)
         let natural = geometry.laidSize(for: widget.frame), padding = WidgetMetrics.padding(for: widget)
         return CGSize(width: max(0, natural.width - 2 * padding), height: max(0, natural.height - 2 * padding))
     }
@@ -169,36 +155,6 @@ struct ProgressPartsPanel: View {
             return CGSize(width: side, height: side)
         }
         return CGSize(width: max(box?.width ?? 170, 40), height: 40)
-    }
-
-    @ViewBuilder private func ring(_ look: ProgressLook, side: CGFloat) -> some View {
-        switch id {
-        case .fanDial:
-            // Its speed and mode are parts of their own (set in the editor): here faint, for their place.
-            FanDial(fans: FanControlWidget.sample, held: nil, isManual: false, diameter: side, showsTexts: true,
-                    value: widget.shows(.value) ? Text(FanControlWidget.rpmText(FanControlWidget.sample))
-                        .font(.system(size: WidgetMetrics.points(side, ratio: 0.2, min: 8, max: 26), weight: .semibold, design: .rounded))
-                        .foregroundStyle(.tertiary) : nil,
-                    label: widget.shows(.label) ? Text(FanControlWidget.modeText(manual: false, access: .unknown))
-                        .font(.system(size: WidgetMetrics.points(side, ratio: 0.095, min: 7, max: 12), weight: .semibold))
-                        .foregroundStyle(.tertiary) : nil,
-                    look: look, nameStyle: widget.textStyles[.fanName], unitStyle: widget.textStyles[.fanUnit], reportsFrame: true,
-                    set: { _ in }, automatic: {})
-        case .tempDial:
-            TemperatureDial(celsius: 46, diameter: side, number: FanControlWidget.degreeNumber(46, locale: .current),
-                            unit: FanControlWidget.degreeUnit(locale: .current), look: look,
-                            nameStyle: widget.textStyles[.tempName], valueStyle: widget.textStyles[.tempValue], reportsFrame: true)
-        case .cpuLoad, .memoryLoad:
-            StatRing(title: id == .cpuLoad ? "CPU" : "RAM", value: id == .cpuLoad ? 0.23 : 0.61, diameter: side, look: look,
-                     reportsFrame: true, titleStyle: widget.textStyles[id == .cpuLoad ? .cpuTitle : .memoryTitle],
-                     valueStyle: widget.textStyles[id == .cpuLoad ? .cpuValue : .memoryValue])
-        default:
-            // A level's ring, a third full; its symbol and value are the button and the text they are.
-            LevelRing(value: 1.0 / 3, symbol: WidgetParts.buttonSymbol(of: .levelIcon, in: widget, model: model),
-                      showsSymbol: widget.shows(.levelIcon), showsValue: widget.shows(.levelValue), size: CGSize(width: side, height: side),
-                      look: look, symbolLook: widget.buttonLook(of: .levelIcon), valueStyle: widget.textStyles[.levelValue],
-                      reportsFrame: true, set: { _ in })
-        }
     }
 
     /// While a part is dragged: the lines it holds to (yellow), the others' edges near it, the
@@ -277,6 +233,7 @@ struct ProgressPartsPanel: View {
                     beginResize(part, look, handle: handle, zoom: zoom)
                 }
                 if var current = resizing {
+                    if !editing.isPlacingLinePart { editing.isPlacingLinePart = true }
                     current.geometry.move(by: CGSize(width: value.translation.width / zoom, height: value.translation.height / zoom))
                     resizing = current
                     apply(current, handle: current.handle)
@@ -293,16 +250,22 @@ struct ProgressPartsPanel: View {
                     let offset = look.offset(of: part)
                     drag = (part, ElementDrag(id: id, base: frame.offsetBy(dx: -offset.x, dy: -offset.y), start: offset,
                                               others: others, bounds: CGSize(width: bounds.width / zoom, height: bounds.height / zoom),
-                                              release: max(Self.release / zoom, 0.6)))
+                                              release: max(Self.release / zoom, 0.6)), offset)
                 }
                 guard var current = drag, hypot(value.translation.width, value.translation.height) >= 2 else { return }
                 current.geometry.move(by: CGSize(width: value.translation.width / zoom, height: value.translation.height / zoom))
                 drag = current
-                let offset = current.geometry.offset
-                updateLine { $0.setOffset(offset, of: current.part) }
+                DragPace.shared.step()
             }
             .onEnded { _ in
                 if pressMissed { pick(nil) }
+                DragPace.shared.end("line part")
+                if editing.isPlacingLinePart { editing.isPlacingLinePart = false }
+                // Where the drag left it, set once.
+                if let drag, drag.geometry.offset != drag.from {
+                    let offset = drag.geometry.offset, part = drag.part
+                    updateLine { $0.setOffset(offset, of: part) }
+                }
                 drag = nil
                 resizing = nil
                 pressMissed = false
@@ -334,7 +297,13 @@ struct ProgressPartsPanel: View {
     /// above them for accents, below for descenders) — narrowed to its digits, from its font.
     private var drawn: [ProgressLook.Part: CGRect] {
         let zoom = zoom
+        // The part being dragged: where its own picture has been moved to.
+        let moved: (part: ProgressLook.Part, by: CGSize)? = drag.map {
+            ($0.part, CGSize(width: ($0.geometry.offset.x - $0.from.x) * zoom, height: ($0.geometry.offset.y - $0.from.y) * zoom))
+        }
         return frames.reduce(into: [:]) { result, entry in
+            var entry = entry
+            if let moved, moved.part == entry.key { entry.value = entry.value.offsetBy(dx: moved.by.width, dy: moved.by.height) }
             guard let text = entry.key.textID(in: id) else {
                 result[entry.key] = entry.value
                 return
@@ -401,7 +370,7 @@ struct ProgressPartsPanel: View {
         case .elapsed, .remaining:
             guard let text = resizing.part.textID(in: id) else { return }
             let factor = handle.y != 0 ? frame.height / start.height : frame.width / start.width
-            let size = Self.points(resizing.size * Double(factor))
+            let size = points(resizing.size * Double(factor))
             let scale = CGFloat(size / resizing.size)
             let width = start.width * scale, height = start.height * scale
             // Where it would be drawn at that size, unmoved: from its end of the line (elapsed the
@@ -436,13 +405,13 @@ struct ProgressPartsPanel: View {
                     }
                 }
                 if let text = part.textID(in: id) {
-                    let size = widget.textStyle(of: text).size ?? Double(basePoints(part))
+                    let size = min(widget.textStyle(of: text).size ?? Double(basePoints(part)), sizes.upperBound)
                     HStack(spacing: 8) {
                         Text("Size").font(.callout)
                         Slider(value: Binding(get: { size }, set: { new in
                             let points = new.rounded()
                             if points != size { updateText(text) { $0.size = points } }
-                        }), in: TextStyle.sizes) { Text("Size") }
+                        }), in: sizes) { Text("Size") }
                         .labelsHidden()
                         .tint(Color.islandAccent)
                         ReservedWidthText("\(Int(size)) pt", fitting: ["48 pt"])
@@ -514,7 +483,7 @@ struct ProgressPartsPanel: View {
             updateLine { $0.barLength *= Double(width / frame.width) }
         } else if let text = part.textID(in: id) {
             let size = widget.textStyle(of: text).size ?? Double(basePoints(part))
-            updateText(text) { $0.size = Self.points(size * Double(width / frame.width)) }
+            updateText(text) { $0.size = points(size * Double(width / frame.width)) }
         }
     }
 
@@ -526,15 +495,21 @@ struct ProgressPartsPanel: View {
             updateLine { if isRing { $0.barLength *= Double(height / frame.height) } else { $0.barThickness *= Double(height / frame.height) } }
         } else if let text = part.textID(in: id) {
             let size = widget.textStyle(of: text).size ?? Double(basePoints(part))
-            updateText(text) { $0.size = Self.points(size * Double(height / frame.height)) }
+            updateText(text) { $0.size = points(size * Double(height / frame.height)) }
         }
     }
 
     // MARK: Pieces
 
     /// A type size, whole and within what a text style offers.
-    static func points(_ size: Double) -> Double {
-        min(max(size.rounded(), TextStyle.sizes.lowerBound), TextStyle.sizes.upperBound)
+    private func points(_ size: Double) -> Double {
+        min(max(size.rounded(), sizes.lowerBound), sizes.upperBound)
+    }
+
+    /// The sizes a text of this line takes: a text's own, but in a ring no larger than a ring's
+    /// texts are drawn (`RingText.largest`) — the slider and the handles stop where the letters do.
+    private var sizes: ClosedRange<Double> {
+        isRing ? TextStyle.sizes.lowerBound...RingText.largest : TextStyle.sizes
     }
 
     /// The times' own size, as the line sets them.
@@ -543,7 +518,7 @@ struct ProgressPartsPanel: View {
         guard isRing else { return basePoints }
         let side = room.width
         return switch (id, part) {
-        case (.tempDial, .remaining): WidgetMetrics.points(side, ratio: 0.2, min: 8, max: 26)
+        case (.tempDial, .remaining), (.fanDial, .remaining): WidgetMetrics.points(side, ratio: 0.2, min: 8, max: 26)
         case (.fanDial, _), (.tempDial, _): WidgetMetrics.points(side, ratio: 0.095, min: 7, max: 12)
         case (_, .remaining): StatRing.valuePoints(diameter: side)
         default: StatRing.titlePoints(diameter: side)
@@ -552,7 +527,7 @@ struct ProgressPartsPanel: View {
 
     private var basePoints: CGFloat {
         if id == .cpuLoad || id == .memoryLoad {
-            let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
+            let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.preferences.panel.grid)
             let natural = geometry.laidSize(for: widget.frame), padding = WidgetMetrics.padding(for: widget)
             return SystemStatsWidget.barTextSize(widget, inner: CGSize(width: natural.width - 2 * padding, height: natural.height - 2 * padding))
         }
@@ -585,5 +560,169 @@ private struct LineBoundsKey: PreferenceKey {
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
         let next = nextValue()
         if next != .zero { value = next }
+    }
+}
+
+/// How fast a drag's steps are taken, for the log: "line part drag: 212 steps in 4.9 s (43 a second)".
+/// A drag that stutters is one whose steps each take longer than a frame; this says how many there were.
+@MainActor final class DragPace {
+    static let shared = DragPace()
+
+    private var steps = 0
+    private var began: TimeInterval = 0
+    private var last: TimeInterval = 0
+
+    func step() {
+        let now = ProcessInfo.processInfo.systemUptime
+        if steps == 0 { began = now }
+        steps += 1
+        last = now
+    }
+
+    func end(_ what: String) {
+        defer { steps = 0 }
+        guard steps >= 10, last > began else { return }
+        let seconds = last - began
+        Log.app.notice("\(what, privacy: .public) drag: \(self.steps) steps in \(seconds, format: .fixed(precision: 1)) s (\(Int(Double(self.steps - 1) / seconds)) a second)")
+    }
+}
+
+/// What of a line's picture is drawn (`PartsPicture`): all of it, all but a part (the one being
+/// dragged), or that part alone.
+nonisolated enum ProgressPartFilter: Equatable, Sendable {
+    case all
+    case hiding(ProgressLook.Part)
+    case only(ProgressLook.Part)
+
+    static func without(_ part: ProgressLook.Part?) -> ProgressPartFilter { part.map { .hiding($0) } ?? .all }
+
+    func shows(_ part: ProgressLook.Part) -> Bool {
+        switch self {
+        case .all: true
+        case .hiding(let hidden): hidden != part
+        case .only(let only): only == part
+        }
+    }
+
+    /// What is no part of the line (a dial's fan, its thermometer) is drawn with the others.
+    var showsTheRest: Bool { if case .only = self { false } else { true } }
+}
+
+extension EnvironmentValues {
+    @Entry var progressPartFilter = ProgressPartFilter.all
+}
+
+extension View {
+    /// What is drawn with a line but is none of its parts: left out of a picture of one part alone.
+    func besideProgressParts() -> some View { modifier(BesideProgressParts()) }
+}
+
+private struct BesideProgressParts: ViewModifier {
+    @Environment(\.progressPartFilter) private var filter
+
+    func body(content: Content) -> some View { content.opacity(filter.showsTheRest ? 1 : 0) }
+}
+
+/// The line large, as its widget draws it, in one picture: the panel's own view of it. Equatable,
+/// and used so: its picture is made on the CPU, and only when something it shows has changed.
+private struct PartsPicture: View, Equatable {
+    let widget: IslandWidget
+    let id: ElementID
+    let look: ProgressLook
+    let isRing: Bool
+    let room: CGSize
+    let zoom: CGFloat
+    let canvas: CGSize
+    let basePoints: CGFloat
+    let displayScale: CGFloat
+    let controlSize: ControlSize
+    var filter = ProgressPartFilter.all
+
+    @Environment(AppModel.self) private var model
+
+    nonisolated static func == (old: PartsPicture, new: PartsPicture) -> Bool {
+        old.widget == new.widget && old.id == new.id && old.look == new.look && old.isRing == new.isRing && old.room == new.room
+            && old.zoom == new.zoom && old.canvas == new.canvas && old.basePoints == new.basePoints
+            && old.displayScale == new.displayScale && old.controlSize == new.controlSize && old.filter == new.filter
+    }
+
+    func showing(_ filter: ProgressPartFilter) -> PartsPicture {
+        var picture = self
+        picture.filter = filter
+        return picture
+    }
+
+    /// One part alone reports nothing: the whole picture says where the parts are.
+    private var reports: Bool { if case .only = filter { false } else { true } }
+
+    var body: some View {
+        let width = room.width, height = room.height
+        Group {
+            if isRing {
+                ring(side: width)
+            } else if id == .progress {
+                PlaybackScrubber(clock: ProgressPartsPanel.stoppedClock, duration: ProgressPartsPanel.duration,
+                                 isPlaying: false, look: look,
+                                 elapsedStyle: widget.textStyles[.elapsedTime], remainingStyle: widget.textStyles[.remainingTime])
+            } else if id == .cpuLoad || id == .memoryLoad {
+                // The system's line with its name and value, as the widget draws it.
+                StatBar(line: id, title: id == .cpuLoad ? "CPU" : "RAM", value: id == .cpuLoad ? 0.23 : 0.61,
+                        textSize: basePoints, titleWidth: 0, look: look, reportsFrame: true,
+                        titleStyle: widget.textStyles[id == .cpuLoad ? .cpuTitle : .memoryTitle],
+                        valueStyle: widget.textStyles[id == .cpuLoad ? .cpuValue : .memoryValue])
+            } else {
+                // A line without times (the volume's): the line alone, a third full.
+                ScrubTrack(position: 1, duration: 3, look: look, reportsFrame: true) { _ in } commit: {}
+            }
+        }
+        .frame(width: width, height: isRing ? height : nil)
+        .background {
+            if reports {
+                GeometryReader { line in
+                    Color.clear.preference(key: LineBoundsKey.self, value: line.frame(in: .named(ProgressPartFramesKey.space)))
+                }
+            }
+        }
+        .controlSize(Metrics.Control.smaller(controlSize))
+        .environment(\.widgetRenderMode, .canvas)
+        .environment(\.isWidgetPreview, true)
+        .environment(\.reportsProgressParts, true)
+        .environment(\.progressPartFilter, filter)
+        // Its pictures made at the resolution they are shown at.
+        .environment(\.displayScale, displayScale * zoom)
+        .allowsHitTesting(false)
+        .scaleEffect(zoom)
+        // Drawn as one picture at the size it is shown at, not its pixels enlarged (a line has no
+        // glass to lose) — the line and some room round it for a part moved off it, not all of the
+        // panel: the picture is put on screen on the CPU each time it is made.
+        .frame(width: min(width * zoom + 2 * ProgressPartsPanel.pictureMargin, canvas.width),
+               height: min(height * zoom + 2 * ProgressPartsPanel.pictureMargin, canvas.height))
+        .drawingGroup()
+        .frame(width: canvas.width, height: canvas.height)
+    }
+
+    @ViewBuilder private func ring(side: CGFloat) -> some View {
+        switch id {
+        case .fanDial:
+            FanDial(fans: FanControlWidget.sample, held: nil, isManual: false, diameter: side,
+                    number: widget.shows(.value) ? FanControlWidget.rpmText(FanControlWidget.sample) : nil,
+                    name: FanControlWidget.nameText(manual: false, access: .unknown, showsMode: widget.shows(.label)),
+                    look: look, nameStyle: widget.textStyles[.fanName], valueStyle: widget.textStyles[.value], reportsFrame: true,
+                    set: { _ in }, automatic: {})
+        case .tempDial:
+            TemperatureDial(celsius: 46, diameter: side, number: FanControlWidget.degreeNumber(46, locale: .current),
+                            unit: FanControlWidget.degreeUnit(locale: .current), look: look,
+                            nameStyle: widget.textStyles[.tempName], valueStyle: widget.textStyles[.tempValue], reportsFrame: true)
+        case .cpuLoad, .memoryLoad:
+            StatRing(title: id == .cpuLoad ? "CPU" : "RAM", value: id == .cpuLoad ? 0.23 : 0.61, diameter: side, look: look,
+                     reportsFrame: true, titleStyle: widget.textStyles[id == .cpuLoad ? .cpuTitle : .memoryTitle],
+                     valueStyle: widget.textStyles[id == .cpuLoad ? .cpuValue : .memoryValue])
+        default:
+            // A level's ring, a third full; its symbol and value are the button and the text they are.
+            LevelRing(value: 1.0 / 3, symbol: WidgetParts.buttonSymbol(of: .levelIcon, in: widget, model: model),
+                      showsSymbol: widget.shows(.levelIcon), showsValue: widget.shows(.levelValue), size: CGSize(width: side, height: side),
+                      look: look, symbolLook: widget.buttonLook(of: .levelIcon), valueStyle: widget.textStyles[.levelValue],
+                      reportsFrame: true, set: { _ in })
+        }
     }
 }

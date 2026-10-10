@@ -60,6 +60,7 @@ struct WidgetCustomizeView: View {
                     RenderServerSlide(isIn: panelsIn, away: CGSize(width: -40, height: 0), spring: Self.panelSpring,
                                       outDuration: Self.panelOut, environment: environment) {
                         CustomizePanel(widget: widget, addFigure: addFigure)
+                            .equatable()
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                             .background(BlackBox(shape: side(leading: true)))
                     }
@@ -70,6 +71,7 @@ struct WidgetCustomizeView: View {
                             // In place, and the one used once it is: its Open Widgets list grows out
                             // of it over the editor, outside any frame of its own.
                             CustomizeTopBar(widget: widget, editing: editing, versions: versions, close: close)
+                                .equatable()
                                 .frame(height: top)
                                 .background(BlackBox(shape: box))
                                 .opacity(topSlides ? 0 : 1)
@@ -125,6 +127,7 @@ struct WidgetCustomizeView: View {
                     .frame(width: middle)
                     // Its pictures where their fit puts them, as the editor draws them.
                     ElementInspector(widget: IslandWidgetView.resolved(widget, size: natural(of: widget)), editing: editing)
+                        .equatable()
                         .frame(width: Self.panelWidth)
                         .frame(maxHeight: .infinity, alignment: .top)
                         .background(BlackBox(shape: side(leading: false)))
@@ -307,9 +310,14 @@ private struct GraphPaper: View {
 
 /// Everything a widget can be set to, compact: its name, its background (and the colour and strength
 /// under it), and a switch for each of its elements.
-private struct CustomizePanel: View {
+private struct CustomizePanel: View, Equatable {
     let widget: IslandWidget
     let addFigure: (WidgetFigure.Kind) -> Void
+
+    /// The same but for where a line's parts are: nothing here shows that.
+    nonisolated static func == (old: CustomizePanel, new: CustomizePanel) -> Bool {
+        old.widget.withoutLinePlacement == new.widget.withoutLinePlacement
+    }
 
     @Environment(AppModel.self) private var model
     @State private var isMixing = false
@@ -346,7 +354,9 @@ private struct CustomizePanel: View {
                 .animation(.spring(duration: 0.35, bounce: 0.12), value: widget.background)
                 .animation(.spring(duration: 0.35, bounce: 0.12), value: isMixing)
                 let switchable = kind.spec.elements.filter { !$0.isRequired }
-                let size = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
+                // The panel's grid (every board follows it), not the board's own: read from the board,
+                // this panel was gone over again at every change to any widget on it.
+                let size = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.preferences.panel.grid)
                     .laidSize(for: widget.frame)
                 if !switchable.isEmpty {
                     StudioDivider()

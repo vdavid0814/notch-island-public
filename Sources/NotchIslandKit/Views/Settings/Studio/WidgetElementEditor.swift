@@ -61,12 +61,38 @@ struct WidgetElementEditor: View {
     /// picture drawn once: drawn live, a changing scale had it drawn again on the CPU in every frame
     /// (`SharpZoom.still`).
     @State private var still: CGImage?
+    /// The widget is being changed step after step (a drag, a slider), and how many steps: the ink
+    /// is read again once they stop.
+    @State private var isChanging = false
+    @State private var changes = 0
+    /// The widget as the editor draws it while a part of a line is placed in the panel under it:
+    /// the enlarged widget is one picture drawn on the CPU and put on screen dot by dot (~40 ms for
+    /// a widget across the panel, measured) — at every step of that drag it left the panel, the
+    /// thing being dragged, six steps a second. It follows now and then instead, and at the end.
+    @State private var held: IslandWidget?
+    static let pictureInterval: Duration = .milliseconds(160)
+
+    /// The part of the editor the widget's picture is made of: the widget as large as shown and
+    /// this much round it (a part dragged past its edge), no more than the editor — and in from the
+    /// editor's edges by whole dots of the screen, so the picture lands on them: one between dots is
+    /// put on screen by reading every dot of it from its neighbours (three times the work, measured).
+    static func pictured(natural: CGSize, scale: CGFloat, in size: CGSize, displayScale: CGFloat) -> CGSize {
+        func side(_ wanted: CGFloat, in room: CGFloat) -> CGFloat {
+            let dots = max(displayScale, 1)
+            let inset = max(((room - wanted) / 2 * dots).rounded(.down) / dots, 0)
+            return room - 2 * inset
+        }
+        return CGSize(width: side(natural.width * scale + 2 * pictureMargin, in: size.width),
+                      height: side(natural.height * scale + 2 * pictureMargin, in: size.height))
+    }
+
+    static let pictureMargin: CGFloat = 48
     @State private var stillGeneration = 0
     @Environment(\.self) private var environment
 
     /// The widget for a pass, zoomed and framed as the editor shows it.
     private func zoomed(_ pass: WidgetLayerPass, in size: CGSize) -> some View {
-        IslandWidgetView(widget: shown, size: natural)
+        IslandWidgetView(widget: editing.isPlacingLinePart ? held ?? shown : shown, size: natural)
             .environment(\.widgetRenderMode, .canvas)
             .environment(\.isElementEditing, true)
             .environment(\.linePreview, editing.linePreview)
@@ -115,7 +141,32 @@ struct WidgetElementEditor: View {
             let origin = origin(in: proxy.size)
             // As sharp as it is shown, its glass buttons' glass drawn as it is (`SharpZoom`); while
             // it grows in or out, the picture drawn once (`still`).
-            SharpZoom(widget: shown, still: still) { pass in zoomed(pass, in: proxy.size) }
+            SharpZoom(widget: shown, still: still,
+                      drawn: Self.pictured(natural: natural, scale: scale, in: proxy.size, displayScale: displayScale)) { pass in
+                zoomed(pass, in: proxy.size)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .onChange(of: editing.isPlacingLinePart) { _, placing in held = placing ? shown : nil }
+            .task(id: editing.isPlacingLinePart) {
+                guard editing.isPlacingLinePart else { return }
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: Self.pictureInterval)
+                    guard !Task.isCancelled, editing.isPlacingLinePart else { return }
+                    let now = shown
+                    if held != now { held = now }
+                }
+            }
+            // Changed step after step: noted, for the ink's reading to wait.
+            .onChange(of: shown) {
+                if !isChanging { isChanging = true }
+                changes &+= 1
+            }
+            .task(id: changes) {
+                guard isChanging else { return }
+                try? await Task.sleep(for: .milliseconds(220))
+                guard !Task.isCancelled else { return }
+                isChanging = false
+            }
             .onChange(of: isIn, initial: true) { _, isIn in holdStill(isIn: isIn, size: proxy.size) }
             // Growing into place outside the sharp picture: inside it, every frame of the spring drew
             // the whole enlarged widget again on the CPU (~10 ms a frame for ~30 frames, measured).
@@ -126,6 +177,7 @@ struct WidgetElementEditor: View {
                 ElementGuides(frames: currentFrames(of: shown), active: activeGuide, selected: editing.selected,
                               grouped: editing.group,
                               hovered: hovered, handles: handleTargets, natural: natural, scale: scale, origin: origin)
+                    .equatable()
                     .opacity(isIn ? 1 : 0)
                     .allowsHitTesting(false)
             }
@@ -169,7 +221,10 @@ struct WidgetElementEditor: View {
         .onChange(of: frames, initial: true) { _, frames in editing.boxes = frames }
         .task(id: inkKey) {
             // Once the layout has settled (a switch, a new title), not at every step of it.
+            // (It draws the widget several times over, ~10 ms: while a drag or a slider changes it
+            // step after step it waits for them to stop.)
             try? await Task.sleep(for: .milliseconds(30))
+            while isChanging, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(60)) }
             guard !Task.isCancelled else { return }
             measureInk()
         }
@@ -654,7 +709,10 @@ struct WidgetElementEditor: View {
 
 /// The editor's lines (`WidgetElementEditor`), drawn on screen over the enlarged widget, one point
 /// thick however large it is.
-struct ElementGuides: View {
+///
+/// Equatable, and used so: a canvas is drawn on the CPU, all of the editor's area, each time its
+/// view is gone over — at every change to the widget, though its lines only move with the parts.
+struct ElementGuides: View, Equatable {
     /// Each part where it is drawn, in the widget's points.
     let frames: [ElementID: CGRect]
     /// The part dragged or resized.

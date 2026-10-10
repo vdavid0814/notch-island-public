@@ -175,6 +175,8 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     /// Settings in the island: most of the screen, grown out of the notch (a full-screen feel
     /// without leaving it). Kept this far from the screen's sides and bottom, and no larger than
     /// the maximum on big displays.
+    /// What's New's size, as a share of Settings'.
+    static let whatsNewShare: CGFloat = 0.7
     static let settingsSideMargin: CGFloat = 50
     static let settingsBottomMargin: CGFloat = 64
     static let settingsMaximum = CGSize(width: 1180, height: 740)
@@ -292,6 +294,10 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         case .expanded(.update):
             return CGSize(width: max(notch.width + 2 * updateEar, Self.updateCardMinimumWidth),
                           height: notch.height + Self.recordingCardDetailHeight)
+        case .expanded(.whatsNew):
+            // What's New: a display of its own, three tenths smaller than Settings each way.
+            let settings = size(for: .settings)
+            return CGSize(width: (settings.width * Self.whatsNewShare).rounded(), height: (settings.height * Self.whatsNewShare).rounded())
         case .expanded:
             // Exactly as large as its cells (`PanelLayout`'s pitch) and the insets round them, rounded
             // so glass edges stay on the pixel grid; within the screen (`maximumExpandedSize`).

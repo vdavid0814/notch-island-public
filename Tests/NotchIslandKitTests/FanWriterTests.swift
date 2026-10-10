@@ -199,3 +199,51 @@ struct FanInstallerTests {
         #expect(AppCommand.parse(URL(string: "notchisland://fans/remove-helper")!) == .removeFanHelper)
     }
 }
+
+/// About ▸ Permissions ▸ Fan Control: what the row says of each state of the helper.
+@MainActor struct FanHelperRowTests {
+    @Test func theRowSaysWhetherTheHelperWorks() {
+        #expect(FanHelperRow.title(.notSetUp, answers: nil) == "Set up when first used")
+        #expect(FanHelperRow.title(.needsApproval, answers: nil) == "Switched off")
+        #expect(FanHelperRow.title(.ready(installed: false), answers: nil) == "On")
+        #expect(FanHelperRow.title(.ready(installed: false), answers: true) == "Working")
+        #expect(FanHelperRow.title(.ready(installed: true), answers: false) == "On, not working")
+        #expect(FanHelperRow.title(.failed("no"), answers: nil) == "Not working")
+        #expect(FanHelperRow.tone(.ready(installed: false), answers: true) == .ok)
+        #expect(FanHelperRow.tone(.ready(installed: false), answers: false) == .attention)
+        #expect(FanHelperRow.tone(.needsApproval, answers: nil) == .attention)
+        #expect(FanHelperRow.tone(.notSetUp, answers: nil) == .neutral)
+        #expect(FanHelperRow.note(.failed("SMC 0x82"), answers: nil).contains("SMC 0x82"))
+        #expect(FanHelperRow.note(.ready(installed: true), answers: true).contains("password"))
+    }
+}
+
+struct FanDemoTests {
+    @Test func simulatedFansAreAskedForInTheEnvironmentAlone() {
+        #expect(FanSensors.demoCount(environment: nil) == nil)
+        #expect(FanSensors.demoCount(environment: "1") == 1)
+        #expect(FanSensors.demoCount(environment: "9") == 2)
+        #expect(FanSensors.demoCount(environment: "0") == nil)
+    }
+}
+
+/// What's New: the notes of a version, and the page that shows them.
+struct ReleaseNotesTests {
+    @Test func theNotesHaveSomethingInEverySectionShown() {
+        let notes = ReleaseNotes.current
+        #expect(!notes.version.isEmpty && !notes.sections.isEmpty)
+        for section in notes.sections { #expect(!notes.items(section).isEmpty) }
+        // Each item once: the list tells them apart by their titles.
+        for section in ReleaseNotes.Section.allCases {
+            let titles = notes.items(section).map(\.title)
+            #expect(Set(titles).count == titles.count)
+        }
+        #expect(ReleaseNotes(version: "1", new: [], fixed: [.init(title: "a", detail: "b")], known: []).sections == [.fixed])
+    }
+
+    @Test func thePageIsThePanelsButNeverInThePickerOrStored() {
+        #expect(!ExpandedPage.allCases.contains(.whatsNew) && !ExpandedPage.whatsNew.isBoard && !ExpandedPage.whatsNew.isNoticeCard)
+        #expect(ExpandedPage(rawValue: "whatsNew") == nil)
+        #expect(AppCommand.parse(URL(string: "notchisland://whatsnew")!) == .showWhatsNew)
+    }
+}

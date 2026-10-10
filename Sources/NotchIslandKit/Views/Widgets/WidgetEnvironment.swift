@@ -68,6 +68,11 @@ nonisolated enum WidgetLayerPass: Sendable {
 struct SharpZoom<Content: View>: View {
     let widget: IslandWidget
     var still: CGImage? = nil
+    /// The part of `content` the widget is drawn in (about its middle), where it is smaller than
+    /// all of it: only that is made a picture. The picture is drawn on the CPU, all of it again at
+    /// every change — an editor's whole area for a widget across a third of it was most of what a
+    /// drag in Customize cost (24 ms of 56 a step, measured).
+    var drawn: CGSize? = nil
     @ViewBuilder let content: (WidgetLayerPass) -> Content
 
     @Environment(\.displayScale) private var displayScale
@@ -87,6 +92,11 @@ struct SharpZoom<Content: View>: View {
     @ViewBuilder private func picture(_ pass: WidgetLayerPass) -> some View {
         if let still {
             Image(decorative: still, scale: displayScale)
+        } else if let drawn {
+            content(pass)
+                .environment(\.widgetLayerPass, pass)
+                .frame(width: drawn.width, height: drawn.height)
+                .drawingGroup()
         } else {
             content(pass)
                 .environment(\.widgetLayerPass, pass)

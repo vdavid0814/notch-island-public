@@ -95,10 +95,10 @@ struct StatRing: View {
             VStack(spacing: 0) {
                 RingText(text: Text(IslandFormat.percent(value)), style: valueStyle, size: Self.valuePoints(diameter: diameter),
                          weight: .semibold, design: .rounded, automatic: AnyShapeStyle(.primary), part: .remaining, look: look,
-                         reportsFrame: reportsFrame)
+                         reportsFrame: reportsFrame, limit: RingText.valueLimit(diameter: diameter, line: line))
                     .transaction { $0.animation = nil }
                 RingText(text: Text(title), style: titleStyle, size: Self.titlePoints(diameter: diameter), part: .elapsed, look: look,
-                         reportsFrame: reportsFrame)
+                         reportsFrame: reportsFrame, limit: RingText.valueLimit(diameter: diameter, line: line))
             }
             .lineLimit(1)
             .minimumScaleFactor(0.6)

@@ -333,7 +333,8 @@ nonisolated enum WidgetSpecs {
         // A dial round a fan, a dial of the chip's temperature and a graph of it over the last ten
         // minutes, in a row: the fan dial turned to set the speed, the fan in it a button that gives
         // the fans back to macOS; the speed's graph beside the temperature's where the widget is wide
-        // (as wide as the panel). Each part moved and resized in Customize — a graph made lower.
+        // (as wide as the panel). Each part moved and resized in Customize — a graph made lower. The
+        // two dials are made alike: each one's texts are its own, placed in its panel.
         // Only where there is a fan: MacBook Pro.
         .fanControl: WidgetKindSpec(
             title: "Fan Control", summary: "The fans' speed and the chip's temperature. Turn the fan's dial to set it; click the fan for automatic.",
@@ -348,11 +349,10 @@ nonisolated enum WidgetSpecs {
                 ElementSpec(.tempGraph, "Temperature graph", symbol: "chart.xyaxis.line"),
                 ElementSpec(.rpmGraph, "Speed graph", symbol: "waveform.path.ecg", defaultVisible: false),
             ],
-            movable: [.fanDial, .value, .label, .tempDial, .tempGraph, .rpmGraph],
-            texts: [.value, .label],
+            movable: [.fanDial, .tempDial, .tempGraph, .rpmGraph],
             // The dials set as lines are, the graphs as charts are.
             progressBars: [.fanDial, .tempDial],
-            innerTexts: [.fanName, .fanUnit, .tempName, .tempValue, .tempGraphText, .rpmGraphText],
+            innerTexts: [.fanName, .value, .tempName, .tempValue, .tempGraphText, .rpmGraphText],
             charts: [.tempGraph, .rpmGraph],
             isAvailable: { FanSensors.hasFans }
         ),

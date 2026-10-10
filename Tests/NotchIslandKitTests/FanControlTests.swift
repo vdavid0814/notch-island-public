@@ -35,7 +35,7 @@ import Testing
         let center = CGPoint(x: 50, y: 50)
         func at(_ degrees: Double, previous: Double? = nil) -> Double {
             let angle = degrees * .pi / 180
-            return FanDial<EmptyView, EmptyView>.fraction(at: CGPoint(x: 50 + cos(angle) * 40, y: 50 + sin(angle) * 40),
+            return FanDial.fraction(at: CGPoint(x: 50 + cos(angle) * 40, y: 50 + sin(angle) * 40),
                                                          center: center, previous: previous)
         }
         // Screen angles, y down: 135° bottom left (slowest), 270° top (half), 45° bottom right (fastest).
@@ -52,8 +52,7 @@ import Testing
     func use(manual: Bool, from: CGPoint, to: CGPoint) -> FanCalls {
         let calls = FanCalls()
         let fans = [FanReading(index: 0, rpm: 2450, minimum: 1200, maximum: 5800, target: 3000, isManual: manual)]
-        let view = FanDial(fans: fans, held: manual ? 0.4 : nil, isManual: manual, diameter: 136, showsTexts: true,
-                           value: Text("2 450 rpm"), label: Text("Auto"),
+        let view = FanDial(fans: fans, held: manual ? 0.4 : nil, isManual: manual, diameter: 136, number: "2 450", name: "Fan",
                            set: { calls.speeds.append($0) }, automatic: { calls.automatic += 1 })
             .frame(width: 150, height: 150)
         let host = NSHostingView(rootView: view)
@@ -95,7 +94,7 @@ import Testing
 
     @Test func aClickOnTheFanGivesItBack() {
         // The fan sits over the speed (y up here, down in the dial).
-        let icon = FanDial<EmptyView, EmptyView>.iconCenter(diameter: 136, showsTexts: true)
+        let icon = FanDial.iconCenter(diameter: 136, showsTexts: true)
         let point = CGPoint(x: icon.x, y: -icon.y)
         let calls = use(manual: true, from: point, to: point)
         #expect(calls.automatic == 1)

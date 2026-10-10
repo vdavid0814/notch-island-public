@@ -428,17 +428,34 @@ extension EnvironmentValues {
 }
 
 extension View {
-    /// Reports where `part` is drawn when `reports` (nothing at all otherwise).
+    /// Reports where `part` is drawn when `reports` (nothing at all otherwise) — and, in a picture
+    /// of the line without a part or of one part alone (`ProgressPartFilter`), is seen or not.
     @ViewBuilder func reportsProgressPart(_ part: ProgressLook.Part, if reports: Bool) -> some View {
         if reports {
-            background {
-                GeometryReader { proxy in
-                    Color.clear.preference(key: ProgressPartFramesKey.self,
-                                           value: [part: proxy.frame(in: .named(ProgressPartFramesKey.space))])
-                }
-            }
+            modifier(ProgressPartReport(part: part))
         } else {
             self
         }
+    }
+}
+
+private struct ProgressPartReport: ViewModifier {
+    let part: ProgressLook.Part
+    @Environment(\.progressPartFilter) private var filter
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                // One part alone is a second picture of it: the whole one says where it is.
+                if case .only = filter {
+                    EmptyView()
+                } else {
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: ProgressPartFramesKey.self,
+                                               value: [part: proxy.frame(in: .named(ProgressPartFramesKey.space))])
+                    }
+                }
+            }
+            .opacity(filter.shows(part) ? 1 : 0)
     }
 }

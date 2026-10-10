@@ -28,8 +28,13 @@ nonisolated struct FanReading: Sendable, Equatable {
 /// `NI_DEMO_FANS=1` or `2` in the environment (`open --env`) puts simulated fans in their place
 /// (`FanSimulator`), so the widget can be tried and pictured on a Mac without one.
 nonisolated enum FanSensors {
-    /// The simulated fans' count, when asked for.
-    static let demoCount: Int? = ProcessInfo.processInfo.environment["NI_DEMO_FANS"].flatMap(Int.init).map { min(max($0, 1), 2) }
+    /// The simulated fans' count, when asked for in the environment (a developer's switch: nothing
+    /// kept on the Mac turns Fan Control on where there is no fan).
+    static let demoCount: Int? = demoCount(environment: ProcessInfo.processInfo.environment["NI_DEMO_FANS"])
+
+    static func demoCount(environment: String?) -> Int? {
+        environment.flatMap(Int.init).flatMap { $0 > 0 ? min($0, 2) : nil }
+    }
 
     static var isSimulated: Bool { demoCount != nil }
 

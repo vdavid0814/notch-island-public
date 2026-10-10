@@ -33,36 +33,49 @@ struct WidgetsSettingsPage: View {
                                 fillHeight: model.studio.mode == .size
                                     ? viewportHeight - Self.topInset - Self.spacing - inspectorHeight - bottomInset : 0)
                         .id(StudioAnchor.stage)
-                    Group {
-                        let picked = group.filter { model.editedWidgets.board.contains($0) }
-                        if model.studio.mode == .topBar {
-                            TopBarInspector()
-                                .transition(.opacity)
-                        } else if model.studio.mode == .size {
-                            VStack(alignment: .leading, spacing: 16) {
-                                SizeInspector()
-                                ParkedTray()
-                            }
-                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { inspectorHeight = $0 }
-                            .transition(.opacity)
-                        } else if picked.count >= 2 {
-                            GroupInspector(ids: picked, selection: $selection, group: $group)
-                                .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
-                                                        removal: .opacity))
-                        } else if let id = selection, model.editedWidgets.board.contains(id) {
-                            WidgetInspector(id: id, selection: $selection, notice: $notice)
-                                .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
-                                                        removal: .opacity))
-                        } else {
-                            VStack(alignment: .leading, spacing: 22) {
-                                ParkedTray()
-                                WidgetStoreView(add: { add($0, scroller: scroller) },
-                                                open: { kind in
-                                                    if let id = model.editedWidgets.board.first(of: kind)?.id { select(id, scroller: scroller) }
-                                                })
-                            }
-                            .transition(.opacity)
+                    // Every mode's content is built once and kept (`ModeDeck`): another mode, a widget
+                    // picked or let go, is one of them shown instead of another — nothing is built
+                    // again (building the gallery's cards, or Size's controls the first time, was the
+                    // long frame each switch began with).
+                    let picked = group.filter { model.editedWidgets.board.contains($0) }
+                    let mode = model.studio.mode
+                    let inspects = mode == .widgets && (picked.count >= 2 || selection.map { model.editedWidgets.board.contains($0) } == true)
+                    let shown: ModeDeck.Slot = mode == .topBar ? .topBar : mode == .size ? .size : inspects ? .inspector : .gallery
+                    ModeDeck(shown: shown) {
+                        TopBarInspector()
+                            .deckSlot(.topBar, shown: shown)
+                        VStack(alignment: .leading, spacing: 16) {
+                            SizeInspector()
+                            ParkedTray()
                         }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { inspectorHeight = $0 }
+                        .deckSlot(.size, shown: shown)
+                        VStack(alignment: .leading, spacing: 22) {
+                            ParkedTray()
+                            WidgetStoreView(isShown: shown == .gallery, add: { add($0, scroller: scroller) },
+                                            open: { kind in
+                                                if let id = model.editedWidgets.board.first(of: kind)?.id { select(id, scroller: scroller) }
+                                            })
+                                // Unseen, it is not gone over at all: every change to a widget (a
+                                // drag in Customize) would run its fifty cards' bodies otherwise.
+                                .equatable()
+                        }
+                        .deckSlot(.gallery, shown: shown)
+                        VStack(alignment: .leading, spacing: 0) {
+                            if mode != .widgets {
+                                EmptyView()
+                            } else if picked.count >= 2 {
+                                GroupInspector(ids: picked, selection: $selection, group: $group)
+                                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
+                                                            removal: .opacity))
+                            } else if let id = selection, model.editedWidgets.board.contains(id) {
+                                WidgetInspector(id: id, selection: $selection, notice: $notice)
+                                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
+                                                            removal: .opacity))
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .deckSlot(.inspector, shown: shown)
                     }
                     .animation(.spring(duration: 0.35, bounce: 0.12), value: selection)
                     .animation(.spring(duration: 0.35, bounce: 0.12), value: group.count >= 2)
@@ -215,6 +228,36 @@ private enum StudioAnchor: Hashable { case stage }
 /// ⌘Z and ⌘⇧Z on the page: the board edited (its widgets added, moved, resized, restyled, taken
 /// away) back a step and forward again. Only while the page is the one shown and Customize is not
 /// open over it (its own undo is the widget's).
+/// The Widgets page's content under the stage: every mode's, built once and kept, one shown. As
+/// large as the one shown; the others are laid out at its width, unseen and untouchable, so showing
+/// one costs no building and no first layout.
+private struct ModeDeck: Layout {
+    enum Slot: Int { case topBar, size, gallery, inspector }
+
+    var shown: Slot
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.indices.contains(shown.rawValue) else { return .zero }
+        return subviews[shown.rawValue].sizeThatFits(proposal)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for subview in subviews {
+            subview.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(width: bounds.width, height: nil))
+        }
+    }
+}
+
+private extension View {
+    /// One of `ModeDeck`'s: seen and used only while it is the one shown, fading as it comes and goes.
+    func deckSlot(_ slot: ModeDeck.Slot, shown: ModeDeck.Slot) -> some View {
+        opacity(slot == shown ? 1 : 0)
+            .animation(.easeOut(duration: 0.18), value: slot == shown)
+            .allowsHitTesting(slot == shown)
+            .accessibilityHidden(slot != shown)
+    }
+}
+
 private struct BoardUndoKeys: View {
     @Binding var selection: WidgetID?
     @Binding var group: Set<WidgetID>
@@ -672,11 +715,14 @@ private struct WidgetInspector: View {
         let fitsOneRow = width <= 0 || (width - CGFloat(elements.count - 1) * Self.spacing) / CGFloat(elements.count) >= Self.tileMinimum
         let columns = fitsOneRow ? elements.count : (elements.count + 1) / 2
         let rows = stride(from: 0, to: elements.count, by: columns).map { Array(elements[$0..<min($0 + columns, elements.count)]) }
+        // A part with no room at this size is not drawn: its tile is off, and says why.
+        let size = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid).laidSize(for: widget.frame)
         return VStack(spacing: Self.spacing) {
             ForEach(rows.indices, id: \.self) { row in
                 HStack(spacing: Self.spacing) {
                     ForEach(rows[row], id: \.id) { element in
-                        ElementTile(element: element, isOn: widget.shows(element.id)) { on in
+                        let hasRoom = IslandWidgetView.hasRoom(for: element.id, in: widget, size: size)
+                        ElementTile(element: element, isOn: hasRoom && widget.shows(element.id), hasRoom: hasRoom) { on in
                             withAnimation(Motion.content) { model.editedWidgets.setOption(element.id, on, for: id) }
                         }
                     }
@@ -826,6 +872,8 @@ struct BackgroundSettings: View {
 private struct ElementTile: View {
     let element: ElementSpec
     let isOn: Bool
+    /// False: the widget is too small to draw it (it comes back where there is room).
+    var hasRoom = true
     let set: (Bool) -> Void
 
     @State private var isHovered = false
@@ -840,7 +888,14 @@ private struct ElementTile: View {
                     .font(.callout.weight(.medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
+                if !hasRoom {
+                    Text("No room at this size")
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
             }
+            .opacity(hasRoom ? 1 : 0.55)
             .foregroundStyle(isOn ? AnyShapeStyle(.primary) : AnyShapeStyle(SettingsPalette.secondary))
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity, minHeight: 74)
@@ -853,9 +908,10 @@ private struct ElementTile: View {
             .contentShape(.rect(cornerRadius: 12))
         }
         .buttonStyle(.plain)
+        .disabled(!hasRoom)
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovered)
-        .help(isOn ? "Shown: click to hide" : "Hidden: click to show")
+        .help(!hasRoom ? "Make the widget larger to show it" : isOn ? "Shown: click to hide" : "Hidden: click to show")
         .accessibilityRepresentation {
             Toggle(element.title, isOn: Binding(get: { isOn }, set: set))
         }
@@ -867,7 +923,13 @@ private struct ElementTile: View {
 /// Every built-in widget, grouped by category: compact cards with a live preview, a name, one line
 /// on what it shows, and Add (or a check and Edit once it is on the island). Worded and weighted as
 /// what it is — widgets that come with the app and only need adding — not as a store.
-private struct WidgetStoreView: View {
+private struct WidgetStoreView: View, Equatable {
+    /// Unseen before and after: the same, whatever else it was given (its closures never compare).
+    nonisolated static func == (old: WidgetStoreView, new: WidgetStoreView) -> Bool { !old.isShown && !new.isShown }
+
+    /// False while it is kept unseen (a widget is picked, another mode): it stands still then — the
+    /// board is not read, so moving a widget on the stage does not go over its cards.
+    var isShown = true
     let add: (IslandWidgetKind) -> Void
     let open: (IslandWidgetKind) -> Void
 
@@ -883,17 +945,31 @@ private struct WidgetStoreView: View {
     static let categoryBarMaximum: CGFloat = 760
     /// The row's width: the categories take what the search leaves them.
     @State private var rowWidth: CGFloat = 0
+    /// The board as it was when last shown: what the cards say while unseen.
+    @State private var seen = SeenBoard()
+
+    private final class SeenBoard {
+        var board: WidgetBoard?
+    }
+
+    /// The board the cards read: the edited one while shown, the last one seen otherwise.
+    private var board: WidgetBoard {
+        if isShown || seen.board == nil { seen.board = model.editedWidgets.board }
+        return seen.board ?? model.editedWidgets.board
+    }
+
+    private func matches(_ kind: IslandWidgetKind) -> Bool {
+        search.isEmpty || kind.title.localizedStandardContains(search) || kind.summary.localizedStandardContains(search)
+    }
 
     var body: some View {
+        let board = board
         let offered = IslandWidgetKind.allCases.filter(\.isOffered)
-        let kinds = offered.filter { kind in
-            (category == nil || kind.category == category)
-                && (search.isEmpty || kind.title.localizedStandardContains(search) || kind.summary.localizedStandardContains(search))
-        }
+        let kinds = offered.filter { kind in (category == nil || kind.category == category) && matches(kind) }
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("All Widgets").font(.title3.weight(.semibold))
-                Text("Built in · \(offered.filter { model.editedWidgets.board.contains($0) }.count) of \(offered.count) on your island")
+                Text("Built in · \(offered.filter { board.contains($0) }.count) of \(offered.count) on your island")
                     .font(.callout)
                     .foregroundStyle(SettingsPalette.secondary)
             }
@@ -927,28 +1003,41 @@ private struct WidgetStoreView: View {
             if kinds.isEmpty {
                 ContentUnavailableView.search(text: search)
                     .frame(maxWidth: .infinity, minHeight: 140)
-            } else if category == nil, search.isEmpty {
-                // Everything: one titled group per category.
-                ForEach(WidgetCategory.allCases) { group in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label(group.title, systemImage: group.systemImage)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(SettingsPalette.secondary)
-                        grid(group.kinds.filter(\.isOffered))
-                    }
-                    .padding(.top, 4)
-                }
-            } else {
-                grid(kinds)
             }
+            // One group per category, each kept whichever is picked: a category picked folds the
+            // others away (their cards and previews stay built), so it is there at once and All
+            // comes back at once — only what a search leaves out is taken away.
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(WidgetCategory.allCases) { group in
+                    let inGroup = group.kinds.filter { $0.isOffered && matches($0) }
+                    let folded = inGroup.isEmpty || (category != nil && category != group)
+                    VStack(alignment: .leading, spacing: 8) {
+                        // Its name over it among all the others; alone, the bar says which it is.
+                        if category == nil, search.isEmpty {
+                            Label(group.title, systemImage: group.systemImage)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(SettingsPalette.secondary)
+                        }
+                        grid(inGroup, board: board)
+                    }
+                    .padding(.top, category == nil && search.isEmpty ? 18 : 14)
+                    .opacity(folded ? 0 : 1)
+                    .animation(.easeOut(duration: 0.22), value: folded)
+                    .frame(height: folded ? 0 : nil, alignment: .top)
+                    .clipped()
+                    .allowsHitTesting(!folded)
+                    .accessibilityHidden(folded)
+                }
+            }
+            .padding(.top, -14)
         }
     }
 
-    private func grid(_ kinds: [IslandWidgetKind]) -> some View {
+    private func grid(_ kinds: [IslandWidgetKind], board: WidgetBoard) -> some View {
         GalleryGrid(minimum: 200, maximum: 300, spacing: 12) {
             ForEach(kinds) { kind in
-                GalleryCard(kind: kind, grid: model.editedWidgets.board.grid,
-                            isAdded: model.editedWidgets.board.contains(kind),
+                GalleryCard(kind: kind, grid: board.grid,
+                            isAdded: board.contains(kind),
                             add: { add(kind) }, open: { open(kind) })
             }
         }

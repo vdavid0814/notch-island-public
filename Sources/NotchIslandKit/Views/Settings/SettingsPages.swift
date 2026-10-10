@@ -789,6 +789,14 @@ private struct UpdateSection: View {
                 Label("Updated from \(from) to \(updater.current). Your settings and permissions were kept.", systemImage: "sparkles")
                     .foregroundStyle(.primary)
             }
+            if ReleaseNotes.current.version == updater.current {
+                LabeledContent("What this version brought") {
+                    Button("What's New…") {
+                        model.controller.closeSettings()
+                        model.controller.showWhatsNew()
+                    }
+                }
+            }
             switch updater.state {
             case .idle, .checking:
                 HStack(spacing: 8) {

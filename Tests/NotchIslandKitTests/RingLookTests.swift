@@ -40,13 +40,13 @@ import Testing
 
     @Test func theDialsTextsAreTheirLinesParts() {
         #expect(ProgressLook.Part.elapsed.textID(in: .fanDial) == .fanName)
-        #expect(ProgressLook.Part.remaining.textID(in: .fanDial) == .fanUnit)
+        #expect(ProgressLook.Part.remaining.textID(in: .fanDial) == .value)
         #expect(ProgressLook.Part.elapsed.textID(in: .tempDial) == .tempName)
         #expect(ProgressLook.Part.remaining.textID(in: .tempDial) == .tempValue)
         #expect(ProgressLook.Part.remaining.textID(in: .levelSlider) == nil)
         #expect(ProgressLook.Part.remaining.textID(in: .progress) == .remainingTime)
         #expect(ProgressLook.Part.bar.title(in: .fanDial, isRing: true) == "Ring")
-        #expect(ProgressLook.Part.remaining.title(in: .fanDial) == "Unit")
+        #expect(ProgressLook.Part.remaining.title(in: .fanDial) == "Value")
         #expect(ProgressLook.Part.elapsed.title(in: .progress) == "Elapsed")
     }
 
@@ -70,12 +70,15 @@ import Testing
         text.isBold = true
         widget.progressLooks = [.fanDial: line, .tempDial: line, .value: line]
         widget.chartLooks = [.tempGraph: chart, .rpmGraph: chart, .fanDial: chart]
-        widget.textStyles = [.fanName: text, .fanUnit: text, .tempName: text, .tempValue: text, .tempGraphText: text,
+        widget.offsets = [.value: ElementOffset(x: 4, y: 4), .fanDial: ElementOffset(x: 2, y: 0)]
+        widget.textStyles = [.fanName: text, .value: text, .tempName: text, .tempValue: text, .tempGraphText: text,
                              .rpmGraphText: text, .fanDial: text]
         widget.sanitize()
         #expect(Set(widget.progressLooks.keys) == [.fanDial, .tempDial])
         #expect(Set(widget.chartLooks.keys) == [.tempGraph, .rpmGraph])
-        #expect(Set(widget.textStyles.keys) == [.fanName, .fanUnit, .tempName, .tempValue, .tempGraphText, .rpmGraphText])
+        #expect(Set(widget.textStyles.keys) == [.fanName, .value, .tempName, .tempValue, .tempGraphText, .rpmGraphText])
+        // The speed is the dial's own text now: no longer moved by itself.
+        #expect(Set(widget.offsets.keys) == [.fanDial])
     }
 
     @Test func theBatterysRingKeepsALineLook() {
@@ -88,22 +91,51 @@ import Testing
         #expect(widget.progressLooks == [.batteryRing: line])
     }
 
-    @Test func aGraphWritesTheValuesThatFit() {
-        var look = ChartLook()
-        #expect(SensorGraph.guides(look) == [0, 50, 100])
-        look.percentStep = 0
-        // None written: the top and the bottom keep their guides.
-        #expect(SensorGraph.guides(look) == [0, 100] && look.percentages.isEmpty)
-        look.percentStep = 10
-        let tall = SensorGraph.written(look.percentages, height: 200, caption: 10)
-        #expect(tall == look.percentages)
+    @Test func aGraphWritesAValueEverySoMany() {
+        // The temperature's own: 25, 50, 75 and 100.
+        #expect(SensorGraph.marks(SensorGraph.temperatureRange, step: SensorGraph.temperatureStep) == [25, 50, 75, 100])
+        // From the lowest up, the highest always: 25, 40, 55, 70, 85 and 100; 30, 50, 70 and 80.
+        #expect(SensorGraph.marks(25...100, step: 15) == [25, 40, 55, 70, 85, 100])
+        #expect(SensorGraph.marks(30...80, step: 20) == [30, 50, 70, 80])
+        // No step: the ends alone (their guides stay; nothing is written).
+        #expect(SensorGraph.marks(25...100, step: 0) == [25, 100])
+        #expect(SensorGraph.speedStep(1200...5800) == 2300)
+        let marks = SensorGraph.marks(25...100, step: 5)
+        #expect(SensorGraph.written(marks, range: 25...100, height: 400, caption: 10) == marks)
         // Low: the ends always, those between only clear of their neighbours.
-        let low = SensorGraph.written(look.percentages, height: 44, caption: 10)
-        #expect(low.first == 0 && low.last == 100 && low.count < look.percentages.count)
+        let low = SensorGraph.written(marks, range: 25...100, height: 44, caption: 10)
+        #expect(low.first == 25 && low.last == 100 && low.count < marks.count)
         for (lower, upper) in zip(low, low.dropFirst()) {
-            #expect(SensorGraph.captionTop(lower, height: 44, caption: 10) - SensorGraph.captionTop(upper, height: 44, caption: 10) >= 10)
+            #expect(SensorGraph.captionTop((lower - 25) / 75, height: 44, caption: 10)
+                    - SensorGraph.captionTop((upper - 25) / 75, height: 44, caption: 10) >= 10)
         }
-        #expect(ChartLook.title(ofGraphStep: 25) == "Every quarter")
+        var look = ChartLook()
+        look.valueStep = -3
+        look.sanitize()
+        #expect(look.valueStep == nil)
+    }
+
+    @Test func aGraphsRangeIsItsOwnUntilAnEndIsSet() throws {
+        var look = ChartLook()
+        #expect(look.range(own: 30...110, gap: 5) == 30...110)
+        look.rangeMinimum = 40
+        #expect(look.range(own: 30...110, gap: 5) == 40...110)
+        look.rangeMaximum = 42
+        // The highest stays above the lowest.
+        #expect(look.range(own: 30...110, gap: 5) == 40...45)
+        let stored = try JSONDecoder().decode(ChartLook.self, from: JSONEncoder().encode(look))
+        #expect(stored == look && stored != .plain)
+        look.rangeMinimum = .infinity
+        look.sanitize()
+        #expect(look.rangeMinimum == nil && look.rangeMaximum == 42)
+    }
+
+    @Test func theFansDialNamesItsMode() {
+        #expect(FanControlWidget.nameText(manual: false, access: .ready, showsMode: true) == "Fan")
+        #expect(FanControlWidget.nameText(manual: true, access: .ready, showsMode: true) == "Manual")
+        #expect(FanControlWidget.nameText(manual: true, access: .ready, showsMode: false) == "Fan")
+        #expect(FanControlWidget.nameText(manual: false, access: .needsApproval, showsMode: true) == "Allow in Login Items")
+        #expect(FanControlWidget.isAlert(manual: false, access: .failed("no")) && !FanControlWidget.isAlert(manual: false, access: .unknown))
     }
 
     @Test func aGraphsColoursAreItsOwnUntilOneIsPicked() {

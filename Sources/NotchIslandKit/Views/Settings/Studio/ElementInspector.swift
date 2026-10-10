@@ -5,9 +5,15 @@ import SwiftUI
 /// aligned, its colour, and a background of its own with its corners (`TextStyle`). For a button
 /// (play, previous, next): what it is made of, its shape and corners, its fill and its symbol's
 /// colour (`ButtonLook`; the symbol is placed in the panel under the editor).
-struct ElementInspector: View {
+struct ElementInspector: View, Equatable {
     let widget: IslandWidget
     let editing: ElementEditing
+
+    /// The same but for where a line's parts are (`IslandWidget.withoutLinePlacement`): nothing here
+    /// shows that. What it reads of `editing` and the model it follows by itself.
+    nonisolated static func == (old: ElementInspector, new: ElementInspector) -> Bool {
+        old.editing === new.editing && old.widget.withoutLinePlacement == new.widget.withoutLinePlacement
+    }
 
     @Environment(AppModel.self) private var model
     /// The colour whose mixer is open.
@@ -290,6 +296,8 @@ struct ElementInspector: View {
                 .foregroundStyle(SettingsPalette.secondary)
                 .monospacedDigit()
         }
+        // A slider follows the pointer: never eased to where it was put.
+        .transaction { $0.animation = nil }
         .help(help)
     }
 
@@ -480,19 +488,84 @@ struct ElementInspector: View {
             colourChoice(look.highColor, mixing: .chartHigh) { color in updateChart(id) { $0.highColor = color } }
         }
         StudioDivider()
-        section(graph ? "Values" : "Percentages",
-                caption: graph ? "Beside the graph, each with its line, where it is large enough; ones too close to the next are left out."
-                    : "Beside the chart, each with its line, where it is wide enough; ones too close to the next are left out.") {
-            HStack(spacing: 10) {
-                Text("Write").font(.callout)
-                Picker("Percentages", selection: Binding(get: { look.percentStep }, set: { step in updateChart(id) { $0.percentStep = step } })) {
-                    ForEach(ChartLook.percentSteps, id: \.self) {
-                        Text(graph ? ChartLook.title(ofGraphStep: $0) : ChartLook.title(ofStep: $0)).tag($0)
+        if !graph {
+            section("Percentages", caption: "Beside the chart, each with its line, where it is wide enough; ones too close to the next are left out.") {
+                HStack(spacing: 10) {
+                    Text("Write").font(.callout)
+                    Picker("Percentages", selection: Binding(get: { look.percentStep }, set: { step in updateChart(id) { $0.percentStep = step } })) {
+                        ForEach(ChartLook.percentSteps, id: \.self) { Text(ChartLook.title(ofStep: $0)).tag($0) }
                     }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .fixedSize()
+            }
+        }
+        // A graph's range: its lowest and highest value, each the graph's own until it is set.
+        if graph {
+            let own = graphRange(id)
+            let step: Double = id == .tempGraph ? 5 : 100
+            let limits: ClosedRange<Double> = id == .tempGraph ? 0...130 : 0...8000
+            StudioDivider()
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Range").font(.subheadline.weight(.semibold))
+                    Text("The lowest and the highest value drawn; the values written are spread between them.")
+                        .font(.caption).foregroundStyle(SettingsPalette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                if look.rangeMinimum != nil || look.rangeMaximum != nil {
+                    Button("Automatic") {
+                        withAnimation(.spring(duration: 0.35, bounce: 0.12)) {
+                            updateChart(id) { $0.rangeMinimum = nil; $0.rangeMaximum = nil }
+                        }
+                    }
+                    .controlSize(.small)
+                    .help("The graph's own range")
+                }
+            }
+            rangeSlider("Lowest", value: look.rangeMinimum ?? own.lowerBound, in: limits.lowerBound...(limits.upperBound - step),
+                        step: step, graph: id) { low in
+                updateChart(id) { look in
+                    look.rangeMinimum = low
+                    // The highest stays above it.
+                    if (look.rangeMaximum ?? own.upperBound) < low + step { look.rangeMaximum = low + step }
+                }
+            }
+            rangeSlider("Highest", value: look.rangeMaximum ?? own.upperBound, in: (limits.lowerBound + step)...limits.upperBound,
+                        step: step, graph: id) { high in
+                updateChart(id) { look in
+                    look.rangeMaximum = high
+                    if (look.rangeMinimum ?? own.lowerBound) > high - step { look.rangeMinimum = high - step }
+                }
+            }
+            // A value every so many degrees (or rpm) from the lowest up: 25, 30, 35… or 25, 40, 55…
+            let ownStep = id == .tempGraph ? SensorGraph.temperatureStep : SensorGraph.speedStep(own)
+            let every = look.valueStep ?? ((ownStep / step).rounded() * step)
+            let low = look.rangeMinimum ?? own.lowerBound
+            StudioDivider()
+            section("Values", caption: "Written beside the graph from the lowest up, each with its line; ones too close to the next are left out. At nothing, none are written.") {
+                HStack(spacing: 10) {
+                    Text("Every").font(.callout)
+                    Slider(value: Binding(get: { min(every, id == .tempGraph ? 50 : 3000) }, set: { new in
+                        let snapped = (new / step).rounded() * step
+                        if snapped != every { updateChart(id) { $0.valueStep = snapped } }
+                    }), in: 0...(id == .tempGraph ? 50 : 3000)) { Text("Every") }
+                    .labelsHidden()
+                    .tint(Color.islandAccent)
+                    ReservedWidthText(every <= 0 ? String(localized: "None")
+                                      : id == .tempGraph ? FanControlWidget.degreeStep(every, locale: .current) : FanControlWidget.rpm(every, locale: .current),
+                                      fitting: [String(localized: "None"), id == .tempGraph ? "90°" : FanControlWidget.rpm(3000, locale: .current)])
+                        .foregroundStyle(SettingsPalette.secondary)
+                        .monospacedDigit()
+                }
+                if every > 0 {
+                    let format: (Double) -> String = { id == .tempGraph ? FanControlWidget.degrees($0, locale: .current) : FanControlWidget.rpm($0, locale: .current) }
+                    Text(verbatim: [low, low + every, low + 2 * every].map(format).joined(separator: " · ") + " …")
+                        .font(.caption)
+                        .foregroundStyle(SettingsPalette.secondary)
+                }
             }
         }
         // A graph's texts (its name, the value now, the values beside it): one type and colour.
@@ -500,8 +573,11 @@ struct ElementInspector: View {
             let style = widget.textStyle(of: graphText)
             StudioDivider()
             Text("Texts").font(.subheadline.weight(.semibold))
-            pointSlider("Size", value: style.size ?? Double(WidgetParts.textSize(of: graphText, in: widget, inner: inner)),
-                        in: 6...16, help: "The graph's name; the value now and the values beside it follow it") { points in
+            // From the size they are drawn at now (the graph's own follows its height): the first
+            // touch does not jump.
+            let ownSize = Double(SensorGraph.textPoints(height: editing.parts[id]?.height ?? inner.height))
+            pointSlider("Size", value: min(style.size ?? ownSize, SensorGraph.textSizes.upperBound),
+                        in: SensorGraph.textSizes, help: "The graph's name; the value now and the values beside it follow it") { points in
                 update(graphText) { $0.size = points }
             }
             font(graphText, style, showsSize: false)
@@ -747,6 +823,33 @@ struct ElementInspector: View {
             change(&look)
             look.sanitize()
             widget.setDayGridLook(look, of: id)
+        }
+    }
+
+    /// A graph's own range: the chip's fixed one, the fans' slowest to fastest.
+    private func graphRange(_ id: ElementID) -> ClosedRange<Double> {
+        if id == .tempGraph { return TemperatureDial.range }
+        let fans = model.fans.fans.isEmpty ? FanControlWidget.sample : model.fans.fans
+        let low = fans.map(\.minimum).min() ?? 0, high = fans.map(\.maximum).max() ?? 1
+        return low...max(high, low + 1)
+    }
+
+    /// One end of a graph's range, in the graph's own unit (degrees as the Mac writes them, rpm).
+    private func rangeSlider(_ title: LocalizedStringKey, value: Double, in range: ClosedRange<Double>, step: Double, graph: ElementID,
+                             set: @escaping (Double) -> Void) -> some View {
+        let shown = min(max(value, range.lowerBound), range.upperBound)
+        return HStack(spacing: 10) {
+            Text(title).font(.callout)
+            Slider(value: Binding(get: { shown }, set: { new in
+                let snapped = (new / step).rounded() * step
+                if snapped != value { set(snapped) }
+            }), in: range) { Text(title) }
+            .labelsHidden()
+            .tint(Color.islandAccent)
+            ReservedWidthText(graph == .tempGraph ? FanControlWidget.degrees(value, locale: .current) : FanControlWidget.rpm(value, locale: .current),
+                              fitting: [graph == .tempGraph ? "266°" : FanControlWidget.rpm(8000, locale: .current)])
+                .foregroundStyle(SettingsPalette.secondary)
+                .monospacedDigit()
         }
     }
 
@@ -1414,7 +1517,9 @@ struct ElementInspector: View {
 
     /// The widget's inside, as the board draws it.
     private var inner: CGSize {
-        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
+        // The panel's grid (every board follows it), not the board's own: read from the board, the
+        // inspector was gone over again at every change to the widget, whatever it showed of it.
+        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.preferences.panel.grid)
         let natural = geometry.laidSize(for: widget.frame)
         let padding = WidgetMetrics.padding(for: widget)
         return CGSize(width: max(0, natural.width - 2 * padding), height: max(0, natural.height - 2 * padding))

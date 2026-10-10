@@ -62,20 +62,67 @@ final class SettingsPageDeckView: NSView {
         for page in pages.values where page.host.frame != bounds { page.host.frame = bounds }
     }
 
-    /// Shows `pane`, at its top, as a new page was.
+    /// Shows `pane`, at its top, as a new page was: the page it takes the place of fades out as
+    /// this one fades in, rising a little into place. Both are layers the render server moves
+    /// (opacity and a transform): nothing is laid out or drawn again for it, so every frame of it is
+    /// cheap. With Reduce Motion, or the first page of all, it is simply there.
     func show(_ pane: IslandSettingsPane) {
         guard pane != shown || pages[pane]?.visit.isShown == false else { return }
-        if let shown, shown != pane, let old = pages[shown] {
-            old.host.isHidden = true
-            old.visit.isShown = false
-        }
+        let old = shown.flatMap { $0 != pane ? pages[$0] : nil }
+        let leaving = shown
+        old?.visit.isShown = false
         let page = pages[pane] ?? make(pane)
         page.host.isHidden = false
         page.host.scrollToTop()
         page.visit.count += 1
         page.visit.isShown = true
         shown = pane
+        guard let old, let leaving, window?.isVisible == true, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              let incoming = page.host.layer, let outgoing = old.host.layer else {
+            old?.host.isHidden = true
+            return
+        }
+        incoming.removeAnimation(forKey: Self.transitionKey)
+        outgoing.removeAnimation(forKey: Self.transitionKey)
+        let timing = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
+        let fadeIn = CABasicAnimation(keyPath: "opacity")
+        fadeIn.fromValue = 0
+        fadeIn.toValue = 1
+        let rise = CABasicAnimation(keyPath: "transform.translation.y")
+        // The deck is flipped: its layers' y grows downwards.
+        rise.fromValue = Self.rise
+        rise.toValue = 0
+        let entrance = CAAnimationGroup()
+        entrance.animations = [fadeIn, rise]
+        entrance.duration = Self.transitionDuration
+        entrance.timingFunction = timing
+        incoming.add(entrance, forKey: Self.transitionKey)
+
+        let fadeOut = CABasicAnimation(keyPath: "opacity")
+        fadeOut.fromValue = 1
+        fadeOut.toValue = 0
+        fadeOut.duration = Self.transitionDuration * 0.55
+        fadeOut.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        // Stays as it ends until it is hidden (the model layer is still opaque).
+        fadeOut.fillMode = .forwards
+        fadeOut.isRemovedOnCompletion = false
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                // Not if it was shown again meanwhile.
+                if self.shown != leaving { old.host.isHidden = true }
+                outgoing.removeAnimation(forKey: Self.transitionKey)
+            }
+        }
+        outgoing.add(fadeOut, forKey: Self.transitionKey)
+        CATransaction.commit()
     }
+
+    private static let transitionKey = "settingsPage"
+    private static let transitionDuration: CFTimeInterval = 0.26
+    /// How far below its place a page starts.
+    private static let rise: CGFloat = 14
 
     /// Settings has closed: the shown page stands still too.
     func closed() {

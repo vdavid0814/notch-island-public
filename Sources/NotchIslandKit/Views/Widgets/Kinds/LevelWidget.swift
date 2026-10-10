@@ -176,7 +176,8 @@ struct LevelRing: View {
                 }
                 if showsNumber {
                     RingText(text: Text(IslandFormat.percent(value)), style: valueStyle, size: diameter * 0.18, weight: .semibold,
-                             design: .rounded, part: .remaining, look: look)
+                             design: .rounded, part: .remaining, look: look,
+                             limit: RingText.valueLimit(diameter: diameter, line: line))
                         // The ring moves; the number just changes (a cross-fade per step smeared).
                         .transaction { $0.animation = nil }
                 }
@@ -184,6 +185,7 @@ struct LevelRing: View {
             .lineLimit(1)
             .minimumScaleFactor(0.6)
             .padding(line * 1.4)
+            .besideProgressParts()
         }
         .frame(width: diameter, height: diameter)
         .frame(width: size.width, height: size.height)

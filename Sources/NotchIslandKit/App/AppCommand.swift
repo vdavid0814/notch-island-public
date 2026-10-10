@@ -73,6 +73,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
     case toggleRecording
     /// The fans back to macOS and Fan Control's helper removed (`fans/remove-helper`).
     case removeFanHelper
+    /// What this version brought, in the notch (`whatsnew`), as after an update.
+    case showWhatsNew
     case demo(DemoCommand)
 
     static let scheme = "notchisland"
@@ -92,7 +94,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
     ///     open[?page=home|shelf|timer|battery]   close   pin   settings[/general|widgets|activities|permissions|about]
     ///     customize   widget/<kind>|<id>   siri   diagnostics/send   diagnostics/baseline
     ///     media/play|pause|toggle|next|previous
-    ///     timer[?minutes=N]   timer/cancel   stopwatch   fans/remove-helper
+    ///     timer[?minutes=N]   timer/cancel   stopwatch   fans/remove-helper   whatsnew
     ///     demo/media|charging|unplug|low|timerdone|drop|shelf|reset
     ///     demo/volume[?level=0…1]   demo/brightness[?level=0…1]
     ///     demo/hover[?inside=1|0]   demo/state   demo/surface?style=smoked|black|fade   demo/airpods
@@ -154,6 +156,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "timer/cancel": return .cancelTimer
         case "stopwatch": return .startStopwatch
         case "fans/remove-helper": return .removeFanHelper
+        case "whatsnew": return .showWhatsNew
 
         case "demo/media": return .demo(.media)
         case "demo/charging": return .demo(.charging)

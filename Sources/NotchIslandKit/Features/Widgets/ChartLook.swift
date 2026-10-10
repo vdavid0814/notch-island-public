@@ -2,7 +2,8 @@ import Foundation
 
 /// A graph of readings (Fan Control's temperature and speed) is set by the same look: its corners
 /// are its line's joins and the mark at the newest reading, its three colours the low, middle and
-/// high readings', and its step how often a value is written beside it.
+/// high readings', with a range and a step of its own (`rangeMinimum`, `rangeMaximum`, `valueStep`:
+/// a value written every so many degrees or rpm, in place of the chart's percentages).
 ///
 /// How a chart is drawn (`WidgetKindSpec.charts`), from Customize's inspector: its bars' corners,
 /// the colour of a bar by how far the battery has run down, and how often a percentage is written
@@ -18,6 +19,12 @@ nonisolated struct ChartLook: Sendable, Codable, Hashable {
     var highColor: TextStyle.TextColor = .automatic
     /// A percentage (and its dashed line) every this many percent; 0: none beside the chart.
     var percentStep = 50
+    /// A graph's lowest and highest value drawn (degrees Celsius, rpm); nil: the graph's own.
+    var rangeMinimum: Double?
+    var rangeMaximum: Double?
+    /// A graph's values written every this much (degrees Celsius, rpm), from its lowest up; 0:
+    /// none; nil: the graph's own (the temperature's every 25 °C, the speed's at its middle).
+    var valueStep: Double?
 
     static let plain = ChartLook()
 
@@ -51,7 +58,7 @@ nonisolated struct ChartLook: Sendable, Codable, Hashable {
 
     init() {}
 
-    private enum CodingKeys: String, CodingKey { case corners, lowColor, mediumColor, highColor, percentStep }
+    private enum CodingKeys: String, CodingKey { case corners, lowColor, mediumColor, highColor, percentStep, rangeMinimum, rangeMaximum, valueStep }
 
     // Field by field: one this build cannot read keeps its default.
     init(from decoder: any Decoder) throws {
@@ -61,11 +68,26 @@ nonisolated struct ChartLook: Sendable, Codable, Hashable {
         mediumColor = (try? c.decodeIfPresent(TextStyle.TextColor.self, forKey: .mediumColor)).flatMap { $0 } ?? .automatic
         highColor = (try? c.decodeIfPresent(TextStyle.TextColor.self, forKey: .highColor)).flatMap { $0 } ?? .automatic
         percentStep = (try? c.decodeIfPresent(Int.self, forKey: .percentStep)).flatMap { $0 } ?? 50
+        rangeMinimum = (try? c.decodeIfPresent(Double.self, forKey: .rangeMinimum)).flatMap { $0 }
+        rangeMaximum = (try? c.decodeIfPresent(Double.self, forKey: .rangeMaximum)).flatMap { $0 }
+        valueStep = (try? c.decodeIfPresent(Double.self, forKey: .valueStep)).flatMap { $0 }
     }
 
     /// A step not offered is the chart's own.
     mutating func sanitize() {
         if !Self.percentSteps.contains(percentStep) { percentStep = 50 }
+        if let rangeMinimum, !rangeMinimum.isFinite { self.rangeMinimum = nil }
+        if let rangeMaximum, !rangeMaximum.isFinite { self.rangeMaximum = nil }
+        if let valueStep, !(valueStep.isFinite && valueStep >= 0) { self.valueStep = nil }
+    }
+
+    /// The range a graph draws: `own`, with the ends the look sets — the highest kept above the
+    /// lowest by `gap` at least.
+    func range(own: ClosedRange<Double>, gap: Double) -> ClosedRange<Double> {
+        let low = rangeMinimum ?? own.lowerBound
+        var high = rangeMaximum ?? own.upperBound
+        if high < low + gap { high = low + gap }
+        return low...high
     }
 
     /// What a step is called in Customize.
@@ -74,18 +96,6 @@ nonisolated struct ChartLook: Sendable, Codable, Hashable {
         case 0: String(localized: "None")
         case 100: String(localized: "0 and 100 %")
         default: String(localized: "Every \(step) %")
-        }
-    }
-
-    /// What a step is called for a graph of readings (Fan Control's): shares of its range.
-    static func title(ofGraphStep step: Int) -> String {
-        switch step {
-        case 0: String(localized: "None")
-        case 100: String(localized: "Top and bottom")
-        case 50: String(localized: "Every half")
-        case 25: String(localized: "Every quarter")
-        case 20: String(localized: "Every fifth")
-        default: String(localized: "Every tenth")
         }
     }
 

@@ -39,6 +39,9 @@ import SwiftUI
     var linePreview: ElementID?
     /// The part of a playback line picked in the panel under the editor (its line, a time).
     var progressPart: ProgressLook.Part?
+    /// A part of a line is being dragged or sized in that panel now: the editor over it follows a
+    /// few times a second meanwhile (`WidgetElementEditor.pictureInterval`), the panel at every step.
+    var isPlacingLinePart = false
     /// The ruler's unit name is picked in the panel under the editor (the inspector sets its type).
     var picksRulerUnit = false
     /// A part's size as drawn, copied in the inspector to give another part (Paste Size).
@@ -107,11 +110,23 @@ import SwiftUI
 /// Over the editor: saving the widget's look as a version and opening the saved ones, putting the
 /// picked part or the whole widget back, whether the picked part is drawn under or over those it overlaps,
 /// Done, and undo and redo.
-struct CustomizeTopBar: View {
+struct CustomizeTopBar: View, Equatable {
     let widget: IslandWidget
     let editing: ElementEditing
     let versions: WidgetVersionStore
     let close: () -> Void
+
+    /// The same but for where a line's parts are (`IslandWidget.withoutLinePlacement`): the bar
+    /// shows none of that, and is not laid out again (three times over, to find the size that fits)
+    /// at every step of a drag in the panel under the editor. What it saves and undoes from is the
+    /// widget as it stands (`current`), not the one it was last drawn for.
+    nonisolated static func == (old: CustomizeTopBar, new: CustomizeTopBar) -> Bool {
+        old.editing === new.editing && old.versions === new.versions
+            && old.widget.withoutLinePlacement == new.widget.withoutLinePlacement
+    }
+
+    /// The widget as it stands in the store now.
+    private var current: IslandWidget { model.editedWidgets.board.widget(widget.id) ?? widget }
 
     @Environment(AppModel.self) private var model
     /// The last choice shown, kept while the picked half fades out.
@@ -140,7 +155,7 @@ struct CustomizeTopBar: View {
             // Left: saving this look, and opening the saved ones (the button grows into their list).
             VStack(spacing: 8) {
                 Button {
-                    let version = versions.save(widget)
+                    let version = versions.save(current)
                     withAnimation(.spring(duration: 0.3)) { justSaved = version.id }
                     Task {
                         try? await Task.sleep(for: .seconds(1.5))
@@ -210,12 +225,12 @@ struct CustomizeTopBar: View {
             // Right: undo and redo, and Done in the corner, as wide as the bar under them.
             VStack(spacing: 8) {
                 HStack(spacing: 6) {
-                    Button { restore(editing.undo(from: widget)) } label: { historyIcon("arrow.uturn.backward") }
+                    Button { restore(editing.undo(from: current)) } label: { historyIcon("arrow.uturn.backward") }
                         .disabled(editing.undoStack.isEmpty)
                         .keyboardShortcut("z", modifiers: .command)
                         .help("Undo")
                         .accessibilityLabel("Undo")
-                    Button { restore(editing.redo(from: widget)) } label: { historyIcon("arrow.uturn.forward") }
+                    Button { restore(editing.redo(from: current)) } label: { historyIcon("arrow.uturn.forward") }
                         .disabled(editing.redoStack.isEmpty)
                         .keyboardShortcut("z", modifiers: [.command, .shift])
                         .help("Redo")

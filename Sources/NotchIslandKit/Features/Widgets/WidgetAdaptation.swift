@@ -11,6 +11,26 @@ import Foundation
 /// Playing on one row, placed on three), where they were set means nothing: the parts are where
 /// the layout puts them, set as large as it sets them, their looks (colours, styles, buttons) kept.
 extension IslandWidget {
+    /// The widget as Customize's side panels show it: where a line's parts are and how long and
+    /// thick it is (set in the panel under the editor, and shown there) left out — whether each is
+    /// set at all is kept, for their Reset buttons. Two widgets alike in this differ only by a part
+    /// of a line dragged or sized, which the side panels do not show: they are not gone over for
+    /// it (every bar of segments in them was set up again at each step of such a drag, measured).
+    nonisolated var withoutLinePlacement: IslandWidget {
+        guard !progressLooks.isEmpty else { return self }
+        func mark(_ offset: ElementOffset) -> ElementOffset { offset == .zero ? .zero : ElementOffset(x: 1, y: 0) }
+        var widget = self
+        widget.progressLooks = progressLooks.mapValues { look in
+            var look = look
+            look.barOffset = mark(look.barOffset)
+            look.elapsedOffset = mark(look.elapsedOffset)
+            look.remainingOffset = mark(look.remainingOffset)
+            look.barLength = look.barLength == 1 ? 1 : 0.5
+            return look
+        }
+        return widget
+    }
+
     /// The size its parts were placed at: the one set, or the kind's own.
     var effectiveDesignSize: GridSize { designSize ?? kind.defaultSize }
 

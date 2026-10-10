@@ -253,6 +253,15 @@ final class SettingsSurfaceView: NSView {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.25
             pagesHost.animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                // Faded out behind Customize, the pages are hidden too: unseen but not hidden, the
+                // Widgets page went on following every change made in Customize — laid out and
+                // drawn again, its stage's wallpaper with it (about half of each step of a drag,
+                // measured). Hidden, they do nothing (`DeferringHostingView`) until it closes.
+                guard let self, self.customizeHost === host else { return }
+                self.pagesHost.isHidden = true
+            }
         }
         // It comes in in steps of its own as it appears (`WidgetCustomizeView`).
         presentation.isShown = true
@@ -273,6 +282,7 @@ final class SettingsSurfaceView: NSView {
     private func closeCustomize() {
         guard let presentation = customizePresentation else { return }
         presentation.isShown = false
+        pagesHost.isHidden = false
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.3
             pagesHost.animator().alphaValue = 1
@@ -298,6 +308,7 @@ final class SettingsSurfaceView: NSView {
         customizeHost?.removeFromSuperview()
         customizeHost = nil
         customizePresentation = nil
+        if pagesHost.isHidden { pagesHost.isHidden = false }
         if restoresPages, pagesHost.alphaValue != 1 { pagesHost.alphaValue = 1 }
     }
 

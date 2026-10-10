@@ -184,7 +184,7 @@ import Observation
     /// The page the panel shows: the one chosen, or home once that one is gone (the shelf switched
     /// off while it was the page).
     var panelPage: ExpandedPage {
-        availablePages.contains(island.page) ? island.page : .home
+        island.page == .whatsNew || availablePages.contains(island.page) ? island.page : .home
     }
 
     /// Created at the end of `init` (it needs `self`) and never replaced, hence not observed.
@@ -372,11 +372,16 @@ import Observation
 
         // Just updated and a permission in use is missing (a copy signed differently): About shows
         // which one, instead of features that silently do nothing.
+        // Otherwise what the new version brought, in the notch, until it is closed.
         if updater.updatedFrom != nil {
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(3))
-                guard let self, self.isRunning, self.permissionsNeedAttention else { return }
-                self.controller.openSettings(pane: .about)
+                guard let self, self.isRunning else { return }
+                if self.permissionsNeedAttention {
+                    self.controller.openSettings(pane: .about)
+                } else if ReleaseNotes.current.version == self.updater.current {
+                    self.controller.showWhatsNew()
+                }
             }
         }
 
@@ -454,8 +459,10 @@ import Observation
             timers.cancel()
         case .startStopwatch:
             timers.startStopwatch()
+        case .showWhatsNew:
+            controller.showWhatsNew()
         case .removeFanHelper:
-            fans.removeHelper()
+            Task { await fans.removeHelper() }
         case .showSettings:
             showSettings()
         case .showSettingsPane(let pane):

@@ -55,7 +55,7 @@ nonisolated struct ProgressLook: Sendable, Codable, Hashable {
             case (.memoryLoad, .elapsed): .memoryTitle
             case (.memoryLoad, .remaining): .memoryValue
             case (.fanDial, .elapsed): .fanName
-            case (.fanDial, .remaining): .fanUnit
+            case (.fanDial, .remaining): .value
             case (.tempDial, .elapsed): .tempName
             case (.tempDial, .remaining): .tempValue
             // A level has no texts of its line's own.
@@ -69,8 +69,7 @@ nonisolated struct ProgressLook: Sendable, Codable, Hashable {
             switch (line, self) {
             case (_, .bar): isRing ? "Ring" : title
             case (.cpuLoad, .elapsed), (.memoryLoad, .elapsed), (.fanDial, .elapsed), (.tempDial, .elapsed): "Name"
-            case (.cpuLoad, .remaining), (.memoryLoad, .remaining), (.tempDial, .remaining): "Value"
-            case (.fanDial, .remaining): "Unit"
+            case (.cpuLoad, .remaining), (.memoryLoad, .remaining), (.tempDial, .remaining), (.fanDial, .remaining): "Value"
             default: title
             }
         }

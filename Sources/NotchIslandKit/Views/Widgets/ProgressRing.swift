@@ -147,12 +147,32 @@ struct RingText: View {
     let part: ProgressLook.Part
     let look: ProgressLook
     var reportsFrame = false
+    /// The widest it is drawn (its ring's inside): set larger in Customize, its letters shrink to
+    /// this. nil: as wide as its letters.
+    var limit: CGFloat?
 
     /// For the cover's colour alone: a ring drawn on its own (a test) has no model.
     @Environment(AppModel.self) private var model: AppModel?
 
+    /// The largest a ring's text is set, in points: Customize's slider and handles stop here, and a
+    /// size stored larger is drawn at this.
+    static let largest = 25.0
+
+    /// `style` no larger than a ring's texts are.
+    static func capped(_ style: TextStyle?) -> TextStyle? {
+        guard var style, let size = style.size, size > largest else { return style }
+        style.size = largest
+        return style
+    }
+
+    /// A text across a ring's middle is no wider than this (the ring's inside, a little clear of
+    /// it), one in a dial's opening than `nameLimit`.
+    static func valueLimit(diameter: CGFloat, line: CGFloat) -> CGFloat { max((diameter - 2 * line) * 0.94, 8) }
+    static func nameLimit(diameter: CGFloat) -> CGFloat { max(diameter * 0.52, 8) }
+
     var body: some View {
         let offset = look.offset(of: part)
+        let style = Self.capped(style)
         Group {
             if let style {
                 text
@@ -167,9 +187,12 @@ struct RingText: View {
             }
         }
         .lineLimit(1)
-        // As the widget sets it, it shrinks to its room; set or moved in Customize, it is as large as set.
-        .fixedSize(horizontal: style != nil || offset != .zero || reportsFrame, vertical: false)
+        .minimumScaleFactor(limit == nil ? 0.6 : 0.05)
+        // As the widget sets it, it shrinks to its room; set or moved in Customize, it is as large
+        // as set — up to its limit, where it has one.
+        .fixedSize(horizontal: limit == nil && (style != nil || offset != .zero || reportsFrame), vertical: false)
         .reportsProgressPart(part, if: reportsFrame)
+        .frame(maxWidth: limit)
         .offset(x: offset.x, y: offset.y)
     }
 

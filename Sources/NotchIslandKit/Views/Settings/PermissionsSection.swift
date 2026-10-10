@@ -28,6 +28,8 @@ struct PermissionsSection: View {
                     label(row)
                 }
             }
+            // Not a permission of macOS's list, but allowed the same way: Fan Control's helper.
+            if model.fans.hasFans { FanHelperRow() }
         } header: {
             HStack {
                 Text("Permissions")

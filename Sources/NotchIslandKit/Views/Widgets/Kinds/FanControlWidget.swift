@@ -80,7 +80,7 @@ struct FanControlWidget: View {
         return switch element {
         case .tempDial: layout.showsTempDial
         case .tempGraph, .rpmGraph: layout.graphs.contains(element)
-        case .value, .label: FanDial<EmptyView, EmptyView>.showsTexts(diameter: layout.dial)
+        case .value, .label: FanDial.showsTexts(diameter: layout.dial)
         default: true
         }
     }
@@ -115,6 +115,21 @@ struct FanControlWidget: View {
         }
     }
 
+    /// Under the dial: its name — or, where the mode is shown, what the fans are not doing by
+    /// themselves (Manual, or what is missing to set them).
+    static func nameText(manual: Bool, access: FanCenter.Access, showsMode: Bool) -> String {
+        guard showsMode, isAlert(manual: manual, access: access) else { return String(localized: "Fan") }
+        return modeText(manual: manual, access: access)
+    }
+
+    /// Held by hand, or not settable: the name says so, in orange.
+    static func isAlert(manual: Bool, access: FanCenter.Access) -> Bool {
+        switch access {
+        case .needsApproval, .installing, .failed: true
+        default: manual
+        }
+    }
+
     /// The dial's tooltip: how to set the fans, or why they cannot be.
     static func accessHelp(_ access: FanCenter.Access) -> String {
         switch access {
@@ -128,6 +143,11 @@ struct FanControlWidget: View {
     /// "52°", in the locale's unit.
     static func degrees(_ celsius: Double, locale: Locale) -> String {
         "\(degreeNumber(celsius, locale: locale))°"
+    }
+
+    /// "15°": a difference of degrees, in the locale's unit (no 32 added).
+    static func degreeStep(_ celsius: Double, locale: Locale) -> String {
+        "\(Int((locale.measurementSystem == .us ? celsius * 9 / 5 : celsius).rounded()))°"
     }
 
     /// "52": the degrees alone, in the locale's unit.
@@ -154,10 +174,11 @@ struct FanControlWidget: View {
         let lone = !layout.showsTempDial && layout.graphs.isEmpty
         HStack(spacing: layout.gap) {
             FanDial(fans: fans, held: picture ? nil : center.heldFraction, isManual: manual, diameter: layout.dial,
-                    showsTexts: true, value: valueLabel(fans, dial: layout.dial),
-                    label: modeLabel(manual: manual, access: access, dial: layout.dial),
+                    number: widget.shows(.value) ? Self.rpmText(fans, locale: locale) : nil,
+                    name: Self.nameText(manual: manual, access: access, showsMode: widget.shows(.label)),
+                    nameIsAlert: widget.shows(.label) && Self.isAlert(manual: manual, access: access),
                     look: widget.progressLook(of: .fanDial), nameStyle: widget.textStyles[.fanName],
-                    unitStyle: widget.textStyles[.fanUnit], reportsFrame: reportsParts,
+                    valueStyle: widget.textStyles[.value], reportsFrame: reportsParts,
                     set: { center.setSpeed($0) }, automatic: { center.setAutomatic() },
                     onInteraction: { model.island.isInteracting = $0 })
                 .frame(width: layout.dial, height: layout.dial)
@@ -198,55 +219,26 @@ struct FanControlWidget: View {
             if id == .tempGraph {
                 SensorGraph(title: String(localized: "Chip"),
                             samples: picture ? Self.sampleTemperatures(now: now) : model.thermals.temperatures, now: now,
-                            minimumSpan: 8, fixedRange: TemperatureDial.range,
+                            minimumSpan: 8, fixedRange: widget.chartLook(of: id).range(own: SensorGraph.temperatureRange, gap: 5),
                             colors: SensorGraph.colors(widget.chartLook(of: id), automatic: TemperatureDial.colors, model: model),
                             showsAverage: true, format: { Self.degrees($0, locale: locale) }, size: drawn,
-                            look: widget.chartLook(of: id), textStyle: widget.textStyles[.tempGraphText])
+                            look: widget.chartLook(of: id), ownStep: SensorGraph.temperatureStep,
+                            textStyle: widget.textStyles[.tempGraphText])
             } else {
                 let lowest = fans.map(\.minimum).min() ?? 0, highest = fans.map(\.maximum).max() ?? 1
                 SensorGraph(title: String(localized: "Fan"),
                             samples: picture ? Self.sampleSpeeds(now: now) : model.thermals.speeds, now: now,
-                            minimumSpan: 1, fixedRange: lowest...max(highest, lowest + 1),
+                            minimumSpan: 1,
+                            fixedRange: widget.chartLook(of: id).range(own: lowest...max(highest, lowest + 1), gap: 100),
                             colors: SensorGraph.colors(widget.chartLook(of: id), automatic: FanTint.colors, model: model),
                             showsAverage: false, format: { Self.rpm($0, locale: locale) }, size: drawn,
-                            look: widget.chartLook(of: id), textStyle: widget.textStyles[.rpmGraphText])
+                            look: widget.chartLook(of: id), ownStep: SensorGraph.speedStep(lowest...max(highest, lowest + 1)),
+                            textStyle: widget.textStyles[.rpmGraphText])
             }
         }
         .frame(width: drawn.width, height: drawn.height)
         .frame(width: width, height: size.height, alignment: .topLeading)
         .movableElement(id, of: widget, drawsScale: false)
-    }
-
-    @ViewBuilder private func valueLabel(_ fans: [FanReading], dial: CGFloat) -> some View {
-        if widget.shows(.value), FanDial<EmptyView, EmptyView>.showsTexts(diameter: dial) {
-            let points = Self.valuePoints(inner: size)
-            let text = Self.rpmText(fans, locale: locale)
-            WidgetLabel(id: .value, text: text, widget: widget, size: points, weight: .semibold, isSecondary: false) {
-                Text(text)
-                    .font(.system(size: points, weight: .semibold, design: .rounded).monospacedDigit())
-                    .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                // A new reading each second: it just changes (a cross-fade a second smeared).
-                .transaction { $0.animation = nil }
-            }
-            .movableElement(.value, of: widget)
-        }
-    }
-
-    @ViewBuilder private func modeLabel(manual: Bool, access: FanCenter.Access, dial: CGFloat) -> some View {
-        if widget.shows(.label), FanDial<EmptyView, EmptyView>.showsTexts(diameter: dial) {
-            let points = Self.labelPoints(inner: size)
-            let text = Self.modeText(manual: manual, access: access)
-            WidgetLabel(id: .label, text: text, widget: widget, size: points, weight: .semibold, isSecondary: true,
-                        automaticColor: manual ? .orange : nil) {
-                Text(text)
-                    .font(.system(size: points, weight: .semibold))
-                    .foregroundStyle(manual ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-            }
-            .movableElement(.label, of: widget)
-        }
     }
 }
 
@@ -258,22 +250,27 @@ nonisolated enum FanDialGeometry {
     static let sweep: Double = 270
 }
 
-/// The fan's dial: its arc, the fan (a button: back to Auto), the speed under it and the mode in the
-/// arc's opening; a dot on the arc where the fans are held. Too small for texts (under 56 pt), the fan
-/// alone.
-struct FanDial<Value: View, Label: View>: View {
+/// The fan's dial, made as the chip's is: its arc, the fan (a button: back to Auto), the speed with
+/// "rpm" under it, and its name in the arc's opening ("Manual" while the fans are held); a dot on the
+/// arc where they are held. Too small for texts (under 56 pt), the fan alone.
+struct FanDial: View {
     let fans: [FanReading]
     /// Where the fans are held (0…1), while manual.
     let held: Double?
     let isManual: Bool
     let diameter: CGFloat
-    let showsTexts: Bool
-    let value: Value?
-    let label: Label?
-    /// How the arc is drawn and where its name and unit are (`ProgressLook`, as a line's).
+    var showsTexts = true
+    /// "2,450"; nil: the speed is not shown.
+    let number: String?
+    var unit = "rpm"
+    /// "Fan", or the mode.
+    let name: String
+    /// The name in orange (held by hand, or something is missing).
+    var nameIsAlert = false
+    /// How the arc is drawn and where its name and speed are (`ProgressLook`, as a line's).
     var look: ProgressLook = .plain
     var nameStyle: TextStyle?
-    var unitStyle: TextStyle?
+    var valueStyle: TextStyle?
     var reportsFrame = false
     let set: (Double) -> Void
     let automatic: () -> Void
@@ -337,22 +334,20 @@ struct FanDial<Value: View, Label: View>: View {
             .gesture(drag)
 
             if texts {
-                // The speed, under it the mode beside "rpm", and the dial's name in its opening.
-                let small = WidgetMetrics.points(diameter, ratio: 0.095, min: 7, max: 12)
-                VStack(spacing: 0) {
-                    if let value { value }
-                    HStack(spacing: small * 0.4) {
-                        if let label { label }
-                        RingText(text: Text("rpm"), style: unitStyle, size: small, part: .remaining, look: look,
-                                 reportsFrame: reportsFrame)
-                    }
-                    .lineLimit(1)
-                    .frame(maxWidth: diameter * 0.7)
+                // The speed with its unit, and the dial's name in its opening: as the chip's dial.
+                if let number {
+                    let points = WidgetMetrics.points(diameter, ratio: 0.2, min: 8, max: 26)
+                    RingText(text: speed(number, points: points), style: valueStyle, size: points, weight: .semibold, design: .rounded,
+                             automatic: AnyShapeStyle(.primary), part: .remaining, look: look, reportsFrame: reportsFrame,
+                             limit: RingText.valueLimit(diameter: diameter, line: line))
+                        .offset(y: diameter * 0.02)
+                        // A new reading each second: it just changes (a cross-fade a second smeared).
+                        .transaction { $0.animation = nil }
+                        .allowsHitTesting(false)
                 }
-                .offset(y: diameter * 0.05)
-                .allowsHitTesting(false)
-                RingText(text: Text("Fan"), style: nameStyle, size: small, weight: .semibold, part: .elapsed, look: look,
-                         reportsFrame: reportsFrame)
+                RingText(text: Text(name), style: nameStyle, size: WidgetMetrics.points(diameter, ratio: 0.095, min: 7, max: 12),
+                         weight: .semibold, automatic: nameIsAlert ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary),
+                         part: .elapsed, look: look, reportsFrame: reportsFrame, limit: RingText.nameLimit(diameter: diameter))
                     .offset(y: diameter * 0.39)
                     .allowsHitTesting(false)
             }
@@ -361,12 +356,25 @@ struct FanDial<Value: View, Label: View>: View {
                 if isManual { automatic() }
             }
             .offset(x: icon.x, y: icon.y)
+            .besideProgressParts()
         }
         .frame(width: diameter, height: diameter)
         .accessibilityElement(children: .contain)
         .accessibilityRepresentation {
             Slider(value: Binding(get: { knob }, set: set), in: 0...1) { Text("Fan speed") }
         }
+    }
+
+    /// "2,450 rpm": the speed with its unit under half as large and dimmer — in the style's type
+    /// where it has one (its colour then the unit's too).
+    private func speed(_ number: String, points: CGFloat) -> Text {
+        guard let valueStyle = RingText.capped(valueStyle) else {
+            return Text(number)
+                + Text(" " + unit).font(.system(size: points * 0.45, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+        }
+        var small = valueStyle
+        small.size = (valueStyle.size ?? Double(points)) * 0.45
+        return Text(number) + Text(" " + unit).font(Font(small.font(size: points * 0.45, weight: .semibold)))
     }
 
     private var drag: some Gesture {
@@ -440,10 +448,10 @@ struct TemperatureDial: View {
     }
 
     var body: some View {
-        let line = FanDial<EmptyView, EmptyView>.line(diameter: diameter)
+        let line = FanDial.line(diameter: diameter)
         let fraction = celsius.map(Self.fraction) ?? 0
-        let texts = FanDial<EmptyView, EmptyView>.showsTexts(diameter: diameter)
-        let points = FanDial<EmptyView, EmptyView>.iconPoints(diameter: diameter, showsTexts: true)
+        let texts = FanDial.showsTexts(diameter: diameter)
+        let points = FanDial.iconPoints(diameter: diameter, showsTexts: true)
         ZStack {
             ProgressRing(fraction: fraction, diameter: diameter, line: line, look: look, start: FanDialGeometry.start,
                          sweep: FanDialGeometry.sweep, automaticTrack: .white.opacity(0.1), minimumFill: 0.004,
@@ -452,15 +460,18 @@ struct TemperatureDial: View {
             Image(systemName: fraction < 0.25 ? "thermometer.low" : fraction < 0.65 ? "thermometer.medium" : "thermometer.high")
                 .font(.system(size: points, weight: .medium))
                 .foregroundStyle(.primary.opacity(0.85))
-                .offset(y: FanDial<EmptyView, EmptyView>.iconCenter(diameter: diameter, showsTexts: true).y)
+                .offset(y: FanDial.iconCenter(diameter: diameter, showsTexts: true).y)
+                .besideProgressParts()
             if texts {
                 let points = WidgetMetrics.points(diameter, ratio: 0.2, min: 8, max: 26)
                 RingText(text: degrees(points: points), style: valueStyle, size: points, weight: .semibold, design: .rounded,
-                         automatic: AnyShapeStyle(.primary), part: .remaining, look: look, reportsFrame: reportsFrame)
+                         automatic: AnyShapeStyle(.primary), part: .remaining, look: look, reportsFrame: reportsFrame,
+                         limit: RingText.valueLimit(diameter: diameter, line: line))
                     .offset(y: diameter * 0.02)
                     .transaction { $0.animation = nil }
                 RingText(text: Text("Chip"), style: nameStyle, size: WidgetMetrics.points(diameter, ratio: 0.095, min: 7, max: 12),
-                         weight: .semibold, part: .elapsed, look: look, reportsFrame: reportsFrame)
+                         weight: .semibold, part: .elapsed, look: look, reportsFrame: reportsFrame,
+                         limit: RingText.nameLimit(diameter: diameter))
                     .offset(y: diameter * 0.39)
             }
         }
@@ -473,7 +484,7 @@ struct TemperatureDial: View {
     /// "52°C": the degrees with their unit half as large and dimmer — in the style's type where it
     /// has one (its colour then the unit's too).
     private func degrees(points: CGFloat) -> Text {
-        guard let valueStyle else {
+        guard let valueStyle = RingText.capped(valueStyle) else {
             return Text(number ?? "—")
                 + Text(unit).font(.system(size: points * 0.5, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
         }
@@ -505,10 +516,34 @@ struct SensorGraph: View {
     let format: (Double) -> String
     let size: CGSize
     var look: ChartLook = .plain
+    /// A value written every this much (degrees, rpm) where the look sets no step of its own.
+    var ownStep: Double = 0
     /// The texts' type and colour; nil: the graph's own.
     var textStyle: TextStyle?
 
     @Environment(AppModel.self) private var model
+
+    /// The temperature graph's own range and step: 25, 50, 75 and 100 °C.
+    static let temperatureRange = 25.0...100.0
+    static let temperatureStep = 25.0
+    /// The texts' sizes Customize offers.
+    static let textSizes = 6.0...15.0
+
+    /// The speed graph's own step: its slowest, its middle and its fastest.
+    static func speedStep(_ range: ClosedRange<Double>) -> Double { (range.upperBound - range.lowerBound) / 2 }
+
+    /// The texts' own size on a graph `height` tall.
+    static func textPoints(height: CGFloat) -> CGFloat { WidgetMetrics.points(height, ratio: 0.11, min: 8, max: 11) }
+
+    /// The values with a guide, low to high: the lowest, then every `step` up, and the highest.
+    /// No step (0): the lowest and the highest alone. Never more than forty.
+    static func marks(_ range: ClosedRange<Double>, step: Double) -> [Double] {
+        let low = range.lowerBound, high = range.upperBound
+        guard step > 0, (high - low) / step <= 40 else { return [low, high] }
+        var marks = Array(stride(from: low, to: high - step * 0.001, by: step))
+        marks.append(high)
+        return marks
+    }
 
     static func range(of values: [Double], minimumSpan: Double) -> ClosedRange<Double> {
         guard let low = values.min(), let high = values.max() else { return 0...1 }
@@ -538,28 +573,24 @@ struct SensorGraph: View {
         return [resolve(look.lowColor, first), resolve(look.mediumColor, automatic[automatic.count / 2]), resolve(look.highColor, last)]
     }
 
-    /// The shares of the range with a guide, top and bottom always.
-    static func guides(_ look: ChartLook) -> [Int] { look.percentages.isEmpty ? [0, 100] : look.percentages }
-
     /// A value's line height beside the plot, at its type's size.
     static func captionHeight(points: CGFloat) -> CGFloat { (points * 1.25).rounded(.up) }
 
-    /// A value's top beside a plot `height` tall: centred on its guide, kept inside at the ends.
-    static func captionTop(_ share: Int, height: CGFloat, caption: CGFloat) -> CGFloat {
-        min(max(height * (1 - CGFloat(share) / 100) - caption / 2, 0), max(height - caption, 0))
+    /// A value's top beside a plot `height` tall: centred on its guide (`share` of the way up, 0…1),
+    /// kept inside at the ends.
+    static func captionTop(_ share: Double, height: CGFloat, caption: CGFloat) -> CGFloat {
+        min(max(height * (1 - CGFloat(share)) - caption / 2, 0), max(height - caption, 0))
     }
 
-    /// The shares written: the ends always, those between where they are clear of the last one
+    /// The marks written: the ends always, those between where they are clear of the last one
     /// written and of the top (as the battery chart's percentages are).
-    static func written(_ shares: [Int], height: CGFloat, caption: CGFloat) -> [Int] {
-        guard let first = shares.first, let last = shares.last else { return [] }
+    static func written(_ marks: [Double], range: ClosedRange<Double>, height: CGFloat, caption: CGFloat) -> [Double] {
+        guard let first = marks.first, let last = marks.last else { return [] }
+        let span = max(range.upperBound - range.lowerBound, 0.001)
+        func top(_ value: Double) -> CGFloat { captionTop((value - range.lowerBound) / span, height: height, caption: caption) }
         var kept = [first]
-        for share in shares.dropFirst() where share != last {
-            let top = captionTop(share, height: height, caption: caption)
-            if abs(top - captionTop(kept[kept.count - 1], height: height, caption: caption)) >= caption,
-               abs(top - captionTop(last, height: height, caption: caption)) >= caption {
-                kept.append(share)
-            }
+        for value in marks.dropFirst() where value != last {
+            if abs(top(value) - top(kept[kept.count - 1])) >= caption, abs(top(value) - top(last)) >= caption { kept.append(value) }
         }
         if last != first { kept.append(last) }
         return kept
@@ -572,8 +603,10 @@ struct SensorGraph: View {
         let range = fixedRange ?? Self.range(of: values, minimumSpan: minimumSpan)
         let average = values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
         let header = size.height >= 40
-        let axis = size.height >= 54 && size.width >= 110 && !look.percentages.isEmpty
-        let titlePoints = CGFloat(textStyle?.size ?? Double(WidgetMetrics.points(size.height, ratio: 0.11, min: 8, max: 11)))
+        let step = look.valueStep ?? ownStep
+        let marks = Self.marks(range, step: step)
+        let axis = size.height >= 54 && size.width >= 110 && step > 0
+        let titlePoints = CGFloat(min(textStyle?.size ?? Double(Self.textPoints(height: size.height)), Self.textSizes.upperBound))
         let headerHeight = header ? (titlePoints * 1.15 * 1.25).rounded(.up) : 0
         let plotHeight = max(size.height - headerHeight - (header ? 3 : 0), 0)
         let axisPoints = max(titlePoints * 0.82, 7)
@@ -601,10 +634,10 @@ struct SensorGraph: View {
                 if axis {
                     let span = range.upperBound - range.lowerBound
                     ZStack(alignment: .topTrailing) {
-                        ForEach(Self.written(look.percentages, height: plotHeight, caption: caption), id: \.self) { share in
-                            Text(format(range.lowerBound + span * Double(share) / 100))
+                        ForEach(Self.written(marks, range: range, height: plotHeight, caption: caption), id: \.self) { value in
+                            Text(format(value))
                                 .frame(height: caption)
-                                .offset(y: Self.captionTop(share, height: plotHeight, caption: caption))
+                                .offset(y: Self.captionTop((value - range.lowerBound) / max(span, 0.001), height: plotHeight, caption: caption))
                         }
                     }
                     .frame(height: plotHeight, alignment: .topTrailing)
@@ -612,7 +645,7 @@ struct SensorGraph: View {
                     .foregroundStyle(ink(0.4, automatic: .tertiary))
                     .fixedSize(horizontal: true, vertical: false)
                 }
-                plot(shown, range: range, average: showsAverage ? average : nil)
+                plot(shown, range: range, marks: marks, average: showsAverage ? average : nil)
                     .frame(height: plotHeight)
             }
         }
@@ -641,10 +674,9 @@ struct SensorGraph: View {
         }
     }
 
-    private func plot(_ shown: [SensorSample], range: ClosedRange<Double>, average: Double?) -> some View {
+    private func plot(_ shown: [SensorSample], range: ClosedRange<Double>, marks: [Double], average: Double?) -> some View {
         let window = Self.span(of: shown, now: now)
         let corners = look.corners
-        let guides = Self.guides(look)
         return Canvas { context, size in
             let span = max(range.upperBound - range.lowerBound, 0.001)
             func y(_ value: Double) -> CGFloat { size.height * (1 - CGFloat((value - range.lowerBound) / span)) }
@@ -653,12 +685,13 @@ struct SensorGraph: View {
                 (size.width - 3) * CGFloat(1 - min(max(now.timeIntervalSince(date) / window, 0), 1))
             }
             // The guides: the top and the bottom, and those between fainter.
-            for share in guides {
+            for value in marks {
                 var guide = Path()
-                let level = size.height * (1 - CGFloat(share) / 100)
+                let level = y(value)
                 guide.move(to: CGPoint(x: 0, y: level))
                 guide.addLine(to: CGPoint(x: size.width, y: level))
-                context.stroke(guide, with: .color(.white.opacity(share == 0 || share == 100 ? 0.1 : 0.06)), lineWidth: 0.5)
+                let isEnd = value == range.lowerBound || value == range.upperBound
+                context.stroke(guide, with: .color(.white.opacity(isEnd ? 0.1 : 0.06)), lineWidth: 0.5)
             }
             guard shown.count >= 2 else { return }
             var line = Path()

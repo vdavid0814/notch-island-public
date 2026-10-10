@@ -23,6 +23,27 @@ import ServiceManagement
         case failed(String)
     }
 
+    /// How the helper stands, for About ▸ Permissions.
+    nonisolated enum HelperState: Equatable, Sendable {
+        /// Never set up: it is the first time a speed is set.
+        case notSetUp
+        /// Registered; its switch in Login Items is off.
+        case needsApproval
+        /// Switched on in Login Items, or installed with a password (`installed`).
+        case ready(installed: Bool)
+        case failed(String)
+    }
+
+    var helperState: HelperState {
+        if case .failed(let reason) = access { return .failed(reason) }
+        if FanInstaller.isInstalled { return .ready(installed: true) }
+        switch daemon.status {
+        case .enabled: return .ready(installed: false)
+        case .requiresApproval: return .needsApproval
+        default: return .notSetUp
+        }
+    }
+
     private(set) var fans: [FanReading] = []
     /// The speed asked for, 0…1 of each fan's range, from the moment it is asked until the fans read
     /// it back (or it is given up): the dial shows it at once.
@@ -267,20 +288,53 @@ import ServiceManagement
     }
 
     /// Removes the helper, however it was put there (the fans back to macOS first): the registered
-    /// one unregistered, the installed one removed with an administrator's password.
-    func removeHelper() {
+    /// one unregistered, the installed one removed with an administrator's password. The next speed
+    /// set, or `setUpHelper`, puts it back.
+    func removeHelper() async {
         setAutomatic()
         connection?.invalidate()
         connection = nil
         checkedBuild = false
+        repaired = false
         let daemon = daemon
-        Task {
-            if daemon.status != .notFound && daemon.status != .notRegistered { try? await daemon.unregister() }
-            if FanInstaller.isInstalled {
-                let outcome = await FanInstaller.remove()
-                Log.fans.notice("fan helper removed: \(String(describing: outcome), privacy: .public)")
+        if daemon.status != .notFound && daemon.status != .notRegistered {
+            do { try await daemon.unregister() } catch {
+                Log.fans.error("fan helper unregister: \(error.localizedDescription, privacy: .public)")
             }
-            access = .unknown
+        }
+        if FanInstaller.isInstalled {
+            let outcome = await FanInstaller.remove()
+            Log.fans.notice("fan helper removed: \(String(describing: outcome), privacy: .public)")
+        }
+        Log.fans.notice("fan helper reset")
+        access = .unknown
+    }
+
+    /// Sets the helper up without setting a speed (About's button): registered, and Login Items
+    /// opened for its switch — or installed with a password where macOS will not register it.
+    func setUpHelper() {
+        guard hasFans, !FanSensors.isSimulated else { return }
+        if case .failed = access { access = .unknown }
+        _ = prepare()
+    }
+
+    /// Whether the helper answers now: asked over a connection of its own (launchd starts it for
+    /// the question; idle, it quits a minute later), given four seconds.
+    func helperAnswers() async -> Bool {
+        guard case .ready = helperState else { return false }
+        let connection = NSXPCConnection(machServiceName: FanHelper.label, options: .privileged)
+        connection.remoteObjectInterface = NSXPCInterface(with: (any FanHelperProtocol).self)
+        connection.resume()
+        defer { connection.invalidate() }
+        return await withCheckedContinuation { continuation in
+            let answer = OneAnswer(continuation)
+            let helper = connection.remoteObjectProxyWithErrorHandler { error in
+                Log.fans.error("fan helper does not answer: \(error.localizedDescription, privacy: .public)")
+                answer.give(false)
+            } as? any FanHelperProtocol
+            guard let helper else { return answer.give(false) }
+            helper.build { _ in answer.give(true) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 4) { answer.give(false) }
         }
     }
 
@@ -386,5 +440,22 @@ import ServiceManagement
         connection.resume()
         self.connection = connection
         return connection
+    }
+}
+
+/// One answer to a question asked of the helper: the first given counts (its reply, the
+/// connection's error or the time running out).
+nonisolated private final class OneAnswer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    init(_ continuation: CheckedContinuation<Bool, Never>) { self.continuation = continuation }
+
+    func give(_ answer: Bool) {
+        lock.lock()
+        let waiting = continuation
+        continuation = nil
+        lock.unlock()
+        waiting?.resume(returning: answer)
     }
 }

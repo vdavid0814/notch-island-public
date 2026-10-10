@@ -95,6 +95,10 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
     /// (`UpdateCard`). Never in the picker, never stored.
     static let update = ExpandedPage(own: "update")
 
+    /// What this version brought, shown once after an update (`WhatsNewPage`): the panel's size,
+    /// under its top bar. Never in the picker, never stored.
+    static let whatsNew = ExpandedPage(own: "whatsNew")
+
     /// The cards the pointer opens over an ongoing notice instead of the panel.
     var isNoticeCard: Bool { self == .recording || self == .update }
 
@@ -114,7 +118,7 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
 
     /// Drawn as a board of widgets the user arranges: home, the timer's and the battery's, and the
     /// user's own (the shelf is its own).
-    var isBoard: Bool { self != .shelf && !isNoticeCard }
+    var isBoard: Bool { self != .shelf && self != .whatsNew && !isNoticeCard }
 
     var id: String { rawValue }
 
@@ -139,6 +143,7 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
         case .battery: "Battery"
         case .recording: "Recording"
         case .update: "Update"
+        case .whatsNew: "What's New"
         default: CustomPage.catalog.withLock { $0[self]?.title } ?? "Page"
         }
     }
@@ -151,6 +156,7 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
         case .battery: "battery.100percent"
         case .recording: "record.circle"
         case .update: "arrow.down.circle"
+        case .whatsNew: "sparkles"
         default: CustomPage.catalog.withLock { $0[self]?.symbol } ?? CustomPage.defaultSymbol
         }
     }

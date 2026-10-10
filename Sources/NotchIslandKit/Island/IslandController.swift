@@ -236,7 +236,7 @@ nonisolated extension BannerKind {
         // A page asked for by name (a file dragged to the shelf, `open?page=`) is the panel, also
         // while recording; the pointer and a plain open bring the recording card then.
         if page != nil, model.recorder.isRecording || model.updater.notice != nil { wantsPanelWhileRecording = true }
-        if let page, model.island.page != page, model.availablePages.contains(page) { model.island.page = page }
+        if let page, model.island.page != page, model.availablePages.contains(page) || page == .whatsNew { model.island.page = page }
         if pinned, !model.island.isPinned { model.island.isPinned = true }
         // Opened without a page asked for, on one the user has since hidden from the picker: the
         // first page it offers.
@@ -255,6 +255,12 @@ nonisolated extension BannerKind {
         closeTimer.cancel()
         unvisitedTimer.cancel()
         inputsChanged()
+    }
+
+    /// What this version brought (`WhatsNewPage`), in the panel and kept open until it is closed
+    /// (Done, a click elsewhere, another page).
+    func showWhatsNew() {
+        expand(page: .whatsNew, pinned: true, userInitiated: false)
     }
 
     // MARK: Recording

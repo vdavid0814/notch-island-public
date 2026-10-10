@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4.1 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4.2 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -24,13 +24,46 @@ Swift 6, SwiftUI, macOS 27.
 
 ---
 
+## What's new in v0.8.4.2
+
+- **What's New, in the notch.** After an update the notch opens on what the new version brought:
+  one list to scroll through — What's New, Fixed, Known Issues — and a glass bar over it that shows
+  all of it or one part alone. Settings ▸ About ▸ **What's New…** shows it again.
+- **Fan Control in About ▸ Permissions.** A row of its own: whether the fan helper is switched on
+  and answers, a button to Login Items, and **Reset** when it does not work.
+- **The fan's dial is made as the chip's.** The speed with "rpm" and the dial's name are the dial's
+  own texts, placed and styled in the panel under Customize's editor; the name says **Manual**
+  while the fans are held. A text in a ring is at most 25 pt and never wider than its ring.
+- **Graphs with a range of their own.** Fan Control's graphs take a lowest and a highest value
+  (the temperature's is 25 to 100° by itself) and write a value every so many degrees or rpm:
+  25 · 30 · 35 or 25 · 40 · 55, on a slider.
+- **Customize keeps up with the pointer.** A text dragged in the panel under the editor moves about
+  four times as often as before (29 steps a second where there were 7, measured on Fan Control
+  across the panel); the widget in the editor over it catches up when the drag ends.
+- **Smoother Settings.** Pages fade and rise into place; Widgets, Top Bar and Size, and the
+  gallery's categories, switch without building everything again.
+- **Pages.** One of the island's own pages (Battery, Shelf, Home) is taken out of the picker with
+  the bin beside the pages under the stage; a page's new symbol shows there at once; the page
+  editor has round symbols, a capsule for the name and a red glass Delete.
+- **Fixed.** A part with no room at a widget's size shows its tile off ("No room at this size")
+  instead of on; the graphs' text-size slider no longer jumps at the first touch (at most 15 pt).
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.4.2 in place and keeps your permissions (signed
+exactly as 0.8.4.1). Or download **NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
+
+---
+
 ## What's new in v0.8.4.1
 
-- **Fan Control works on a downloaded copy.** In 0.8.4 the dial said **Unavailable** on most Macs:
-  macOS only takes a background helper from a notarized app, and NotchIsland is not. Now, where
-  macOS will not take it, the first turn of the dial asks for an administrator's password once
-  (macOS's own prompt) and installs the helper that way; where it does take it, Login Items is
-  switched on as before. `open notchisland://fans/remove-helper` removes the helper again.
+- **Fan Control works on a downloaded copy.** In 0.8.4 the dial said **Unavailable** on every
+  MacBook Pro: the helper was never registered (a helper macOS has not seen yet was taken for one
+  that is missing). Now it is, and Login Items is switched on once as described; only where macOS
+  refuses to register it does the first turn of the dial ask for an administrator's password
+  (macOS's own prompt) and install the helper that way. `open notchisland://fans/remove-helper` removes the helper again.
 - **Fans that stay as set.** Every speed is read back from the fans after it is set, a fan macOS
   took back (it does over sleep) is held again within three seconds, and one that will not hold is
   given back to automatic. A fan is never set under its own slowest speed. M5 and M1–M4 are each
