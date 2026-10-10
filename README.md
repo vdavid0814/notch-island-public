@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.2 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.3 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,53 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.3
+
+NotchIsland 0.8.3 makes bug reports, feature requests and diagnostics work again, fixes Customize
+on a small island, and takes less energy in Customize, in Siri and when the panel opens.
+
+### Fixes
+
+- **Reports work again.** 0.8.2 was built without the developer's addresses: in Settings ▸ About,
+  **Report a Bug** and **Request a Feature** stayed greyed out ("This build cannot send reports"),
+  **Detailed Diagnostics** could not be turned on and no diagnostics were sent. 0.8.3 has them:
+  bug reports and feature requests go to Sentry and to the developer's Discord, diagnostics to
+  Sentry and Mixpanel (while Send Diagnostics is on), and Detailed Diagnostics can be switched on.
+- **Customize shows the widget as the island does.** With the island at its small size, Customize's
+  editor laid the widget out again for the smaller cells: its texts were larger than on the island
+  and Now Playing's line lay over the artist. The editor, its panels and the saved versions'
+  previews now use the layout the island draws.
+- **"update available"** sits a little way in from the pill's end, and NotchIsland looks for a new
+  version five times a day (twice before).
+
+### Energy
+
+Activity Monitor's Energy Impact for the worst second, old and new back to back on a MacBook Air M5.
+Nothing looks different, except that Siri now cross-fades on the charger as it always did on battery.
+
+- **The panel opening on hover** (after ten seconds or more, as most openings are): 128–144 → 60–70.
+  Its page is built during the hover delay, on the efficiency cores, and the opening only shows it.
+- **Opening Customize:** 3700–3850 → about 600 (an opening and closing: 10.4 J → 1.5 J). **Closing
+  it:** 1000–1250 → about 110. The zoomed widget is a picture drawn once while it grows in, and the
+  panels slide in without being drawn again at every frame.
+- **Siri closing its app gallery:** about 320 mJ → 105–142 mJ; opening it about 245 → 190 mJ. The
+  fade style's shade is drawn once per size instead of at every opening and closing.
+
+### Still to do
+
+Still above 100 for a moment: opening Customize (building it), Siri's app gallery, and a typed
+Siri search (most of it the system's Spotlight). The details and the method are in
+[docs/ENERGY-LOG.md](docs/ENERGY-LOG.md).
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.3 in place and keeps your permissions (signed
+exactly as 0.8.2). Or download **NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 
