@@ -798,6 +798,28 @@ nonisolated extension BannerKind {
         hoverDwell.schedule(after: delay) { [weak self] in
             self?.hoverDwellElapsed(wasOverIsland: isOverIsland)
         }
+        if isOverIsland { prewarmPanel(within: delay) }
+    }
+
+    /// The pointer rests on the island and the panel opens once the hover delay is up: its page is
+    /// built now, hidden, in a turn of its own on the efficiency cores (`IslandModel.panelPrewarm`).
+    ///
+    /// The panel's last page is kept for 10 s after a close (`IslandContentStack.keepDuration`);
+    /// any later opening — most of them — built the whole page in the opening's own turn (~55 ms,
+    /// half of it on a performance core: Activity Monitor ~130–160 for one opening, measured). In
+    /// the hover delay that work costs a fraction of it, and the opening then only shows the page.
+    /// Nothing is done when the delay is too short to fit it, or when the pointer opens something
+    /// else (the recording card, the update notice).
+    private func prewarmPanel(within delay: TimeInterval) {
+        guard delay >= 0.1, !model.island.presentation.isOpen,
+              !model.recorder.isRecording, model.updater.notice == nil else { return }
+        MainThrift.lowPower(for: delay * 0.6)
+        // A turn of its own: the pointer event's turn runs at the event's priority whatever the
+        // thread's quality of service is.
+        let timer = Timer(timeInterval: 0, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.model.island.prewarmPanel() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     private func hoverDwellElapsed(wasOverIsland: Bool) {

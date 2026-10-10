@@ -1,23 +1,29 @@
 import Foundation
 import QuartzCore
 
-/// `NI_TRACE=1`: logs every main run-loop turn longer than 2 ms (window category, "TURN"), for
-/// finding the bursts that run on a performance core. Off, it installs nothing.
+/// `NI_TRACE=1`: logs every main run-loop turn longer than 2 ms (`NI_TRACE_MIN=<ms>` for another
+/// threshold; window category, "TURN"), for finding the bursts that run on a performance core.
+/// Off, it installs nothing.
 @MainActor enum PerfTrace {
     static let isOn = ProcessInfo.processInfo.environment["NI_TRACE"] == "1"
 
     static func install() {
         guard isOn else { return }
         nonisolated(unsafe) var woke: CFTimeInterval = 0
-        let activities = CFRunLoopActivity.afterWaiting.rawValue | CFRunLoopActivity.beforeWaiting.rawValue
-        let observer = CFRunLoopObserverCreateWithHandler(nil, activities, true, 0) { _, activity in
+        let threshold = Double(ProcessInfo.processInfo.environment["NI_TRACE_MIN"] ?? "") ?? 2
+        // Two observers: the wake-up first of all, the end after everything else (Core Animation's
+        // commit, which draws the layers, runs in its own before-waiting observer).
+        let woken = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue, true, CFIndex.min) { _, _ in
+            woke = CACurrentMediaTime()
+        }
+        let done = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max) { _, _ in
             let now = CACurrentMediaTime()
-            if activity == .afterWaiting { woke = now; return }
             let ms = (now - woke) * 1000
-            guard woke > 0, ms > 2 else { return }
+            guard woke > 0, ms > threshold else { return }
             Log.window.notice("TURN \(String(format: "%.1f", ms), privacy: .public) at \(String(format: "%.3f", woke), privacy: .public)")
         }
-        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        CFRunLoopAddObserver(CFRunLoopGetMain(), woken, .commonModes)
+        CFRunLoopAddObserver(CFRunLoopGetMain(), done, .commonModes)
     }
 
     /// Times `body` into the same log ("TIME name ms").

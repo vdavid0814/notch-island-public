@@ -115,8 +115,8 @@ codesign -dv "$APP" 2>&1 | sed 's/^/    /'
 # Symbols for Sentry: a release build's dSYM next to the app, uploaded when sentry-cli and a token
 # are there (SENTRY_AUTH_TOKEN, or `sentry-cli login --url https://de.sentry.io` once, which keeps it
 # in ~/.sentryclirc; org and project from Support/telemetry.json), so crashes read as NotchIsland's
-# functions and lines.
-if [[ "$CONFIG" == release ]]; then
+# functions and lines. `NO_SYMBOLS=1` skips both (measuring builds, A/B copies).
+if [[ "$CONFIG" == release && "${NO_SYMBOLS:-}" != 1 ]]; then
   DSYM="$ROOT/build/NotchIsland.app.dSYM"
   rm -rf "$DSYM"
   dsymutil "$APP/Contents/MacOS/NotchIsland" -o "$DSYM" 2>/dev/null && echo "==> symbols: ${DSYM#"$ROOT"/}"

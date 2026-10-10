@@ -132,6 +132,8 @@ private struct IslandContentStack: View {
     let crossFades: Bool
     let thumbnails: ThumbnailCache
 
+    @Environment(AppModel.self) private var model
+
     /// The panel's last page, kept alive (hidden) while the island shows something else: opening
     /// the panel again only shows it, instead of building every view of the page (~25–40 ms in
     /// one burst, the largest part of an open's energy, measured).
@@ -168,6 +170,11 @@ private struct IslandContentStack: View {
             }
         } }
         .onChange(of: shownPage, initial: true) { _, page in if let page { keptPage = page } }
+        // The panel is about to open: its page is built now, hidden, so the opening only shows it.
+        .onChange(of: model.island.panelPrewarm) {
+            guard shownPage == nil, keptPage == nil, !presentation.isOpen else { return }
+            withoutAnimation { keptPage = model.panelPage }
+        }
         // Kept only for a while: hidden, it is part of every other update the island makes (a
         // volume banner cost twice as much with it, measured). Quick re-opens are where it pays.
         .task(id: shownPage == nil ? keptPage : nil) {

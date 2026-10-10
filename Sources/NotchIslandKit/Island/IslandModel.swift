@@ -107,6 +107,12 @@ import SwiftUI
         withoutAnimation { surfaceHold = nil }
     }
 
+    /// Bumped when the panel is about to open (the pointer rests on the notch): the island builds
+    /// the panel's page hidden ahead of the opening (`IslandController.prewarmPanel`).
+    private(set) var panelPrewarm = 0
+
+    func prewarmPanel() { panelPrewarm &+= 1 }
+
     func setHovering(_ hovering: Bool) {
         guard hovering != isHovering else { return }
         isHovering = hovering
