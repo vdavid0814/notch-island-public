@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.3 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.3.01 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,29 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.3.01
+
+Two fixes found in the first diagnostics report 0.8.3 sent from another Mac.
+
+- **The keys come back after a permission Reset.** After Settings ▸ About ▸ **Reset…** of
+  Accessibility or Input Monitoring, macOS refuses the volume/brightness keys and ⌘Space until
+  NotchIsland is allowed again, and does not always tell the app when that happens. They were tried
+  three times in twelve seconds and then stayed off until the screen was locked or the app
+  reopened; now they are tried every 15 seconds for ten minutes, and come back on their own.
+- **Diagnostics blame the right version.** A report reads the last hours of the log, earlier runs
+  included: 0.8.3's first report listed errors 0.8.2 had logged two hours before the update as its
+  own problem. A report now counts only the errors of the run it is sent from (earlier runs' are
+  listed apart), and a key macOS refuses for a moment is an error only if no later try works.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.3.01 in place and keeps your permissions (signed
+exactly as 0.8.3). Or download **NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 
