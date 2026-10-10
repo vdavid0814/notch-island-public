@@ -337,6 +337,58 @@ import Testing
 }
 
 @Suite struct AppUpdaterTests {
+    @Test func theChecksADayStayBetweenOneAndFortyEight() {
+        #expect(AppUpdater.checksPerDay(stored: nil) == 5)
+        #expect(AppUpdater.checksPerDay(stored: "12") == 5)
+        #expect(AppUpdater.checksPerDay(stored: 12) == 12)
+        #expect(AppUpdater.checksPerDay(stored: 0) == 1)
+        #expect(AppUpdater.checksPerDay(stored: -3) == 1)
+        #expect(AppUpdater.checksPerDay(stored: 500) == 48)
+        #expect(AppUpdater.checkInterval(perDay: 5) == .seconds(17280))
+        #expect(AppUpdater.checkInterval(perDay: 1) == .seconds(86400))
+        #expect(AppUpdater.checkInterval(perDay: 48) == .seconds(1800))
+        #expect(AppUpdater.checkInterval(perDay: 0) == .seconds(86400))
+    }
+
+    /// The setting counts from the last look: more often takes effect at once, not after the old wait.
+    @Test func aChangedSettingCountsFromTheLastLook() {
+        // None yet this launch: the first one comes as it would have.
+        #expect(AppUpdater.delay(sinceLastCheck: nil, perDay: 48) == AppUpdater.firstCheckDelay)
+        // Three hours since the last, now every 30 minutes: overdue, in a moment.
+        #expect(AppUpdater.delay(sinceLastCheck: .seconds(3 * 3600), perDay: 48) == AppUpdater.rescheduleGap)
+        // Ten minutes since the last, every 30 minutes: in twenty.
+        #expect(AppUpdater.delay(sinceLastCheck: .seconds(600), perDay: 48) == .seconds(1200))
+        // Less often: the rest of the longer wait.
+        #expect(AppUpdater.delay(sinceLastCheck: .seconds(3600), perDay: 1) == .seconds(23 * 3600))
+    }
+
+    /// The setting itself: kept within the range, saved, and moved while the checks are scheduled
+    /// (no check is due within the test: none has run, so the first one stays a minute away).
+    @Test @MainActor func theSettingIsKeptInRangeAndSaved() {
+        let defaults = UserDefaults.standard
+        let before = defaults.object(forKey: AppUpdater.checksPerDayKey)
+        defer { defaults.set(before, forKey: AppUpdater.checksPerDayKey) }
+        defaults.removeObject(forKey: AppUpdater.checksPerDayKey)
+        let updater = AppUpdater()
+        #expect(updater.checksPerDay == 5)
+        updater.startAutomaticChecks()
+        updater.checksPerDay = 100
+        #expect(updater.checksPerDay == 48)
+        #expect(defaults.integer(forKey: AppUpdater.checksPerDayKey) == 48)
+        updater.checksPerDay = 0
+        #expect(updater.checksPerDay == 1)
+        #expect(AppUpdater().checksPerDay == 1)
+    }
+
+    @Test func theSettingReadsAsTimesADayAndAsTheWaitBetween() {
+        #expect(SettingsFormat.checksPerDay(5) == "5× a day")
+        #expect(SettingsFormat.checkInterval(perDay: 1) == "once a day")
+        #expect(SettingsFormat.checkInterval(perDay: 5) == "every 4 h 48 min")
+        #expect(SettingsFormat.checkInterval(perDay: 24) == "every 1 h")
+        #expect(SettingsFormat.checkInterval(perDay: 48) == "every 30 min")
+        #expect(SettingsFormat.checkInterval(perDay: 7) == "every 3 h 26 min")
+    }
+
     @Test func theReleaseComesFromItsDiskImage() throws {
         let json: [String: Any] = [
             "tag_name": "v0.4.11", "body": "## New\n- **Faster**",

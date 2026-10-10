@@ -865,6 +865,23 @@ private struct UpdateSection: View {
                         .foregroundStyle(.primary)
                 }
             }
+            LabeledContent {
+                HStack {
+                    Slider(value: Binding(get: { Double(updater.checksPerDay) }, set: { new in
+                        let count = Int(new.rounded())
+                        if count != updater.checksPerDay { updater.checksPerDay = count }
+                    }), in: Double(AppUpdater.checksPerDayRange.lowerBound)...Double(AppUpdater.checksPerDayRange.upperBound))
+                    .labelsHidden()
+                    .tint(Color.islandAccent)
+                    .frame(minWidth: 160, maxWidth: 240)
+                    ReservedWidthText(SettingsFormat.checksPerDay(updater.checksPerDay),
+                                      fitting: [SettingsFormat.checksPerDay(AppUpdater.checksPerDayRange.lowerBound),
+                                                SettingsFormat.checksPerDay(AppUpdater.checksPerDayRange.upperBound)])
+                        .foregroundStyle(SettingsPalette.secondary)
+                }
+            } label: {
+                InfoLabel("Automatic checks", "How often NotchIsland looks for a new version on its own: now \(SettingsFormat.checkInterval(perDay: updater.checksPerDay)). Each look is one small request to GitHub.")
+            }
         } header: {
             Text("Updates")
         } footer: {

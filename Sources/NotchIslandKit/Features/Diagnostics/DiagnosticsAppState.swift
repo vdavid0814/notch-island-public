@@ -182,6 +182,7 @@ enum DiagnosticsAppState {
             if label.hasPrefix("_") { label.removeFirst() }
             section.add(label, stable(child.value))
         }
+        section.add("update.checksPerDay", model.updater.checksPerDay)
         return section
     }
 

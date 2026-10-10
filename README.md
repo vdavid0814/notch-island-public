@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.3.01 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.3.2 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,23 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.3.2
+
+- **How often NotchIsland looks for a new version is yours to set.** Settings ▸ About ▸ Updates ▸
+  **Automatic checks**: from once to 48 times a day (five, as before, unless you change it). The ⓘ
+  beside it says how far apart that is. A change counts from the last look, so "more often" takes
+  effect at once. Each look is one small request to GitHub: about as much energy as NotchIsland
+  takes at rest in 20 seconds.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.3.2 in place and keeps your permissions (signed
+exactly as 0.8.3.01). Or download **NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 

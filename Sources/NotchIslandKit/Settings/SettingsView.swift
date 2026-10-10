@@ -410,6 +410,20 @@ nonisolated enum SettingsFormat {
         )
     }
 
+    /// "5× a day": how often NotchIsland looks for a new version.
+    static func checksPerDay(_ count: Int) -> String {
+        "\(count)× a day"
+    }
+
+    /// "every 4 h 48 min", "every 30 min", "once a day": the time between two looks.
+    static func checkInterval(perDay count: Int) -> String {
+        guard count > 1 else { return "once a day" }
+        let minutes = Int((24.0 * 60 / Double(count)).rounded())
+        let (hours, rest) = (minutes / 60, minutes % 60)
+        if hours == 0 { return "every \(rest) min" }
+        return rest == 0 ? "every \(hours) h" : "every \(hours) h \(rest) min"
+    }
+
     static func mediaStatus(_ status: MediaSourceStatus, enabled: Bool) -> Status {
         guard enabled, case .on(let web, let automationIssue) = status else {
             return Status(title: "Off", detail: "Now Playing is turned off in Activities.", tone: .neutral)
