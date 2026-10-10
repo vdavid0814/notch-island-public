@@ -34,6 +34,24 @@ WARN
   echo "    ALLOW_OTHER_SIGNER=1: making a test image anyway" >&2
 fi
 
+echo "==> report addresses"
+# A release without them cannot send a bug report, a feature request or any diagnostics: About's
+# buttons stay greyed out ("This build cannot send reports") and Detailed Diagnostics cannot be
+# turned on. 0.8.2 went out so (built where the git-ignored Support/telemetry.json and
+# Support/diagnostics-webhooks.json were missing). ALLOW_NO_REPORTS=1 makes a test image anyway.
+PLIST="$APP/Contents/Info.plist"
+MISSING=()
+/usr/libexec/PlistBuddy -c "Print :NITelemetry:sentryDSN" "$PLIST" >/dev/null 2>&1 || MISSING+=("Sentry (Support/telemetry.json)")
+/usr/libexec/PlistBuddy -c "Print :NITelemetry:mixpanelToken" "$PLIST" >/dev/null 2>&1 || MISSING+=("Mixpanel (Support/telemetry.json)")
+/usr/libexec/PlistBuddy -c "Print :NIDiagnosticsConfig" "$PLIST" >/dev/null 2>&1 \
+  || /usr/libexec/PlistBuddy -c "Print :NIDiagnosticsWebhookURL" "$PLIST" >/dev/null 2>&1 \
+  || MISSING+=("Discord (Support/diagnostics-webhooks.json)")
+if (( ${#MISSING[@]} )); then
+  printf '\n  !!  This build has no address for: %s\n  !!  Its users could not report a bug or send diagnostics.\n\n' "${MISSING[*]}" >&2
+  if [[ "${ALLOW_NO_REPORTS:-}" != 1 ]]; then exit 1; fi
+  echo "    ALLOW_NO_REPORTS=1: making a test image anyway" >&2
+fi
+
 WORK="$(mktemp -d)"
 trap 'hdiutil detach "$WORK/mnt" -quiet -force 2>/dev/null || true; rm -rf "$WORK"' EXIT
 xcrun swiftc -O "$ROOT/Scripts/set-icon.swift" -o "$WORK/set-icon"
