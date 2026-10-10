@@ -811,7 +811,7 @@ nonisolated extension BannerKind {
     /// Nothing is done when the delay is too short to fit it, or when the pointer opens something
     /// else (the recording card, the update notice).
     private func prewarmPanel(within delay: TimeInterval) {
-        guard delay >= 0.1, !model.island.presentation.isOpen,
+        guard delay >= 0.1, !model.island.presentation.isOpen, !model.island.isPanelKept,
               !model.recorder.isRecording, model.updater.notice == nil else { return }
         MainThrift.lowPower(for: delay * 0.6)
         // A turn of its own: the pointer event's turn runs at the event's priority whatever the

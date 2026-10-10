@@ -113,6 +113,10 @@ import SwiftUI
 
     func prewarmPanel() { panelPrewarm &+= 1 }
 
+    /// The panel's page is alive, shown or kept hidden (`IslandContentStack.keptPage`): nothing to
+    /// prewarm. Plain storage: nothing draws from it.
+    @ObservationIgnored var isPanelKept = false
+
     func setHovering(_ hovering: Bool) {
         guard hovering != isHovering else { return }
         isHovering = hovering

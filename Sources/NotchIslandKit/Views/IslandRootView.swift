@@ -170,10 +170,14 @@ private struct IslandContentStack: View {
             }
         } }
         .onChange(of: shownPage, initial: true) { _, page in if let page { keptPage = page } }
+        .onChange(of: keptPage != nil, initial: true) { _, kept in model.island.isPanelKept = kept }
         // The panel is about to open: its page is built now, hidden, so the opening only shows it.
-        .onChange(of: model.island.panelPrewarm) {
-            guard shownPage == nil, keptPage == nil, !presentation.isOpen else { return }
-            withoutAnimation { keptPage = model.panelPage }
+        // A view of its own reads the request, so the stack's body is not evaluated again for it.
+        .background {
+            PanelPrewarmTrigger { page in
+                guard shownPage == nil, keptPage == nil, !presentation.isOpen else { return }
+                withoutAnimation { keptPage = page }
+            }
         }
         // Kept only for a while: hidden, it is part of every other update the island makes (a
         // volume banner cost twice as much with it, measured). Quick re-opens are where it pays.
@@ -188,6 +192,17 @@ private struct IslandContentStack: View {
         // Like Control Center, it is a surface the user operates directly: draw controls active.
         .environment(\.appearsActive, true)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+/// Builds the panel's page ahead of an opening when asked (`IslandModel.panelPrewarm`).
+private struct PanelPrewarmTrigger: View {
+    let prewarm: (ExpandedPage) -> Void
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Color.clear
+            .onChange(of: model.island.panelPrewarm) { prewarm(model.panelPage) }
     }
 }
 
