@@ -469,7 +469,7 @@ struct ProgressPartsPanel: View {
     private var basePoints: CGFloat {
         if id == .cpuLoad || id == .memoryLoad {
             let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
-            let natural = geometry.frame(for: widget.frame).size, padding = WidgetMetrics.padding(for: widget)
+            let natural = geometry.laidSize(for: widget.frame), padding = WidgetMetrics.padding(for: widget)
             return SystemStatsWidget.barTextSize(widget, inner: CGSize(width: natural.width - 2 * padding, height: natural.height - 2 * padding))
         }
         return Metrics.Control.smaller(controlSize) >= .large ? 12 : 10

@@ -295,7 +295,7 @@ struct ButtonSymbolPanel: View {
     /// The widget's own symbol size for the button.
     private func points(_ id: ElementID) -> CGFloat {
         let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
-        let natural = geometry.frame(for: widget.frame).size
+        let natural = geometry.laidSize(for: widget.frame)
         let padding = WidgetMetrics.padding(for: widget)
         return WidgetParts.buttonPoints(of: id, in: widget, inner: CGSize(width: natural.width - 2 * padding,
                                                                          height: natural.height - 2 * padding))

@@ -1345,7 +1345,7 @@ struct ElementInspector: View {
     /// The widget's inside, as the board draws it.
     private var inner: CGSize {
         let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
-        let natural = geometry.frame(for: widget.frame).size
+        let natural = geometry.laidSize(for: widget.frame)
         let padding = WidgetMetrics.padding(for: widget)
         return CGSize(width: max(0, natural.width - 2 * padding), height: max(0, natural.height - 2 * padding))
     }

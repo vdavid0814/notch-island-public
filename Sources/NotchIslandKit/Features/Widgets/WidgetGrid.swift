@@ -114,6 +114,19 @@ nonisolated struct WidgetBoardGeometry: Sendable, Equatable {
         )
     }
 
+    /// The size a widget on `rect` is laid out at on this board: its cells' size or, where the
+    /// cells are smaller than the design's, the design's — the board then draws it smaller as a
+    /// whole (`ZoomedWidgetView`). Whatever shows or places a widget's parts as the board does
+    /// (Customize's editor, its inspector) lays it out at this size, not at `frame(for:)`'s: laid
+    /// out again for the smaller room, its texts came out larger and its parts elsewhere than on
+    /// the island (seen with the island at its small size, 0.8.2).
+    func laidSize(for rect: GridRect) -> CGSize {
+        let size = frame(for: rect).size
+        let scale = WidgetZoom.scale(span: rect.size, size: size)
+        guard scale < 0.999, scale > 0 else { return size }
+        return CGSize(width: size.width / scale, height: size.height / scale)
+    }
+
     /// The column whose leading edge is nearest to `x` (0…columns).
     func columnEdge(nearest x: CGFloat) -> Int {
         min(max(Int((x / (cellWidth + gap)).rounded()), 0), grid.columns)
