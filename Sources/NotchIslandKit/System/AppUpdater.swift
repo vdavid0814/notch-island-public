@@ -45,8 +45,8 @@ import Security
     nonisolated static let dismissedKey = "ni2.update.dismissed"
     /// The first look for a new version after launch, and then how often.
     static let firstCheckDelay: Duration = .seconds(60)
-    /// Twice a day: one small request to GitHub each time.
-    static let checkInterval: Duration = .seconds(12 * 3600)
+    /// Five times a day: one small request to GitHub each time.
+    static let checkInterval: Duration = .seconds(24 * 3600 / 5)
 
     /// A notice in the notch that a new version is out (`UpdateCompact`): from the first check that
     /// finds one until it is installed or closed. While it installs, it stays to show how far.
@@ -71,7 +71,7 @@ import Security
         }
     }
 
-    /// Looks for a new version a minute after launch, then every 12 hours, at background priority
+    /// Looks for a new version a minute after launch, then five times a day, at background priority
     /// (one small request to GitHub; nothing runs in between).
     func startAutomaticChecks() {
         guard checks == nil else { return }

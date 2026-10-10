@@ -23,6 +23,8 @@ struct UpdateCompact: View {
             .foregroundStyle(.white)
             .lineLimit(1)
             .minimumScaleFactor(0.7)
+            // A little way in from the pill's end (asked for).
+            .padding(.leading, UpdateStyle.compactTextInset)
         } trailing: {
             PulsingDot(color: NSColor(UpdateStyle.green), diameter: glyphSide * 0.42)
                 .frame(width: glyphSide * 0.42, height: glyphSide * 0.42)
@@ -139,6 +141,9 @@ enum UpdateStyle {
     static func compactTextSize(notchHeight: CGFloat) -> CGFloat {
         min(11, max(8, (notchHeight - 6) / 2.6))
     }
+
+    /// The pill's two lines start this far in from where the ear's content does.
+    static let compactTextInset: CGFloat = 4
 }
 
 /// A dot fading slowly out and back in, for as long as it is on screen: a layer animation the
