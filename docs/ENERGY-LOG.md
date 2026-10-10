@@ -4,6 +4,69 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-10 (night): real-pointer stress tests, cold openings, Customize
+
+Release builds, MacBook Air M5, on battery (91 → 50 %), music playing, fade style. Measured with
+the new `Scripts/perf/stress.py` (real pointer through one long-lived `ws/moused`; Activity
+Monitor's 1 s Energy Impact = the coalition's energy, own + GPU + billed), A B A B against the
+evening's build (`apps/base.app`), Activity Monitor read alongside.
+
+| scenario (1 s Energy Impact, worst / per second) | before | after |
+|---|---|---|
+| Hover opening after 10 s or more (most openings) | **128–144** | **60–70** (P-core 71 → 0 ms, energy −35 %) |
+| Customize opened by its button (Settings ▸ Widgets) | **3700–3850** | **~1260** (10.4 J → 3.5 J per open and close) |
+| Customize closed by Done | 1000–1250 | ~410 |
+| Hover stress (open and close every second, page kept) | 68–75 (mean 42–45) | same |
+| Hover, one every 2.2 s | 45–60 (mean 24) | same |
+| Settings from the gear, then a click outside | open 40–50, close 90–110 | same |
+| Rest with music | 0.0–0.2 | same |
+
+- **Cold openings.** The panel's last page is kept 10 s after a close; any later opening built the
+  whole page in the opening's own turn (~55 ms, half on a performance core). The page is now built,
+  hidden, in the hover delay, in a turn of its own at background quality of service
+  (`IslandController.prewarmPanel`); the opening only shows it. Nothing is done when the page is
+  still kept, the delay is under 0.1 s, or the pointer would open the recording card or the update
+  notice. Openings by click (no delay) are as before.
+- **Customize.** The editor grows in and out by a scale (0.94 → 1 around the editor, 0.9 → 1 around
+  the widget). Under a changing scale SwiftUI's CPU renderer (`RB_DISABLE_GPU`) drew the whole
+  enlarged widget picture (`SharpZoom`'s `drawingGroup`) again in every frame — removing both
+  scales took a cycle from 10.2 J to 2.7 J. While the scale moves, the picture drawn once is shown
+  (`SharpZoom.still`, rendered with the environment around it); the live one takes over once the
+  spring has settled. Settled screenshots old and new match. With `RB_DISABLE_GPU=0` the same cycle
+  read 4.0 J with no GPU energy in the coalition (left as it is: +40–80 MB, and the GPU's share
+  does not show there).
+
+### Measuring traps found
+- **A new process that posts events is checked by TCC, trustd and syspolicyd**, and the system
+  bills that (~100 mJ a spawn) to the app receiving the events: a `ws/mouse` per step read hover
+  stress at 160–300 with 1–2 J "billed". `ws/moused` takes every step from one process.
+- **Settings activates the app** (it takes the keyboard); macOS then donates the activation to
+  Spotlight's knowledge store, and `spotlightknowledged`/`corespotlightd` bill ~90–100 mJ per
+  Settings opening to the app. Not avoidable without Settings giving up the keyboard.
+- **Two instances**: `open -a <other build> notchisland://…` starts that build next to the running
+  one; `pgrep -x` then measures the first. Kill all before measuring.
+
+### Tried and left out
+- The stage grown to the panel's frame in the hover delay too (the resize and the page picker's
+  return off the opening's turn): equal within noise on warm openings, A B A B.
+- Holding the large stage after a close while the page is kept: −7 to −13 % own energy on hover
+  stress, but it leaves a transparent window over menu-bar items for 10 s; not kept.
+- Opening and closing Settings in a turn after the click's (to escape the click's priority): warm
+  openings already run on the efficiency cores; no difference.
+- Reading permissions and Login Items at Settings' opening only after System Settings was visited:
+  no measurable difference (the billing comes from the activation above).
+
+### Left for next time (worst first)
+1. **Customize's opening** (~1260): its side panels' AppKit controls (Liquid Glass switches, slider,
+   segmented controls) are drawn again while they slide in (CoreUI display lists, 16-bit soft
+   masks), and the editor's graph paper (`Canvas`) under the scale.
+2. **Siri's app gallery** (worst 1 s ~400) and typed search (~550, most billed by Spotlight's
+   daemons); Siri's close (40–80 ms in one turn, ~40 % of it the fade style's shade drawn again).
+3. **Warm hover stress** (~45 mean at one open and close a second): ~120 ms of CPU per cycle — the
+   opening's turn (~35 ms: the stage's resize lays SwiftUI out twice, the page picker put back in
+   the window, the shade drawn at the panel's size), the outgoing pill torn down at +0.18 s
+   (~11 ms), and ~40 SwiftUI frames of the 0.18 s content swap and 0.1 s page fade.
+
 ## 2026-10-09 (evening): Sentry and Mixpanel in place of the Discord reports
 
 Release build, diagnostics on, at rest (no input, no music), the app's own `proc_pid_rusage`

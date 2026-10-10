@@ -89,6 +89,20 @@ which did not, and how to keep the look identical. The numbers are in `ENERGY-LO
   measure the CPU and energy of the step, compare. Quicker than reading profiles when the work is
   spread over many small updates.
 
+- **Stress with a hand's input, not a tool's**: `stress.py` (hover in and out, cold openings,
+  Settings from the gear, Customize) drives one long-lived `ws/moused`. A new event-posting process
+  per step is checked by TCC, trustd and syspolicyd and the system bills it to the app that gets the
+  events (~100 mJ each). Check "billed" in the output and, when it is large, who serviced it
+  (`proc_pid_rusage` v4's `ri_serviced_energy` over all processes).
+- **Do the work in the wait the user already has**: the hover delay (0.2 s) builds what the opening
+  will show, in a turn of its own at background quality of service (`prewarmPanel`). The pointer
+  event's own turn runs at the event's priority: hand the work to a run-loop timer, after
+  `MainThrift.lowPower`.
+- **A changing scale over CPU-rendered content redraws it every frame** (`drawingGroup`, `Canvas`,
+  RenderBox effects under `RB_DISABLE_GPU`): show a picture drawn once while the scale moves
+  (`SharpZoom.still`), the live view once it has settled. Find it by ablation: switch the animation
+  off (`NI_EXP_…`), measure the cycle, then one scale at a time.
+
 ## 5. Tried and dropped (measured equal or worse)
 
 An AppKit `NSScrollView` around a SwiftUI page, responsive scrolling, AppKit hover tracking instead
@@ -105,6 +119,11 @@ first ink reading 0.65 s later in a `Task(priority: .background)` on the main ac
 from ~650 to 2200–2900: the main thread's work moved to the performance cores). Settings' live pictures hidden
 instead of taken out of the window while it is closed (Settings itself cheaper, every track change
 ~28 → ~42: the hidden previews followed the music).
+
+October 10 2026: the island's stage grown to the panel's frame already in the hover delay (equal on
+warm openings); Settings opened in a turn after the click's (no difference: warm openings already
+run on the efficiency cores); Settings' permission and Login Items reads only after a visit to
+System Settings (the billing at an opening is Spotlight's, for the app's activation).
 
 ## 6. Keep the look and the motion identical
 
