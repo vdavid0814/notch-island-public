@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 // One long-lived process for a whole scenario: commands on stdin, one per line, "ok" after each.
 //   move x y [steps] [stepMs] | click x y | down x y | up x y | pos
+//   key <virtual key code> [cmd|shift|opt|ctrl…] | type <text>
 // Every new process that posts events is checked by TCC (and its signature by trustd and
 // syspolicyd) — work the system bills to the app receiving the events, ~100 mJ per spawn, which a
 // person's hand never costs. Spawned once, it is checked once.
@@ -31,6 +32,36 @@ while let line = readLine() {
         if verb == "click" { usleep(50000) }
         if verb != "down" {
             post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left))
+        }
+    case "key":
+        let code = CGKeyCode(a[1])!
+        var flags: CGEventFlags = []
+        for f in a.dropFirst(2) {
+            switch f {
+            case "cmd": flags.insert(.maskCommand)
+            case "shift": flags.insert(.maskShift)
+            case "opt": flags.insert(.maskAlternate)
+            case "ctrl": flags.insert(.maskControl)
+            default: break
+            }
+        }
+        for down in [true, false] {
+            let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)
+            e?.flags = flags
+            post(e)
+            usleep(30000)
+        }
+    case "type":
+        let text = a.dropFirst().joined(separator: " ")
+        for scalar in text.utf16 {
+            for down in [true, false] {
+                let e = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: down)
+                var unit = scalar
+                e?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unit)
+                post(e)
+                usleep(20000)
+            }
+            usleep(100000)
         }
     case "pos":
         print(cur())

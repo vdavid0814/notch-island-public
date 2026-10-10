@@ -60,7 +60,11 @@ def customize_cycle():
     move(*CUSTOMIZE, 6, 8); click(*CUSTOMIZE, hold=0.12); time.sleep(3.0)
     move(*DONE, 6, 8); click(*DONE, hold=0.12); time.sleep(3.0)
 
+def key(code, *flags):
+    send("key " + " ".join([str(code), *flags]))
+
 SCENARIOS = {
+
     # Customize opened and closed by its buttons (Settings ▸ Widgets, a widget picked).
     "customize": (customize_cycle, 2),
     # Settings opened from the panel's gear and closed by a click outside, as a hand does.

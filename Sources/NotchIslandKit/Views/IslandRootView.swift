@@ -74,8 +74,12 @@ struct IslandRootView: View {
             let glassStyle = isOpaquePage ? IslandGlassStyle.black : model.effectiveGlassStyle
             let wantsGlass = glassStyle != .fade || outline.size.height > layout.notch.height + 0.5
             // On battery the content swaps with a plain cross-fade: the blur-replace costs about a
-            // seventh of an open's main-thread time (measured).
+            // seventh of an open's main-thread time (measured). Siri cross-fades always (asked for,
+            // Oct 10 2026): blurred on the CPU at every frame across several performance cores, its
+            // field, list and gallery leaving cost ~30 % of a gallery's opening and closing (816 →
+            // 575 mJ on the charger, measured); the small pills and banners keep the blur.
             let lightContentSwap = model.activity.prefersReducedWork || model.power.isOnBattery
+                || presentation.isAssistant
             IslandContentStack(
                 presentation: presentation,
                 layout: layout,
