@@ -133,14 +133,69 @@ extension View {
             if style == .fade {
                 shape.fill(Color.black).mask(alignment: .top) {
                     if isSettled {
-                        FadeShadeMask(solidDepth: solidDepth, size: size, stretch: fadeStretch)
-                            .drawingGroup()
+                        FadeShadePicture(solidDepth: solidDepth, size: size, stretch: fadeStretch)
                     } else {
                         FadeShadeMask(solidDepth: solidDepth, size: size, stretch: fadeStretch)
                     }
                 }
             }
         }
+    }
+}
+
+/// The fade's black drawn once into a picture (the settled shade): as a `drawingGroup` it was drawn
+/// again on the CPU each time the surface was drawn anew at a size it had been before — every
+/// opening and closing of the panel, and Siri's closing at its gallery's size (the shade alone was
+/// over half of that closing: 253 → 110 mJ without it, measured). The pictures of the last few
+/// sizes are kept; the pixels are the `drawingGroup`'s (the same renderer, the same frame).
+private struct FadeShadePicture: View {
+    let solidDepth: CGFloat
+    let size: CGSize
+    let stretch: CGFloat
+
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        if let picture = FadeShadeCache.picture(solidDepth: solidDepth, size: size, stretch: stretch, scale: displayScale) {
+            Image(decorative: picture, scale: displayScale)
+                .frame(width: max(size.width, 1), height: max(size.height, 1))
+        } else {
+            FadeShadeMask(solidDepth: solidDepth, size: size, stretch: stretch)
+                .drawingGroup()
+        }
+    }
+}
+
+@MainActor private enum FadeShadeCache {
+    private struct Key: Hashable {
+        let width: CGFloat, height: CGFloat, solidDepth: CGFloat, stretch: CGFloat, scale: CGFloat
+    }
+
+    /// The panel, the pill, Siri's field and gallery: a few sizes come back again and again. Each
+    /// picture is the island's size in pixels (a panel's ~1 MB, Siri's gallery's up to ~6 MB).
+    private static let limit = 4
+    private static var pictures: [Key: CGImage] = [:]
+    private static var order: [Key] = []
+
+    static func picture(solidDepth: CGFloat, size: CGSize, stretch: CGFloat, scale: CGFloat) -> CGImage? {
+        // Sizes on the pixel grid only: a surface handed over mid-spring is held at an in-between
+        // size once, and its picture would only push out one that comes back.
+        guard size.width >= 1, size.height >= 1, scale > 0,
+              (size.width * scale).rounded() == size.width * scale,
+              (size.height * scale).rounded() == size.height * scale else { return nil }
+        let key = Key(width: size.width, height: size.height, solidDepth: solidDepth, stretch: stretch, scale: scale)
+        if let picture = pictures[key] {
+            order.removeAll { $0 == key }
+            order.append(key)
+            return picture
+        }
+        let renderer = ImageRenderer(content: FadeShadeMask(solidDepth: solidDepth, size: size, stretch: stretch))
+        renderer.scale = scale
+        guard let picture = renderer.cgImage else { return nil }
+        pictures[key] = picture
+        order.append(key)
+        while order.count > limit { pictures[order.removeFirst()] = nil }
+        return picture
     }
 }
 

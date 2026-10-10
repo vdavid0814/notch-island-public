@@ -104,7 +104,9 @@ struct IslandRootView: View {
                 // Under Reduce Motion the island cross-fades as SwiftUI animates it; otherwise it
                 // grows out of the notch on the render server. Between two open presentations the
                 // surface follows its outline here (`Motion.surfaceFollowsOutline`).
-                isStill: !reduceMotion
+                isStill: !reduceMotion,
+                // Held while the render server moves the outline: drawn once, still, at its size.
+                isHeld: hold != nil
             )))
             .task(id: wantsGlass) { await glassRetirement(wantsGlass: wantsGlass) }
         }
@@ -353,6 +355,8 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
     let isStill: Bool
     /// 0 in the notch, 1 at the presentation.
     var emergence: Double = 1
+    /// Drawn still at the hold's outline (`SurfaceHold`): its shade is a picture, as a settled one.
+    var isHeld = false
 
     var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<AnimatablePair<CGFloat, CGFloat>, Double>> {
         // Always the real values: a move on the render server changes them only in transactions
@@ -399,7 +403,7 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
                 .islandSurfaceShade(glassStyle, solidDepth: solidDepth,
                                     size: CGSize(width: size.width, height: size.height + IslandLayout.overdraw),
                                     fadeStretch: fadeStretch,
-                                    isSettled: size == settledSize,
+                                    isSettled: size == settledSize || isHeld,
                                     in: surface.inset(by: -IslandGlassStyle.shadeBleed))
                 // Off, the glass is parked out of sight rather than taken down (`IslandGlassBody`);
                 // while SwiftUI animates the surface (Reduce Motion) it goes, as a parked glass
