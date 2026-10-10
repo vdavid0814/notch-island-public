@@ -33,11 +33,18 @@ if environment.keys.contains(where: { getenv($0) == nil }) {
     // exec failed: carry on without them.
 }
 
-// macOS 27's AppKit offers every window of an app to Spotlight (window and tab search) whenever
-// its windows change: for the island that is every opening and closing, three items each time,
-// which Spotlight's knowledge daemon then works through at the app's expense (~90 mJ billed per
-// hover opening, 70 % of what an opening cost; measured with `Scripts/perf/serviced.py`). The
-// island's panels are not windows anyone looks for; AppKit's own switch leaves them out.
-UserDefaults.standard.register(defaults: ["NSEnableWindowTabIndexing": false])
+// AppKit's own switches, set before it starts (the registration domain: the app's defaults, not the
+// user's, and nothing is written):
+// - NSEnableWindowTabIndexing: macOS 27's AppKit offers every window of an app to Spotlight (window
+//   and tab search) whenever its windows change: for the island that is every opening and closing,
+//   three items each time, which Spotlight's knowledge daemon then works through at the app's
+//   expense (~90 mJ billed per hover opening, 70 % of what an opening cost; measured with
+//   `Scripts/perf/serviced.py`). The island's panels are not windows anyone looks for.
+// - NSAutoFillHeuristicsEnabled: the first text field that takes the keyboard (Spotlight's) had
+//   AppKit start the AutoFill helper (`com.apple.SafariPlatformSupport.Helper`, a process of the
+//   app's own) to judge whether the field wants a password or a card number: the first opening
+//   after a launch cost ~375 mJ + ~110 billed instead of ~48 + ~11 (measured). None of the app's
+//   fields is one AutoFill fills.
+UserDefaults.standard.register(defaults: ["NSEnableWindowTabIndexing": false, "NSAutoFillHeuristicsEnabled": false])
 
 NotchIslandApp.main()

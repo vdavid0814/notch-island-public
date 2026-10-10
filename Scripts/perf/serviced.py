@@ -4,6 +4,9 @@
 plays to see which daemons the coalition's "billed to me" comes from.
 
     serviced.py <seconds> [min mJ]
+
+Polled four times a second, so a helper that starts and exits inside the window is counted too
+(from zero): marked "new" or "gone".
 """
 import ctypes, ctypes.util, subprocess, sys, time
 
@@ -38,15 +41,24 @@ def snapshot():
 
 def main():
     seconds = float(sys.argv[1]); floor = float(sys.argv[2]) if len(sys.argv) > 2 else 0.5
-    before = snapshot(); time.sleep(seconds); after = snapshot()
+    first = snapshot(); last = dict(first); started = set(); end = time.time() + seconds
+    while time.time() < end:
+        time.sleep(0.25)
+        now = snapshot()
+        for pid, row in now.items():
+            if pid not in first:
+                first[pid] = (row[0], 0, 0, 0); started.add(pid)
+            last[pid] = row
+    final = snapshot()
     rows = []
-    for pid, (name, energy, serviced, cpu) in after.items():
-        if pid in before:
-            mj = (energy - before[pid][1]) / 1e6
-            if mj >= floor:
-                rows.append((mj, name, pid, (serviced - before[pid][2]) * TICK / 1e6, (cpu - before[pid][3]) * TICK / 1e6))
-    for mj, name, pid, serviced_ms, cpu_ms in sorted(rows, reverse=True):
-        print(f"{mj:8.1f} mJ serviced  {serviced_ms:7.1f} ms of {cpu_ms:7.1f} ms CPU  {name} [{pid}]")
+    for pid, (name, energy, serviced, cpu) in last.items():
+        mj = (energy - first[pid][1]) / 1e6
+        if mj >= floor:
+            note = " new" if pid in started else ""
+            if pid not in final: note += " gone"
+            rows.append((mj, name, pid, (serviced - first[pid][2]) * TICK / 1e6, (cpu - first[pid][3]) * TICK / 1e6, note))
+    for mj, name, pid, serviced_ms, cpu_ms, note in sorted(rows, reverse=True):
+        print(f"{mj:8.1f} mJ serviced  {serviced_ms:7.1f} ms of {cpu_ms:7.1f} ms CPU  {name} [{pid}]{note}")
 
 if __name__ == "__main__":
     main()

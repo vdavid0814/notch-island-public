@@ -44,12 +44,14 @@ def hover_cycle(dwell, away):
     return run
 
 GEAR = tuple(float(v) for v in os.environ.get("GEAR", "887,14").split(","))
+# A point outside Settings (it reaches most of the screen at the larger panel sizes).
+OUTSIDE = tuple(float(v) for v in os.environ.get("OUTSIDE", "1262,420").split(","))
 
 def settings_cycle():
     # Hover the panel open, click its gear: Settings grows; a click outside closes it.
     move(NX, NY); time.sleep(0.9)
     move(*GEAR, 6, 8); click(*GEAR); time.sleep(3.0)
-    click(NX, 600); time.sleep(0.4)
+    click(*OUTSIDE); time.sleep(0.4)
     move(*AWAY); time.sleep(2.5)
 
 CUSTOMIZE = tuple(float(v) for v in os.environ.get("CUSTOMIZE", "1122,431").split(","))
@@ -124,7 +126,11 @@ def main():
           f"CPU {sum(s[1] for s in samples) * 1000:5.0f} ms  P {sum(s[4] for s in samples) * 1000:4.0f} ms  "
           f"energy {total:6.0f} mJ (billed {sum(s[5] for s in samples) * 1000:5.0f}, gpu {sum(s[6] for s in samples) * 1000:4.0f})  "
           f"wakeups {sum(s[7] for s in samples)}", flush=True)
-    if os.environ.get("SECONDS_ROW"): print("  per s: " + " ".join(f"{v:.0f}" for v in per))
+    if os.environ.get("SECONDS_ROW"):
+        print("  per s: " + " ".join(f"{v:.0f}" for v in per))
+        # Performance-core ms and all CPU ms of each second: where a burst left the efficiency cores.
+        print("  P ms:  " + " ".join(f"{1000 * sum(x[4] for x in v):.0f}" for k, v in sorted(secs.items())))
+        print("  CPU:   " + " ".join(f"{1000 * sum(x[1] for x in v):.0f}" for k, v in sorted(secs.items())))
 
 if __name__ == "__main__":
     main()

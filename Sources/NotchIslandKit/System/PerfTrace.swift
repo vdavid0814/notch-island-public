@@ -20,7 +20,9 @@ import QuartzCore
             let now = CACurrentMediaTime()
             let ms = (now - woke) * 1000
             guard woke > 0, ms > threshold else { return }
-            Log.window.notice("TURN \(String(format: "%.1f", ms), privacy: .public) at \(String(format: "%.3f", woke), privacy: .public)")
+            // With the quality of service the turn ended at (0x21 user-interactive … 0x09 background):
+            // what decides between the performance and the efficiency cores.
+            Log.window.notice("TURN \(String(format: "%.1f", ms), privacy: .public) at \(String(format: "%.3f", woke), privacy: .public) qos \(qos_class_self().rawValue, privacy: .public)")
         }
         CFRunLoopAddObserver(CFRunLoopGetMain(), woken, .commonModes)
         CFRunLoopAddObserver(CFRunLoopGetMain(), done, .commonModes)
