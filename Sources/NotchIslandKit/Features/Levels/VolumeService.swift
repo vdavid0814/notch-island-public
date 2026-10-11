@@ -27,6 +27,27 @@ nonisolated struct VolumeSnapshot: Sendable, Equatable {
     }
 }
 
+/// A volume of nothing is silence. An output at volume 0 still plays, very quietly (its lowest
+/// volume is a gain like any other, not off — a user heard the music go on at 0 %, until the mute
+/// key was pressed), so macOS's own keys mute it there, and so does the island: taken down to
+/// nothing the output is muted, raised again it is unmuted.
+nonisolated enum VolumeSilence {
+    /// Under this a volume is nothing: it reads "0 %".
+    static let threshold = 0.005
+
+    static func snapped(_ value: Double) -> Double { value < threshold ? 0 : value }
+
+    /// The mute to write with a volume of `target`; nil: left as it is. `unmutes`: the change is one
+    /// that unmutes a muted output (the slider raised, the volume-up key).
+    static func mute(at target: Double, isMuted: Bool, unmutes: Bool) -> Bool? {
+        if target < threshold { return isMuted ? nil : true }
+        return isMuted && unmutes ? false : nil
+    }
+
+    /// The mute after the mute key: the other one — but never unmuted at nothing.
+    static func toggled(isMuted: Bool, value: Double) -> Bool { value < threshold ? true : !isMuted }
+}
+
 /// Owns the CoreAudio HAL for output volume. Output volume needs no permission (TCC covers input only).
 ///
 /// Every HAL call happens on one private serial queue, which is also this actor's executor: property
@@ -88,26 +109,35 @@ actor VolumeService {
         lastPublished = .noDevice
     }
 
-    /// Island slider. Raising the level of a muted output unmutes it, like Control Center's slider.
+    /// Island slider. Raising the level of a muted output unmutes it, like Control Center's slider;
+    /// taken down to nothing it is muted (`VolumeSilence`).
     func setVolume(_ value: Double) -> VolumeSnapshot {
         let current = read()
-        let target = LevelStepper.clamped(value)
+        let target = VolumeSilence.snapped(LevelStepper.clamped(value))
         if current.canSetVolume { writeVolume(target) }
-        if target > 0, current.isMuted, current.canSetMute { writeMute(false) }
+        if current.canSetMute, let muted = VolumeSilence.mute(at: target, isMuted: current.isMuted, unmutes: target > 0) {
+            writeMute(muted)
+        }
         return commit()
     }
 
-    /// Media key. Stepping up while muted unmutes first, the way the hardware key does.
+    /// Media key. Stepping up while muted unmutes first, the way the hardware key does; stepped
+    /// down to nothing the output is muted.
     func step(up: Bool, fine: Bool) -> VolumeSnapshot {
         let current = read()
-        if up, current.isMuted, current.canSetMute { writeMute(false) }
-        if current.canSetVolume { writeVolume(LevelStepper.stepped(current.value, up: up, fine: fine)) }
+        let target = LevelStepper.stepped(current.value, up: up, fine: fine)
+        if current.canSetVolume { writeVolume(target) }
+        if current.canSetMute, let muted = VolumeSilence.mute(at: current.canSetVolume ? target : current.value,
+                                                             isMuted: current.isMuted, unmutes: up) {
+            writeMute(muted)
+        }
         return commit()
     }
 
+    /// The mute key. At nothing the output stays muted: unmuted there it would play, faintly.
     func toggleMute() -> VolumeSnapshot {
         let current = read()
-        if current.canSetMute { writeMute(!current.isMuted) }
+        if current.canSetMute { writeMute(VolumeSilence.toggled(isMuted: current.isMuted, value: current.value)) }
         return commit()
     }
 

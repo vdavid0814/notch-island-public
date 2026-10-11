@@ -35,7 +35,10 @@ struct RestingSlider: View {
                     onEditingChanged(editing)
                 }
                 .labelsHidden()
-                .modifier(OptionalTint(color: sliderFill))
+                // The theme's colour, as the picture's: left untinted, the native control took the
+                // system's accent — the Minimal volume and brightness lines (never a picture) and a
+                // slider under the pointer were blue whatever the theme.
+                .tint(sliderFill ?? Color.islandAccent)
             } else {
                 SliderPicture(value: value, height: renderMode == .canvas ? SliderPicture.nativeHeight(controlSize) : SliderPicture.height,
                               set: set, onEditingChanged: { editing in

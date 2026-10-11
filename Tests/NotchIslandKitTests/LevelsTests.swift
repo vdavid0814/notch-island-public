@@ -192,6 +192,34 @@ import Testing
     }
 }
 
+/// A volume of nothing is silence: taken down to 0 % the output is muted (at volume 0 it still
+/// plays, faintly), raised again it is unmuted.
+@Suite struct VolumeSilenceTests {
+    @Test func downToNothingIsMutedAndUpAgainIsNot() {
+        // The slider: at nothing muted, raised from muted unmuted, otherwise left as it is.
+        #expect(VolumeSilence.mute(at: 0, isMuted: false, unmutes: false) == true)
+        #expect(VolumeSilence.mute(at: 0, isMuted: true, unmutes: false) == nil)
+        #expect(VolumeSilence.mute(at: 0.3, isMuted: true, unmutes: true) == false)
+        #expect(VolumeSilence.mute(at: 0.3, isMuted: false, unmutes: true) == nil)
+        // The volume-down key on an output muted by its key: still muted.
+        #expect(VolumeSilence.mute(at: 0.3, isMuted: true, unmutes: false) == nil)
+        // The last step down, and the first one up from there.
+        #expect(VolumeSilence.mute(at: LevelStepper.stepped(LevelStepper.step, up: false, fine: false), isMuted: false, unmutes: false) == true)
+        #expect(VolumeSilence.mute(at: LevelStepper.stepped(0, up: true, fine: false), isMuted: true, unmutes: true) == false)
+    }
+
+    @Test func whatReadsZeroPercentIsNothing() {
+        #expect(VolumeSilence.snapped(0.004) == 0 && VolumeSilence.snapped(0.006) == 0.006 && VolumeSilence.snapped(1) == 1)
+        #expect(IslandFormat.percent(0.004) == IslandFormat.percent(0))
+        #expect(VolumeSilence.mute(at: 0.004, isMuted: false, unmutes: true) == true)
+    }
+
+    @Test func theMuteKeyNeverUnmutesAtNothing() {
+        #expect(VolumeSilence.toggled(isMuted: true, value: 0) && VolumeSilence.toggled(isMuted: false, value: 0))
+        #expect(VolumeSilence.toggled(isMuted: false, value: 0.5) && !VolumeSilence.toggled(isMuted: true, value: 0.5))
+    }
+}
+
 @Suite struct BrightnessChangeFilterTests {
     private let now = ContinuousClock.now
 

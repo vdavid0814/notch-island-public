@@ -52,13 +52,15 @@ import Observation
     /// From the island's Slider. The reading follows immediately so the Slider tracks the pointer.
     func set(_ kind: LevelKind, to value: Double) {
         guard isRunning, reading(kind).isAvailable else { return }
-        let target = LevelStepper.clamped(value)
+        var target = LevelStepper.clamped(value)
         switch kind {
         case .volume:
-            let unmutes = target > 0 && volume.isMuted && volumeState.canSetMute
-            guard target != volume.value || unmutes else { return }
+            // Down to nothing is muted, raised again unmuted (`VolumeSilence`).
+            target = VolumeSilence.snapped(target)
+            let mute = volumeState.canSetMute ? VolumeSilence.mute(at: target, isMuted: volume.isMuted, unmutes: target > 0) : nil
+            guard target != volume.value || mute != nil else { return }
             volume.value = target
-            if unmutes { volume.isMuted = false }
+            if let mute { volume.isMuted = mute }
         case .brightness:
             guard target != brightness.value else { return }
             brightness.value = target
@@ -68,7 +70,7 @@ import Observation
 
     func toggleMute() {
         guard isRunning, volumeState.canSetMute else { return }
-        volume.isMuted.toggle()
+        volume.isMuted = VolumeSilence.toggled(isMuted: volume.isMuted, value: volume.value)
         enqueue(.toggleMute, on: .volume, source: .island)
     }
 
