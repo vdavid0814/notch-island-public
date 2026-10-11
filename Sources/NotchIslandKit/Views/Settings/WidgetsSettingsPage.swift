@@ -21,8 +21,6 @@ struct WidgetsSettingsPage: View {
     /// room they leave, so the controls sit at the window's bottom.
     @State private var viewportHeight: CGFloat = 0
     @State private var inspectorHeight: CGFloat = 0
-    /// The stage's height as drawn: Top Bar mode's page takes the room under it.
-    @State private var stageHeight: CGFloat = 0
     /// The gallery's own height, as its graph lays it out (`GalleryHost`).
     @State private var galleryHeight: CGFloat = 400
     @Environment(\.settingsPageVisit) private var visit
@@ -34,10 +32,15 @@ struct WidgetsSettingsPage: View {
         ScrollViewReader { scroller in
             ScrollView {
                 VStack(alignment: .leading, spacing: Self.spacing) {
+                    // The room Size mode gives the stage, known in every mode (`WidgetStudio.stageHeight`).
+                    // (No inset at the page's foot in Size mode: `bottomInset`.)
+                    let sizeRoom = viewportHeight - Self.topInset - Self.spacing - inspectorHeight
+                    let _ = model.studio.stageSizeRoom = sizeRoom
                     StudioStage(selection: $selection, group: $group, backdrop: $backdrop, notice: notice,
-                                fillHeight: model.studio.mode == .size
-                                    ? viewportHeight - Self.topInset - Self.spacing - inspectorHeight - bottomInset : 0)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { stageHeight = $0 }
+                                fillHeight: model.studio.mode == .size ? sizeRoom : 0)
+                        // For Top Bar's page alone (`TopBarSlot`): kept as the page's own state, every
+                        // change of it had the whole page worked out again, a turn after each switch.
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { model.studio.stageMeasuredHeight = $0 }
                         .id(StudioAnchor.stage)
                     // Every mode's content is built once and kept (`ModeDeck`): another mode, a widget
                     // picked or let go, is one of them shown instead of another — nothing is built
@@ -49,26 +52,28 @@ struct WidgetsSettingsPage: View {
                     let shown: ModeDeck.Slot = mode == .topBar ? .topBar : mode == .size ? .size : inspects ? .inspector : .gallery
                     ModeDeck(shown: shown) {
                         // As tall as the room under the stage: its Reset is level with the sidebar's foot.
-                        TopBarInspector(height: max(viewportHeight - Self.topInset - stageHeight - Self.spacing - bottomInset,
-                                                    TopBarInspector.minimumHeight))
+                        TopBarSlot(room: viewportHeight - Self.topInset - Self.spacing - bottomInset, isShown: shown == .topBar)
                             .deckSlot(.topBar, shown: shown)
                         VStack(alignment: .leading, spacing: 16) {
                             SizeInspector()
                             ParkedTray()
                         }
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { inspectorHeight = $0 }
+                        .modifier(UnderStage())
                         .deckSlot(.size, shown: shown)
                         VStack(alignment: .leading, spacing: 22) {
                             if model.studio.page == .shelf {
                                 StudioCard("Shelf", subtitle: "Files dropped on the notch wait on this page. It has no widgets to arrange; General switches it on and off.") {
                                     EmptyView()
                                 }
+                                .modifier(UnderStage())
                             }
                             ParkedTray()
+                                .modifier(UnderStage())
                             // In a view graph of its own (`GalleryHost`): kept built while another
                             // mode or a picked widget is shown, but out of this page's graph.
                             GalleryHost(isShown: shown == .gallery, isShelf: model.studio.page == .shelf, height: galleryHeight,
-                                        model: model, visit: visit,
+                                        board: model.editedWidgets.board, model: model, visit: visit,
                                         add: { add($0, scroller: scroller) },
                                         open: { kind in
                                             if let id = model.editedWidgets.board.first(of: kind)?.id { select(id, scroller: scroller) }
@@ -289,12 +294,18 @@ private extension View {
 /// nothing. Kept in the page's own graph it made every update of the page go over its fifty cards
 /// and their previews: a pointer's move while something was dragged on the page took 5.6 ms of the
 /// main thread with it there and 2.1 without (measured). In its own graph, hidden while unseen, the
-/// page's updates pass it by; its content is handed to it again only when what it shows changes.
+/// page's updates pass it by; its content is handed to it again only when what it shows changes —
+/// the board its cards tell of (which are on the island), and only while it is the one shown. Told
+/// at every coming and going that it was seen or unseen, its fifty-five cards were gone over each
+/// time: ~50–60 ms of a performance core in the turn after every switch of mode and every widget
+/// picked or let go (measured with `NI_TRACE`).
 private struct GalleryHost: NSViewRepresentable {
     let isShown: Bool
     /// The shelf's page: nothing is added to it — faint, and not to be clicked.
     let isShelf: Bool
     let height: CGFloat
+    /// The edited board, as the cards show it (read by the page, not by the gallery's own graph).
+    let board: WidgetBoard
     let model: AppModel
     let visit: SettingsPageVisit?
     let add: (IslandWidgetKind) -> Void
@@ -302,8 +313,9 @@ private struct GalleryHost: NSViewRepresentable {
     /// Its content's height, as laid out.
     let measured: (CGFloat) -> Void
 
+    /// What the gallery's content was last built from.
     fileprivate struct Input: Equatable {
-        var isShown: Bool
+        var board: WidgetBoard
         var isShelf: Bool
     }
 
@@ -319,7 +331,7 @@ private struct GalleryHost: NSViewRepresentable {
 
     func makeNSView(context: Context) -> DeferringHostingView<AnyView> {
         follow(context.coordinator)
-        context.coordinator.input = Input(isShown: isShown, isShelf: isShelf)
+        context.coordinator.input = Input(board: board, isShelf: isShelf)
         let view = DeferringHostingView(rootView: root(context.coordinator))
         // Its size comes from here: its width the page's, its height the one it measured.
         view.sizingOptions = []
@@ -328,13 +340,17 @@ private struct GalleryHost: NSViewRepresentable {
         view.forcesLayout = true
         view.isHidden = !isShown
         context.coordinator.view = view
+        GalleryGlide.view = view
         return view
     }
 
     func updateNSView(_ view: DeferringHostingView<AnyView>, context: Context) {
         follow(context.coordinator)
         if view.isHidden == isShown { view.isHidden = !isShown }
-        let input = Input(isShown: isShown, isShelf: isShelf)
+        // Unseen, it stands still: moving a widget on the stage does not go over its cards. It
+        // catches up when it is shown again, if anything it shows has changed.
+        guard isShown else { return }
+        let input = Input(board: board, isShelf: isShelf)
         guard context.coordinator.input != input else { return }
         context.coordinator.input = input
         view.rootView = root(context.coordinator)
@@ -353,7 +369,7 @@ private struct GalleryHost: NSViewRepresentable {
 
     private func root(_ coordinator: Coordinator) -> AnyView {
         AnyView(
-            WidgetStoreView(isShown: isShown, add: { coordinator.add($0) }, open: { coordinator.open($0) })
+            WidgetStoreView(board: board, add: { coordinator.add($0) }, open: { coordinator.open($0) })
                 .opacity(isShelf ? 0.35 : 1)
                 .allowsHitTesting(!isShelf)
                 .fixedSize(horizontal: false, vertical: true)
@@ -494,14 +510,14 @@ private struct StudioStage: View {
     @State private var sizingFit: CGFloat?
     /// The stage's height as drawn, following the one it should have: into Size mode it unfolds
     /// down to the controls at the window's bottom, and folds back up out of it.
-    @State private var shownHeight: CGFloat?
     /// The mode the height was last set for, and until when a change of height is the mode's
     /// (unfolding) rather than a row's.
     @State private var heightMode: WidgetStudio.Mode?
     @State private var unfoldsUntil: TimeInterval = 0
 
     /// The stage unfolding into Size mode's room, and folding back.
-    static let unfold: Animation = .spring(duration: 0.55, bounce: 0.12)
+    static let unfoldSpring = Spring(duration: 0.55, bounce: 0.12)
+    static let unfold: Animation = .spring(unfoldSpring)
 
     /// Between the hint and the button and the stage's edges.
     static let controlInset: CGFloat = 12
@@ -535,7 +551,10 @@ private struct StudioStage: View {
             topTrailingRadius: 18,
             style: .continuous
         )
-        let height = max((layout.notch.height + box.height + Self.badgeRoom + 56).rounded(), fillHeight.rounded())
+        let ownHeight = (layout.notch.height + box.height + Self.badgeRoom + 56).rounded()
+        let height = max(ownHeight, fillHeight.rounded())
+        // For `WidgetStudio.stageHeight(in:)` (not observed: nothing is drawn from it).
+        let _ = model.studio.stageOwnHeight = ownHeight
         ZStack(alignment: .top) {
             DesktopBackdrop(style: backdrop)
                 .contentShape(.rect)
@@ -573,9 +592,14 @@ private struct StudioStage: View {
                     .environment(\.appearsActive, true)
             }
         }
-        .frame(height: shownHeight ?? height)
-        .onAppear { heightMode = mode }
-        .onChange(of: height) { _, new in
+        .modifier(StageDrawnHeight(own: height))
+        .onAppear {
+            heightMode = mode
+            // A stage built anew starts at its own height.
+            model.studio.stageShown = nil
+            model.studio.stagePlace = nil
+        }
+        .onChange(of: height) { old, new in
             // Into Size mode or out of it (its room measured a moment later is part of it): the
             // stage unfolds down to the controls, or folds back up. A row added while sizing:
             // as the island grows.
@@ -584,7 +608,39 @@ private struct StudioStage: View {
                 unfoldsUntil = now + 0.8
                 heightMode = mode
             }
-            withAnimation(now < unfoldsUntil ? Self.unfold : .spring(duration: 0.3, bounce: 0.05)) { shownHeight = new }
+            let studio = model.studio
+            guard now < unfoldsUntil, mode != .topBar, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+                // The stage and its place together, as one: the page laid out at every frame. A row
+                // added while sizing — and Top Bar's page, which is as tall as the room under the
+                // stage and so follows every frame of it.
+                withAnimation(now < unfoldsUntil ? Self.unfold : .spring(duration: 0.3, bounce: 0.05)) {
+                    studio.stageShown = new
+                    studio.stagePlace = new
+                }
+                return
+            }
+            // Unfolding or folding: its place takes the new height now, in one layout of the page;
+            // what is under the stage is drawn where it was (`UnderStage`, `GalleryGlide`), and
+            // then follows the stage's foot along the same spring with no layout of the page.
+            // Laid out at every frame the page took 30–100 ms a frame, all of the spring on a
+            // performance core: 2.1–3.1 J for a switch into Size mode or out of it (measured by
+            // real clicks, `Scripts/perf/studio.py`), against ~0.3 J without the motion.
+            if studio.stageShown == nil { studio.stageShown = old }
+            let lift = (studio.stagePlace ?? old) - new
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            withTransaction(instant) { studio.stagePlace = new }
+            GalleryGlide.hold(by: lift)
+            // The controls that take the keyboard only move, in their order: the key view loop is
+            // left as it is meanwhile (SwiftUI built it again at every frame: over half of each
+            // frame's work, sampled), and the pointer's place is not asked for at every frame.
+            SettingsWindow.current?.holdKeyViewLoop(for: 0.9)
+            ScrollActivity.hold(for: 0.7)
+            // In a turn of its own: the layout above is on screen first, with nothing moved yet.
+            DispatchQueue.main.async {
+                withAnimation(Self.unfold) { studio.stageShown = new }
+                GalleryGlide.settle(Self.unfoldSpring)
+            }
         }
         // Grown or shrunk by a row while sizing: what is under the stage glides with it.
         .animation(.spring(duration: 0.3, bounce: 0.05), value: box.height)
@@ -658,6 +714,110 @@ private struct StudioStage: View {
             .padding(Self.controlInset)
             .environment(\.colorScheme, .dark)
         }
+        .modifier(StagePlace())
+    }
+}
+
+/// The stage's height as drawn (`WidgetStudio.stageShown`), and its place in the page
+/// (`stagePlace`), the picture hanging from its top. Views of their own: the stage's whole body
+/// would otherwise be worked out again whenever either changes (a second ~55 ms turn at the start
+/// of every unfolding, measured).
+private struct StageDrawnHeight: ViewModifier {
+    let own: CGFloat
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content.frame(height: model.studio.stageShown ?? own)
+    }
+}
+
+private struct StagePlace: ViewModifier {
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content.frame(height: model.studio.stagePlace, alignment: .top)
+    }
+}
+
+/// Top Bar's page, as tall as the room under the stage: its Reset is level with the sidebar's foot.
+/// It follows the stage's height only while it is the page shown; kept unseen it stays as tall as
+/// it last was, so the stage unfolding into Size mode or folding back does not lay it out again.
+private struct TopBarSlot: View {
+    /// The page's room less the stage: the viewport without the insets and the gap.
+    let room: CGFloat
+    let isShown: Bool
+
+    @Environment(AppModel.self) private var model
+    @State private var kept = Kept()
+
+    private final class Kept {
+        var height: CGFloat?
+    }
+
+    var body: some View {
+        TopBarInspector(height: height)
+    }
+
+    private var height: CGFloat {
+        // Read only while shown (or never yet): unseen, a change of the stage's height is not
+        // this view's to follow.
+        if isShown || kept.height == nil {
+            kept.height = max(room - model.studio.stageMeasuredHeight, TopBarInspector.minimumHeight)
+        }
+        return kept.height ?? TopBarInspector.minimumHeight
+    }
+}
+
+/// What lies under the stage, drawn under the stage's foot as it is drawn: while the stage unfolds
+/// its place in the page already has the new height (`WidgetStudio.stageLag`). In a view of its
+/// own, so only this follows the two heights.
+private struct UnderStage: ViewModifier {
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content.offset(y: model.studio.stageLag)
+    }
+}
+
+/// The gallery following the stage's foot on the render server: it lies where the page's one
+/// layout put it, and its layer shifts what it shows (`sublayerTransform`) from where it was drawn
+/// along the stage's own spring. Moved by SwiftUI its fifty-five cards — each preview a hosting
+/// view of its own — were told their place had changed at every frame, and the pointer's place
+/// over them asked for again (80–165 ms a frame as the stage folded back, measured).
+@MainActor enum GalleryGlide {
+    static weak var view: NSView?
+    private static let key = "stageUnfold"
+
+    /// Drawn `distance` points lower than it now is (higher, if negative), at once.
+    static func hold(by distance: CGFloat) {
+        guard distance != 0, let layer = view?.layer else { return }
+        // Down the screen is down the layer when its geometry is flipped, up otherwise.
+        let flipped = layer.isGeometryFlipped || layer.contentsAreFlipped()
+        let drawn = layer.presentation()?.sublayerTransform ?? layer.sublayerTransform
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.removeAnimation(forKey: key)
+        layer.sublayerTransform = CATransform3DTranslate(drawn, 0, flipped ? distance : -distance, 0)
+        CATransaction.commit()
+    }
+
+    /// Back to where it lies, along `spring`.
+    static func settle(_ spring: Spring) {
+        guard let layer = view?.layer, !CATransform3DIsIdentity(layer.sublayerTransform) else { return }
+        let from = layer.presentation()?.sublayerTransform ?? layer.sublayerTransform
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.removeAnimation(forKey: key)
+        layer.sublayerTransform = CATransform3DIdentity
+        let animation = CASpringAnimation(keyPath: "sublayerTransform")
+        animation.mass = spring.mass
+        animation.stiffness = spring.stiffness
+        animation.damping = spring.damping
+        animation.duration = animation.settlingDuration
+        animation.fromValue = NSValue(caTransform3D: from)
+        animation.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+        layer.add(animation, forKey: key)
+        CATransaction.commit()
     }
 }
 
@@ -1124,13 +1284,11 @@ private struct ElementTile: View {
 /// Every built-in widget, grouped by category: compact cards with a live preview, a name, one line
 /// on what it shows, and Add (or a check and Edit once it is on the island). Worded and weighted as
 /// what it is — widgets that come with the app and only need adding — not as a store.
-private struct WidgetStoreView: View, Equatable {
-    /// Unseen before and after: the same, whatever else it was given (its closures never compare).
-    nonisolated static func == (old: WidgetStoreView, new: WidgetStoreView) -> Bool { !old.isShown && !new.isShown }
-
-    /// False while it is kept unseen (a widget is picked, another mode): it stands still then — the
-    /// board is not read, so moving a widget on the stage does not go over its cards.
-    var isShown = true
+private struct WidgetStoreView: View {
+    /// The board the cards read, handed in (`GalleryHost`): not read from the model here, so the
+    /// gallery stands still while it is kept unseen (a widget picked, another mode) and moving a
+    /// widget on the stage does not go over its cards.
+    let board: WidgetBoard
     let add: (IslandWidgetKind) -> Void
     let open: (IslandWidgetKind) -> Void
 
@@ -1146,25 +1304,11 @@ private struct WidgetStoreView: View, Equatable {
     static let categoryBarMaximum: CGFloat = 760
     /// The row's width: the categories take what the search leaves them.
     @State private var rowWidth: CGFloat = 0
-    /// The board as it was when last shown: what the cards say while unseen.
-    @State private var seen = SeenBoard()
-
-    private final class SeenBoard {
-        var board: WidgetBoard?
-    }
-
-    /// The board the cards read: the edited one while shown, the last one seen otherwise.
-    private var board: WidgetBoard {
-        if isShown || seen.board == nil { seen.board = model.editedWidgets.board }
-        return seen.board ?? model.editedWidgets.board
-    }
-
     private func matches(_ kind: IslandWidgetKind) -> Bool {
         search.isEmpty || kind.title.localizedStandardContains(search) || kind.summary.localizedStandardContains(search)
     }
 
     var body: some View {
-        let board = board
         let offered = IslandWidgetKind.allCases.filter(\.isOffered)
         let kinds = offered.filter { kind in (category == nil || kind.category == category) && matches(kind) }
         VStack(alignment: .leading, spacing: 14) {

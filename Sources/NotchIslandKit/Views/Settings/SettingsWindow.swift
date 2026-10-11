@@ -352,6 +352,27 @@ final class SettingsWindow: NSPanel {
 
     // MARK: Keyboard
 
+    /// The key view loop (what Tab steps through) left as it is for `seconds`: while something
+    /// only moves. SwiftUI builds the loop again at every change of where a control that takes the
+    /// keyboard lies — every frame of the Widgets page's stage unfolding, where that was most of
+    /// each frame's work (sampled) — unless the window says it sees to the loop itself; the order
+    /// of the controls does not change by their moving together, so nothing is lost. Off again
+    /// afterwards: SwiftUI's own loop is the one Tab has always stepped through here.
+    func holdKeyViewLoop(for seconds: TimeInterval) {
+        autorecalculatesKeyViewLoop = true
+        keyViewLoopRelease?.invalidate()
+        let timer = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.autorecalculatesKeyViewLoop = false
+                self?.keyViewLoopRelease = nil
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        keyViewLoopRelease = timer
+    }
+
+    private var keyViewLoopRelease: Timer?
+
     /// The first click in the window makes it key and is handled as any other: as a window that
     /// was not key, it went only to making the window key, and the sidebar or a field missed it.
     override func sendEvent(_ event: NSEvent) {
@@ -440,8 +461,11 @@ private final class SettingsWindowRoot: NSView {
 /// cursor (not for a click) stop at the page's hosting view (`DeferringHostingView`).
 @MainActor enum ScrollActivity {
     private static var last: CFTimeInterval = 0
-    static func mark() { last = CACurrentMediaTime() }
+    static func mark() { last = max(last, CACurrentMediaTime()) }
     static var isActive: Bool { CACurrentMediaTime() - last < 0.2 }
+    /// As while a scroll moves the page: for `seconds` of the page's content moving by itself (the
+    /// Widgets page's stage unfolding), when the pointer's place over it is asked again at every frame.
+    static func hold(for seconds: TimeInterval) { last = max(last, CACurrentMediaTime() + seconds - 0.2) }
 }
 
 /// A trackpad scroll of a Settings page, moved on the render server and handed to the scroll view

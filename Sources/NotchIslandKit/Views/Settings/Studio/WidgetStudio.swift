@@ -70,6 +70,26 @@ import SwiftUI
     /// The kind being dragged out of the gallery, for the stage to show where it would land.
     @ObservationIgnored var draggedKind: IslandWidgetKind?
 
+    /// The stage's height as drawn (it unfolds into Size mode's room and folds back, `StudioStage`),
+    /// and the height its place in the page has: the same, but for an unfolding, when the place
+    /// takes its new height at once and what is under the stage is shifted by the difference
+    /// (`stageLag`) — so the page is laid out once, not at every frame of the spring.
+    var stageShown: CGFloat?
+    var stagePlace: CGFloat?
+    /// How far above its place what is under the stage is drawn (negative: above).
+    var stageLag: CGFloat { (stageShown ?? 0) - (stagePlace ?? stageShown ?? 0) }
+    /// The stage's place as laid out (its height in the page): Top Bar's page takes the room under it.
+    var stageMeasuredHeight: CGFloat = 0
+    /// The stage's own height and the room Size mode gives it, as the page last worked them out:
+    /// what the stage's height will be in a mode, known before the mode is set (`switchMode`).
+    @ObservationIgnored var stageOwnHeight: CGFloat?
+    @ObservationIgnored var stageSizeRoom: CGFloat?
+
+    func stageHeight(in mode: Mode) -> CGFloat? {
+        guard let own = stageOwnHeight else { return nil }
+        return mode == .size ? max(own, (stageSizeRoom ?? 0).rounded()) : own
+    }
+
     /// The mode picked and on its way in (`switchMode`): the picker shows it at once.
     var pendingMode: Mode?
     /// The Widgets page's content under the stage: faded out while the mode switches.
@@ -97,9 +117,16 @@ import SwiftUI
             guard let self, !Task.isCancelled else { return }
             var instant = Transaction()
             instant.disablesAnimations = true
+            // The stage's place takes the mode's height in the same layout as the mode's content
+            // (`StudioStage` unfolds into it): set a turn later, when the stage's height is seen
+            // to have changed, the page was laid out twice (~55 ms more on a performance core).
+            let place = target != .topBar && self.stageShown != nil
+                && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? self.stageHeight(in: target) : nil
+            if let place, let was = self.stagePlace, was != place { GalleryGlide.hold(by: was - place) }
             withTransaction(instant) {
                 self.mode = target
                 self.pendingMode = nil
+                if let place, self.stagePlace != nil { self.stagePlace = place }
             }
             // After the long frame: a fade started before it would be half over when it ends.
             try? await Task.sleep(for: .milliseconds(30))
