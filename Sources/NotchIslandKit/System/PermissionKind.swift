@@ -150,7 +150,29 @@ nonisolated enum PermissionStatus: Sendable, Equatable {
     /// The apps Now Playing scripts when the MediaRemote adapter is missing.
     static let automationTargets: [(name: String, bundleID: String)] = [("Music", "com.apple.Music"), ("Spotify", "com.spotify.client")]
 
+    /// The answer macOS last gave for an app, and when. Asking takes ~20 ms of the main thread and
+    /// work in `tccd` that is billed to the app (~50 mJ for an opening of Settings ▸ General, whose
+    /// rows asked two or three times each time it opened): an "allowed" is kept a minute — it can
+    /// only be taken back in System Settings, and while that runs every answer is kept two
+    /// seconds, as one that is not "allowed" always is (a prompt may be up).
+    private static var automationAnswers: [String: (status: PermissionStatus, at: TimeInterval)] = [:]
+
     static func automation(_ bundleID: String) -> PermissionStatus {
+        let now = ProcessInfo.processInfo.systemUptime
+        if let known = automationAnswers[bundleID] {
+            let age = now - known.at
+            if age < 2 { return known.status }
+            if age < 60, known.status == .allowed,
+               NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.systempreferences").isEmpty {
+                return known.status
+            }
+        }
+        let status = askAutomation(bundleID)
+        automationAnswers[bundleID] = (status, now)
+        return status
+    }
+
+    private static func askAutomation(_ bundleID: String) -> PermissionStatus {
         // Asking about an app that is not running only logs errors; the answer waits for it.
         guard !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty else { return .unknown }
         var target = AEAddressDesc()

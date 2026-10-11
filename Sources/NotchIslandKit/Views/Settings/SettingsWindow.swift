@@ -28,8 +28,49 @@ final class SettingsWindow: NSPanel {
     /// Ordering out after the fade.
     private var orderingOut: DispatchWorkItem?
 
+    /// Whether Settings is kept built while it is closed (and built ahead after a launch): on
+    /// battery, where an opening of the kept window costs a ninth of building it. On the charger
+    /// memory comes first: it is built when opened and given up `discardDelay` after it closes
+    /// (~150 MB with every page built). Set by the island's window controller as the power source
+    /// changes (`IslandWindowController.followPowerSource`).
+    static var isKept = true {
+        didSet {
+            guard isKept != oldValue else { return }
+            if isKept { discarding?.cancel() } else { discardLater() }
+        }
+    }
+
+    /// How long after it closes Settings is given up where it is not kept: opened again within it
+    /// (to change one more thing), it is still there.
+    static let discardDelay: TimeInterval = 30
+    private static var discarding: DispatchWorkItem?
+
+    private static func discardLater() {
+        discarding?.cancel()
+        let work = DispatchWorkItem { discard() }
+        discarding = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + discardDelay, execute: work)
+    }
+
+    /// Settings given up while it is closed: its window, its pages and what they drew. Its next
+    /// opening builds it again (as the first one after a launch does where it was not built ahead).
+    static func discard() {
+        discarding = nil
+        guard !isKept, let window = current else { return }
+        // Open (or closing): after it has closed.
+        guard !window.isVisible || window.isRehearsing, !window.model.island.presentation.isSettings else { return discardLater() }
+        if window.isRehearsing { window.endRehearsal() }
+        window.orderingOut?.cancel()
+        current = nil
+        window.surface.removeFromSuperview()
+        window.contentView = nil
+        window.close()
+        Log.window.notice("settings given up while closed (not kept on the charger)")
+    }
+
     /// The kept window with its surface (as it was left), or a new one, over `frame`.
     static func reused(model: AppModel, placement: SettingsPlacement, frame: CGRect) -> SettingsWindow {
+        discarding?.cancel()
         if let current, current.model === model {
             current.place(frame)
             current.surface.reattach(placement: placement)
@@ -175,37 +216,7 @@ final class SettingsWindow: NSPanel {
     /// on its way in, did not free it (tried on the live window); moved to the active Space by the
     /// window server it is on every Space again. Its behaviour is still set again while it is out.
     private func orderIn() {
-        if !isVisible { rejoinAllSpaces() }
-        orderFrontRegardless()
-        guard !isOnActiveSpace else { return }
-        Log.window.error("settings window ordered in off the active Space: moved to it")
-        moveToActiveSpace()
-        rejoinAllSpaces()
-        orderFrontRegardless()
-    }
-
-    private func rejoinAllSpaces() {
-        collectionBehavior.remove(.canJoinAllSpaces)
-        collectionBehavior.insert(.canJoinAllSpaces)
-    }
-
-    private typealias ConnectionID = @convention(c) () -> Int32
-    private typealias ActiveSpace = @convention(c) (Int32) -> UInt64
-    private typealias MoveToSpace = @convention(c) (Int32, CFArray, UInt64) -> Void
-
-    /// SkyLight's own, not in the headers: looked up once, nothing done on a system without them.
-    private static let skyLight: (ConnectionID, ActiveSpace, MoveToSpace)? = {
-        let all = UnsafeMutableRawPointer(bitPattern: -2)
-        guard let connection = dlsym(all, "SLSMainConnectionID"), let active = dlsym(all, "SLSGetActiveSpace"),
-              let move = dlsym(all, "SLSMoveWindowsToManagedSpace") else { return nil }
-        return (unsafeBitCast(connection, to: ConnectionID.self), unsafeBitCast(active, to: ActiveSpace.self),
-                unsafeBitCast(move, to: MoveToSpace.self))
-    }()
-
-    private func moveToActiveSpace() {
-        guard let (connection, active, move) = Self.skyLight, windowNumber > 0 else { return }
-        let id = connection()
-        move(id, [windowNumber] as CFArray, active(id))
+        if orderFrontOnActiveSpace() { Log.window.error("settings window ordered in off the active Space: moved to it") }
     }
 
     /// Ordered in, invisible and letting every click through, as Settings starts to grow: what the
@@ -302,6 +313,7 @@ final class SettingsWindow: NSPanel {
             self.orderingOut = nil
             SettingsPresence.shared.isShown = false
             self.orderOut(nil)
+            if !Self.isKept { Self.discardLater() }
         }
         orderingOut = work
         if let fade {

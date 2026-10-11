@@ -107,6 +107,9 @@ final class SettingsPageDeckView: NSView {
         old?.visit.isShown = false
         let page = pages[pane] ?? make(pane)
         page.host.isHidden = false
+        // Its live pictures, out of the window since Settings last closed, are put back now
+        // (`DeferringHostingView.pausesWithSettings`).
+        if SettingsPresence.shared.isShown { NotificationCenter.default.post(name: SettingsPresence.didChange, object: nil) }
         page.host.scrollToTop()
         page.visit.count += 1
         page.visit.isShown = true

@@ -169,6 +169,11 @@ class DeferringHostingView<Content: View>: NSHostingView<Content> {
     /// (`SettingsPresence`): Settings is kept, and a live picture in it (the widget gallery's
     /// previews, the studio's island) followed the models it reads unseen — a volume change, a
     /// timer finishing — and redrew. Out of the window, it does nothing.
+    ///
+    /// Put back only on the page that is shown; on another, when that page is (the deck says so
+    /// with the same notification, `SettingsPageDeckView.show`). Every picture of every page put
+    /// back at each opening — Widgets' gallery and stage while General was the page — was half of
+    /// what opening Settings cost, and taking them out again most of its closing (measured).
     var pausesWithSettings = false {
         didSet {
             guard pausesWithSettings != oldValue else { return }
@@ -185,7 +190,7 @@ class DeferringHostingView<Content: View>: NSHostingView<Content> {
 
     private func followPresence() {
         if SettingsPresence.shared.isShown {
-            guard let container = pausedIn, superview == nil else { return }
+            guard let container = pausedIn, superview == nil, !container.isHiddenOrHasHiddenAncestor else { return }
             pausedIn = nil
             frame = container.bounds
             container.addSubview(self)

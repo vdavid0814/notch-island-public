@@ -56,21 +56,51 @@ import SwiftUI
         observeLayout()
         reanchor()
         // `NI_NO_PREPARE=1` (measuring): Settings is built only when first opened.
-        if ProcessInfo.processInfo.environment["NI_NO_PREPARE"] != "1" { prepareSettings(after: Self.settingsPreparationDelay) }
+        followPowerSource()
     }
 
     /// Settings is built once, unseen, a while after launch (`SettingsSurfaceView.prepare`):
     /// its first opening then costs what any later one does (Energy Impact ~340 → ~40, measured).
     static let settingsPreparationDelay: Duration = .seconds(6)
 
+    /// Energy on battery, memory on the charger: on battery Settings is built ahead and kept (its
+    /// opening then costs a ninth, and ~150 MB stay with the app); on the charger it is built when
+    /// opened and given up after it closes (`SettingsWindow.isKept`). A Mac without a battery is
+    /// on the charger. `NI_KEEP_SETTINGS=1` or `0` (measuring): kept or not, whatever the power.
+    private func followPowerSource() {
+        let generation = observationGeneration
+        let onBattery = withObservationTracking {
+            model.power.isOnBattery
+        } onChange: { [weak self] in
+            // onChange runs before the new value is stored: read it next turn.
+            Task { @MainActor in
+                guard let self, self.isStarted, generation == self.observationGeneration else { return }
+                self.followPowerSource()
+            }
+        }
+        let forced = ProcessInfo.processInfo.environment["NI_KEEP_SETTINGS"].flatMap { ["1": true, "0": false][$0] }
+        let keeps = forced ?? onBattery
+        guard keeps != SettingsWindow.isKept || !hasFollowedPowerSource else { return }
+        hasFollowedPowerSource = true
+        SettingsWindow.isKept = keeps
+        Log.window.notice("settings \(keeps ? "kept (on battery)" : "built when opened (on the charger)", privacy: .public)")
+        preparation += 1
+        if keeps { prepareSettings(after: Self.settingsPreparationDelay, preparation: preparation) }
+    }
+
+    private var hasFollowedPowerSource = false
+    /// Which run of `prepareSettings` goes on: one from before the power source changed stops.
+    private var preparation = 0
+
     /// One piece of Settings per step, at background quality of service (efficiency cores), only
     /// while the island is closed: a step waits while it is open.
-    private func prepareSettings(after delay: Duration) {
+    private func prepareSettings(after delay: Duration, preparation: Int) {
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay, tolerance: .milliseconds(200))
-            guard let self, self.isStarted, let metrics = self.metrics else { return }
+            guard let self, self.isStarted, SettingsWindow.isKept, preparation == self.preparation,
+                  let metrics = self.metrics else { return }
             guard !self.model.island.presentation.isOpen, !self.model.island.presentation.isBanner else {
-                self.prepareSettings(after: .seconds(3))
+                self.prepareSettings(after: .seconds(3), preparation: preparation)
                 return
             }
             // The step in a turn of its own with the thread at background quality of service
@@ -79,9 +109,9 @@ import SwiftUI
             // 1370, 1356, 766 and 471 in the four seconds from ten seconds after every launch
             // (measured with `rest.py`).
             MainThrift.lowPowerTurn { [weak self] in
-                guard let self, self.isStarted, !self.model.island.presentation.isOpen,
-                      !self.model.island.presentation.isBanner else {
-                    self?.prepareSettings(after: .seconds(3))
+                guard let self, self.isStarted, SettingsWindow.isKept, preparation == self.preparation else { return }
+                guard !self.model.island.presentation.isOpen, !self.model.island.presentation.isBanner else {
+                    self.prepareSettings(after: .seconds(3), preparation: preparation)
                     return
                 }
                 if !SettingsWindow.isPrepared {
@@ -94,7 +124,7 @@ import SwiftUI
                 } else if !SettingsWindow.prepareNextPage(model: self.model) {
                     return
                 }
-                self.prepareSettings(after: .milliseconds(400))
+                self.prepareSettings(after: .milliseconds(400), preparation: preparation)
             }
         }
     }
