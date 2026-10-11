@@ -150,13 +150,17 @@ import Synchronization
     }
 
     private func setCovered(_ covered: Bool, at pointer: CGPoint, reason: String) {
-        guard covered != (cover?.isVisible ?? false) else { return }
+        // Up, but on another Space (a full-screen Space made since): shown again here.
+        let isUp = (cover?.isVisible ?? false) && (cover?.isOnActiveSpace ?? false)
+        guard covered != isUp || (!covered && cover?.isVisible == true) else { return }
         if covered, let geometry {
             let panel = cover ?? BandCoverPanel()
             panel.onMouseDown = { [weak self] in self?.coverClicked() }
             cover = panel
             panel.setFrame(geometry.bandRect, display: true)
-            panel.orderFrontRegardless()
+            // Onto this Space if the window server holds it on another (`orderFrontOnActiveSpace`):
+            // there it covered nothing, and the menu bar came down at the notch.
+            if panel.orderFrontOnActiveSpace() { Log.window.error("menu-bar strip ordered in off the active Space: moved to it") }
         } else {
             cover?.orderOut(nil)
         }
