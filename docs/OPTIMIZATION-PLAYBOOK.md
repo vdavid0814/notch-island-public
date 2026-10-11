@@ -177,7 +177,19 @@ Settings' window (Tab then loses the keyboard from the search field; the unfold'
 the unseen Top Bar page out of the mode deck (no change). See `ENERGY-LOG.md` for Size mode's unfold
 (2–3 J: the page laid out at every frame) and the branch `wip-unfold-in-place`.
 
+October 11 2026 (afternoon): a scroll gesture's later events sent straight to the view that took
+its first, past AppKit's own routing (`NSWindow.sendEvent`): a sixth of a swipe saved, but AppKit's
+routing does more than find the view — it keeps the system's momentum events from a scroll view
+that animates its own momentum, so the ruler was moved twice — taken out the same day.
+
 ## 6. Keep the look and the motion identical
+
+- **Synthetic swipes are straighter than fingers**: a real two-finger swipe always carries some
+  of the other direction, a rest before lifting, and momentum of its own. What only a hand shows
+  (the ruler's ticks sliding down out of it, a short swipe running to the end) the user's screen
+  recording did: frames with `AVAssetImageGenerator` every 0.05 s, cropped to the part. Record
+  with `screencapture -V <s> -R x,y,w,h` to see the island in one's own test (a recording started
+  from the island's widget leaves the island's windows out).
 
 - **Screenshots, old and new, same state**: `screencapture -x`, then `image-diff.swift` (a live
   clock or reading changes ~0.1–0.3 % of the pixels; more means a real change).

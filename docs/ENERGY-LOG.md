@@ -12,13 +12,13 @@ binary (the SwiftUI scroll track behind a switch, removed since), each from a fr
 
 | step (1 s Energy Impact) | before | after |
 |---|---|---|
-| A fast swipe along the Timer's ruler | 228–264 (205–233 ms of a performance core) | **44–52** (0–3 ms) |
-| A slow swipe along it (two fingers held, 1 s) | 171–223 | **42–48** |
+| A fast swipe along the Timer's ruler | 228–264 (205–233 ms of a performance core) | **50–55** (0–4 ms) |
+| A slow swipe along it (two fingers held, 1 s) | 171–223 | **47–52** |
 | The ruler dragged with the mouse | not measured | 21–28 |
-| A page turned by a sideways swipe (its second) | 78–100 | 50–60 |
+| A page turned by a sideways swipe (its second) | 78–100 | the same (not solved) |
 | Memory at rest, on the charger | 215–221 MB | **27 MB** (77–79 MB after Settings has been open) |
 
-Of a swipe's 44–52, 13–25 is `tccd` checking the synthetic events (billed to the app; a hand's
+Of a swipe's 50–55, 12–21 is `tccd` checking the synthetic events (billed to the app; a hand's
 swipes are not checked). The first swipe after a launch costs 130–200 more, once (before too).
 The page turn was measured while `mediaanalysisd` held two cores; compare only with its own row.
 
@@ -52,9 +52,23 @@ The page turn was measured while `mediaanalysisd` held two cores; compare only w
   the live scale (`LiveRulerTrack`); the tick felt comes from the ruler's setter. The widget's body
   — with a text measured at every call — was built again at every tick.
 - **Label fonts made once** (`TextStyle.font`: a font from a descriptor at every change of a
-  restyled text), and **a scroll gesture's later events go to the view that took its first**
-  (`IslandPanel.sendEvent`: AppKit found the view under the pointer again for every event, through
-  SwiftUI's hit test — a sixth of a swipe along the ruler).
+  restyled text).
+- **Tried for two hours and taken out: a scroll gesture's later events handed straight to the view
+  that took its first** (`IslandPanel.sendEvent`, to save AppKit's hit test at every event, a
+  sixth of a swipe). The user found both faults at once on a real trackpad: the momentum's own
+  events, which AppKit's routing keeps from a scroll view that animates its momentum itself, moved
+  the ruler a second time (a short swipe ran from one end to the other), and a page turn's 50–60
+  measured with it is gone with it.
+- **The ruler's ticks slid down out of it on a real trackpad** (the user's recording: their tops
+  coming down, then nothing for half a second): two fingers never move exactly sideways, and the
+  scroll view took the rest for a scroll of its own although it cannot scroll that way and has no
+  rubber band there. Not reproduced with synthetic swipes, straight or slanted, with or without
+  momentum. The clip now stays where it is up and down (`RulerClipView`), the scale is drawn
+  against whatever is left of it (`holdUpright`), and a clip moved while no scroll of the user's
+  goes on is put back on its value. **To be confirmed by the user's hand.**
+- How far a swipe carries, old against new, the same six gestures from the low end: 7 / 9,
+  15 / 18, 23 / 31, 63 / 66, 16 / 15 and 5 / 5 minutes (one run each; runs of one build differ as
+  much).
 - **Memory on the charger, energy on battery** (`SettingsWindow.isKept`,
   `IslandWindowController.followPowerSource`): on battery Settings is built ahead after a launch
   and kept, as before; on the charger (and on a Mac without a battery) it is built when opened
@@ -69,7 +83,7 @@ The page turn was measured while `mediaanalysisd` held two cores; compare only w
 - **The Automation answer is kept** (`PermissionProbe.automation`: a minute while allowed and
   System Settings is not running, two seconds otherwise): General's rows asked two or three times
   at each opening, ~20 ms each and work in `tccd` billed to the app.
-- **Measured, not solved**: a page turn (50–60: SwiftUI lays the panel out at every frame of the
+- **Measured, not solved**: a page turn (78–100: SwiftUI lays the panel out at every frame of the
   swap; nothing of the app's own stands out in a sample); kept Settings still costs ~60–90 more
   per opening and closing than one with a single page built (146 / 31 against 181–204 / 77–95):
   what the kept pages do then is not found yet; the first swipe after a launch (+130–200 once);

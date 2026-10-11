@@ -72,6 +72,7 @@ final class RulerScrollView: NSScrollView {
 
     init() {
         super.init(frame: .zero)
+        contentView = RulerClipView()
         drawsBackground = false
         borderType = .noBorder
         hasHorizontalScroller = false
@@ -156,11 +157,16 @@ final class RulerScrollView: NSScrollView {
 
     private func scroll(to offset: CGFloat) {
         if contentView.bounds.origin.x != offset {
+            isSetting = true
             contentView.setBoundsOrigin(CGPoint(x: offset, y: 0))
             reflectScrolledClipView(contentView)
+            isSetting = false
         }
         align()
     }
+
+    /// The clip is being moved from here (`scroll(to:)`), not by a scroll.
+    private var isSetting = false
 
     /// At rest the ticks are exactly where the resting picture has them. The scroll view keeps its
     /// clip on whole device pixels, and the widget is drawn scaled: that is up to a quarter of a
@@ -170,6 +176,14 @@ final class RulerScrollView: NSScrollView {
         guard let scale, !isLive else { return }
         let origin = contentView.bounds.origin
         scaleView.shift = CGPoint(x: origin.x - scale.offset(of: value), y: origin.y)
+    }
+
+    /// The scale never moves up or down, wherever the clip is: two fingers on a trackpad never
+    /// move exactly sideways, and the scroll view took the rest for a scroll of its own (the ticks
+    /// slid down out of the ruler; `RulerClipView` keeps the clip in place too).
+    private func holdUpright() {
+        let y = contentView.bounds.origin.y
+        if scaleView.shift.y != y { scaleView.shift.y = y }
     }
 
     /// The ticks' colours for `new` under the marker.
@@ -191,7 +205,18 @@ final class RulerScrollView: NSScrollView {
     }
 
     private func scrolled() {
-        guard isLive, let scale else { return align() }
+        guard let scale, !isSetting else { return }
+        holdUpright()
+        guard isLive else {
+            // At rest off its value (moved by something that is no scroll of the user's): back
+            // onto it at once.
+            if dragStart == nil, abs(contentView.bounds.origin.x - scale.offset(of: value)) > 1 {
+                scroll(to: scale.offset(of: value))
+            } else {
+                align()
+            }
+            return
+        }
         let new = scale.value(at: contentView.bounds.origin.x)
         guard new != value else { return }
         mark(new)
@@ -257,6 +282,16 @@ final class RulerScrollView: NSScrollView {
         guard dragStart != nil else { return }
         dragStart = nil
         onInteraction(false)
+    }
+}
+
+/// The ruler's clip: it scrolls sideways only. A trackpad's swipe always has a little of the other
+/// direction in it, and the scroll view's rubber band took the clip up or down with it.
+final class RulerClipView: NSClipView {
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var bounds = super.constrainBoundsRect(proposedBounds)
+        bounds.origin.y = 0
+        return bounds
     }
 }
 
