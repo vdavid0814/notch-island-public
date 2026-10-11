@@ -172,7 +172,8 @@ private struct FadeShadePicture: View {
     }
 
     /// The panel, the pill, Siri's field and gallery: a few sizes come back again and again. Each
-    /// picture is the island's size in pixels (a panel's ~1 MB, Siri's gallery's up to ~6 MB).
+    /// picture is the island's size in pixels, a byte a pixel (`alphaOnly`): a panel's ~0.3 MB,
+    /// Siri's gallery's and Settings' ~3.5 MB.
     private static let limit = 4
     private static var pictures: [Key: CGImage] = [:]
     private static var order: [Key] = []
@@ -191,11 +192,24 @@ private struct FadeShadePicture: View {
         }
         let renderer = ImageRenderer(content: FadeShadeMask(solidDepth: solidDepth, size: size, stretch: stretch))
         renderer.scale = scale
-        guard let picture = renderer.cgImage else { return nil }
+        guard let drawn = renderer.cgImage else { return nil }
+        let picture = alphaOnly(drawn)
         pictures[key] = picture
         order.append(key)
         while order.count > limit { pictures[order.removeFirst()] = nil }
         return picture
+    }
+
+    /// The picture's coverage alone, one byte a pixel: it is only ever a mask, and as the
+    /// renderer's four bytes a pixel Settings' shade (its whole surface) was 14 MB kept here and
+    /// 14 MB more in Core Animation's copy of it, from Settings' first closing on (measured with
+    /// `vmmap`).
+    private static func alphaOnly(_ picture: CGImage) -> CGImage {
+        guard let context = CGContext(data: nil, width: picture.width, height: picture.height, bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: CGColorSpaceCreateDeviceGray(),
+                                      bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue) else { return picture }
+        context.draw(picture, in: CGRect(x: 0, y: 0, width: picture.width, height: picture.height))
+        return context.makeImage() ?? picture
     }
 }
 
