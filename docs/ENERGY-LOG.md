@@ -12,8 +12,7 @@ Real clicks and trackpad-like scrolls (`studio.py`, `ws/moused`'s new `scroll`),
 |---|---|---|
 | Stage mode Size, and back (Settings ▸ Widgets) | 2100–3100 | **570–710** (60 frames a second, where it showed 5–8) |
 | The seconds after a launch (Settings built ahead) | 1370, 1356, 766, 471 … (4.3 J) | 675, 153, 570, 141, 119, 143, 725 (2.6 J) |
-| A swipe along the Timer's ruler (open panel) | 390–430 | **210–255** |
-| The ruler dragged slowly | 170–290 | 170–200 |
+| A swipe along the Timer's ruler (open panel) | ~300 | ~300 (not solved) |
 
 - **The unfold** (`StudioStage`, `WidgetStudio.stagePlace` / `stageShown`): the stage's place in the
   page takes the mode's height in the same layout as the mode's content (known ahead:
@@ -34,10 +33,13 @@ Real clicks and trackpad-like scrolls (`studio.py`, `ws/moused`'s new `scroll`),
 - **Settings built ahead after a launch** ran from a task (at the task's priority: a performance
   core); each step now runs in a `lowPowerTurn`. Left: ~0.6 s of performance-core time in other
   turns and threads, and 15–50 mJ a second of GPU.
-- **Scrolls over the island are handed on once a frame** (`ScrollPacer`): the moving events of a
-  gesture and of its momentum are summed and delivered from a timer's turn, the first and last of
-  each phase at once. A trackpad sends up to 120 a second; each was a turn with a SwiftUI update.
-  `NI_NO_SCROLL_PACE=1` switches it off for measuring.
+- **The Timer's ruler** (a fast swipe ~300 for its second, ~270 ms of a performance core): the
+  window already gets a trackpad's scroll once a display frame (554 events in the test's swipes,
+  16.4 ms apart, although `ws/moused` posts them at 120 a second), so there is nothing to merge.
+  A pacer that delivered each event a frame later from a timer (tried for an hour, shipped in one
+  build) only halved the updates — 30–40 a second, which looked slow, as the user saw at once —
+  and is out again. What a swipe costs is sixty SwiftUI updates of ~5 ms; less means the ruler's
+  scale as a layer moved on the render server.
 - **Measured, not solved**: a widget picked from the gallery's state (~1100): the inspector slides
   in over ~20 frames of ~12 ms, its native controls drawn again at each (as Customize's panels were
   before `RenderServerSlide`); taking the deck's height out of that spring made it worse (2000).

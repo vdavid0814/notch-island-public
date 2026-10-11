@@ -71,7 +71,9 @@ struct TimerRuler: View {
             // numbers out of step with the time's), while the marker below stays put.
             RestingRulerTrack(minutes: $minutes, range: range, minimum: minimum, isEditable: isEditable,
                               showsLabels: showsLabels, tint: tint, ends: ends, isAwake: isAwake, onInteraction: onInteraction)
-                .id(unit)
+                // … and per range of it: minutes run to 59 with Set hours on and to 120 without, and
+                // the scale is made anew when that changes, never the longer one kept.
+                .id("\(unit)-\(range.lowerBound)-\(range.upperBound)")
                 .transition(.identity)
                 // The scale alone: the unit's name under it keeps what it draws below its line
                 // (an underline) and where it is moved.
