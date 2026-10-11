@@ -60,4 +60,35 @@ nonisolated enum Thrifty {
         RunLoop.main.add(timer, forMode: .common)
         restore = timer
     }
+
+    /// `work` in a turn of its own with the main thread at background quality of service until
+    /// that turn's layout and commit are done: for what a click sets off and nobody watches the
+    /// first frame of (a close). In the click's own turn it runs at the click's priority whatever
+    /// the thread's quality of service is — on a performance core: closing Settings by a click
+    /// outside was one ~105 ms turn there, ~200 mJ for that second; here ~105 (measured with
+    /// `NI_TRACE` and `stress.py settings-gear`, A B A B), the close starting ~0.1 s later.
+    /// Utility instead of background changed nothing (still a performance core). A run-loop
+    /// timer, not a dispatch job or a task (their end puts the thread's quality of service back);
+    /// the frames after the turn run at the thread's own priority again, so the motion is as
+    /// smooth as before.
+    static func lowPowerTurn(_ work: @escaping @MainActor () -> Void) {
+        guard isEnabled else { return work() }
+        let timer = Timer(timeInterval: 0, repeats: false) { _ in
+            pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
+            // Again just before the layout and the commit (a dispatch job run meanwhile restores
+            // the thread's own), and back after them — unless a longer stretch was asked for.
+            let lower = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, CFIndex.min) { _, _ in
+                pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
+            }
+            let raise = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, CFIndex.max) { _, _ in
+                MainActor.assumeIsolated {
+                    if restore == nil { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) }
+                }
+            }
+            CFRunLoopAddObserver(CFRunLoopGetMain(), lower, .commonModes)
+            CFRunLoopAddObserver(CFRunLoopGetMain(), raise, .commonModes)
+            MainActor.assumeIsolated { work() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
 }

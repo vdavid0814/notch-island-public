@@ -339,10 +339,14 @@ nonisolated extension BannerKind {
         inputsChanged()
     }
 
+    /// Asked for now, resolved in a turn of its own on the efficiency cores (`lowPowerTurn`): the
+    /// close's first turn (the island's content swapped, Settings' place taken down) was ~105 ms
+    /// on a performance core in the click's own turn. Whatever else changes the inputs meanwhile
+    /// resolves it at once.
     func closeSettings() {
         guard wantsSettings else { return }
         wantsSettings = false
-        inputsChanged()
+        MainThrift.lowPowerTurn { [weak self] in self?.inputsChanged() }
     }
 
     /// Esc, a click outside, or the island losing the keyboard: whichever of the two is open.
@@ -351,10 +355,11 @@ nonisolated extension BannerKind {
         closeSettings()
     }
 
+    /// As `closeSettings`: its first turn (~60–70 ms) off the click's or the key's own.
     func closeAssistant() {
         guard wantsAssistant else { return }
         wantsAssistant = false
-        inputsChanged()
+        MainThrift.lowPowerTurn { [weak self] in self?.inputsChanged() }
     }
 
     /// Pinning keeps the island open, so pinning a closed island opens it.
