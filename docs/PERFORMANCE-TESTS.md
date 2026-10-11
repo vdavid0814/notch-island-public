@@ -22,7 +22,7 @@ builds of v0.8.4.3 (39) and this work as signed test copies (`mkapp.sh`), each f
 4. **Who the app is billed for** (new `serviced.py`), with the daemons' logs and a `sample`.
 5. **Rest**: `rest.py` for 4 and 15 minutes with music, each coalition member's CPU beside it.
 6. **Memory**: `footprint`, `vmmap` and `heap` after a launch, after each Settings page built alone
-   (`NI_NO_PREPARE=1`), and after a tour.
+   (`NI_KEEP_SETTINGS=0`: built when opened, as on the charger), and after a tour.
 7. **It looks the same**: the island's and Settings' own windows captured alone
    (`screencapture -l`, `frames/wins.swift`), old and new: the panel, Spotlight's gallery, Settings.
 8. **Unit tests** (`Scripts/test.sh`): 897 tests and the 482 widget snapshots.

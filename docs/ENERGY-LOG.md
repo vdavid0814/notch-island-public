@@ -4,6 +4,82 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-11 (afternoon, on the charger): the Timer's ruler as layers, memory on the charger
+
+Real trackpad-like swipes and drags (`ruler.py`, `ws/moused`), release builds, music playing, the
+user's board (small panel; the timer widget drawn at 0.92 of its size). Old and new from the same
+binary (the SwiftUI scroll track behind a switch, removed since), each from a fresh launch.
+
+| step (1 s Energy Impact) | before | after |
+|---|---|---|
+| A fast swipe along the Timer's ruler | 228–264 (205–233 ms of a performance core) | **44–52** (0–3 ms) |
+| A slow swipe along it (two fingers held, 1 s) | 171–223 | **42–48** |
+| The ruler dragged with the mouse | not measured | 21–28 |
+| A page turned by a sideways swipe (its second) | 78–100 | 50–60 |
+| Memory at rest, on the charger | 215–221 MB | **27 MB** (77–79 MB after Settings has been open) |
+
+Of a swipe's 44–52, 13–25 is `tccd` checking the synthetic events (billed to the app; a hand's
+swipes are not checked). The first swipe after a launch costs 130–200 more, once (before too).
+The page turn was measured while `mediaanalysisd` held two cores; compare only with its own row.
+
+- **The ruler's live scale is an AppKit scroll view with layers** (`RulerScrollView`,
+  `RulerScaleView`): one `CALayer` a tick (the frame, corner and colour SwiftUI gave its own,
+  read from the layer tree with `NI_LAYER_DETAIL=1`), the numbers drawn once each. A swipe moves
+  the clip; the app works when another tick comes under the marker (the ticks between the two
+  values change colour, the value is handed on). SwiftUI's scroll view (an `NSScrollView` too,
+  `HostingScrollView`) laid the island's whole view tree out at every frame.
+- **The same motion**: AppKit's scrolling animator in both (fingers, momentum, rubber band). The
+  momentum's end is asked for through the scroll view's own delegate
+  (`scrollViewBeganMomentum:withVelocity:targetContentOffset:`, not in the headers; found by
+  listing AppKit's scroll classes and protocols at run time): the nearest whole tick. Traced old
+  against new with the same gestures (the clip's origin at every change, and what the delegate
+  made of each proposed end): the same ends for slow and medium swipes and for fingers lifted at
+  rest. **Two differences, both on purpose**: a hard swipe back ended on 0 or 5 in the old one
+  whatever its momentum (SwiftUI's lazy stack picked among the ticks it had laid out; 61 → 0,
+  95 → 0, 145 → 40 pt), and now ends where its momentum does; the old scale rested up to a
+  quarter of a point off its tick after a swipe (the resting picture then shifted as the pointer
+  left), the new one exactly on it.
+- **Pixel for pixel the resting picture**: 0 of the ruler's pixels differ between the live scale
+  and the picture, at its first value and after a swipe (max 1/255 with the numbers shown). The
+  scroll view keeps its clip on whole device pixels, which in a scaled widget is up to 0.24 pt
+  off the tick: the ticks' layer is drawn that much the other way (`RulerScrollView.align`).
+- **A value set from outside** glides over three frames, as the old one did (measured: SwiftUI's
+  scroll view took two to three frames whatever animation it was asked with, not the 0.24 s spring).
+- **A drag** counts in the view's own points (the widget is scaled): 41 pt on the screen are six
+  ticks in both.
+- **The length being set is read only where it is shown**: the time (`TimerReadout`), the Start
+  button's state (`DisabledAtZero`), the ruler's value for assistive apps (`RulerAccessibility`),
+  the live scale (`LiveRulerTrack`); the tick felt comes from the ruler's setter. The widget's body
+  — with a text measured at every call — was built again at every tick.
+- **Label fonts made once** (`TextStyle.font`: a font from a descriptor at every change of a
+  restyled text), and **a scroll gesture's later events go to the view that took its first**
+  (`IslandPanel.sendEvent`: AppKit found the view under the pointer again for every event, through
+  SwiftUI's hit test — a sixth of a swipe along the ruler).
+- **Memory on the charger, energy on battery** (`SettingsWindow.isKept`,
+  `IslandWindowController.followPowerSource`): on battery Settings is built ahead after a launch
+  and kept, as before; on the charger (and on a Mac without a battery) it is built when opened
+  and given up 30 s after it closes. Settings ▸ General open 51 MB, Widgets ~150 MB while open.
+  `NI_KEEP_SETTINGS=1` or `0` forces either. Opening Settings on the charger builds the page
+  shown (General: ~175 mJ over two seconds the first time, ~150 while it is still there).
+- **A page's live pictures are put back only when that page is shown**
+  (`DeferringHostingView.pausesWithSettings`): every opening put Widgets' gallery and stage back
+  into the window while General was the page, and every closing took them out. Kept Settings from
+  the gear: opening 237–268 → 181–204, closing 84–115 → 77–95 (same hour; later runs under
+  load read higher for both).
+- **The Automation answer is kept** (`PermissionProbe.automation`: a minute while allowed and
+  System Settings is not running, two seconds otherwise): General's rows asked two or three times
+  at each opening, ~20 ms each and work in `tccd` billed to the app.
+- **Measured, not solved**: a page turn (50–60: SwiftUI lays the panel out at every frame of the
+  swap; nothing of the app's own stands out in a sample); kept Settings still costs ~60–90 more
+  per opening and closing than one with a single page built (146 / 31 against 181–204 / 77–95):
+  what the kept pages do then is not found yet; the first swipe after a launch (+130–200 once);
+  scrolls over the island are not taken for ~30 s after a launch, and the ruler's hover often
+  goes unreported when the pointer comes straight down from the notch (the scale stays a picture
+  and a swipe turns the page): both seen with synthetic input, old and new alike.
+- **Activity Monitor** could not be read live this time: its window was on another Space while
+  the screen was on a full-screen one (it cannot be brought there, and does not update unseen).
+  The numbers are the coalition's, which it shows.
+
 ## 2026-10-11 (midday): Size mode's unfold, the launch, the Timer's ruler
 
 Real clicks and trackpad-like scrolls (`studio.py`, `ws/moused`'s new `scroll`), the user's board.

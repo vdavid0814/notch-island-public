@@ -125,6 +125,29 @@ which did not, and how to keep the look identical. The numbers are in `ENERGY-LO
 - **Never read energy under `sample`**: the sampled main thread stays on the efficiency cores (a
   switch that costs 2700 mJ read 145).
 
+- **A scroll view of SwiftUI's lays its window's whole view tree out at every frame of a scroll**
+  (it is an `NSScrollView`, `HostingScrollView`, whose offset is SwiftUI state). Where the content
+  is simple, an `NSScrollView` of our own with layers drawn once costs a fifth (the Timer's ruler,
+  `RulerScrollView`). To keep the look: read what SwiftUI made (`NI_LAYER_DETAIL=1` with
+  `demo/state`: every layer's exact frame, corner, colour) and make the same layers; to keep the
+  motion: trace both with the same gestures (the clip's origin at every change) and hook the
+  same AppKit call SwiftUI does — list a class's methods and protocols at run time
+  (`class_copyMethodList`, `objc_copyProtocolList`) to find it.
+- **A model value that changes sixty times a second must be read by leaves only**: a small view or
+  modifier for each place it is shown. Read in a widget's body (or by an `onChange` there), the
+  whole widget is built again at every change.
+- **In a scaled view AppKit and SwiftUI disagree by a fraction of a point**: AppKit keeps a clip
+  on device pixels, SwiftUI rounds in the view's own points. Compare screenshots on the part's own
+  rectangle only (the island is see-through: whatever moves behind it differs too).
+- **Check that the part under test is really live before a synthetic gesture**: hover often goes
+  unreported to SwiftUI when the pointer is put somewhere (come in from a neighbouring view, and
+  check), and scrolls are not delivered for ~30 s after a launch.
+- **Kept views that take themselves out of the window** (`pausesWithSettings`) must come back only
+  where they are seen: put back by a notification, every one of every page came back at each
+  opening.
+- **Another daemon's CPU changes every number** (`mediaanalysisd` at 200 % for an hour): look at
+  `ps -Ao pcpu,comm -r | head` before a run and compare only runs made in the same state.
+
 ## 5. Tried and dropped (measured equal or worse)
 
 An AppKit `NSScrollView` around a SwiftUI page, responsive scrolling, AppKit hover tracking instead

@@ -65,7 +65,21 @@ def customize_cycle():
 def key(code, *flags):
     send("key " + " ".join([str(code), *flags]))
 
+PAGE = tuple(float(v) for v in os.environ.get("PAGE", "520,110").split(","))
+
+def page_cycle():
+    # Two fingers swiped sideways over the open panel (on a widget that does not scroll): the next
+    # page, then back.
+    send("scroll -8 0 10 0"); time.sleep(1.2)
+    send("scroll 8 0 10 0"); time.sleep(1.2)
+
+def page_open():
+    move(NX, NY); time.sleep(1.2)
+    move(*PAGE, 20, 12); time.sleep(0.8)
+
 SCENARIOS = {
+    # Pages turned by a sideways swipe, there and back (the panel hovered open first: PRELUDE).
+    "page-swipe": (page_cycle, 6),
 
     # Customize opened and closed by its buttons (Settings ▸ Widgets, a widget picked).
     "customize": (customize_cycle, 2),
@@ -91,6 +105,7 @@ def main():
     pid = int(subprocess.run(["pgrep", "-x", "NotchIsland"], capture_output=True, text=True).stdout.split()[0])
     cid = coalition_id(pid)
     move(*AWAY); time.sleep(2.5)
+    if name == "page-swipe": page_open()
     samples = []; stop = False
     def sampler():
         prev = read(cid); pt = time.time()

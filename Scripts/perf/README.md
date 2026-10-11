@@ -5,7 +5,8 @@
 | `bench.py <label> <seconds> [full\|opens\|settings\|idle]` | Drives the island through `notchisland://` URLs and samples CPU %, GPU %, footprint and Energy Impact (top's POWER) every second. `NI_APP` picks the app bundle. |
 | `ab.py <out.tsv> <label=app> … -- [scenario …]` | Back-to-back comparison of builds with `anim.py` (A B A B …), one row per scenario and round, then the medians. Refuses a build that still sends diagnostics. |
 | `rest.py <seconds> [label]` | Energy Impact second by second at rest, as Activity Monitor at 1 s shows it (own, GPU, billed to the app), with the seconds that had keyboard or mouse input marked and left out of the summary; `QUIET=1` prints the summary only. |
-| `stress.py <scenario> [rounds]` | Stress tests with the real pointer, through one long-lived `ws/moused` (build: `swiftc -O ws/moused.swift -o ws/moused`): `hover-spam`, `hover-slow`, `hover-cold` (openings after the kept page is gone), `hover-once`, `pass-by`, `move-around`, `settings-gear` (Settings from the panel's gear, closed by a click outside), `customize` (Settings ▸ Widgets with a widget picked: Customize… and Done). Worst 1 s / 5 s, mean, CPU, P-core ms, energy with what was billed; `SECONDS_ROW=1` prints every second. `NOTCH`, `GEAR`, `CUSTOMIZE`, `DONE` override the points. |
+| `stress.py <scenario> [rounds]` | Stress tests with the real pointer, through one long-lived `ws/moused` (build: `swiftc -O ws/moused.swift -o ws/moused`): `hover-spam`, `hover-slow`, `hover-cold` (openings after the kept page is gone), `hover-once`, `pass-by`, `move-around`, `settings-gear` (Settings from the panel's gear, closed by a click outside), `page-swipe` (pages turned by a sideways swipe over the open panel, `PAGE` the point), `customize` (Settings ▸ Widgets with a widget picked: Customize… and Done). Worst 1 s / 5 s, mean, CPU, P-core ms, energy with what was billed; `SECONDS_ROW=1` prints every second. `NOTCH`, `GEAR`, `CUSTOMIZE`, `DONE` override the points. |
+| `ruler.py [rounds] [fast\|slow\|drag …]` | The Timer's ruler under trackpad-like swipes and mouse drags, the panel hovered open first: each swipe's energy, worst 1 s, CPU and performance-core ms. `RULER`, `OTHER`, `NOTCH` are the points. Wait ~40 s after a launch. |
 | `meter.py` | `run([(name, step), …])`: each step's energy as Activity Monitor counts it, its worst 1 s window, CPU and performance-core ms, and every second's energy; the steps use `stress.py`'s pointer and keys (`move`, `click`, `key`, `send`). |
 | `studio.py [rounds] [picks\|modes\|customize]` | Settings ▸ Widgets by real clicks: a widget picked on the stage and let go, the stage's modes (Top Bar, Size and back), Customize opened and closed. Open the page first (`drive.py settings/widgets 4`); the points (`TIMER`, `SYSTEM`, `SIZE`, …) are for a 1280 × 832 pt screen. |
 | `serviced.py <seconds> [min mJ]` | Which processes worked for others meanwhile (`proc_pid_rusage`'s serviced energy, polled, so short-lived helpers count): who the coalition's "billed to me" comes from. Root's daemons (`mds`) cannot be read. |
@@ -20,6 +21,11 @@
 | `image-diff.swift` | Pixel difference of two screenshots. |
 | `ws/ws_bench.py <label> <app\|none\|keep:app> <scenario …>` | The app, WindowServer and coreaudiod together (coalition energy, CPU, wake-ups), with a real pointer: rest, 10 hover opens, a Settings tour, Settings ▸ General at rest. Build `ws/mouse.swift` and `ws/hideapp.swift` first. |
 | `night.py cycle\|rest\|only <label> …` | The overnight soak: every animation and opening (panels, hover, Siri and its galleries, level/battery/AirPods/timer/drop banners, a track change, every Settings page, music paused and playing), sampled four times a second, then a rest reported per minute to catch leaks. Rows in `night/` (not committed). |
+
+Switches read by the app (measuring only): `NI_TRACE=1` (long main-thread turns in the log),
+`NI_LAYER_DETAIL=1` (`demo/state` writes every layer's exact frame, corner, colour and gradient),
+`NI_KEEP_SETTINGS=1` or `0` (Settings kept built as on battery, or built when opened as on the
+charger, whatever the power source).
 
 Findings (September 2026, macOS 27, MacBook Air M5):
 - SwiftUI's `.glassEffect(.clear.tint(.black.opacity(0.62)))` and `NSGlassEffectView(.clear, tint)` render identically (0 pixel difference).
@@ -205,7 +211,7 @@ New tools:
 | `subtree.py <sample> <needle> <min> [depth] [min]` | The call tree under the first node matching `needle`. |
 | `parts.py <scenario …>` | An `anim.py` scenario's coalition energy split: CPU, GPU, billed to the app by other processes, performance-core ms, instructions. |
 | `ws/key.swift` | Types text or Esc with CGEvents (`swiftc -O key.swift -o key`). |
-| `ws/moused.swift` | The long-lived pointer driver (`stress.py`, `meter.py`): `move`, `click`, `down`, `up`, `key`, `type`, and `scroll dx dy frames [momentum]` — a trackpad-like scroll with gesture phases where the pointer is. |
+| `ws/moused.swift` | The long-lived pointer driver (`stress.py`, `meter.py`): `move`, `click`, `down`, `drag` (the button held), `up`, `key`, `type`, and `scroll dx dy frames [momentum] [pause ms]` — a trackpad-like scroll with gesture phases where the pointer is, the fingers lifted with an event that moves nothing (after a rest, with `pause`). |
 | `ws/smooth.swift <x> <y> <pt per frame> <frames> [momentum frames] [decay]` | A trackpad-like scroll at 120 Hz, with gesture phases, a momentum tail if asked; `HOLD=1` keeps the fingers down (`swiftc -O smooth.swift -o smooth`). |
 | `ws/axscroll.swift <pid>` | Every scroll area's vertical position through Accessibility, in any build. |
 | `drive.py <step> …` | `notchisland://` URLs (`settings/widgets`, `close`, …) sent to `NI_APP`, or seconds to wait. |
