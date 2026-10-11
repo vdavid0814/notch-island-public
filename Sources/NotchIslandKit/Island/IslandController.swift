@@ -355,11 +355,10 @@ nonisolated extension BannerKind {
         closeSettings()
     }
 
-    /// As `closeSettings`: its first turn (~60–70 ms) off the click's or the key's own.
     func closeAssistant() {
         guard wantsAssistant else { return }
         wantsAssistant = false
-        MainThrift.lowPowerTurn { [weak self] in self?.inputsChanged() }
+        inputsChanged()
     }
 
     /// Pinning keeps the island open, so pinning a closed island opens it.
