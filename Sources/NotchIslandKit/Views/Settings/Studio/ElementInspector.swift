@@ -826,12 +826,10 @@ struct ElementInspector: View, Equatable {
         }
     }
 
-    /// A graph's own range: the chip's fixed one, the fans' slowest to fastest.
+    /// A graph's own range: the chip's fixed one, the fans' from nothing to their fastest.
     private func graphRange(_ id: ElementID) -> ClosedRange<Double> {
         if id == .tempGraph { return TemperatureDial.range }
-        let fans = model.fans.fans.isEmpty ? FanControlWidget.sample : model.fans.fans
-        let low = fans.map(\.minimum).min() ?? 0, high = fans.map(\.maximum).max() ?? 1
-        return low...max(high, low + 1)
+        return FanControlWidget.speedRange(model.fans.fans.isEmpty ? FanControlWidget.sample : model.fans.fans)
     }
 
     /// One end of a graph's range, in the graph's own unit (degrees as the Mac writes them, rpm).

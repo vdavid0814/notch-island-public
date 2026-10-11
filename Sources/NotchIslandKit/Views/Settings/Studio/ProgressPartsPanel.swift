@@ -706,7 +706,7 @@ private struct PartsPicture: View, Equatable {
         case .fanDial:
             FanDial(fans: FanControlWidget.sample, held: nil, isManual: false, diameter: side,
                     number: widget.shows(.value) ? FanControlWidget.rpmText(FanControlWidget.sample) : nil,
-                    name: FanControlWidget.nameText(manual: false, access: .unknown, showsMode: widget.shows(.label)),
+                    mode: widget.shows(.label) ? FanControlWidget.modeText(manual: false, access: .unknown) : nil,
                     look: look, nameStyle: widget.textStyles[.fanName], valueStyle: widget.textStyles[.value], reportsFrame: true,
                     set: { _ in }, automatic: {})
         case .tempDial:

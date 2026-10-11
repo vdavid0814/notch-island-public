@@ -45,17 +45,22 @@ import ServiceManagement
     }
 
     private(set) var fans: [FanReading] = []
-    /// The speed asked for, 0…1 of each fan's range, from the moment it is asked until the fans read
-    /// it back (or it is given up): the dial shows it at once.
-    private(set) var requested: Double?
+    /// The speed the fans are held at by hand, 0…1 of what each can do: from the moment the dial is
+    /// turned until the fan in it is clicked (Automatic). Nothing else gives it up but the helper
+    /// failing, or the chip at its limit (`isTooHot`): fans macOS took back meanwhile are asked for
+    /// again (`sample`), and the dial says Manual all along.
+    private(set) var held: Double?
     private(set) var access: Access = .unknown
+    /// The helper gave the fans back to macOS because the chip was at its limit: said on the dial
+    /// for a few seconds (`heatNotice`).
+    private(set) var isTooHot = false
 
     var hasFans: Bool { FanSensors.hasFans }
-    var isManual: Bool { requested != nil || fans.contains(where: \.isManual) }
+    var isManual: Bool { held != nil || fans.contains(where: \.isManual) }
 
-    /// The speed held, 0…1 of the range (the first fan's; they are set alike).
+    /// The speed held, 0…1 (the first fan's; they are set alike).
     var heldFraction: Double? {
-        if let requested { return requested }
+        if let held { return held }
         guard let fan = fans.first(where: \.isManual) else { return nil }
         return fan.fraction(of: fan.target)
     }
@@ -75,7 +80,12 @@ import ServiceManagement
     @ObservationIgnored private var checkedBuild = false
     /// Requests waiting for the helper to say which build it runs.
     @ObservationIgnored private var waiting: [(any FanHelperProtocol) -> Void] = []
-    @ObservationIgnored private var requestedAt = Date.distantPast
+    /// When a speed was last sent: fans not held as asked are asked for again `askAgain` later.
+    @ObservationIgnored private var askedAt = Date.distantPast
+    @ObservationIgnored private var tooHotAt = Date.distantPast
+    /// When the fans were given back: for `releaseTime` readings that still say held (the helper
+    /// has not answered yet) are not shown as Manual.
+    @ObservationIgnored private var releasedAt = Date.distantPast
     /// When the request on its way was sent: one never answered is given up (`answerTimeout`).
     @ObservationIgnored private var sentAt: Date?
     /// The helper was registered again after it could not be reached (once a run).
@@ -87,6 +97,21 @@ import ServiceManagement
     /// The helper answers within this (holding a fan the first time takes M1–M4 up to fifteen
     /// seconds); past it the connection is dropped and the next request starts over.
     static let answerTimeout: TimeInterval = 30
+    /// Fans seen out of the speed they are held at are asked for again this long after the last
+    /// request (the helper holds them again by itself within three seconds, when it can).
+    static let askAgain: TimeInterval = 5
+    /// How long the helper is given to hand the fans back before a reading that says held is believed.
+    static let releaseTime: TimeInterval = 4
+    /// How long the dial says the chip was too hot.
+    static let heatNotice: TimeInterval = 8
+
+    /// Whether `fan` is held at `held` of what it can do — or at its slowest, where that is more
+    /// (a Mac that will not stop a fan holds it there).
+    nonisolated static func holds(_ fan: FanReading, at held: Double) -> Bool {
+        guard fan.isManual else { return false }
+        let wanted = fan.rpm(at: held)
+        return abs(fan.target - wanted) <= 60 || wanted < fan.minimum && abs(fan.target - fan.minimum) <= 60
+    }
 
     private var daemon: SMAppService { .daemon(plistName: FanHelper.plistName) }
 
@@ -124,8 +149,12 @@ import ServiceManagement
         guard !isReading else { return }
         isReading = true
         Task {
-            let read = await Task.detached(priority: .utility) { FanSensors.read() }.value
+            var read = await Task.detached(priority: .utility) { FanSensors.read() }.value
             isReading = false
+            // Just given back: Automatic at once, not a second later.
+            if held == nil, Date.now.timeIntervalSince(releasedAt) < Self.releaseTime {
+                for index in read.indices { read[index].isManual = false }
+            }
             // Steps of under 20 rpm are noise: left out, so the dial redraws only when it moves.
             let same = read.count == fans.count && zip(read, fans).allSatisfy {
                 abs($0.rpm - $1.rpm) < 20 && $0.isManual == $1.isManual && abs($0.target - $1.target) < 20
@@ -133,23 +162,29 @@ import ServiceManagement
             }
             if !same { fans = read }
             if !read.isEmpty { onRead?(read.map(\.rpm).reduce(0, +) / Double(read.count)) }
-            // The fans hold what was asked: the dial follows them again. Given up after five
-            // seconds (unless still sending, or waiting for the yes in Login Items).
-            if let requested, let fan = read.first, !isSending, pending == nil, access != .needsApproval, access != .installing,
-               fan.isManual && abs(fan.fraction(of: fan.target) - requested) < 0.02 || Date.now.timeIntervalSince(requestedAt) > 5 {
-                self.requested = nil
+            if isTooHot, Date.now.timeIntervalSince(tooHotAt) > Self.heatNotice { isTooHot = false }
+            // Held by hand, and the fans are not (macOS took them back and the helper has not held
+            // them again, or gave them up): asked for again. The speed stays the user's until they
+            // click Automatic.
+            if let held, access == .ready, !isSending, pending == nil, read.contains(where: { !Self.holds($0, at: held) }),
+               Date.now.timeIntervalSince(askedAt) > Self.askAgain {
+                Log.fans.notice("fans not held as asked; asking again")
+                askedAt = .now
+                send(read.map { $0.rpm(at: held) })
             }
         }
     }
 
     // MARK: Setting
 
-    /// Holds every fan at `fraction` of its range (0 its slowest, 1 its fastest).
+    /// Holds every fan at `fraction` of what it can do (0 standing still, 1 its fastest), until
+    /// `setAutomatic`.
     func setSpeed(_ fraction: Double) {
         guard hasFans else { return }
         let fraction = min(max(fraction, 0), 1)
-        requested = fraction
-        requestedAt = .now
+        held = fraction
+        isTooHot = false
+        askedAt = .now
         let rpms = (fans.isEmpty ? FanSensors.read() : fans).map { $0.rpm(at: fraction) }
         guard !rpms.isEmpty else { return }
         send(rpms)
@@ -157,8 +192,13 @@ import ServiceManagement
 
     /// Gives the fans back to macOS: its own curve, as from the factory.
     func setAutomatic() {
-        requested = nil
+        held = nil
+        isTooHot = false
         pending = nil
+        releasedAt = .now
+        if fans.contains(where: \.isManual) {
+            for index in fans.indices { fans[index].isManual = false }
+        }
         // A click on the fan after a failure: the next turn of the dial starts over.
         if case .failed = access { access = .unknown }
         if FanSensors.isSimulated {
@@ -179,7 +219,7 @@ import ServiceManagement
     private func send(_ rpms: [Double]) {
         if FanSensors.isSimulated {
             FanSimulator.shared.set(rpms)
-            access = .ready
+            if access != .ready { access = .ready }
             return
         }
         pending = rpms
@@ -193,10 +233,18 @@ import ServiceManagement
                 Task { @MainActor in
                     self.isSending = false
                     self.sentAt = nil
-                    if let error {
+                    if error == FanHelper.tooHot {
+                        // The chip is at its limit: the helper keeps the fans with macOS until it
+                        // has cooled. Not a failure; the dial says why it is Automatic again.
+                        Log.fans.notice("fans left to macOS: the chip is too hot")
+                        self.held = nil
+                        self.pending = nil
+                        self.isTooHot = true
+                        self.tooHotAt = .now
+                    } else if let error {
                         Log.fans.error("fan speed: \(error, privacy: .public)")
                         self.access = .failed(error)
-                        self.requested = nil
+                        self.held = nil
                         self.pending = nil
                     } else if let next = self.pending {
                         self.send(next)
@@ -211,6 +259,10 @@ import ServiceManagement
     /// register it.
     private func prepare() -> Bool {
         if access == .installing { return false }
+        // Known to be usable: not asked again for every step of a turn of the dial (asking macOS
+        // how the daemon stands takes ~15 ms each time, on the main thread — a turn stuttered).
+        // What fails afterwards says so itself (`unreachable`).
+        if access == .ready { return true }
         // Installed with a password before: used as it is.
         if FanInstaller.isInstalled {
             access = .ready
@@ -276,12 +328,12 @@ import ServiceManagement
             case .cancelled:
                 Log.fans.notice("fan helper: the password was not given")
                 access = .unknown
-                requested = nil
+                held = nil
                 pending = nil
             case .failed(let reason):
                 Log.fans.error("fan helper install failed: \(reason, privacy: .public)")
                 access = .failed(reason)
-                requested = nil
+                held = nil
                 pending = nil
             }
         }
@@ -363,8 +415,8 @@ import ServiceManagement
             waiting.removeAll()
             isSending = false
             sentAt = nil
-            if pending == nil, let requested {
-                pending = (fans.isEmpty ? FanSensors.read() : fans).map { $0.rpm(at: requested) }
+            if pending == nil, let held {
+                pending = (fans.isEmpty ? FanSensors.read() : fans).map { $0.rpm(at: held) }
             }
             return install()
         }
@@ -411,19 +463,21 @@ import ServiceManagement
         sentAt = nil
         waiting.removeAll()
         guard wasSending else { return }
-        guard !repaired, let last = requested, !FanInstaller.isInstalled, daemon.status == .enabled else {
+        guard !repaired, let last = held, !FanInstaller.isInstalled, daemon.status == .enabled else {
             access = .failed(reason)
-            requested = nil
+            held = nil
             pending = nil
             return
         }
         repaired = true
         Log.fans.notice("fan helper unreachable; registering it again")
+        // Not known to be usable any more: `prepare` asks macOS again.
+        access = .unknown
         let daemon = daemon
         Task {
             try? await daemon.unregister()
             try? await Task.sleep(for: .milliseconds(500))
-            guard requested == last else { return }
+            guard held == last else { return }
             setSpeed(last)
         }
     }

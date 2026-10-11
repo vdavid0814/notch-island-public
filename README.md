@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4.4 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4.5 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,39 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.4.5
+
+- **A fan speed set by hand stays.** Turn Fan Control's dial and the fans are held there until you
+  click the fan in it for automatic: fans macOS takes back meanwhile are taken again, and the dial
+  says Manual all along. Only a chip at its limit (105 °C) gives them back by itself, until it has
+  cooled (0.8.4.4 gave them back at 95 °C, which a heavy load can reach).
+- **Fans down to 0 rpm.** The dial starts at nothing instead of the slowest macOS turns the fans:
+  all the way down holds them still. A Mac that will not stop a fan holds it at its slowest.
+- **Auto or Manual, between the fan and the speed.** The mode has a line of its own in the dial,
+  under the fan and over the rpm. The dial's name, Fan, stays in its opening.
+- **Graphs of the last 30 seconds.** Fan Control's temperature and speed graphs show the last half
+  minute, a reading a second, so what just happened is seen as it moved, on a small graph too. The
+  speed graph starts at 0 rpm.
+- **The dial turns smoothly.** A turn of the dial asked macOS about the fan helper at every step
+  (15 ms each time, measured); it stuttered. Asked once now, and a turn redraws the dial alone.
+- **Lighter.** The Timer's ruler is drawn as layers: a swipe along it costs about a fifth of what
+  it did. On the charger Settings is built when opened, so the app rests at about 27 MB instead
+  of 220.
+- **Fixed:** in full screen the strip that keeps the menu bar from coming down at the notch could
+  be left on another Space; after a click on the fan the dial said Manual for another second.
+
+The fan helper changed with this version: where it was installed with a password, macOS asks for
+it once more the first time the dial is turned.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.4.5 in place and keeps your permissions (signed
+exactly as 0.8.4.4). Or download **NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 

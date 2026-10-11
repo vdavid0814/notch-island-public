@@ -24,11 +24,61 @@ import Testing
 
     @Test func aFansRange() {
         let fan = FanReading(index: 0, rpm: 2450, minimum: 1200, maximum: 5800, target: 0, isManual: false)
-        #expect(fan.rpm(at: 0) == 1200 && fan.rpm(at: 1) == 5800)
-        #expect(fan.rpm(at: 0.5) == 3500)
-        #expect(fan.rpm(at: 2) == 5800 && fan.rpm(at: -1) == 1200)
-        #expect(abs(fan.fraction(of: 2450) - 1250.0 / 4600) < 0.0001)
+        // From nothing — the fan stopped — to its fastest: not from the slowest macOS turns it.
+        #expect(fan.rpm(at: 0) == 0 && fan.rpm(at: 1) == 5800)
+        #expect(fan.rpm(at: 0.5) == 2900)
+        #expect(fan.rpm(at: 2) == 5800 && fan.rpm(at: -1) == 0)
+        #expect(abs(fan.fraction(of: 2450) - 2450.0 / 5800) < 0.0001)
         #expect(fan.fraction(of: 9000) == 1 && fan.fraction(of: 0) == 0)
+        #expect(FanControlWidget.speedRange([fan]) == 0...5800)
+    }
+
+    /// A speed set by hand is the user's until they give it back: fans read as not held at it are
+    /// asked for again, ones held where the Mac will have them (their slowest for less) are left.
+    @Test func whetherAFanIsHeldAsAsked() {
+        var fan = FanReading(index: 0, rpm: 2450, minimum: 1200, maximum: 5800, target: 2900, isManual: true)
+        #expect(FanCenter.holds(fan, at: 0.5))
+        #expect(!FanCenter.holds(fan, at: 0.8))
+        fan.isManual = false
+        #expect(!FanCenter.holds(fan, at: 0.5))
+        fan = FanReading(index: 0, rpm: 0, minimum: 1200, maximum: 5800, target: 0, isManual: true)
+        #expect(FanCenter.holds(fan, at: 0))
+        fan.target = 1200
+        #expect(FanCenter.holds(fan, at: 0) && FanCenter.holds(fan, at: 0.1) && !FanCenter.holds(fan, at: 0.5))
+    }
+
+    /// Simulated fans (`NI_DEMO_FANS`): held where the dial was turned to — to none too — and they
+    /// stay held whatever time passes, until Automatic.
+    @Test(.enabled(if: FanSensors.isSimulated, "needs NI_DEMO_FANS=1")) func aSpeedSetStaysUntilAutomatic() async throws {
+        let center = FanCenter()
+        center.startObserving()
+        defer {
+            center.setAutomatic()
+            center.stopObserving()
+        }
+        center.setSpeed(0)
+        #expect(center.isManual && center.heldFraction == 0)
+        try await Task.sleep(for: .seconds(7))
+        #expect(center.isManual && center.heldFraction == 0)
+        #expect(center.fans.first?.isManual == true && center.fans.first?.target == 0)
+        center.setSpeed(0.5)
+        #expect(center.heldFraction == 0.5)
+        center.setAutomatic()
+        #expect(!center.isManual && center.heldFraction == nil)
+    }
+
+    /// The graphs reach back thirty seconds, and a graph just started fills its width.
+    @Test func theGraphsShowTheLastHalfMinute() {
+        #expect(ThermalMonitor.window == 30)
+        let now = Date(timeIntervalSince1970: 1_790_235_660)
+        func samples(_ ages: [TimeInterval]) -> [SensorSample] { ages.map { SensorSample(date: now.addingTimeInterval(-$0), value: 1) } }
+        #expect(SensorGraph.span(of: samples([3, 2, 1]), now: now) == 10)
+        #expect(SensorGraph.span(of: samples([22, 2, 1]), now: now) == 22)
+        #expect(SensorGraph.span(of: samples([44, 30, 1]), now: now) == 30)
+        let pictured = FanControlWidget.sampleTemperatures(now: now)
+        #expect(pictured.first?.date == now.addingTimeInterval(-30) && pictured.last?.date == now)
+        // The speed's graph starts at nothing: 0, half and the fastest are its values.
+        #expect(SensorGraph.marks(0...5800, step: SensorGraph.speedStep(0...5800)) == [0, 2900, 5800])
     }
 
     @Test func whereOnTheDialIsWhichSpeed() {
@@ -93,7 +143,10 @@ import Testing
     }
 
     @Test func aClickOnTheFanGivesItBack() {
-        // The fan sits over the speed (y up here, down in the dial).
+        // The fan sits over the speed (y up here, down in the dial) — higher where the mode is
+        // written between the two.
+        #expect(FanDial.iconCenter(diameter: 136, showsTexts: true, showsMode: true).y < FanDial.iconCenter(diameter: 136, showsTexts: true).y)
+        #expect(FanDial.iconCenter(diameter: 136, showsTexts: true, showsMode: true).y < FanDial.modeCenter(diameter: 136))
         let icon = FanDial.iconCenter(diameter: 136, showsTexts: true)
         let point = CGPoint(x: icon.x, y: -icon.y)
         let calls = use(manual: true, from: point, to: point)

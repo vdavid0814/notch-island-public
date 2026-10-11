@@ -1,17 +1,22 @@
 import SwiftUI
 
 /// Fan Control: in a row, a dial round the fan, a dial of the chip's temperature, and a graph of
-/// the temperature over the last ten minutes — with the fans' speed graphed beside it where the
+/// the temperature over the last thirty seconds — with the fans' speed graphed beside it where the
 /// widget is wide enough (about as wide as the panel).
 ///
-/// The dials are plain arcs open at the bottom, filled as far as the fans turn between their slowest
-/// and fastest (the chip between 30 and 100 °C), the value in the middle. Turning the fan's dial —
-/// dragging anywhere on it — holds the fans at that speed (Manual, a dot where they are held); the
-/// fan in it is a button that gives them back to macOS (Auto, its own curve, as from the factory).
+/// The dials are plain arcs open at the bottom, filled as far as the fans turn between standing
+/// still and their fastest (the chip between 30 and 100 °C), the value in the middle. Turning the
+/// fan's dial — dragging anywhere on it — holds the fans at that speed, down to none (Manual, a dot
+/// where they are held), and they stay there; the fan in it is a button that gives them back to
+/// macOS (Auto, its own curve, as from the factory). Which of the two it is stands between the fan
+/// and the speed; the dial's name stays in its opening.
 /// Every part is moved and resized in Customize; a graph keeps its lines thin when made lower.
 ///
 /// Read every second while shown (`FanCenter`, `ThermalMonitor`); a picture (the gallery,
 /// Customize) shows samples. Offered only on a Mac with a fan (MacBook Pro).
+///
+/// Each part reads what it shows by itself (`FanDialPart`, `ChipDialPart`, `FanGraphPart`): a turn
+/// of the dial redraws the dial alone, a reading the parts that show it.
 struct FanControlWidget: View {
     let widget: IslandWidget
     let size: CGSize
@@ -19,25 +24,27 @@ struct FanControlWidget: View {
     @Environment(AppModel.self) private var model
     @Environment(\.isWidgetPreview) private var isPreview
     @Environment(\.widgetRenderMode) private var renderMode
-    @Environment(\.widgetDate) private var fixedDate
-    @Environment(\.locale) private var locale
-    @Environment(\.reportsProgressParts) private var reportsParts
 
-    /// A MacBook Pro's fan turning at a quarter of its range, left to macOS, the chip at 46 °C.
+    /// A MacBook Pro's fan turning at two fifths of what it can, left to macOS, the chip at 46 °C.
     static let sample = [FanReading(index: 0, rpm: 2450, minimum: 1200, maximum: 5800, target: 0, isManual: false)]
 
-    /// Ten minutes of a chip working now and then, for the pictures: a reading every fifteen seconds
-    /// up to `now`.
+    /// Half a minute of a chip working now and then, for the pictures: a reading a second up to
+    /// `now`.
     static func sampleTemperatures(now: Date) -> [SensorSample] {
-        (0...40).map { step in
+        (0...30).map { step in
             let t = Double(step)
-            return SensorSample(date: now.addingTimeInterval(-ThermalMonitor.window + t * 15),
-                                value: 46 + 7 * sin(t / 4.2) + 4 * sin(t / 1.7) + (step > 30 ? Double(step - 30) * 0.9 : 0))
+            return SensorSample(date: now.addingTimeInterval(-ThermalMonitor.window + t),
+                                value: 46 + 7 * sin(t / 3.2) + 4 * sin(t / 1.3) + (step > 22 ? Double(step - 22) * 1.1 : 0))
         }
     }
 
     static func sampleSpeeds(now: Date) -> [SensorSample] {
         sampleTemperatures(now: now).map { SensorSample(date: $0.date, value: 1200 + ($0.value - 34) * 75) }
+    }
+
+    /// The speed graph's own range: from nothing (a fan stopped) to the fastest any fan turns.
+    static func speedRange(_ fans: [FanReading]) -> ClosedRange<Double> {
+        0...max(fans.map(\.maximum).max() ?? 1, 1)
     }
 
     // MARK: Layout
@@ -105,28 +112,22 @@ struct FanControlWidget: View {
         Int((value / 10).rounded() * 10).formatted(.number.locale(locale))
     }
 
-    /// Auto or Manual; what is missing when the fans cannot be set.
-    static func modeText(manual: Bool, access: FanCenter.Access) -> String {
+    /// Between the fan and the speed: Auto or Manual; what is missing when the fans cannot be set;
+    /// for a few seconds, that the chip was too hot to keep them held.
+    static func modeText(manual: Bool, access: FanCenter.Access, tooHot: Bool = false) -> String {
         switch access {
         case .needsApproval: String(localized: "Allow in Login Items")
         case .installing: String(localized: "Password…")
         case .failed: String(localized: "Unavailable")
-        default: manual ? String(localized: "Manual") : String(localized: "Auto")
+        default: manual ? String(localized: "Manual") : tooHot ? String(localized: "Too hot") : String(localized: "Auto")
         }
     }
 
-    /// Under the dial: its name — or, where the mode is shown, what the fans are not doing by
-    /// themselves (Manual, or what is missing to set them).
-    static func nameText(manual: Bool, access: FanCenter.Access, showsMode: Bool) -> String {
-        guard showsMode, isAlert(manual: manual, access: access) else { return String(localized: "Fan") }
-        return modeText(manual: manual, access: access)
-    }
-
-    /// Held by hand, or not settable: the name says so, in orange.
-    static func isAlert(manual: Bool, access: FanCenter.Access) -> Bool {
+    /// Held by hand, or not settable: the mode says so in orange.
+    static func isAlert(manual: Bool, access: FanCenter.Access, tooHot: Bool = false) -> Bool {
         switch access {
         case .needsApproval, .installing, .failed: true
-        default: manual
+        default: manual || tooHot
         }
     }
 
@@ -136,7 +137,7 @@ struct FanControlWidget: View {
         case .needsApproval: String(localized: "Switch NotchIsland on in System Settings ▸ General ▸ Login Items, then turn the dial again.")
         case .installing: String(localized: "macOS is asking for an administrator's password, once, to install the helper that sets the fans.")
         case .failed(let reason): String(localized: "The fans cannot be set: \(reason) Turn the dial to try again.")
-        default: String(localized: "Turn the dial to set the fans' speed; click the fan for automatic.")
+        default: String(localized: "Turn the dial to set the fans' speed, down to none; it stays until you click the fan for automatic.")
         }
     }
 
@@ -165,35 +166,25 @@ struct FanControlWidget: View {
         let picture = isPreview || renderMode == .canvas
         let center = model.fans
         let thermals = model.thermals
-        let now = fixedDate ?? .now
-        let fans = picture || center.fans.isEmpty ? Self.sample : center.fans
-        let manual = !picture && center.isManual
-        let access = picture ? FanCenter.Access.unknown : center.access
-        let chip = picture ? SystemReadings.sampleChip : thermals.chip
         let layout = Self.layout(widget, inner: size)
         let lone = !layout.showsTempDial && layout.graphs.isEmpty
         HStack(spacing: layout.gap) {
-            FanDial(fans: fans, held: picture ? nil : center.heldFraction, isManual: manual, diameter: layout.dial,
-                    number: widget.shows(.value) ? Self.rpmText(fans, locale: locale) : nil,
-                    name: Self.nameText(manual: manual, access: access, showsMode: widget.shows(.label)),
-                    nameIsAlert: widget.shows(.label) && Self.isAlert(manual: manual, access: access),
-                    look: widget.progressLook(of: .fanDial), nameStyle: widget.textStyles[.fanName],
-                    valueStyle: widget.textStyles[.value], reportsFrame: reportsParts,
-                    set: { center.setSpeed($0) }, automatic: { center.setAutomatic() },
-                    onInteraction: { model.island.isInteracting = $0 })
+            FanDialPart(widget: widget, diameter: layout.dial, picture: picture)
                 .frame(width: layout.dial, height: layout.dial)
-                .help(Self.accessHelp(access))
                 .movableElement(.fanDial, of: widget)
             if layout.showsTempDial {
-                TemperatureDial(celsius: chip?.average, diameter: layout.dial, number: chip.map { Self.degreeNumber($0.average, locale: locale) },
-                                unit: Self.degreeUnit(locale: locale), look: widget.progressLook(of: .tempDial),
-                                nameStyle: widget.textStyles[.tempName], valueStyle: widget.textStyles[.tempValue],
-                                reportsFrame: reportsParts)
+                ChipDialPart(widget: widget, diameter: layout.dial, picture: picture)
                     .frame(width: layout.dial, height: layout.dial)
                     .movableElement(.tempDial, of: widget)
             }
             ForEach(layout.graphs, id: \.self) { id in
-                graph(id, picture: picture, now: now, fans: fans, width: layout.graphWidth)
+                // A graph, as large as Customize resized it (from its top-leading corner), its lines as thin.
+                let scale = widget.scale(of: id)
+                let drawn = CGSize(width: layout.graphWidth * scale.x, height: size.height * scale.y)
+                FanGraphPart(widget: widget, id: id, picture: picture, size: drawn)
+                    .frame(width: drawn.width, height: drawn.height)
+                    .frame(width: layout.graphWidth, height: size.height, alignment: .topLeading)
+                    .movableElement(id, of: widget, drawsScale: false)
             }
         }
         .frame(width: size.width, height: size.height, alignment: lone ? .center : .leading)
@@ -210,35 +201,90 @@ struct FanControlWidget: View {
             thermals.stopObserving()
         }
     }
+}
 
-    /// A graph, as large as Customize resized it (from its top-leading corner), its lines as thin.
-    @ViewBuilder private func graph(_ id: ElementID, picture: Bool, now: Date, fans: [FanReading], width: CGFloat) -> some View {
-        let scale = widget.scale(of: id)
-        let drawn = CGSize(width: width * scale.x, height: size.height * scale.y)
-        Group {
-            if id == .tempGraph {
-                SensorGraph(title: String(localized: "Chip"),
-                            samples: picture ? Self.sampleTemperatures(now: now) : model.thermals.temperatures, now: now,
-                            minimumSpan: 8, fixedRange: widget.chartLook(of: id).range(own: SensorGraph.temperatureRange, gap: 5),
-                            colors: SensorGraph.colors(widget.chartLook(of: id), automatic: TemperatureDial.colors, model: model),
-                            showsAverage: true, format: { Self.degrees($0, locale: locale) }, size: drawn,
-                            look: widget.chartLook(of: id), ownStep: SensorGraph.temperatureStep,
-                            textStyle: widget.textStyles[.tempGraphText])
-            } else {
-                let lowest = fans.map(\.minimum).min() ?? 0, highest = fans.map(\.maximum).max() ?? 1
-                SensorGraph(title: String(localized: "Fan"),
-                            samples: picture ? Self.sampleSpeeds(now: now) : model.thermals.speeds, now: now,
-                            minimumSpan: 1,
-                            fixedRange: widget.chartLook(of: id).range(own: lowest...max(highest, lowest + 1), gap: 100),
-                            colors: SensorGraph.colors(widget.chartLook(of: id), automatic: FanTint.colors, model: model),
-                            showsAverage: false, format: { Self.rpm($0, locale: locale) }, size: drawn,
-                            look: widget.chartLook(of: id), ownStep: SensorGraph.speedStep(lowest...max(highest, lowest + 1)),
-                            textStyle: widget.textStyles[.rpmGraphText])
-            }
+/// The fan's dial with the fans as they are: their speed, whether they are held and at what, and
+/// what is missing to set them.
+private struct FanDialPart: View {
+    let widget: IslandWidget
+    let diameter: CGFloat
+    let picture: Bool
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.locale) private var locale
+    @Environment(\.reportsProgressParts) private var reportsParts
+
+    var body: some View {
+        let center = model.fans
+        let fans = picture || center.fans.isEmpty ? FanControlWidget.sample : center.fans
+        let manual = !picture && center.isManual
+        let access = picture ? FanCenter.Access.unknown : center.access
+        let tooHot = !picture && center.isTooHot
+        FanDial(fans: fans, held: picture ? nil : center.heldFraction, isManual: manual, diameter: diameter,
+                number: widget.shows(.value) ? FanControlWidget.rpmText(fans, locale: locale) : nil,
+                mode: widget.shows(.label) ? FanControlWidget.modeText(manual: manual, access: access, tooHot: tooHot) : nil,
+                modeIsAlert: FanControlWidget.isAlert(manual: manual, access: access, tooHot: tooHot),
+                look: widget.progressLook(of: .fanDial), nameStyle: widget.textStyles[.fanName],
+                valueStyle: widget.textStyles[.value], reportsFrame: reportsParts,
+                set: { center.setSpeed($0) }, automatic: { center.setAutomatic() },
+                onInteraction: { model.island.isInteracting = $0 })
+            .help(FanControlWidget.accessHelp(access))
+    }
+}
+
+/// The chip's dial at the chip's temperature now.
+private struct ChipDialPart: View {
+    let widget: IslandWidget
+    let diameter: CGFloat
+    let picture: Bool
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.locale) private var locale
+    @Environment(\.reportsProgressParts) private var reportsParts
+
+    var body: some View {
+        let chip = picture ? SystemReadings.sampleChip : model.thermals.chip
+        TemperatureDial(celsius: chip?.average, diameter: diameter,
+                        number: chip.map { FanControlWidget.degreeNumber($0.average, locale: locale) },
+                        unit: FanControlWidget.degreeUnit(locale: locale), look: widget.progressLook(of: .tempDial),
+                        nameStyle: widget.textStyles[.tempName], valueStyle: widget.textStyles[.tempValue],
+                        reportsFrame: reportsParts)
+    }
+}
+
+/// A graph of the last thirty seconds: the chip's temperature, or the fans' speed from nothing to
+/// their fastest.
+private struct FanGraphPart: View {
+    let widget: IslandWidget
+    let id: ElementID
+    let picture: Bool
+    let size: CGSize
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.widgetDate) private var fixedDate
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        let now = fixedDate ?? .now
+        let look = widget.chartLook(of: id)
+        let locale = locale
+        if id == .tempGraph {
+            SensorGraph(title: String(localized: "Chip"),
+                        samples: picture ? FanControlWidget.sampleTemperatures(now: now) : model.thermals.temperatures, now: now,
+                        minimumSpan: 8, fixedRange: look.range(own: SensorGraph.temperatureRange, gap: 5),
+                        colors: SensorGraph.colors(look, automatic: TemperatureDial.colors, model: model),
+                        showsAverage: true, format: { FanControlWidget.degrees($0, locale: locale) }, size: size,
+                        look: look, ownStep: SensorGraph.temperatureStep, textStyle: widget.textStyles[.tempGraphText])
+        } else {
+            let fans = picture || model.fans.fans.isEmpty ? FanControlWidget.sample : model.fans.fans
+            let own = FanControlWidget.speedRange(fans)
+            SensorGraph(title: String(localized: "Fan"),
+                        samples: picture ? FanControlWidget.sampleSpeeds(now: now) : model.thermals.speeds, now: now,
+                        minimumSpan: 1, fixedRange: look.range(own: own, gap: 100),
+                        colors: SensorGraph.colors(look, automatic: FanTint.colors, model: model),
+                        showsAverage: false, format: { FanControlWidget.rpm($0, locale: locale) }, size: size,
+                        look: look, ownStep: SensorGraph.speedStep(own), textStyle: widget.textStyles[.rpmGraphText])
         }
-        .frame(width: drawn.width, height: drawn.height)
-        .frame(width: width, height: size.height, alignment: .topLeading)
-        .movableElement(id, of: widget, drawsScale: false)
     }
 }
 
@@ -250,9 +296,10 @@ nonisolated enum FanDialGeometry {
     static let sweep: Double = 270
 }
 
-/// The fan's dial, made as the chip's is: its arc, the fan (a button: back to Auto), the speed with
-/// "rpm" under it, and its name in the arc's opening ("Manual" while the fans are held); a dot on the
-/// arc where they are held. Too small for texts (under 56 pt), the fan alone.
+/// The fan's dial, made as the chip's is: its arc, the fan (a button: back to Auto), under it the
+/// mode ("Auto", "Manual" while the fans are held), then the speed with "rpm", and its name in the
+/// arc's opening, always; a dot on the arc where they are held. Too small for texts (under 56 pt),
+/// the fan alone.
 struct FanDial: View {
     let fans: [FanReading]
     /// Where the fans are held (0…1), while manual.
@@ -263,10 +310,13 @@ struct FanDial: View {
     /// "2,450"; nil: the speed is not shown.
     let number: String?
     var unit = "rpm"
-    /// "Fan", or the mode.
-    let name: String
-    /// The name in orange (held by hand, or something is missing).
-    var nameIsAlert = false
+    /// "Auto" or "Manual" (or what is missing to set the fans), between the fan and the speed; nil:
+    /// not shown.
+    var mode: String?
+    /// The mode in orange (held by hand, or something is missing).
+    var modeIsAlert = false
+    /// "Fan": in the arc's opening, whatever the mode.
+    var name = String(localized: "Fan")
     /// How the arc is drawn and where its name and speed are (`ProgressLook`, as a line's).
     var look: ProgressLook = .plain
     var nameStyle: TextStyle?
@@ -286,14 +336,22 @@ struct FanDial: View {
 
     static func line(diameter: CGFloat) -> CGFloat { max(diameter * 0.055, 2) }
 
-    /// The fan's middle, from the dial's (y down): over the speed when the texts are drawn.
-    static func iconCenter(diameter: CGFloat, showsTexts: Bool) -> CGPoint {
-        CGPoint(x: 0, y: showsTexts && self.showsTexts(diameter: diameter) ? -diameter * 0.235 : 0)
+    /// The fan's middle, from the dial's (y down): over the speed when the texts are drawn — a
+    /// little higher (and the fan smaller) where the mode stands between the two.
+    static func iconCenter(diameter: CGFloat, showsTexts: Bool, showsMode: Bool = false) -> CGPoint {
+        guard showsTexts && self.showsTexts(diameter: diameter) else { return .zero }
+        return CGPoint(x: 0, y: -diameter * (showsMode ? 0.3 : 0.235))
     }
 
-    static func iconPoints(diameter: CGFloat, showsTexts: Bool) -> CGFloat {
-        showsTexts && self.showsTexts(diameter: diameter) ? diameter * 0.19 : diameter * 0.36
+    static func iconPoints(diameter: CGFloat, showsTexts: Bool, showsMode: Bool = false) -> CGFloat {
+        guard showsTexts && self.showsTexts(diameter: diameter) else { return diameter * 0.36 }
+        return diameter * (showsMode ? 0.165 : 0.19)
     }
+
+    /// The mode's middle, from the dial's: between the fan and the speed.
+    static func modeCenter(diameter: CGFloat) -> CGFloat { -diameter * 0.155 }
+
+    static func modePoints(diameter: CGFloat) -> CGFloat { WidgetMetrics.points(diameter, ratio: 0.09, min: 7, max: 11) }
 
     /// 0…1 at a point of the dial (its middle `center`): along the arc; in its opening, the nearer
     /// end — the one the drag came from (`previous`), so it never jumps across.
@@ -318,8 +376,8 @@ struct FanDial: View {
         let running = fan.map { $0.fraction(of: $0.rpm) } ?? 0
         let knob = dragged ?? held ?? running
         let texts = showsTexts && Self.showsTexts(diameter: diameter)
-        let icon = Self.iconCenter(diameter: diameter, showsTexts: showsTexts)
-        let points = Self.iconPoints(diameter: diameter, showsTexts: showsTexts)
+        let icon = Self.iconCenter(diameter: diameter, showsTexts: showsTexts, showsMode: mode != nil)
+        let points = Self.iconPoints(diameter: diameter, showsTexts: showsTexts, showsMode: mode != nil)
         ZStack {
             // The arc, dragged anywhere on the dial.
             ZStack {
@@ -346,10 +404,23 @@ struct FanDial: View {
                         .allowsHitTesting(false)
                 }
                 RingText(text: Text(name), style: nameStyle, size: WidgetMetrics.points(diameter, ratio: 0.095, min: 7, max: 12),
-                         weight: .semibold, automatic: nameIsAlert ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary),
-                         part: .elapsed, look: look, reportsFrame: reportsFrame, limit: RingText.nameLimit(diameter: diameter))
+                         weight: .semibold, part: .elapsed, look: look, reportsFrame: reportsFrame,
+                         limit: RingText.nameLimit(diameter: diameter))
                     .offset(y: diameter * 0.39)
                     .allowsHitTesting(false)
+                if let mode {
+                    // The mode, in the name's type: with the fan, none of the line's own parts.
+                    Text(mode)
+                        .font(modeFont(Self.modePoints(diameter: diameter)))
+                        .foregroundStyle(modeIsAlert ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .frame(maxWidth: diameter * 0.6)
+                        .offset(y: Self.modeCenter(diameter: diameter))
+                        .transaction { $0.animation = nil }
+                        .allowsHitTesting(false)
+                        .besideProgressParts()
+                }
             }
             FanButton(isManual: isManual, color: FanTint.color(knob), points: points, taps: taps) {
                 taps += 1
@@ -363,6 +434,13 @@ struct FanDial: View {
         .accessibilityRepresentation {
             Slider(value: Binding(get: { knob }, set: set), in: 0...1) { Text("Fan speed") }
         }
+    }
+
+    /// The mode's type: the name's where Customize set one (at the mode's own size), else the dial's.
+    private func modeFont(_ points: CGFloat) -> Font {
+        guard var style = nameStyle else { return .system(size: points, weight: .semibold) }
+        style.size = Double(points)
+        return Font(style.font(size: points, weight: .semibold))
     }
 
     /// "2,450 rpm": the speed with its unit under half as large and dimmer — in the style's type
@@ -496,7 +574,7 @@ struct TemperatureDial: View {
 
 // MARK: - The graphs
 
-/// A series over the last ten minutes: its line over a soft fill, in the colours of its values (cool
+/// A series over the last thirty seconds: its line over a soft fill, in the colours of its values (cool
 /// at the bottom, hot at the top), faint guides with their values beside them, and over it its name,
 /// the average (dashed, where asked) and the value now. Lower than 40 pt, the line alone.
 ///
@@ -529,7 +607,7 @@ struct SensorGraph: View {
     /// The texts' sizes Customize offers.
     static let textSizes = 6.0...15.0
 
-    /// The speed graph's own step: its slowest, its middle and its fastest.
+    /// The speed graph's own step: nothing, half and its fastest.
     static func speedStep(_ range: ClosedRange<Double>) -> Double { (range.upperBound - range.lowerBound) / 2 }
 
     /// The texts' own size on a graph `height` tall.
@@ -551,11 +629,11 @@ struct SensorGraph: View {
         return (middle - span / 2)...(middle + span / 2)
     }
 
-    /// How far back the graph reaches: as far as it has readings, from a minute up to ten — so a
-    /// graph just started fills its width and spreads out as its past grows.
+    /// How far back the graph reaches: as far as it has readings, from ten seconds up to the thirty
+    /// it shows — so a graph just started fills its width and spreads out as its past grows.
     static func span(of samples: [SensorSample], now: Date) -> TimeInterval {
         let reach = samples.first.map { now.timeIntervalSince($0.date) } ?? 0
-        return min(max(reach, 60), ThermalMonitor.window)
+        return min(max(reach, 10), ThermalMonitor.window)
     }
 
     /// The line's colours, bottom to top: the graph's own, or — once the look picks any — the

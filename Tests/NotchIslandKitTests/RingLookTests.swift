@@ -131,11 +131,14 @@ import Testing
     }
 
     @Test func theFansDialNamesItsMode() {
-        #expect(FanControlWidget.nameText(manual: false, access: .ready, showsMode: true) == "Fan")
-        #expect(FanControlWidget.nameText(manual: true, access: .ready, showsMode: true) == "Manual")
-        #expect(FanControlWidget.nameText(manual: true, access: .ready, showsMode: false) == "Fan")
-        #expect(FanControlWidget.nameText(manual: false, access: .needsApproval, showsMode: true) == "Allow in Login Items")
+        // The mode is a text of its own (between the fan and the speed); the dial's name stays "Fan".
+        #expect(FanControlWidget.modeText(manual: false, access: .ready) == "Auto")
+        #expect(FanControlWidget.modeText(manual: true, access: .ready) == "Manual")
+        #expect(FanControlWidget.modeText(manual: false, access: .needsApproval) == "Allow in Login Items")
+        #expect(FanControlWidget.modeText(manual: false, access: .ready, tooHot: true) == "Too hot")
+        #expect(FanControlWidget.modeText(manual: true, access: .ready, tooHot: true) == "Manual")
         #expect(FanControlWidget.isAlert(manual: false, access: .failed("no")) && !FanControlWidget.isAlert(manual: false, access: .unknown))
+        #expect(FanControlWidget.isAlert(manual: true, access: .ready) && FanControlWidget.isAlert(manual: false, access: .ready, tooHot: true))
     }
 
     @Test func aGraphsColoursAreItsOwnUntilOneIsPicked() {

@@ -21,6 +21,8 @@ nonisolated final class FakeFanKeys: FanKeys, @unchecked Sendable {
     var refusesMode = false
     /// Answers 0x87 to a target it took all the same.
     var miscountsTargets = false
+    /// Will not hold a fan slower than its slowest: a lower target is not taken.
+    var keepsFansTurning = false
 
     var mode: String { chip == .m5 ? "md" : "Md" }
 
@@ -58,6 +60,9 @@ nonisolated final class FakeFanKeys: FanKeys, @unchecked Sendable {
             }
         }
         if dropsWrites { return SMC.success }
+        if keepsFansTurning, key.hasSuffix("Tg"), let target = SMC.decode(SMC.Value(type: value.type, bytes: bytes)), target < 1200 {
+            return 0x87
+        }
         values[key] = SMC.Value(type: value.type, bytes: bytes)
         if key == "Ftst" { unlockedAt = bytes == [1] ? clock : nil }
         return key.hasSuffix("Tg") && miscountsTargets ? 0x87 : SMC.success
@@ -86,11 +91,52 @@ struct FanWriterTests {
         #expect(writer.isHolding && writer.held == [2000, 5800])
         #expect(keys.number("F0md") == 1 && keys.number("F1md") == 1)
         #expect(keys.number("F0Tg") == 2000 && keys.number("F1Tg") == 5800)
-        // Slower than the fan's slowest is its slowest: a fan is never stopped.
-        #expect(writer.set([0, 0]) == nil)
-        #expect(keys.number("F0Tg") == 1200)
+        // Down to nothing: a fan held by hand may be stopped, or turned slower than macOS turns it.
+        #expect(writer.set([0, 600]) == nil)
+        #expect(keys.number("F0Tg") == 0 && keys.number("F1Tg") == 600 && writer.held == [0, 600])
+        #expect(writer.set([-50, 0]) == nil)
+        #expect(writer.held == [0, 0])
         #expect(writer.setAutomatic() == nil)
         #expect(!writer.isHolding && keys.number("F0md") == 0 && keys.number("F1md") == 0)
+    }
+
+    /// A Mac that will not hold a fan under its slowest: held there, said once, and not tried again
+    /// at every step of a turn of the dial.
+    @Test func aFanThatCannotBeStoppedIsHeldAtItsSlowest() {
+        let keys = FakeFanKeys(.m5)
+        keys.keepsFansTurning = true
+        let writer = keys.writer()
+        #expect(writer.set([0, 3000]) == nil)
+        #expect(writer.held == [1200, 3000] && keys.number("F0Tg") == 1200 && keys.number("F0md") == 1)
+        keys.writes = []
+        #expect(writer.set([400, 3000]) == nil)
+        #expect(writer.held == [1200, 3000])
+        #expect(!keys.writes.contains { $0.key == "F0Tg" && $0.bytes != SMC.encode(1200, type: "flt ")! })
+        // Still held as asked: nothing to hold again.
+        keys.writes = []
+        writer.maintain()
+        #expect(keys.writes.isEmpty)
+    }
+
+    /// The chip at its limit, look after look, gives held fans back; they stay with macOS until it
+    /// has cooled. A core at 95–100 °C, as under any heavy load, never does.
+    @Test func onlyAChipAtItsLimitTakesTheFansBack() {
+        var guardian = HeatGuard()
+        /// Looks at the chip `times` over; how many of them said to give the fans back.
+        func looks(_ times: Int, at hottest: Double, holding: Bool = true) -> Int {
+            (0..<times).count { _ in guardian.check(hottest: hottest, holding: holding) }
+        }
+        #expect(looks(20, at: 101) == 0)
+        #expect(looks(2, at: 106) == 0)
+        // Cooler between: counted from the start again.
+        #expect(looks(1, at: 99) == 0 && looks(2, at: 106) == 0)
+        #expect(looks(1, at: 105) == 1 && guardian.isTripped)
+        // Tripped: nothing more to give back, and not over until it is under 95 °C.
+        #expect(looks(3, at: 108, holding: false) == 0 && guardian.isTripped)
+        #expect(looks(1, at: 96, holding: false) == 0 && guardian.isTripped)
+        #expect(looks(1, at: 94, holding: false) == 0 && !guardian.isTripped)
+        // Nothing held: a hot chip is macOS's business.
+        #expect(looks(5, at: 109, holding: false) == 0 && !guardian.isTripped)
     }
 
     @Test func givingBackNeverWritesATarget() {

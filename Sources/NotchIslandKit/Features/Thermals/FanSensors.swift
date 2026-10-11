@@ -11,14 +11,14 @@ nonisolated struct FanReading: Sendable, Equatable {
     var target: Double
     var isManual: Bool
 
-    var range: Double { max(maximum - minimum, 1) }
+    /// 0…1 of what it can do: how far between standing still and its fastest it runs. (From
+    /// nothing, not from `minimum` — the slowest macOS itself turns it: a fan held by hand may be
+    /// stopped.)
+    func fraction(of rpm: Double) -> Double { min(max(rpm / max(maximum, 1), 0), 1) }
 
-    /// 0…1 of its range: how far between its slowest and its fastest it runs.
-    func fraction(of rpm: Double) -> Double { min(max((rpm - minimum) / range, 0), 1) }
-
-    /// The speed `fraction` of its range is, to the nearest 50 rpm.
+    /// The speed `fraction` of the way to its fastest is, to the nearest 50 rpm.
     func rpm(at fraction: Double) -> Double {
-        ((minimum + min(max(fraction, 0), 1) * range) / 50).rounded() * 50
+        (min(max(fraction, 0), 1) * maximum / 50).rounded() * 50
     }
 }
 
@@ -86,9 +86,10 @@ nonisolated final class FanSimulator: @unchecked Sendable {
         let step = min(Date.now.timeIntervalSince(last), 3)
         last = .now
         for index in fans.indices {
-            let goal = fans[index].isManual ? fans[index].target : fans[index].minimum + fans[index].range * 0.24
+            let goal = fans[index].isManual ? fans[index].target : fans[index].maximum * 0.4
             fans[index].rpm += (goal - fans[index].rpm) * min(step / 3, 1)
-            fans[index].rpm = (fans[index].rpm + Double.random(in: -12...12)).rounded()
+            // A fan that stands still reads nothing; one that turns, never quite the same.
+            fans[index].rpm = goal == 0 && fans[index].rpm < 30 ? 0 : max((fans[index].rpm + Double.random(in: -12...12)).rounded(), 0)
         }
         return fans
     }
@@ -97,7 +98,7 @@ nonisolated final class FanSimulator: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         for (index, rpm) in rpms.enumerated() where fans.indices.contains(index) {
-            fans[index].target = min(max(rpm, fans[index].minimum), fans[index].maximum)
+            fans[index].target = min(max(rpm, 0), fans[index].maximum)
             fans[index].isManual = true
         }
     }

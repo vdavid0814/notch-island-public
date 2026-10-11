@@ -3,8 +3,8 @@ import Security
 
 /// What the app asks of the fan helper, over XPC.
 @objc(NIFanHelperProtocol) nonisolated protocol FanHelperProtocol {
-    /// Holds each fan at its speed (rpm, by fan; clamped to the fan's own range). Replies nil, or
-    /// why it could not.
+    /// Holds each fan at its speed (rpm, by fan; from nothing — a fan stopped — to its fastest).
+    /// Replies nil, or why it could not (`FanHelper.tooHot` while the chip is at its limit).
     func setSpeeds(_ rpms: [NSNumber], withReply reply: @escaping @Sendable (String?) -> Void)
     /// Gives the fans back to macOS.
     func setAutomatic(withReply reply: @escaping @Sendable (String?) -> Void)
@@ -23,9 +23,14 @@ import Security
 ///
 /// It takes requests only from a process signed as it is (the app; `setCodeSigningRequirement`),
 /// and keeps nothing for long: when the app's connection ends — it quit or crashed — the fans go
-/// back to macOS at once; while they are held, a hot chip (95 °C) gives them back too; and with no
-/// connection it quits after a minute. While they are held it looks every three seconds that they
-/// still are (macOS takes them back over sleep), and holds them again (`FanWriter.maintain`).
+/// back to macOS at once; and with no connection it quits after a minute. While they are held it
+/// looks every three seconds that they still are (macOS takes them back over sleep), and holds them
+/// again (`FanWriter.maintain`).
+///
+/// A speed set by hand stays (a fan may be held still): the one thing that gives the fans back by
+/// itself is the chip at its limit — its hottest core at 105 °C three looks in a row (`HeatGuard`;
+/// under a heavy load cores read 95–100 °C with macOS's own fan curve too, so nothing lower may
+/// count). They stay with macOS, and a new speed is refused (`tooHot`), until it is under 95 °C.
 nonisolated public enum FanHelper {
     public static let flag = "--fan-helper"
     static let label = "com.davidvarga.notchisland.fanhelper"
@@ -46,7 +51,10 @@ nonisolated public enum FanHelper {
     /// Started from the copy `FanInstaller` put in /Library/PrivilegedHelperTools.
     static let installedFlag = "--installed"
     /// The helper's own code, counted: an installed copy of another revision is replaced.
-    static let revision = 2
+    static let revision = 3
+
+    /// What `setSpeeds` replies while the chip is at its limit: the fans stay with macOS.
+    static let tooHot = "too hot"
 
     /// The app's build (CFBundleVersion).
     static var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0" }
@@ -66,9 +74,7 @@ nonisolated private final class FanHelperService: NSObject, NSXPCListenerDelegat
     private var idleSince = Date.now
     private var watch: (any DispatchSourceTimer)?
     private var signals: [any DispatchSourceSignal] = []
-
-    /// The chip this hot while the fans are held: they go back to macOS, whatever was asked.
-    static let hottest = 95.0
+    private var heat = HeatGuard()
 
     func start() {
         writer = SMC.shared.map { FanWriter(smc: $0) }
@@ -121,7 +127,7 @@ nonisolated private final class FanHelperService: NSObject, NSXPCListenerDelegat
 
     private func check() {
         guard let writer else { return }
-        if writer.isHolding, let chip = ChipSensors.read(), chip.hottest >= Self.hottest {
+        if writer.isHolding || heat.isTripped, let chip = ChipSensors.read(), heat.check(hottest: chip.hottest, holding: writer.isHolding) {
             Log.fans.notice("fan helper: chip at \(Int(chip.hottest)) °C; fans back to automatic")
             _ = writer.setAutomatic()
         }
@@ -132,6 +138,9 @@ nonisolated private final class FanHelperService: NSObject, NSXPCListenerDelegat
     func setSpeeds(_ rpms: [Double], reply: @escaping @Sendable (String?) -> Void) {
         queue.async { [self] in
             guard let writer else { return reply("The fans cannot be reached.") }
+            // Given back for the heat: left with macOS until the chip has cooled.
+            if heat.isTripped, let chip = ChipSensors.read() { _ = heat.check(hottest: chip.hottest, holding: false) }
+            guard !heat.isTripped else { return reply(FanHelper.tooHot) }
             reply(writer.set(rpms))
         }
     }
@@ -160,6 +169,31 @@ nonisolated private final class FanHelperService: NSObject, NSXPCListenerDelegat
         guard SecRequirementCopyString(requirement, [], &text) == errSecSuccess else { return nil }
         return text as String?
     }()
+}
+
+/// The one thing that takes held fans back by itself: the chip at its limit. Its hottest core at
+/// `limit` for `patience` looks in a row (three seconds apart) trips it; it stays tripped — the fans
+/// with macOS, a new speed refused — until the chip is under `cooled`.
+nonisolated struct HeatGuard: Sendable {
+    static let limit = 105.0
+    static let cooled = 95.0
+    static let patience = 3
+
+    private(set) var isTripped = false
+    private var hotLooks = 0
+
+    /// A look at the chip. True when the fans, held, are to be given back now.
+    mutating func check(hottest: Double, holding: Bool) -> Bool {
+        if isTripped {
+            if hottest < Self.cooled { isTripped = false }
+            return false
+        }
+        hotLooks = holding && hottest >= Self.limit ? hotLooks + 1 : 0
+        guard hotLooks >= Self.patience else { return false }
+        hotLooks = 0
+        isTripped = true
+        return true
+    }
 }
 
 /// One connection's view of the helper.
@@ -215,6 +249,8 @@ nonisolated final class FanWriter: @unchecked Sendable {
     private var setTest = false
     /// `maintain` in a row that could not hold the fans again.
     private var failures = 0
+    /// Fans the SMC will not hold slower than their slowest: held there instead, not tried again.
+    private var keepsTurning: Set<Int> = []
 
     var isHolding: Bool { !held.isEmpty || unreleased }
 
@@ -239,8 +275,18 @@ nonisolated final class FanWriter: @unchecked Sendable {
                 _ = setAutomatic()
                 return "Fan \(index + 1) cannot be read."
             }
-            let speed = min(max(rpm, minimum), maximum)
-            if let error = hold(index, at: speed) {
+            // From nothing (the fan stopped) to its fastest. Slower than macOS itself turns it, a Mac
+            // may not have it: the fan is held at its slowest there.
+            var speed = min(max(rpm, 0), maximum)
+            if speed < minimum, keepsTurning.contains(index) { speed = minimum }
+            var error = hold(index, at: speed)
+            if error != nil, speed < minimum, hold(index, at: minimum) == nil {
+                Log.fans.notice("fan helper: fan \(index) is not held under \(Int(minimum)) rpm (\(error ?? "", privacy: .public)); held there")
+                keepsTurning.insert(index)
+                speed = minimum
+                error = nil
+            }
+            if let error {
                 Log.fans.error("fan helper: fan \(index): \(error, privacy: .public)")
                 _ = setAutomatic()
                 return error

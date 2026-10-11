@@ -61,21 +61,23 @@ nonisolated struct SensorSample: Sendable, Equatable {
     var value: Double
 }
 
-/// The chip's temperature, read every two seconds while a widget shows it (Chip Temperature, Fan
-/// Control); nothing is read otherwise. Fan Control's graphs keep the last ten minutes of it and of
-/// the fans' speed: every reading while shown, and — once Fan Control is on a board — one every
+/// The chip's temperature, read every second while a widget shows it (Chip Temperature, Fan
+/// Control); nothing is read otherwise. Fan Control's graphs keep the last thirty seconds of it and
+/// of the fans' speed: every reading while shown, and — once Fan Control is on a board — one every
 /// fifteen seconds while not (`keepHistory`), so the graph has a past when the panel opens.
 @Observable final class ThermalMonitor {
     private(set) var chip: ChipReading?
-    /// The cores' average over the last ten minutes, oldest first.
+    /// The cores' average over the last half minute, oldest first.
     private(set) var temperatures: [SensorSample] = []
-    /// The fans' average speed over the last ten minutes, oldest first.
+    /// The fans' average speed over the last half minute, oldest first.
     private(set) var speeds: [SensorSample] = []
 
-    static let interval: TimeInterval = 2
+    /// While shown: every second, so half a minute's graph has thirty readings.
+    static let interval: TimeInterval = 1
     static let historyInterval: TimeInterval = 15
-    /// How far back the graphs reach.
-    nonisolated static let window: TimeInterval = 10 * 60
+    /// How far back the graphs reach: the last thirty seconds, so that what just happened — a load
+    /// starting, the fans turned up — is seen as it happened, even on a small graph.
+    nonisolated static let window: TimeInterval = 30
 
     @ObservationIgnored private var observers = 0
     @ObservationIgnored private var timer: Timer?
@@ -89,7 +91,7 @@ nonisolated struct SensorSample: Sendable, Equatable {
         let timer = Timer(timeInterval: Self.interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.sample() }
         }
-        timer.tolerance = Self.interval / 2
+        timer.tolerance = Self.interval / 4
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
@@ -144,10 +146,11 @@ nonisolated struct SensorSample: Sendable, Equatable {
         }
     }
 
-    /// At most one sample a second; older than the window, dropped.
+    /// At most one sample a second (a timer's a little early still counts); older than the window,
+    /// dropped.
     private static func append(_ sample: SensorSample, to series: inout [SensorSample]) {
-        if let last = series.last, sample.date.timeIntervalSince(last.date) < 1 { return }
-        let cut = sample.date.addingTimeInterval(-window - 30)
+        if let last = series.last, sample.date.timeIntervalSince(last.date) < 0.6 { return }
+        let cut = sample.date.addingTimeInterval(-window - 5)
         if let first = series.first, first.date < cut { series.removeAll { $0.date < cut } }
         series.append(sample)
     }
