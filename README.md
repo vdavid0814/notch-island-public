@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4.5 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4.6 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,26 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.4.6
+
+Two fixes on top of 0.8.4.5 (below):
+
+- **Volume at 0 % is silent.** Taken down to nothing, with the slider or the keys, the output still
+  played very quietly until the mute key was pressed. It is muted there now, and unmuted when the
+  volume is raised again.
+- **Sliders in the theme's colour.** The Minimal volume and brightness lines, and any slider of the
+  island while the pointer was on it, were the system's blue whatever Theme was set in Settings.
+  They take the theme's colour.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.4.6 in place and keeps your permissions (signed
+exactly as 0.8.4.5). Or download **NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 

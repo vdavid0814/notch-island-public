@@ -52,7 +52,7 @@ nonisolated struct ReleaseNotes: Sendable, Equatable {
     var sections: [Section] { Section.allCases.filter { !items($0).isEmpty } }
 
     static let current = ReleaseNotes(
-        version: "0.8.4.5",
+        version: "0.8.4.6",
         new: [
             Item(title: "A fan speed set by hand stays",
                  detail: "Turn Fan Control's dial and the fans are held there until you click the fan in it for automatic: fans macOS takes back meanwhile are taken again, and the dial says Manual all along. Only a chip at its limit (105 °C) gives them back by itself, until it has cooled.",
@@ -74,6 +74,10 @@ nonisolated struct ReleaseNotes: Sendable, Equatable {
                  isChange: true),
         ],
         fixed: [
+            Item(title: "Volume at 0 % is silent",
+                 detail: "Taken down to nothing, with the slider or the keys, the output still played very quietly until the mute key was pressed. It is muted there now, and unmuted when the volume is raised again."),
+            Item(title: "Sliders in the theme's colour",
+                 detail: "The Minimal volume and brightness lines, and any slider of the island while the pointer was on it, were the system's blue whatever Theme was set."),
             Item(title: "The menu bar at the notch in full screen",
                  detail: "The strip that keeps the menu bar from coming down when the pointer is on the notch could be left on another Space, and covered nothing. It is brought to the Space in use."),
             Item(title: "Automatic at once",
