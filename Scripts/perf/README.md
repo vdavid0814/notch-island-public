@@ -6,6 +6,10 @@
 | `ab.py <out.tsv> <label=app> … -- [scenario …]` | Back-to-back comparison of builds with `anim.py` (A B A B …), one row per scenario and round, then the medians. Refuses a build that still sends diagnostics. |
 | `rest.py <seconds> [label]` | Energy Impact second by second at rest, as Activity Monitor at 1 s shows it (own, GPU, billed to the app), with the seconds that had keyboard or mouse input marked and left out of the summary; `QUIET=1` prints the summary only. |
 | `stress.py <scenario> [rounds]` | Stress tests with the real pointer, through one long-lived `ws/moused` (build: `swiftc -O ws/moused.swift -o ws/moused`): `hover-spam`, `hover-slow`, `hover-cold` (openings after the kept page is gone), `hover-once`, `pass-by`, `move-around`, `settings-gear` (Settings from the panel's gear, closed by a click outside), `customize` (Settings ▸ Widgets with a widget picked: Customize… and Done). Worst 1 s / 5 s, mean, CPU, P-core ms, energy with what was billed; `SECONDS_ROW=1` prints every second. `NOTCH`, `GEAR`, `CUSTOMIZE`, `DONE` override the points. |
+| `meter.py` | `run([(name, step), …])`: each step's energy as Activity Monitor counts it, its worst 1 s window, CPU and performance-core ms, and every second's energy; the steps use `stress.py`'s pointer and keys (`move`, `click`, `key`, `send`). |
+| `studio.py [rounds] [picks\|modes\|customize]` | Settings ▸ Widgets by real clicks: a widget picked on the stage and let go, the stage's modes (Top Bar, Size and back), Customize opened and closed. Open the page first (`drive.py settings/widgets 4`); the points (`TIMER`, `SYSTEM`, `SIZE`, …) are for a 1280 × 832 pt screen. |
+| `serviced.py <seconds> [min mJ]` | Which processes worked for others meanwhile (`proc_pid_rusage`'s serviced energy, polled, so short-lived helpers count): who the coalition's "billed to me" comes from. Root's daemons (`mds`) cannot be read. |
+| `qos_burst.c` | The same burst of work at each quality of service and inside a work interval: wall time, performance-core ms and energy. What a turn costs where (user-interactive ≈ utility ≈ 2.6 mJ/ms on a performance core; background ≈ 0.08 mJ/ms, 3.5× slower). |
 | `phases.py <step>=<seconds> …` | Energy, CPU, performance-core ms and the worst 1 s of each step: a `notchisland://` route, or `move:x,y` / `click:x,y` with the real pointer (`ws/mouse`). A click and a URL run differently (the click's priority carries into its turn): measure the real path. |
 | `per_event.py <label>.json` | CPU ms, peak % and peak energy per event type of a `bench.py` run. |
 | `states.py <label> [seconds]` | Steady-state cost of each island state (rest, panels, Siri, Settings pages). |
@@ -31,6 +35,7 @@ Findings (September 2026, macOS 27, MacBook Air M5):
 |---|---|
 | `frames/backdrop.swift` | A still checkerboard over the top of the screen, just under the island, so screenshots compare exactly. |
 | `frames/pixels.swift` | `stats`, `heat`, `top`, `cut`: difference of two screenshots, a heat map, the most different pixels, a zoomed crop. |
+| `frames/wins.swift` | The app's on-screen windows (`<id> <layer> <x> <y> <w> <h> <alpha>` a line): `screencapture -x -o -l <id>` then captures one window alone, with its transparency, whatever is behind it. |
 | `frames/ab.py` | Freezes a transition at given times and screenshots it (edit the `demo/…` switch it toggles for whatever two variants are compared). |
 
 Build the tools with `swiftc -O backdrop.swift -o backdrop` and `swiftc -O pixels.swift -o pixels`.

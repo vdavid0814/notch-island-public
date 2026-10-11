@@ -5,6 +5,36 @@ anyone can repeat them on their own Mac and compare. It comes with every copy: i
 (`docs/`), inside the app (`NotchIsland.app/Contents/Resources/`) and next to the app in the `.dmg`.
 The detailed before/after tables, and what was changed, are in `ENERGY-LOG.md` next to it.
 
+## The October 11, 2026 run (after v0.8.4.3): what the system billed, real clicks in Settings ▸ Widgets
+
+**Setup.** The same MacBook Air M5, macOS 27.0.1, on the charger (90 %), music playing. Release
+builds of v0.8.4.3 (39) and this work as signed test copies (`mkapp.sh`), each from a fresh launch.
+
+**What was run**
+1. **The real pointer** (`stress.py`): one hover opening, hover every 2.2 s and every second, cold
+   openings, passing the notch by, Settings from the gear closed by a click outside (per-second
+   energy and performance-core ms with `SECONDS_ROW=1`).
+2. **Every animation by URL** (`anim.py`): the panel's pages, Spotlight with its gallery, clipboard
+   and a typed word, the banners, Settings' pages; each also three times in a row, to tell a first
+   opening from a later one.
+3. **Settings ▸ Widgets by real clicks** (new `studio.py` on `meter.py`): a widget picked on the
+   stage and let go, the stage's modes, Customize opened and closed.
+4. **Who the app is billed for** (new `serviced.py`), with the daemons' logs and a `sample`.
+5. **Rest**: `rest.py` for 4 and 15 minutes with music, each coalition member's CPU beside it.
+6. **Memory**: `footprint`, `vmmap` and `heap` after a launch, after each Settings page built alone
+   (`NI_NO_PREPARE=1`), and after a tour.
+7. **It looks the same**: the island's and Settings' own windows captured alone
+   (`screencapture -l`, `frames/wins.swift`), old and new: the panel, Spotlight's gallery, Settings.
+8. **Unit tests** (`Scripts/test.sh`): 897 tests and the 482 widget snapshots.
+
+**Results** (Energy Impact, worst 1 s / worst 5 s, before → after): one hover opening 110 / 37 →
+60 / 17; hover every 2.2 s 112 / 66 → 25 / 20; every second 222 / 143 → 52 / 42; Spotlight's first
+opening after a launch 443 / 104 → 51 / 16; Settings closed by a click outside ~200 → ~105 for its
+second; memory after Settings and the gallery 255 → 226 MB. Not met: Settings' opening (~230 for
+its second), Spotlight's gallery (~150) and a typed word (~380, a third of it Spotlight's own
+search), and in Settings ▸ Widgets a pick (130–1150), the stage's modes (340–390; Size 2100–3100)
+and Customize's opening (~230). The details are in `ENERGY-LOG.md`.
+
 ## The October 2, 2026 run (after v0.7.2): Settings kept, Siri read ahead
 
 **Setup.** The same MacBook Air M5, macOS 27, on battery (75 → 58 %). Release builds of v0.7.2 (26)

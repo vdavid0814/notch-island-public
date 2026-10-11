@@ -4,6 +4,123 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-11 (night, on the charger): what the system billed the app for, the shade's memory
+
+Release builds, MacBook Air M5, macOS 27.0.1, on the charger (90 %), music playing, fade style, the
+user's own board and panel size (Settings ~1160 × 765 pt). Real pointer and keys (`stress.py`, the
+new `meter.py` and `studio.py`), Activity Monitor's Energy Impact as the coalition's energy (own +
+GPU + billed), before and after from fresh launches of `apps/base.app` (0.8.4.3) and the new build.
+
+| scenario (Energy Impact) | before: worst 1 s / worst 5 s | after |
+|---|---|---|
+| Hover opening, one (after a rest) | 110 / 37 (190 mJ, 98 of it billed) | **60 / 17** (91 mJ, 10 billed) |
+| Hover open and close every 2.2 s | 112 / 66 (mean 49) | **25 / 20** (mean 14) |
+| Hover stress, every second | 222 / 143 (mean 110) | **52 / 42** (mean 32) |
+| Hover opening after 10 s or more | 128 / 39 | **45 / 13** |
+| Spotlight's first opening after a launch | 420–445 / 100 (375 mJ + 110 billed) | **42–51 / 14–16** (48 mJ + 11) |
+| Spotlight, later openings | 35–41 / 12 | 33 / 11 |
+| Settings from the gear, then a click outside | open ~230, close ~200 / 104 | open ~230, close **~105** / 81–91 |
+| Rest with music | 0.0–0.3 | same |
+| Memory after Settings and Spotlight's gallery were open | 253–255 MB | **221–226 MB** |
+| Memory, fresh launch (Settings built ahead) | 216 MB | 213–221 MB |
+
+- **AppKit offered the island's windows to Spotlight.** macOS 27's AppKit indexes every window of
+  an app for Spotlight's window and tab search whenever its windows change: three items at every
+  opening and closing of the island, which `spotlightknowledged` then worked through at the app's
+  expense — ~90 mJ billed per hover opening, 70 % of what an opening cost. Found with the new
+  `Scripts/perf/serviced.py` (which process works for others), the log of `corespotlightd`, and a
+  `sample` (`CreateNSCSSearchableItem` under AppKit's idle step). AppKit's own switch
+  (`NSEnableWindowTabIndexing`, in the registration domain: nothing is written) leaves the island's
+  panels out; they are not windows anyone looks for.
+- **The AutoFill helper.** The first text field to take the keyboard (Spotlight's) had AppKit start
+  `com.apple.SafariPlatformSupport.Helper` — a process of the app's own coalition — to judge
+  whether the field wants a password: ~375 mJ own + ~110 billed (tccd, linkd, Spotlight) for the
+  first opening after every launch. `NSAutoFillHeuristicsEnabled` off (none of the app's fields is
+  one AutoFill fills): the first opening costs what any other does.
+- **Settings closes on the efficiency cores.** A click outside closed Settings in the click's own
+  turn: one ~105 ms turn on a performance core (~200 mJ for that second). The close is now resolved
+  in a turn of its own at background quality of service (`MainThrift.lowPowerTurn`: a run-loop
+  timer, the thread's priority back after that turn's commit, so the frames that follow are as
+  before): ~105 mJ, the close starting ~0.1 s later (the turn takes 200–250 ms there). Not done for
+  the opening (measured: +0.1 s for −15 %), nor for Spotlight's close (already ~22 mJ, no gain).
+- **The fade style's shade pictures are masks** (`FadeShadeCache`): kept as the renderer's four bytes
+  a pixel, Settings' (its whole surface) and the gallery's were 14 MB each, and 14 MB more each in
+  Core Animation's copy — from Settings' first closing on, for as long as the app ran. One byte a
+  pixel (their coverage) draws the same pixels (window captures old and new: 0 differ in Settings
+  and the gallery, the panel within the track's time): 59 MB less after both were open.
+
+### What a burst costs (measured tonight, `Scripts/perf/qos_burst.c`: the same work at each priority)
+
+250 ms of main-thread work at user-interactive or utility quality of service runs on a performance
+core at full clock: ~650 mJ (2.6 mJ/ms; the long turns of Settings ▸ Widgets read 4–4.5 mJ/ms). At
+background it runs on an efficiency core: 870 ms, ~71 mJ. Nothing in between was found: throughput
+and latency tiers (`taskpolicy -t/-l`), an audio work interval with a far deadline, utility — all
+ran as user-interactive does. A turn at background is 2–3.5× longer (animation frames at
+background came out 10–17× longer: 170–200 ms each), so it only suits a turn nobody watches the
+first frame of.
+
+### Settings ▸ Widgets by real clicks (measured, not solved)
+
+| step (1 s Energy Impact) | now |
+|---|---|
+| A widget picked on the stage: Timer / System, Now Playing | **~1150** (turns of 180 + 480–545 ms) / 130–175 |
+| The pick let go | ~260 |
+| Stage mode Top Bar, and back | 340–390 |
+| Stage mode Size, and back | **2100–3100** |
+| Customize opened / Done | ~230 / ~70 (2600 and 1260 two nights ago) |
+
+- **Size mode's unfold** (the stage's height on a 0.55 s spring) lays the whole page out at every
+  frame: 30–100 ms a frame, ~0.5 s of a performance core. Without the animation a switch is
+  250–320 mJ. Of each frame, over half (sampled) is SwiftUI building the window's key view loop
+  again (`FocusBridge.updateDefaultKeyViewLoop`, at every change of where a focusable control
+  lies; a window with `autorecalculatesKeyViewLoop` leaves it to AppKit instead — but kept on, Tab
+  from the search field then loses the keyboard). Branch `wip-unfold-in-place` has a version that
+  gives the stage's place its new height at once, shifts what is under it along the spring and
+  holds the key view loop and the hover hit tests meanwhile: frames under 12 ms (smooth, where
+  today's are 5–8 frames), but still ~2.0–2.6 J — 9 ms a frame at 60 fps is still a performance
+  core at full clock. It needs the motion off the main thread altogether (the stage and what is
+  under it in layers moved by Core Animation, as `RenderServerSlide` does for Customize's panels).
+- **A pick** builds the widget's inspector in the click's turn; Timer's is the largest. Over 40 %
+  of it (sampled) is the same key view loop, built again for every native control as it is put in
+  the window (`AppKitPlatformViewHost.viewDidMoveToSuperview`).
+
+### Tried and left out
+- Settings' pictures kept in the window while it is closed (not taken out and put back): the close
+  turn 105 → 95 ms only.
+- Settings' opening resolved in a low-priority turn too: the open second 230 → 175–220, the growth
+  starting 0.06–0.12 s later. Its remaining performance-core time (~100 ms) is the press on the
+  gear and the frames around it, not the opening's own turn (already at background).
+- The stage's mode switch landing in a low-priority turn: 340–390 → ~90–250, but the turn took
+  0.5–1.1 s with the content faded out, and Size's unfold collapsed into one frame.
+- `autorecalculatesKeyViewLoop` on Settings' window for good: the unfold's frames 60 % cheaper in
+  a sample, the energy the same (more frames fit in), and Tab behaved differently.
+- The unseen Top Bar page taken out of the mode deck, or not following the stage's height: no
+  change to the unfold. (It is ~7 MB of the Widgets page.)
+- Memory: the island alone is 32 MB; Settings built ahead adds General 32, Live Activities 11,
+  Spotlight 24, About 10, Widgets 88 (its gallery 38, of which the 55 live previews 10). Under
+  150 MB means not keeping Settings' pages built — each opening and page then costs what it did
+  before October 2 (Energy Impact 300–600) — so it was left as it is.
+
+### Measuring traps found
+- `stress.py settings-gear` clicked "outside" at a point that is inside Settings at the larger
+  panel sizes: Settings stayed open and the numbers were of something else. `OUTSIDE` (default
+  `1262,420`) is now a point beside it; check a screenshot after the first cycle.
+- `bench.url` opens `build/NotchIsland.app` unless `NI_APP` is exported **in the same shell
+  command**: a second instance starts, registers itself with LaunchServices and has Siri's daemons
+  index every app (`siriknowledged`, 600 ms of CPU).
+- Under `sample` the main thread stays on the efficiency cores: a switch that costs 2700 mJ read
+  145 mJ while sampled. Use it for where the time goes, never for the energy.
+- A test copy still sends Sentry's launch report ~96 s after it starts (190–220 ms of CPU on the
+  efficiency cores, Energy Impact 42–72 for that second): once per launch.
+
+### Rest (15 minutes, music playing, `rest.py` with every coalition member's CPU beside it)
+
+Mean 0.39, 0.0–0.3 in 890 of the 900 seconds; a track change 5–7 for a second (35 once); the
+launch report above; and one second of 86 billed to the app with none of its own CPU (34 ms of
+some daemon's, at a moment Music was renewing its assertions seventy times: most likely
+coreaudiod for the spectrum tap as the stream changed — not caught by `serviced.py`, which was
+not running).
+
 ## 2026-10-10 (late morning, on the charger): Siri's cross-fade, the shade drawn once
 
 On the charger the island's content swaps with the blur-replace, which SwiftUI's CPU renderer

@@ -103,6 +103,28 @@ which did not, and how to keep the look identical. The numbers are in `ENERGY-LO
   (`SharpZoom.still`), the live view once it has settled. Find it by ablation: switch the animation
   off (`NI_EXP_…`), measure the cycle, then one scale at a time.
 
+- **Ask who the system bills you for**: when a scenario's "billed" is large (`stress.py`, `parts.py`),
+  run `serviced.py` beside it, then read that daemon's log (`/usr/bin/log stream --predicate
+  'process == "…"' --info --debug`) and `sample` the app for the framework call that set it off.
+  macOS 27's AppKit offered the island's windows to Spotlight at every opening (three items, ~90 mJ
+  billed each time) and started the AutoFill helper process at the first text field (~480 mJ once
+  per launch): both have a switch of AppKit's own (`NSEnableWindowTabIndexing`,
+  `NSAutoFillHeuristicsEnabled`; found among AppKit's strings and its disassembly), registered as
+  the app's defaults before it starts (`main.swift`). Look again after every macOS update.
+- **A click's own turn runs on a performance core whatever the thread's quality of service is**, and
+  a long burst there is 2.6–4.5 mJ a millisecond (`qos_burst.c`). What nobody watches the first
+  frame of (a close) can be resolved in a turn of its own at background quality of service, the
+  thread's priority back after that turn's commit (`MainThrift.lowPowerTurn`): a ninth of the
+  energy for 2–3.5× the time. Animation frames at background came out 10–17× longer: never for
+  motion. Utility, throughput tiers and work intervals all ran as user-interactive does.
+- **A picture that is only ever a mask** keeps one byte a pixel (`CGImageAlphaInfo.alphaOnly`), and
+  Core Animation's copy of it too: the fade style's shade for Settings was 2 × 14 MB.
+- **`NI_TRACE=1` logs each long turn with its quality of service** (33 user-interactive, 9
+  background): which turns of a transition are the performance-core ones. `stress.py` with
+  `SECONDS_ROW=1` prints every second's performance-core ms beside its energy.
+- **Never read energy under `sample`**: the sampled main thread stays on the efficiency cores (a
+  switch that costs 2700 mJ read 145).
+
 ## 5. Tried and dropped (measured equal or worse)
 
 An AppKit `NSScrollView` around a SwiftUI page, responsive scrolling, AppKit hover tracking instead
@@ -125,6 +147,13 @@ warm openings); Settings opened in a turn after the click's (no difference: warm
 run on the efficiency cores); Settings' permission and Login Items reads only after a visit to
 System Settings (the billing at an opening is Spotlight's, for the app's activation).
 
+October 11 2026: Settings' pictures left in the window while it is closed (the close turn 105 → 95 ms
+only); Settings' opening and the Widgets stage's mode switch in a low-priority turn (the opening
++0.1 s for −15 %; the switch 0.5–1.1 s with nothing shown); `autorecalculatesKeyViewLoop` on
+Settings' window (Tab then loses the keyboard from the search field; the unfold's energy the same);
+the unseen Top Bar page out of the mode deck (no change). See `ENERGY-LOG.md` for Size mode's unfold
+(2–3 J: the page laid out at every frame) and the branch `wip-unfold-in-place`.
+
 ## 6. Keep the look and the motion identical
 
 - **Screenshots, old and new, same state**: `screencapture -x`, then `image-diff.swift` (a live
@@ -132,6 +161,9 @@ System Settings (the billing at an opening is Spotlight's, for the app's activat
 - **Mid-motion**: screenshot during the scroll or animation (no blank parts, scroller shown) and
   sample a curve at several delays across repeated runs.
 - **Where a scroll really is**: `ws/axscroll <pid>` (Accessibility), in any build.
+- **One window, no desktop behind it**: `screencapture -x -o -l <window id>` (the ids from
+  `CGWindowListCopyWindowInfo` for the owner "NotchIsland") captures the island's or Settings' own
+  window with its transparency, so old and new compare exactly whatever is on the screen.
 - **After every UI drive**: `pgrep -x NotchIsland` and `~/Library/Logs/DiagnosticReports` — a new
   layout crashed once on an infinite width proposal and only this showed it.
 - Synthetic gestures that end at speed without momentum make AppKit coast on; a real trackpad sends
