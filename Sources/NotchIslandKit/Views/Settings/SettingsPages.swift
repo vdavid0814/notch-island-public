@@ -27,9 +27,7 @@ struct GeneralSettingsPage: View {
             .foregroundStyle(SettingsPalette.secondary)
 
             Section {
-                SurfacePicker(selection: $preferences.glassStyle)
-                    // The thumbnails' corners (10 pt) concentric with the card's.
-                    .padding(.vertical, SettingsForm.cardRadius - SettingsForm.inset - 10)
+                SurfacePicker(selection: $preferences.glassStyle, scale: preferences.scale, desktop: previewWallpaper)
                 if model.activity.isLowPowerMode {
                     Label("Low Power Mode is on: the island is drawn plain black to save battery.",
                           systemImage: "leaf.fill")
@@ -48,10 +46,17 @@ struct GeneralSettingsPage: View {
             }
 
             Section {
-                PictureChoice(options: IslandScale.allCases, selection: $preferences.scale, title: \.title) { scale in
-                    IslandSizePicture(scale: scale)
+                // Each size photographed in the style in use; drawn where there are no photographs.
+                let style = preferences.glassStyle
+                let photographed = IslandPhoto.image(desktop: previewWallpaper, style: style, scale: preferences.scale) != nil
+                PictureChoice(options: IslandScale.allCases, selection: $preferences.scale, title: \.title,
+                              filling: photographed ? IslandPhoto.size : MiniMetrics.sizePicture) { scale in
+                    if let photo = IslandPhoto.image(desktop: previewWallpaper, style: style, scale: scale) {
+                        IslandPhoto(image: photo)
+                    } else {
+                        IslandSizePicture(scale: scale)
+                    }
                 }
-                .padding(.vertical, SettingsForm.cardRadius - SettingsForm.inset - 10)
             } header: {
                 InfoLabel("Size when open", "How large the island opens: the panel, its widgets and its controls. The pill beside the notch always matches the notch.")
             }
@@ -140,7 +145,7 @@ struct GeneralSettingsPage: View {
             Section {
                 WallpaperRow(selection: $previewWallpaper)
             } header: {
-                InfoLabel("Preview Wallpaper", "The desktop behind the island in Settings' pictures and in the widget studio: your own desktop picture, the macOS default wallpaper (dark or light), or a black and white test pattern that shows exactly what the glass lets through.")
+                InfoLabel("Preview Wallpaper", "The desktop behind the island in Settings' pictures and in the widget studio: the macOS default wallpaper (dark or light), or a black and white test pattern that shows exactly what the glass lets through.")
             }
         }
     }
@@ -196,17 +201,30 @@ private struct ThemePicker: View {
 
 private struct SurfacePicker: View {
     @Binding var selection: IslandGlassStyle
+    /// The island's size in use: each style is shown at it.
+    let scale: IslandScale
+    /// The preview wallpaper: the style is shown over it.
+    let desktop: DesktopBackdropStyle
 
     var body: some View {
-        HStack(spacing: 14) {
+        // The three share the card's whole width, as far from one another as from its edges:
+        // their corners concentric with the card's.
+        HStack(alignment: .top, spacing: SettingsForm.inset) {
             ForEach(IslandGlassStyle.allCases) { style in
                 Button {
                     withAnimation(.spring(duration: 0.25)) { selection = style }
                 } label: {
                     VStack(spacing: 7) {
-                        SurfaceThumbnail(style: style)
+                        Group {
+                            // The island photographed in this style; drawn where there is no photograph.
+                            if let photo = IslandPhoto.image(desktop: desktop, style: style, scale: scale) {
+                                FittedPicture(drawn: IslandPhoto.size) { IslandPhoto(image: photo) }
+                            } else {
+                                FittedPicture(drawn: SurfaceThumbnail.size) { SurfaceThumbnail(style: style) }
+                            }
+                        }
                             .overlay {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                RoundedRectangle(cornerRadius: SettingsForm.pictureRadius, style: .continuous)
                                     .strokeBorder(selection == style ? Color.islandAccent : .white.opacity(0.12),
                                                   lineWidth: selection == style ? 3 : 1)
                             }
@@ -220,51 +238,108 @@ private struct SurfacePicker: View {
                 .accessibilityAddTraits(selection == style ? [.isButton, .isSelected] : .isButton)
             }
         }
-        .frame(maxWidth: .infinity)
     }
 }
 
+/// The open island in one surface style over a desktop, with its widgets: glass the desktop shows
+/// through, solid black, or black that clears into glass towards its foot.
 private struct SurfaceThumbnail: View {
     let style: IslandGlassStyle
 
     @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
+    /// As the other pictures (`MiniDesktop`): drawn `k` times as large as its numbers say.
+    @Environment(\.settingsPictureScale) private var k
+    @Environment(\.settingsPictureRadius) private var radius
+
+    // As drawn.
+    static let size = CGSize(width: 150, height: 80)
+    private static let island = CGSize(width: 108, height: 40)
+    private static let menuBar: CGFloat = MiniMetrics.menuBar
 
     var body: some View {
-        let shape = IslandShape(bottomRadius: 13, shoulderRadius: 4)
+        let shape = IslandShape(bottomRadius: MiniMetrics.islandRadius * k, shoulderRadius: 3 * k)
+        let inset = MiniMetrics.widgetInset
+        let size = MiniMetrics.size(Self.size.width, Self.size.height, scale: k)
+        let island = MiniMetrics.size(Self.island.width, Self.island.height, scale: k)
         ZStack(alignment: .top) {
-            DesktopBackdrop(style: backdrop, detail: .miniature)
-            PreviewMenuBar(height: 12, notchWidth: 104, darkText: backdrop.prefersDarkMenuBar,
+            // The miniature (960 px) fills a picture up to 480 pt wide at 2×.
+            DesktopBackdrop(style: backdrop, detail: size.width <= 480 ? .miniature : .full)
+            PreviewMenuBar(height: Self.menuBar * k, notchWidth: island.width, darkText: backdrop.prefersDarkMenuBar,
                            backing: backdrop.menuBarBacking)
             if style.hasGlassSurface {
                 // What the glass lets through: the same desktop, blurred, inside the island.
                 DesktopBackdrop(style: backdrop, detail: .miniature)
-                    .blur(radius: 4)
-                    .mask(alignment: .top) { shape.frame(width: 104, height: 40) }
+                    .blur(radius: 5 * k)
+                    .frame(width: size.width, height: size.height)
+                    .mask(alignment: .top) { shape.frame(width: island.width, height: island.height) }
             }
-            HStack(spacing: 6) {
-                RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.85)).frame(width: 14, height: 14)
-                VStack(alignment: .leading, spacing: 3) {
-                    Capsule().fill(.white.opacity(0.8)).frame(width: 34, height: 3)
-                    Capsule().fill(.white.opacity(0.45)).frame(width: 24, height: 3)
-                }
-                Spacer(minLength: 0)
-                Circle().fill(.white.opacity(0.85)).frame(width: 9, height: 9)
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 16)
-            .frame(width: 104, height: 40, alignment: .top)
-            .islandSurfaceShade(style, solidDepth: 12, in: shape)
-            // A drawn stand-in for the glass: three live glass surfaces here kept ~130 MB of
-            // graphics memory while General was open (measured), for a picture this small.
-            .background { ThumbnailGlass(style: style, shape: shape) }
-            .overlay(alignment: .top) {
-                UnevenRoundedRectangle(bottomLeadingRadius: 3, bottomTrailingRadius: 3)
-                    .fill(.black)
-                    .frame(width: 34, height: 12)
-            }
+            // As far from the island's sides and foot as from each other, their corners concentric
+            // with the island's.
+            MiniWidgets(width: Self.island.width - 2 * inset, height: Self.island.height - Self.menuBar - 2 * inset)
+                .padding(.top, (Self.menuBar + inset) * k)
+                .frame(width: island.width, height: island.height, alignment: .top)
+                // A drawn stand-in for the glass: three live glass surfaces here kept ~130 MB of
+                // graphics memory while General was open (measured), for a picture this small.
+                .background { ThumbnailSurface(style: style, shape: shape, scale: k) }
+                // The island floats over the desktop like the real one, with its soft shadow.
+                .shadow(color: .black.opacity(0.35), radius: 3 * k, y: 1.5 * k)
+            // The camera housing: whatever the island shows, the notch itself stays black.
+            UnevenRoundedRectangle(bottomLeadingRadius: 3 * k, bottomTrailingRadius: 3 * k, style: .continuous)
+                .fill(.black)
+                .frame(width: MiniMetrics.notchWidth * k, height: Self.menuBar * k)
         }
-        .frame(width: 150, height: 94)
-        .clipShape(.rect(cornerRadius: 10, style: .continuous))
+        .frame(width: size.width, height: size.height)
+        .clipShape(.rect(cornerRadius: radius, style: .continuous))
+        .accessibilityHidden(true)
+    }
+}
+
+/// The island's surface in a thumbnail, without live glass.
+///
+/// - Liquid Glass: a clear pane the (blurred) desktop shows through, with the glass's bright rim
+///   all round.
+/// - Black: solid, no rim.
+/// - Fade: black down to about two thirds of the island, as the island wears it, clearing into
+///   clear glass towards its foot, where alone the rim shows. (The island's own shade,
+///   `islandSurfaceShade`, keeps its 12 pt soft edge at any size: in a picture a sixth the island's
+///   size that edge was most of the island, and Fade read as a darker Liquid Glass.)
+private struct ThumbnailSurface<S: Shape>: View {
+    let style: IslandGlassStyle
+    let shape: S
+    let scale: CGFloat
+
+    var body: some View {
+        switch style {
+        case .black:
+            shape.fill(.black)
+        case .liquidGlass:
+            shape.fill(.black.opacity(0.08))
+                .overlay { shape.fill(.white.opacity(0.05)) }
+                .overlay { shape.stroke(.white.opacity(0.45), lineWidth: 0.6 * scale) }
+        case .fade:
+            shape.fill(.black.opacity(0.08))
+                .overlay { shape.fill(.white.opacity(0.05)) }
+                .overlay {
+                    shape.stroke(.white.opacity(0.45), lineWidth: 0.6 * scale)
+                        .mask { LinearGradient(stops: Self.rim, startPoint: .top, endPoint: .bottom) }
+                }
+                .overlay { shape.fill(LinearGradient(stops: Self.shade, startPoint: .top, endPoint: .bottom)) }
+        }
+    }
+
+    /// The fade's black: whole to about two thirds of the way down, then easing out to clear at
+    /// the foot (smoothstep, in steps small enough that none shows).
+    private static var shade: [Gradient.Stop] {
+        let start = 0.6
+        return [Gradient.Stop(color: .black, location: 0)] + (0...8).map { index in
+            let t = Double(index) / 8
+            return Gradient.Stop(color: .black.opacity(1 - t * t * (3 - 2 * t)), location: start + (1 - start) * t)
+        }
+    }
+
+    /// The rim only where the glass is clear.
+    private static var rim: [Gradient.Stop] {
+        [Gradient.Stop(color: .clear, location: 0.62), Gradient.Stop(color: .black, location: 1)]
     }
 }
 
@@ -320,25 +395,6 @@ private struct RowsStepper: View {
 
     private func label(_ count: Int) -> String {
         unit.isEmpty ? "\(count)" : "\(count) \(unit)"
-    }
-}
-
-/// The look of the island's surface in a thumbnail without live glass: black for Black, else
-/// a smoked, faintly lit pane with the glass's bright rim.
-private struct ThumbnailGlass<S: Shape>: View {
-    let style: IslandGlassStyle
-    let shape: S
-
-    var body: some View {
-        if style.hasGlassSurface {
-            // Liquid Glass is smoked; the fade's glass is clear.
-            shape.fill(.black.opacity(style == .fade ? 0.1 : 0.42))
-                .overlay { shape.fill(LinearGradient(colors: [.white.opacity(0.16), .white.opacity(0.03)],
-                                                     startPoint: .top, endPoint: .bottom)) }
-                .overlay { shape.stroke(.white.opacity(style == .liquidGlass ? 0.35 : 0.12), lineWidth: 0.75) }
-        } else {
-            shape.fill(.black)
-        }
     }
 }
 
@@ -415,7 +471,7 @@ struct ActivitiesSettingsPage: View {
         @Bindable var preferences = model.preferences
         Form {
             Section("Now Playing") {
-                SettingPictureRow { NowPlayingPicture() }
+                SettingPictureRow { ActivityPicture(activity: .nowPlaying) { NowPlayingPicture() } }
                 Toggle(isOn: $preferences.showNowPlaying) {
                     InfoLabel("Show what's playing", "The cover beside the notch and moving level bars while something plays, with the playback controls when the island opens.")
                 }
@@ -426,7 +482,7 @@ struct ActivitiesSettingsPage: View {
             }
 
             Section("AirPods") {
-                SettingPictureRow { AirPodsPicture() }
+                SettingPictureRow { ActivityPicture(activity: .airPods) { AirPodsPicture() } }
                 Toggle(isOn: $preferences.showAirPods) {
                     InfoLabel("Show AirPods connecting", "When AirPods (or other Bluetooth headphones) connect: their picture, name and the batteries of each earbud and the case.")
                 }
@@ -450,7 +506,7 @@ struct ActivitiesSettingsPage: View {
                     InfoLabel("Show volume and brightness changes", "Changing the volume or the brightness shows it in the island.")
                 }
                 PictureChoice(options: LevelHUDStyle.allCases, selection: $preferences.levelStyle, title: \.title) { style in
-                    LevelStylePicture(style: style)
+                    ActivityPicture(activity: style == .banner ? .volumeBanner : .volumePill) { LevelStylePicture(style: style) }
                 }
                 .padding(.vertical, SettingsForm.cardRadius - SettingsForm.inset - 10)
                 .disabled(!preferences.showLevelHUD)
@@ -478,7 +534,7 @@ struct ActivitiesSettingsPage: View {
             // the whole power state changed at every percent and redrew this page, kept unseen.)
             if model.power.hasBattery {
                 Section("Battery") {
-                    SettingPictureRow { PowerPicture() }
+                    SettingPictureRow { ActivityPicture(activity: .power) { PowerPicture() } }
                     Toggle(isOn: $preferences.showPowerAlerts) {
                         InfoLabel("Power alerts", "Charger connected or removed, fully charged, and low battery at 20, 10 and 5 %.")
                     }
@@ -946,27 +1002,9 @@ struct AboutSettingsPage: View {
     @Environment(AppModel.self) private var model
     @State private var isConfirmingClear = false
 
-    static let markSide: CGFloat = 72
-
     var body: some View {
         let count = model.shelf.items.count
         Form {
-            Section {
-                HStack(alignment: .top, spacing: 16) {
-                    AppMark(side: Self.markSide)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("NotchIsland").font(.system(size: 20, weight: .bold))
-                        Text(SettingsFormat.version(Bundle.main.infoDictionary))
-                            .foregroundStyle(SettingsPalette.secondary)
-                        Text("The notch as a Liquid Glass island: what's playing, timers, volume and brightness, charging, Spotlight, Control Center's switches and a shelf for files.")
-                            .font(.callout)
-                            .foregroundStyle(SettingsPalette.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .settingsCornerElement(radius: AppMark.cornerRadius(side: Self.markSide))
-            }
-
             UpdateSection()
 
             FeedbackSection()

@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4.3 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4.4 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,37 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.4.4
+
+- **Liquid Glass is clear.** The Liquid Glass surface is plain, colourless glass now: nothing
+  smoked, no tint, and the white veil even the clearest glass lays over the desktop is taken back
+  out. It follows System Settings ▸ Appearance ▸ **Liquid Glass**: fully see-through at the clear
+  end of that slider, evenly darker towards its tinted end. Fade and Black are as they were.
+- **Settings shows the island as it is.** General's Appearance and Size pictures, the picture of
+  the island opening, and every picture in Live Activities are photographs of the island itself,
+  in the style and at the size in use, over the preview wallpaper. The three Appearance pictures
+  and the five sizes fill their cards.
+- **Wider Settings pages.** General, Live Activities, Spotlight and About use the whole room
+  beside the sidebar, as Widgets does.
+- **The scroller keeps out of the way.** The bar beside a Settings page shows only while the
+  pointer is on it, where it can be dragged; scrolling no longer brings it up.
+- **Preview Wallpaper** offers macOS Dark, macOS Light and the test pattern. Your Desktop is gone
+  for now; a stored choice of it becomes macOS Dark.
+- **About** starts with Updates: the card with the app's name and description is gone (the version
+  heads the sidebar).
+- **Lighter.** Settings is built ahead in low-priority turns after a launch, Size mode in Widgets
+  unfolds in one layout pass (2.1 to 3.1 J a switch became 0.6 to 0.7 J), and a swipe along the
+  Timer's ruler costs about half of what it did.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.4.4 in place and keeps your permissions (signed
+exactly as 0.8.4.3). Or download **NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 

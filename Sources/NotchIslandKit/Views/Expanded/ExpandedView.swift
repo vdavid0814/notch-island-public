@@ -30,8 +30,11 @@ struct ExpandedView: View {
 
         VStack(spacing: 0) {
             ExpandedHeader(split: split, height: layout.notch.height)
+                .opacity(model.isPictureScene ? 0 : 1)
             ZStack(alignment: .top) {
                 pageView(scale: scale)
+                    // Photographed for Settings' pictures: the island alone, nothing on it.
+                    .opacity(model.isPictureScene ? 0 : 1)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .id(page)
                     .transition(reduceMotion ? .opacity : AnyTransition(PageSlide(distance: PageSlide.distance * scale)))

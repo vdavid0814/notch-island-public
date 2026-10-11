@@ -13,6 +13,8 @@ nonisolated enum SettingsForm {
     static let controlRadius: CGFloat = 12
     /// The card's corners: concentric with a capsule the inset away from them.
     static let cardRadius: CGFloat = controlRadius + inset
+    /// A picture the inset from the card's corner, concentric with it.
+    static let pictureRadius: CGFloat = cardRadius - inset
     /// Between a section's title and its card, and between one section and the next title.
     static let headerGap: CGFloat = 10
     static let sectionGap: CGFloat = 26
@@ -21,6 +23,11 @@ nonisolated enum SettingsForm {
     static let titleGap: CGFloat = 16
 
     static let cardFill = Color.white.opacity(0.05)
+
+    /// Over and under a page of Settings in the island (`SettingsFormStyle.settingsPage`):
+    /// Widgets' own insets.
+    static let pageTopInset: CGFloat = 10
+    static let pageBottomInset: CGFloat = 28
 }
 
 extension EnvironmentValues {
@@ -44,9 +51,15 @@ extension View {
 
 extension FormStyle where Self == SettingsFormStyle {
     static var settings: SettingsFormStyle { SettingsFormStyle() }
+    /// A page of Settings in the island: as wide as the pages' room, as Widgets' page is.
+    static var settingsPage: SettingsFormStyle { SettingsFormStyle(fillsPage: true) }
 }
 
 struct SettingsFormStyle: FormStyle {
+    /// A page in the island's Settings: its cards from edge to edge of the pages' room, a box
+    /// beside the sidebar's (`SettingsSurfaceView`). Otherwise with room around it, in a window.
+    var fillsPage = false
+
     func makeBody(configuration: Configuration) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: SettingsForm.sectionGap) {
@@ -54,8 +67,13 @@ struct SettingsFormStyle: FormStyle {
                     SettingsFormSection(section: section)
                 }
             }
-            .padding(20)
+            .padding(.top, fillsPage ? SettingsForm.pageTopInset : 20)
+            .padding(.bottom, fillsPage ? SettingsForm.pageBottomInset : 20)
+            .padding(.horizontal, fillsPage ? 0 : 20)
         }
+        // A page's scroller stands out in the gap beside the room (`SettingsEdgeScroller`): the
+        // room's own ran over the cards at its edge.
+        .scrollIndicators(fillsPage ? .hidden : .automatic)
         .labeledContentStyle(SettingsRowStyle())
         .environment(\.isSettingsForm, true)
     }

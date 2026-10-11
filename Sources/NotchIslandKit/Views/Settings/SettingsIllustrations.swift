@@ -66,30 +66,38 @@ struct InfoHint: View {
 /// A desktop in miniature, as this Mac shows it: the preview wallpaper the user chose (General ▸
 /// Preview Wallpaper, their own desktop unless they picked another), the menu bar with its menus,
 /// status items and clock, the camera housing, and whatever hangs from the notch.
+///
+/// Its sizes, and everything drawn in it, are given as drawn at a 150 pt wide desktop and shown
+/// `settingsPictureScale` times as large: the page takes the pictures as large as its width has
+/// room for. Drawn at that size, not enlarged: an enlarged picture's text is a blurred bitmap.
 struct MiniDesktop<Content: View>: View {
     var width: CGFloat = 150
     var height: CGFloat = 94
     @ViewBuilder var content: Content
 
     @AppStorage(DesktopBackdropStyle.key) private var style: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
+    @Environment(\.settingsPictureScale) private var k
+    @Environment(\.settingsPictureRadius) private var radius
 
     var body: some View {
+        let size = MiniMetrics.size(width, height, scale: k)
         ZStack(alignment: .top) {
-            // A picture this small needs no more than the miniature (up to 240 pt wide at 2×).
-            DesktopBackdrop(style: style, detail: width <= 240 && height <= 240 ? .miniature : .full)
-            PreviewMenuBar(height: MiniMetrics.menuBar, notchWidth: MiniMetrics.notchWidth + 14,
+            // A picture this small needs no more than the miniature (960 px: up to 480 pt wide at 2×).
+            DesktopBackdrop(style: style, detail: size.width <= 480 && size.height <= 480 ? .miniature : .full)
+            PreviewMenuBar(height: MiniMetrics.menuBar * k, notchWidth: (MiniMetrics.notchWidth + 14) * k,
                            darkText: style.prefersDarkMenuBar,
                            backing: style.menuBarBacking)
             content
                 // The island floats over the desktop like the real one, with its soft shadow.
-                .shadow(color: .black.opacity(0.35), radius: 3, y: 1.5)
+                .shadow(color: .black.opacity(0.35), radius: 3 * k, y: 1.5 * k)
             // The camera housing: whatever the island shows, the notch itself stays black.
-            UnevenRoundedRectangle(bottomLeadingRadius: 3, bottomTrailingRadius: 3, style: .continuous)
+            UnevenRoundedRectangle(bottomLeadingRadius: 3 * k, bottomTrailingRadius: 3 * k, style: .continuous)
                 .fill(.black)
-                .frame(width: MiniMetrics.notchWidth, height: MiniMetrics.menuBar)
+                .frame(width: MiniMetrics.notchWidth * k, height: MiniMetrics.menuBar * k)
         }
-        .frame(width: width, height: height)
-        .clipShape(.rect(cornerRadius: 10, style: .continuous))
+        .frame(width: size.width, height: size.height)
+        // Its corners stay as they are at any size: concentric with the card's.
+        .clipShape(.rect(cornerRadius: radius, style: .continuous))
         .accessibilityHidden(true)
     }
 }
@@ -99,21 +107,178 @@ nonisolated enum MiniMetrics {
     static let notchWidth: CGFloat = 34
     /// Real island points to picture points.
     static let scale: CGFloat = 0.17
+    /// The open island's lower corners in a picture, and how far its widgets sit in from its
+    /// sides and its foot (and from one another): the widgets' corners are the island's less
+    /// that inset, concentric with them, as on the island itself (28 pt, 20 pt and 8 pt there).
+    static let islandRadius: CGFloat = 8
+    static let widgetInset: CGFloat = 4
+
+    /// A picture's size on the page.
+    static func size(_ width: CGFloat, _ height: CGFloat, scale: CGFloat) -> CGSize {
+        CGSize(width: width * scale, height: height * scale)
+    }
+
+    /// A row of five pictures as drawn (`sizePicture`, `PictureChoice`): what the pictures' size
+    /// on a page is measured by.
+    static let widestRow: CGFloat = 5 * sizePicture.width + 4 * choiceSpacing
+    /// The open island at one of its sizes (`IslandSizePicture`), as drawn.
+    static let sizePicture = CGSize(width: 118, height: 74)
+    /// Between the pictures of a row of choices, as drawn.
+    static let choiceSpacing: CGFloat = 12
+    /// The pictures at most this much larger than drawn, however wide the page.
+    static let largestPictureScale: CGFloat = 1.4
+
+    /// How large a page `pageWidth` wide shows the pictures that stand alone or in a pair
+    /// (those that share a row's whole width take their size from it, `FittedPicture`): as large
+    /// as five in a row would have room for in a card, in steps of a twentieth; smaller than
+    /// drawn on a page too narrow even for that.
+    static func pictureScale(pageWidth: CGFloat) -> CGFloat {
+        let fit = (pageWidth - 2 * SettingsForm.inset) / widestRow
+        return min(max((fit * 20).rounded(.down) / 20, 0.5), largestPictureScale)
+    }
+}
+
+extension EnvironmentValues {
+    /// How many times as large as drawn Settings' pictures are shown (`MiniDesktop`).
+    @Entry var settingsPictureScale: CGFloat = 1
+    /// A picture's corners: 10 pt where it stands in a row with room round it; a picture at the
+    /// card's own inset is rounded concentric with the card (`SettingsForm.pictureRadius`).
+    @Entry var settingsPictureRadius: CGFloat = 10
+}
+
+/// A picture as wide as it is given, drawn that many times as large as `drawn`: pictures in one
+/// row share its whole width, the first and the last the card's inset from its sides, so their
+/// corners are concentric with the card's.
+struct FittedPicture<Content: View>: View {
+    /// The picture's size as drawn.
+    let drawn: CGSize
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        Color.clear
+            .aspectRatio(drawn.width / drawn.height, contentMode: .fit)
+            .overlay {
+                GeometryReader { proxy in
+                    if proxy.size.width > 0 {
+                        content
+                            .environment(\.settingsPictureScale, proxy.size.width / drawn.width)
+                            .environment(\.settingsPictureRadius, SettingsForm.pictureRadius)
+                    }
+                }
+            }
+    }
+}
+
+/// The open island, empty, photographed in a surface style at a size over a drawn desktop: the
+/// island as it is — its real proportions, corners and glass — where a drawing of it only came
+/// near (asked for). The photographs are taken from the running app (`Scripts/settings-pictures.sh`,
+/// `demo/picture`) over each drawn desktop of General ▸ Preview Wallpaper (the user's own desktop
+/// shows the dark default's) and ship in the app's resources; where there are none (the tests, a
+/// bare `swift run`), the drawn pictures stand in.
+struct IslandPhoto: View {
+    let image: NSImage
+    var size = IslandPhoto.size
+
+    @Environment(\.settingsPictureScale) private var k
+    @Environment(\.settingsPictureRadius) private var radius
+
+    /// As drawn: the photographs' 16:9 (`DemoDirector.pictureSize`).
+    static let size = CGSize(width: 160, height: 90)
+    /// A live activity's: the notch and a little desktop round it (`DemoDirector.activityPictureSize`).
+    static let activitySize = CGSize(width: 216, height: 72)
+
+    var body: some View {
+        Image(nsImage: image)
+            .resizable()
+            .interpolation(.high)
+            .frame(width: size.width * k, height: size.height * k)
+            .clipShape(.rect(cornerRadius: radius, style: .continuous))
+            .accessibilityHidden(true)
+    }
+
+    /// Looked up once each (also the ones that are not there).
+    private static var loaded: [String: NSImage?] = [:]
+
+    static func image(desktop: DesktopBackdropStyle, style: IslandGlassStyle, scale: IslandScale) -> NSImage? {
+        named("island-\(drawn(desktop).rawValue)-\(style.rawValue)-\(scale.rawValue)")
+    }
+
+    /// A live activity in the notch.
+    static func activity(_ activity: PictureActivity, desktop: DesktopBackdropStyle, style: IslandGlassStyle) -> NSImage? {
+        named("activity-\(drawn(desktop).rawValue)-\(style.rawValue)-\(activity.rawValue)")
+    }
+
+    /// The desktop with the bare notch.
+    static func idle(desktop: DesktopBackdropStyle) -> NSImage? {
+        named("idle-\(drawn(desktop).rawValue)")
+    }
+
+    /// The open island's outline at each size, as photographed.
+    static let geometry: [String: IslandPhotoGeometry] = Bundle.main
+        .url(forResource: "geometry", withExtension: "json", subdirectory: "SettingsPictures")
+        .flatMap { try? Data(contentsOf: $0) }
+        .flatMap { try? JSONDecoder().decode([String: IslandPhotoGeometry].self, from: $0) } ?? [:]
+
+    /// The photographs are over the drawn desktops only.
+    private static func drawn(_ desktop: DesktopBackdropStyle) -> DesktopBackdropStyle {
+        desktop == .desktop ? .system : desktop
+    }
+
+    private static func named(_ name: String) -> NSImage? {
+        if let known = loaded[name] { return known }
+        let image = Bundle.main.url(forResource: name, withExtension: "jpg", subdirectory: "SettingsPictures")
+            .flatMap { NSImage(contentsOf: $0) }
+        loaded[name] = .some(image)
+        return image
+    }
+}
+
+/// A live activity's picture: the notch photographed with it, in the surface style in use over the
+/// preview wallpaper; the drawn picture where there is no photograph.
+struct ActivityPicture<Drawn: View>: View {
+    let activity: PictureActivity
+    @ViewBuilder var drawn: Drawn
+
+    @Environment(AppModel.self) private var model
+    @AppStorage(DesktopBackdropStyle.key) private var desktop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
+
+    var body: some View {
+        if let photo = IslandPhoto.activity(activity, desktop: desktop, style: model.preferences.glassStyle) {
+            IslandPhoto(image: photo, size: IslandPhoto.activitySize)
+        } else {
+            drawn
+        }
+    }
+}
+
+/// The open island's outline at one size as it was photographed (points on the photographed
+/// screen, of `DemoDirector.pictureSize`): what the picture of its opening grows it along.
+nonisolated struct IslandPhotoGeometry: Codable, Sendable, Equatable {
+    var width: CGFloat
+    var height: CGFloat
+    var radius: CGFloat
+    var shoulder: CGFloat
+    var notchWidth: CGFloat
+    var notchHeight: CGFloat
 }
 
 /// A black island in miniature, hanging from the top.
 struct MiniIsland<Content: View>: View {
     let width: CGFloat
     let height: CGFloat
+    /// Its lower corners (a banner's or a pill's: as round as its height lets them be).
+    var radius: CGFloat?
     @ViewBuilder var content: Content
 
+    @Environment(\.settingsPictureScale) private var k
+
     var body: some View {
-        IslandShape(bottomRadius: min(10, height / 2), shoulderRadius: 3)
+        IslandShape(bottomRadius: (radius ?? min(10, height / 2)) * k, shoulderRadius: 3 * k)
             .fill(.black)
-            .frame(width: width, height: height)
+            .frame(width: width * k, height: height * k)
             .overlay(alignment: .top) {
                 content
-                    .frame(width: width, height: height, alignment: .top)
+                    .frame(width: width * k, height: height * k, alignment: .top)
             }
     }
 }
@@ -124,19 +289,30 @@ struct PictureChoice<Value: Hashable, Picture: View>: View {
     @Binding var selection: Value
     let title: (Value) -> String
     var cardWidth: CGFloat = 150
+    /// The pictures' size as drawn: given, they share the row's whole width (`FittedPicture`),
+    /// as far from one another as from the card's edges.
+    var filling: CGSize?
     @ViewBuilder let picture: (Value) -> Picture
 
+    @Environment(\.settingsPictureScale) private var k
+
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: filling == nil ? MiniMetrics.choiceSpacing * k : SettingsForm.inset) {
             ForEach(options, id: \.self) { option in
                 let isSelected = option == selection
                 Button {
                     withAnimation(.spring(duration: 0.3, bounce: 0.15)) { selection = option }
                 } label: {
                     VStack(spacing: 7) {
-                        picture(option)
+                        Group {
+                            if let filling {
+                                FittedPicture(drawn: filling) { picture(option) }
+                            } else {
+                                picture(option)
+                            }
+                        }
                             .overlay {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                RoundedRectangle(cornerRadius: filling == nil ? 10 : SettingsForm.pictureRadius, style: .continuous)
                                     .strokeBorder(isSelected ? Color.islandAccent : .white.opacity(0.12),
                                                   lineWidth: isSelected ? 3 : 1)
                             }
@@ -155,26 +331,38 @@ struct PictureChoice<Value: Hashable, Picture: View>: View {
     }
 }
 
-/// Tiny widgets inside a pictured island.
+/// Tiny widgets inside a pictured island: two in a row, as tall as their room, their corners
+/// concentric with the island's (`radius`: the island's less the widgets' inset) and as far from
+/// each other as from the island's sides (`gap`).
 struct MiniWidgets: View {
     let width: CGFloat
     let height: CGFloat
+    var radius: CGFloat = MiniMetrics.islandRadius - MiniMetrics.widgetInset
+    var gap: CGFloat = MiniMetrics.widgetInset
+
+    @Environment(\.settingsPictureScale) private var k
 
     var body: some View {
-        let gap: CGFloat = 3
-        HStack(spacing: gap) {
-            RoundedRectangle(cornerRadius: 3, style: .continuous).fill(.white.opacity(0.22))
+        // The cover in the first widget: as far in as half the widget's corner, concentric with it.
+        let inset = max(1.5, radius / 2)
+        let side = width * 0.4
+        HStack(spacing: gap * k) {
+            RoundedRectangle(cornerRadius: radius * k, style: .continuous).fill(.white.opacity(0.22))
                 .overlay(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2).fill(.pink.opacity(0.8)).padding(2).aspectRatio(1, contentMode: .fit)
+                    RoundedRectangle(cornerRadius: (radius - inset) * k, style: .continuous).fill(.pink.opacity(0.8))
+                        .padding(inset * k).aspectRatio(1, contentMode: .fit)
                 }
-            VStack(spacing: gap) {
-                RoundedRectangle(cornerRadius: 3, style: .continuous).fill(.white.opacity(0.22))
-                    .overlay { Capsule().fill(.orange.opacity(0.85)).frame(height: 2).padding(.horizontal, 4) }
-                RoundedRectangle(cornerRadius: 3, style: .continuous).fill(.white.opacity(0.14))
-            }
-            .frame(width: width * 0.38)
+            RoundedRectangle(cornerRadius: radius * k, style: .continuous).fill(.white.opacity(0.16))
+                .overlay(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 2.5 * k) {
+                        Capsule().fill(.orange.opacity(0.85)).frame(width: side * 0.55 * k, height: 2 * k)
+                        Capsule().fill(.white.opacity(0.3)).frame(width: side * 0.35 * k, height: 2 * k)
+                    }
+                    .padding(.leading, (radius + 1) * k)
+                }
+                .frame(width: side * k)
         }
-        .frame(width: width, height: height)
+        .frame(width: width * k, height: height * k)
     }
 }
 
@@ -182,14 +370,19 @@ struct MiniWidgets: View {
 struct IslandSizePicture: View {
     let scale: IslandScale
 
+    @Environment(\.settingsPictureScale) private var k
+
     var body: some View {
         let f = scale.factor
         let width = (600 * f * MiniMetrics.scale).rounded()
         let height = (MiniMetrics.menuBar + 160 * f * MiniMetrics.scale).rounded()
-        MiniDesktop(width: 118, height: 74) {
-            MiniIsland(width: width, height: height) {
-                MiniWidgets(width: width - 10, height: height - MiniMetrics.menuBar - 5)
-                    .padding(.top, MiniMetrics.menuBar + 1)
+        // The island's corners and its widgets' inset grow with it, as they do on the island.
+        let radius = MiniMetrics.islandRadius * f, inset = MiniMetrics.widgetInset * f
+        MiniDesktop(width: MiniMetrics.sizePicture.width, height: MiniMetrics.sizePicture.height) {
+            MiniIsland(width: width, height: height, radius: radius) {
+                MiniWidgets(width: width - 2 * inset, height: height - MiniMetrics.menuBar - 2 * inset,
+                            radius: radius - inset, gap: inset)
+                    .padding(.top, (MiniMetrics.menuBar + inset) * k)
             }
         }
     }
@@ -204,34 +397,77 @@ struct IslandSizePicture: View {
 struct GrowthPicture: View {
     let duration: Double
 
+    @Environment(\.settingsPictureScale) private var k
+    @Environment(\.settingsPictureRadius) private var radius
+    @Environment(AppModel.self) private var model
+    @AppStorage(DesktopBackdropStyle.key) private var desktop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
+
     var body: some View {
-        MiniDesktop(width: Self.size.width, height: Self.size.height) {
-            GrowthLoop(duration: duration)
-                .frame(width: Self.size.width, height: Self.size.height)
+        let preferences = model.preferences
+        // The island as photographed, in the style and at the size in use: the photograph of it
+        // open shows through its outline as that grows out of the notch over the bare desktop's.
+        if let closed = IslandPhoto.idle(desktop: desktop),
+           let open = IslandPhoto.image(desktop: desktop, style: preferences.glassStyle, scale: preferences.scale),
+           let geometry = IslandPhoto.geometry[preferences.scale.rawValue] {
+            GrowthLoop(duration: duration, scale: k, photo: GrowthPhoto(closed: closed, open: open, geometry: geometry))
+                .frame(width: IslandPhoto.size.width * k, height: IslandPhoto.size.height * k)
+                .clipShape(.rect(cornerRadius: radius, style: .continuous))
+                .accessibilityHidden(true)
+        } else {
+            let shown = MiniMetrics.size(Self.size.width, Self.size.height, scale: k)
+            MiniDesktop(width: Self.size.width, height: Self.size.height) {
+                GrowthLoop(duration: duration, scale: k)
+                    .frame(width: shown.width, height: shown.height)
+            }
         }
     }
 
+    // As drawn (`settingsPictureScale` times as large on the page).
     static let size = CGSize(width: 150, height: 70)
     static let open = CGSize(width: 102, height: 40)
     static let closed = CGSize(width: MiniMetrics.notchWidth, height: MiniMetrics.menuBar)
     /// Where the widgets sit in the open island.
-    static let widgets = CGSize(width: open.width - 10, height: open.height - MiniMetrics.menuBar - 5)
+    static let widgets = CGSize(width: open.width - 2 * MiniMetrics.widgetInset,
+                                height: open.height - MiniMetrics.menuBar - 2 * MiniMetrics.widgetInset)
 
-    /// The island's outline at a size, top-centred in the picture (`MiniIsland`'s shape).
-    static func islandPath(_ size: CGSize) -> CGPath {
-        let rect = CGRect(x: (Self.size.width - size.width) / 2, y: 0, width: size.width, height: size.height)
-        return IslandShape(bottomRadius: min(10, size.height / 2), shoulderRadius: 3).path(in: rect).cgPath
+    /// The island's outline at a size (as drawn), top-centred in a picture `width` wide and
+    /// `scale` times as large (`MiniIsland`'s shape).
+    static func islandPath(_ size: CGSize, in width: CGFloat, scale: CGFloat,
+                           radius: CGFloat = MiniMetrics.islandRadius, shoulder: CGFloat = 3) -> CGPath {
+        let rect = CGRect(x: (width - size.width * scale) / 2, y: 0, width: size.width * scale, height: size.height * scale)
+        return IslandShape(bottomRadius: min(radius, size.height / 2) * scale, shoulderRadius: shoulder * scale)
+            .path(in: rect).cgPath
+    }
+}
+
+/// The photographs the island's opening is shown with: the bare desktop, the island open over it,
+/// and the open island's outline in them.
+struct GrowthPhoto: Equatable {
+    let closed: NSImage
+    let open: NSImage
+    let geometry: IslandPhotoGeometry
+
+    static func == (a: GrowthPhoto, b: GrowthPhoto) -> Bool {
+        a.closed === b.closed && a.open === b.open && a.geometry == b.geometry
     }
 }
 
 private struct GrowthLoop: NSViewRepresentable {
     let duration: Double
+    let scale: CGFloat
+    var photo: GrowthPhoto?
 
     func makeNSView(context: Context) -> GrowthLoopView {
-        GrowthLoopView(frame: CGRect(origin: .zero, size: GrowthPicture.size))
+        let view = GrowthLoopView(frame: CGRect(origin: .zero, size: MiniMetrics.size(GrowthPicture.size.width, GrowthPicture.size.height,
+                                                                                    scale: scale)))
+        view.scale = scale
+        view.photo = photo
+        return view
     }
 
     func updateNSView(_ view: GrowthLoopView, context: Context) {
+        view.scale = scale
+        view.photo = photo
         view.duration = duration
     }
 }
@@ -257,6 +493,61 @@ final class GrowthLoopView: NSView {
         didSet { if duration != oldValue { restart() } }
     }
 
+    /// How many times as large as drawn the picture is shown: the island and its widgets with it.
+    var scale: CGFloat = 1 {
+        didSet {
+            guard scale != oldValue else { return }
+            widgets.contents = nil
+            needsLayout = true
+            restart()
+        }
+    }
+
+    private var laidWidth: CGFloat = 0
+
+    /// Photographs instead of the drawn island (`GrowthPicture`): the bare desktop, and over it
+    /// the photograph of the open island, seen through the island's outline (its mask) as that
+    /// springs open and shut — the same springs, and still nothing drawn per frame by the app.
+    var photo: GrowthPhoto? {
+        didSet {
+            guard photo != oldValue else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            base.contents = photo?.closed
+            reveal.contents = photo?.open
+            if photo != nil {
+                island.removeFromSuperlayer()
+                reveal.mask = island
+                widgets.isHidden = true
+            } else {
+                reveal.mask = nil
+                layer?.insertSublayer(island, below: widgets)
+                widgets.isHidden = false
+            }
+            CATransaction.commit()
+            needsLayout = true
+            restart()
+        }
+    }
+    private let base = CALayer()
+    private let reveal = CALayer()
+
+    private var closedSize: CGSize {
+        photo.map { CGSize(width: $0.geometry.notchWidth + 2 * $0.geometry.shoulder, height: $0.geometry.notchHeight) } ?? GrowthPicture.closed
+    }
+
+    /// A point more than the island's own outline at each side and its foot: its edge light too.
+    private var openSize: CGSize {
+        photo.map { CGSize(width: $0.geometry.width + 2, height: $0.geometry.height + 1) } ?? GrowthPicture.open
+    }
+
+    private func path(_ size: CGSize) -> CGPath {
+        guard let photo else { return GrowthPicture.islandPath(size, in: bounds.width, scale: scale) }
+        // Photographed points to the picture's.
+        return GrowthPicture.islandPath(size, in: bounds.width, scale: bounds.width / 800,
+                                        radius: photo.geometry.radius, shoulder: photo.geometry.shoulder)
+    }
+
     /// When the running loop's first cycle started (media time), and the next spring to add.
     private var cycleStart: CFTimeInterval = 0
     private var nextStep = 0
@@ -266,9 +557,13 @@ final class GrowthLoopView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         island.fillColor = NSColor.black.cgColor
-        island.path = GrowthPicture.islandPath(GrowthPicture.closed)
+        island.path = path(closedSize)
         widgets.opacity = 0
         widgets.contentsGravity = .resize
+        base.contentsGravity = .resize
+        reveal.contentsGravity = .resize
+        layer?.addSublayer(base)
+        layer?.addSublayer(reveal)
         layer?.addSublayer(island)
         layer?.addSublayer(widgets)
     }
@@ -303,10 +598,18 @@ final class GrowthLoopView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         island.frame = bounds
+        base.frame = bounds
+        reveal.frame = bounds
         let size = GrowthPicture.widgets
-        widgets.frame = CGRect(x: (bounds.width - size.width) / 2, y: MiniMetrics.menuBar + 1,
-                               width: size.width, height: size.height)
+        widgets.frame = CGRect(x: (bounds.width - size.width * scale) / 2, y: (MiniMetrics.menuBar + MiniMetrics.widgetInset) * scale,
+                               width: size.width * scale, height: size.height * scale)
         CATransaction.commit()
+        // At another width (the pictures' scale changed): the outline is centred in it, from the
+        // loop's start.
+        if bounds.width != laidWidth {
+            laidWidth = bounds.width
+            restart()
+        }
     }
 
     /// Open, pause, close, pause: when the close starts and how long one cycle is.
@@ -320,11 +623,11 @@ final class GrowthLoopView: NSView {
         widgets.removeAnimation(forKey: Self.animationKey)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        island.path = GrowthPicture.islandPath(GrowthPicture.closed)
+        island.path = path(closedSize)
         widgets.opacity = 0
         CATransaction.commit()
         guard let window, duration > 0, !isHiddenOrHasHiddenAncestor else { return }
-        if widgets.contents == nil { renderWidgets(scale: window.backingScaleFactor) }
+        if photo == nil, widgets.contents == nil { renderWidgets(scale: window.backingScaleFactor) }
         cycleStart = CACurrentMediaTime() + Self.lead
         nextStep = 0
         let timer = DispatchSource.makeTimerSource(flags: .strict, queue: .main)
@@ -349,8 +652,8 @@ final class GrowthLoopView: NSView {
             cycleStart += earliest - begin
             begin = earliest
         }
-        let closed = GrowthPicture.islandPath(GrowthPicture.closed)
-        let open = GrowthPicture.islandPath(GrowthPicture.open)
+        let closed = path(closedSize)
+        let open = path(openSize)
 
         func spring(_ key: String, from: Any, to: Any, duration: Double, bounce: Double, available: Double) -> CASpringAnimation {
             let animation = CASpringAnimation(perceptualDuration: duration, bounce: bounce)
@@ -389,13 +692,13 @@ final class GrowthLoopView: NSView {
     }
 
     /// The widgets never change: drawn once into the layer.
-    private func renderWidgets(scale: CGFloat) {
+    private func renderWidgets(scale backing: CGFloat) {
         let size = GrowthPicture.widgets
         let renderer = ImageRenderer(content: MiniWidgets(width: size.width, height: size.height)
-            .frame(width: size.width, height: size.height))
-        renderer.scale = scale
+            .environment(\.settingsPictureScale, scale))
+        renderer.scale = backing
         widgets.contents = renderer.cgImage
-        widgets.contentsScale = scale
+        widgets.contentsScale = backing
     }
 }
 
@@ -403,29 +706,31 @@ final class GrowthLoopView: NSView {
 struct LevelStylePicture: View {
     let style: LevelHUDStyle
 
+    @Environment(\.settingsPictureScale) private var k
+
     var body: some View {
         MiniDesktop(width: 150, height: 70) {
             switch style {
             case .banner:
                 MiniIsland(width: 96, height: MiniMetrics.menuBar + 16) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "speaker.wave.2.fill").font(.system(size: 7))
-                        MiniSlider(value: 0.6).frame(width: 46)
-                        Text("60%").font(.system(size: 6, weight: .semibold))
+                    HStack(spacing: 5 * k) {
+                        Image(systemName: "speaker.wave.2.fill").font(.system(size: 7 * k))
+                        MiniSlider(value: 0.6).frame(width: 46 * k)
+                        Text("60%").font(.system(size: 6 * k, weight: .semibold))
                     }
                     .foregroundStyle(.white)
-                    .padding(.top, MiniMetrics.menuBar + 3)
+                    .padding(.top, (MiniMetrics.menuBar + 3) * k)
                 }
             case .pill:
                 MiniIsland(width: MiniMetrics.notchWidth + 2 * 30, height: MiniMetrics.menuBar) {
                     HStack {
-                        Image(systemName: "speaker.wave.2.fill").font(.system(size: 6))
-                        Spacer(minLength: MiniMetrics.notchWidth)
-                        MiniSlider(value: 0.6).frame(width: 20)
+                        Image(systemName: "speaker.wave.2.fill").font(.system(size: 6 * k))
+                        Spacer(minLength: MiniMetrics.notchWidth * k)
+                        MiniSlider(value: 0.6).frame(width: 20 * k)
                     }
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .frame(height: MiniMetrics.menuBar)
+                    .padding(.horizontal, 6 * k)
+                    .frame(height: MiniMetrics.menuBar * k)
                 }
             }
         }
@@ -435,6 +740,8 @@ struct LevelStylePicture: View {
 private struct MiniSlider: View {
     let value: Double
 
+    @Environment(\.settingsPictureScale) private var k
+
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
@@ -442,24 +749,26 @@ private struct MiniSlider: View {
                 Capsule().fill(Color.islandAccent).frame(width: proxy.size.width * value)
             }
         }
-        .frame(height: 3)
+        .frame(height: 3 * k)
     }
 }
 
 /// Now Playing's pill: the cover beside the notch, the level bars moving on the other side.
 struct NowPlayingPicture: View {
+    @Environment(\.settingsPictureScale) private var k
+
     var body: some View {
         MiniDesktop(width: 150, height: 56) {
             MiniIsland(width: MiniMetrics.notchWidth + 2 * 16, height: MiniMetrics.menuBar) {
                 HStack {
-                    RoundedRectangle(cornerRadius: 2)
+                    RoundedRectangle(cornerRadius: 2 * k)
                         .fill(LinearGradient(colors: [.pink, .orange], startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 8, height: 8)
-                    Spacer(minLength: MiniMetrics.notchWidth)
-                    MiniEqualizer().frame(width: 8, height: 7)
+                        .frame(width: 8 * k, height: 8 * k)
+                    Spacer(minLength: MiniMetrics.notchWidth * k)
+                    MiniEqualizer().frame(width: 8 * k, height: 7 * k)
                 }
-                .padding(.horizontal, 4)
-                .frame(height: MiniMetrics.menuBar)
+                .padding(.horizontal, 4 * k)
+                .frame(height: MiniMetrics.menuBar * k)
             }
         }
     }
@@ -468,31 +777,35 @@ struct NowPlayingPicture: View {
 /// The pill's own bars in miniature: Core Animation, so an open Settings page costs no frames.
 /// (A SwiftUI `TimelineView` here re-rendered the page 8 times a second for as long as it was open.)
 private struct MiniEqualizer: View {
+    @Environment(\.settingsPictureScale) private var k
+
     var body: some View {
-        EqualizerView(isAnimating: true, onBattery: true, size: CGSize(width: 9.5, height: 7), barWidth: 1.2)
+        EqualizerView(isAnimating: true, onBattery: true, size: CGSize(width: 9.5 * k, height: 7 * k), barWidth: 1.2 * k)
     }
 }
 
 /// The AirPods banner: the set, its name, and three battery rings.
 struct AirPodsPicture: View {
+    @Environment(\.settingsPictureScale) private var k
+
     var body: some View {
         MiniDesktop(width: 150, height: 56) {
             MiniIsland(width: 104, height: MiniMetrics.menuBar + 18) {
-                HStack(spacing: 4) {
-                    Image(systemName: "airpods.pro").font(.system(size: 9))
-                    Text("AirPods").font(.system(size: 6, weight: .semibold))
-                    Spacer(minLength: 2)
+                HStack(spacing: 4 * k) {
+                    Image(systemName: "airpods.pro").font(.system(size: 9 * k))
+                    Text("AirPods").font(.system(size: 6 * k, weight: .semibold))
+                    Spacer(minLength: 2 * k)
                     ForEach([0.8, 0.82, 0.86], id: \.self) { level in
                         Circle().trim(from: 0, to: level)
-                            .stroke(.green, style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+                            .stroke(.green, style: StrokeStyle(lineWidth: 1.2 * k, lineCap: .round))
                             .rotationEffect(.degrees(-90))
-                            .background(Circle().stroke(.white.opacity(0.2), lineWidth: 1.2))
-                            .frame(width: 8, height: 8)
+                            .background(Circle().stroke(.white.opacity(0.2), lineWidth: 1.2 * k))
+                            .frame(width: 8 * k, height: 8 * k)
                     }
                 }
                 .foregroundStyle(.white)
-                .padding(.horizontal, 8)
-                .padding(.top, MiniMetrics.menuBar + 4)
+                .padding(.horizontal, 8 * k)
+                .padding(.top, (MiniMetrics.menuBar + 4) * k)
             }
         }
     }
@@ -500,18 +813,20 @@ struct AirPodsPicture: View {
 
 /// A power notice: the battery charging, under the notch.
 struct PowerPicture: View {
+    @Environment(\.settingsPictureScale) private var k
+
     var body: some View {
         MiniDesktop(width: 150, height: 56) {
             MiniIsland(width: 96, height: MiniMetrics.menuBar + 16) {
-                HStack(spacing: 5) {
-                    Image(systemName: "bolt.fill").font(.system(size: 7)).foregroundStyle(.green)
-                    Text("Charging").font(.system(size: 6, weight: .semibold))
-                    Spacer(minLength: 2)
-                    BatteryGlyph(level: 76, isCharging: true, tint: .charging, height: 6)
+                HStack(spacing: 5 * k) {
+                    Image(systemName: "bolt.fill").font(.system(size: 7 * k)).foregroundStyle(.green)
+                    Text("Charging").font(.system(size: 6 * k, weight: .semibold))
+                    Spacer(minLength: 2 * k)
+                    BatteryGlyph(level: 76, isCharging: true, tint: .charging, height: 6 * k)
                 }
                 .foregroundStyle(.white)
-                .padding(.horizontal, 8)
-                .padding(.top, MiniMetrics.menuBar + 3)
+                .padding(.horizontal, 8 * k)
+                .padding(.top, (MiniMetrics.menuBar + 3) * k)
             }
         }
     }

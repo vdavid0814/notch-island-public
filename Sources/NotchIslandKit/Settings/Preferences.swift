@@ -168,6 +168,11 @@ import Foundation
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        // "Your Desktop" is no longer offered as the preview wallpaper: a stored choice of it
+        // becomes the default.
+        if defaults.string(forKey: DesktopBackdropStyle.key) == DesktopBackdropStyle.desktop.rawValue {
+            defaults.removeObject(forKey: DesktopBackdropStyle.key)
+        }
         openOnHover = defaults.object(forKey: Key.openOnHover) as? Bool ?? true
         // Clamped because the stored value may come from a hand-edited plist or an older build.
         let delay = defaults.object(forKey: Key.hoverDelay) as? Double ?? Self.defaultHoverDelay

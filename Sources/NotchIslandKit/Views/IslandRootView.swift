@@ -411,10 +411,9 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
                 .islandGlass(in: IslandGlassBody(outline: surface, isParked: !glassOn && parksGlass),
                              isEnabled: glassOn || parksGlass)
                 .background {
-                    // The shoulders beside the glass body, in the glass's smoke (`IslandGlassBody`).
+                    // The shoulders beside the glass body, in the glass's colour (`IslandGlassBody`).
                     IslandShoulders(outline: surface)
-                        .fill(Color.black.opacity(glassOn && glassStyle.hasGlassSurface ? IslandGlassStyle.smokeOpacity : 0),
-                              style: FillStyle(eoFill: true))
+                        .fill(glassOn ? glassStyle.shoulderFill : .clear, style: FillStyle(eoFill: true))
                 }
                 .environment(\.islandGlassStyle, glassStyle)
                 .padding(.top, -IslandLayout.overdraw)

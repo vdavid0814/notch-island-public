@@ -79,6 +79,8 @@ cp "$ROOT/Support/com.davidvarga.notchisland.fanhelper.plist" "$APP/Contents/Lib
 cp "$ROOT/Support/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 # The energy log and the performance tests behind it: every build and download carries them.
 cp "$ROOT/docs/ENERGY-LOG.md" "$ROOT/docs/PERFORMANCE-TESTS.md" "$APP/Contents/Resources/"
+# The island photographed in each style and size, for Settings ▸ General (Scripts/settings-pictures.sh).
+cp -R "$ROOT/Support/SettingsPictures" "$APP/Contents/Resources/SettingsPictures"
 
 if [[ -d "$VENDOR" ]]; then
   REVISION="$(head -n 1 "$VENDOR/REVISION" 2>/dev/null || echo 'unknown revision')"

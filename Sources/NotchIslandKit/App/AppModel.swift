@@ -516,6 +516,9 @@ import Observation
     /// A widget whose editor Settings ▸ Widgets should open (from the island's context menu).
     var editingWidget: WidgetID?
 
+    /// The open island shown empty, for Settings' pictures to be photographed (`demo/picture`).
+    var isPictureScene = false
+
     /// Settings ▸ Widgets, with the widget's editor open (nil: the page alone).
     func editWidget(_ id: WidgetID?) {
         if let page = id.flatMap(boards.page(containing:)) { studio.page = page }

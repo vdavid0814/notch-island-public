@@ -173,9 +173,9 @@ final class SettingsPageDeckView: NSView {
     }
 
     /// The shown page's own scroll view, where its scroller stands out in the gap beside the room
-    /// (`SettingsEdgeScroller`): Widgets', which reaches the room's edges.
+    /// (`SettingsEdgeScroller`): every page reaches the room's edges.
     var edgeScroll: NSScrollView? {
-        shown == .widgets ? pages[.widgets]?.host.firstSubview(of: NSScrollView.self) : nil
+        shown.flatMap { pages[$0]?.host.firstSubview(of: NSScrollView.self) }
     }
 
     func isBuilt(_ pane: IslandSettingsPane) -> Bool { pages[pane] != nil }

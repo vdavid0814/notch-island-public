@@ -1,0 +1,42 @@
+{
+  "compact" : {
+    "height" : 165,
+    "notchHeight" : 28,
+    "notchWidth" : 156,
+    "radius" : 25.2,
+    "shoulder" : 10,
+    "width" : 544
+  },
+  "extraSmall" : {
+    "height" : 141,
+    "notchHeight" : 28,
+    "notchWidth" : 156,
+    "radius" : 20.16,
+    "shoulder" : 10,
+    "width" : 448
+  },
+  "large" : {
+    "height" : 201,
+    "notchHeight" : 28,
+    "notchWidth" : 156,
+    "radius" : 32.199999999999996,
+    "shoulder" : 10,
+    "width" : 688
+  },
+  "small" : {
+    "height" : 150,
+    "notchHeight" : 28,
+    "notchWidth" : 156,
+    "radius" : 22.400000000000002,
+    "shoulder" : 10,
+    "width" : 484
+  },
+  "standard" : {
+    "height" : 180,
+    "notchHeight" : 28,
+    "notchWidth" : 156,
+    "radius" : 28,
+    "shoulder" : 10,
+    "width" : 604
+  }
+}

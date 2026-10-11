@@ -2,11 +2,12 @@ import SwiftUI
 
 /// The user's choice of island surface (Settings ▸ General ▸ Surface).
 ///
-/// The glass itself is not a choice: the CAD app's smoked Liquid Glass follows the system (with the
-/// panel's active-appearance override) and is always the one used. The choice is how much black the
-/// island wears over it.
+/// The glass itself is not a choice: perfectly clear Liquid Glass (`material`) that follows the
+/// system (with the panel's active-appearance override) is always the one used. The choice is how
+/// much black the island wears over it.
 nonisolated enum IslandGlassStyle: String, Sendable, CaseIterable, Identifiable, Codable {
-    /// The CAD app's smoked Liquid Glass (the default). Raw value kept from the old "Smoked" choice.
+    /// Clear Liquid Glass, nothing over it (the default). Raw value kept from the old "Smoked"
+    /// choice, when this glass was smoked.
     case liquidGlass = "smoked"
     /// Solid black, like the hardware island: no glass under it at all.
     case black
@@ -37,26 +38,53 @@ nonisolated enum IslandGlassStyle: String, Sendable, CaseIterable, Identifiable,
     /// be laid over it) outside the island, where the clip removes it — without shrinking the
     /// island, which must stay exactly the notch's size. The rim reads as a white outline around a
     /// dark island.
-    var rimInset: CGFloat {
-        switch self {
-        case .liquidGlass: 1.5
-        // Fade shows its glass's own edge light where the black has cleared, like the iPhone's Siri
-        // (the black keeps it out of sight around the notch).
-        case .fade: 0
-        case .black: 0
-        }
-    }
+    ///
+    /// None now: clear glass shows its own edge light, like the iPhone's Siri (in Fade where the
+    /// black has cleared; the black keeps it out of sight around the notch). The smoked glass
+    /// Liquid Glass had until October 11 hid its rim this way (1.5 pt).
+    var rimInset: CGFloat { 0 }
 
-    /// The island's glass. Liquid Glass is smoked, a little darker than the CAD app's (0.5), so the
-    /// surface stays closer to the black of the notch it hangs from while still showing what is
-    /// behind it; under the fade's black it is perfectly clear, colourless glass.
-    var material: Glass { self == .fade ? .clear.tint(Self.fadeTint) : .clear.tint(Color.black.opacity(Self.smokeOpacity)) }
+    /// The island's glass.
+    ///
+    /// - Liquid Glass: the clearest there is, with no colour of ours and its own white veil taken
+    ///   back out (`glassVeil`). How see-through it is follows System Settings ▸ Appearance ▸
+    ///   Liquid Glass (`systemTint`, `IslandGlassModifier`).
+    /// - Fade: under its black, clear glass with a trace of colour (`fadeTint`), as it has always
+    ///   been — not to be changed with Liquid Glass's (asked for, October 11).
+    var material: Glass { self == .fade ? .clear.tint(Self.fadeTint) : .clear }
 
     /// A trace of colour in the fade style's otherwise clear glass: the dark warm brown in the
     /// folds of the macOS 27 light wallpaper (its darkest browns averaged), at 25 %.
     static let fadeTint = Color(red: 106 / 255, green: 89 / 255, blue: 75 / 255).opacity(0.25)
 
-    /// The black of the surface glass's tint.
+    /// Whether the glass is Liquid Glass's plain one: its veil taken out, the system's slider followed.
+    var isPlainGlass: Bool { self == .liquidGlass }
+
+    /// Where the system's Liquid Glass slider stands: 0 (clear) … 1 (tinted). The system keeps it
+    /// in the global domain; read each time the glass is made.
+    static var systemTint: Double {
+        min(max(UserDefaults.standard.double(forKey: "NSGlassTintAmount"), 0), 1)
+    }
+
+    /// The white veil even the clearest Liquid Glass lays over what is behind it: every pixel
+    /// comes out as 81 % of itself plus 19 % of white (measured over the test pattern and the
+    /// dark wallpaper, the same in a light and a dark window). A whole island of it read as tinted
+    /// white (asked to be perfectly clear); the island takes it back out over its glass.
+    static let glassVeil = 0.187
+
+    /// The black under the glass at the slider's tinted end.
+    static let fullTint = 0.5
+
+    /// The shoulders beside the glass body, which no glass is drawn in: nothing beside plain
+    /// glass, black beside the Fade's black band.
+    var shoulderFill: Color {
+        switch self {
+        case .liquidGlass, .black: .clear
+        case .fade: .black.opacity(Self.smokeOpacity)
+        }
+    }
+
+    /// The black of the Fade's shoulders.
     static let smokeOpacity = 0.62
     /// How far the fade style's black reaches past the island's outline (clipped by it). The glass's
     /// edge light sits right on the outline (`rimInset` 0); a black ending on the same edge left its
@@ -72,10 +100,9 @@ extension EnvironmentValues {
 
 extension View {
     /// Puts the view on the island's glass, in the style the user chose (`IslandGlassStyle.material`):
-    /// the CAD app's smoked, perfectly clear glass, which refracts what is behind it instead of
-    /// frosting it. Like the CAD app's floating UI, the island's window is pinned to the dark
-    /// appearance (`IslandPanel`): Liquid Glass samples the window's appearance, and a smoked glass
-    /// needs light content on top of it. `isEnabled: false` keeps the view where it is but draws
+    /// perfectly clear glass, which refracts what is behind it instead of frosting it. Like the CAD
+    /// app's floating UI, the island's window is pinned to the dark appearance (`IslandPanel`):
+    /// Liquid Glass samples the window's appearance, and the island's content is light. `isEnabled: false` keeps the view where it is but draws
     /// (and samples) no glass.
     func islandGlass(in shape: some Shape, isEnabled: Bool = true) -> some View {
         modifier(IslandGlassModifier(shape: shape, isEnabled: isEnabled))
@@ -94,8 +121,28 @@ private struct IslandGlassModifier<S: Shape>: ViewModifier {
         // key-view loop over the rebuilt form never terminated and the app hung at 100% CPU.
         // Solid black draws no glass (`.identity`, nothing sampled) and a black fill instead.
         let isSolid = !style.hasGlassSurface
+        let veil = IslandGlassStyle.glassVeil
+        let isPlain = style.isPlainGlass
         content
-            .background(Color.black.opacity(isSolid ? 1 : 0), in: shape)
+            // Under the content, over the glass: black for the solid style. Liquid Glass: nothing
+            // at the clear end of the system's Liquid Glass slider, and an even black, without a
+            // colour, towards its tinted end (`IslandGlassStyle.systemTint`). Fade: nothing.
+            .background(Color.black.opacity(isSolid ? 1 : isPlain ? IslandGlassStyle.fullTint * IslandGlassStyle.systemTint : 0), in: shape)
+            // Liquid Glass: the glass's own white veil taken back out (`IslandGlassStyle.glassVeil`):
+            // first the white it added is subtracted, then what is left is brought back to full
+            // strength. Black and white come out as they went in (measured over the test pattern:
+            // 130 for 128); the tones between come out a little darker than they went in, never
+            // lighter and without a cast (the dark wallpaper's 33/33/58 as 13/13/50) — the look
+            // that was asked to be kept, October 11: if it must lean any way, a touch darker.
+            .background {
+                ZStack {
+                    shape.fill(Color(white: 1 - veil)).blendMode(.plusDarker)
+                    shape.fill(Color(white: veil)).blendMode(.colorDodge)
+                }
+                // Kept in place for every style (the content's identity must not change with the
+                // style): shown for Liquid Glass alone.
+                .opacity(isEnabled && isPlain ? 1 : 0)
+            }
             .glassEffect(isEnabled && !isSolid ? style.material : .identity, in: shape)
     }
 }

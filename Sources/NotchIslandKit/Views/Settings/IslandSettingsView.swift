@@ -101,7 +101,7 @@ extension View {
 }
 
 /// Settings, grown out of the notch over most of the screen: laid out like System Settings — a
-/// sidebar of pages and one grouped form per page, centred at a readable width — with only the
+/// sidebar of pages and one grouped form per page, as wide as the pages' room — with only the
 /// system's own controls.
 ///
 /// It lives only while open (the island's content is torn down on close), so it costs nothing the
@@ -374,8 +374,18 @@ struct SettingsDetail: View {
     let pane: IslandSettingsPane
 
     @Environment(AppModel.self) private var model
+    /// The page's width as laid out; until then, what Settings' size gives it (`roomWidth`).
+    @State private var pageWidth: CGFloat = 0
+
+    /// The pages' room beside the sidebar (`SettingsSurfaceView.layout`): Settings' width less the
+    /// sidebar and the gaps on either side of it and beside the room.
+    static func roomWidth(_ layout: IslandLayout) -> CGFloat {
+        max(0, layout.size(for: .settings).width - SettingsPlacement.sidebarWidth - 3 * IslandSettingsView.sidebarGap)
+    }
 
     var body: some View {
+        // The pages' pictures as large as the page's width has room for (Widgets' are its own).
+        let pictureScale = pane == .widgets ? 1 : MiniMetrics.pictureScale(pageWidth: pageWidth > 0 ? pageWidth : Self.roomWidth(model.layout))
         VStack(alignment: .leading, spacing: 0) {
             SettingsPageHeader(pane: pane)
                 // Its saved notch styles open over the page under it.
@@ -389,15 +399,22 @@ struct SettingsDetail: View {
                 case .about: AboutSettingsPage()
                 }
             }
-            .formStyle(.settings)
+            .formStyle(.settingsPage)
             // Switches and sliders in the theme's colour, where the system's blue was.
             .toggleStyle(.islandSwitch)
             // Every button the system's own, in its capsule (as the pickers are): the square-ish
             // push button and flat tiles stood out (asked for).
             .buttonStyle(.bordered)
             .buttonBorderShape(.capsule)
-            .frame(maxWidth: pane == .widgets ? .infinity : 720)
+            // Every page as wide as the pages' room, as Widgets' is.
             .frame(maxWidth: .infinity)
+            .environment(\.settingsPictureScale, pictureScale)
+        }
+        // The width the page is given, whatever is in it: measured on the page itself, a row of
+        // pictures too wide for it would count as the page's width.
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width.rounded() } action: { width in
+            if pane != .widgets, width > 0, width != pageWidth { pageWidth = width }
         }
         .notchStylesDismissal(model, if: pane == .widgets)
     }
@@ -419,7 +436,6 @@ struct SettingsPageHeader: View {
             Spacer(minLength: 0)
             if pane == .widgets { NotchStyleButtons() }
         }
-        .frame(maxWidth: pane == .widgets ? .infinity : 680)
         .frame(maxWidth: .infinity)
         .padding(.top, 18)
         .padding(.bottom, 4)

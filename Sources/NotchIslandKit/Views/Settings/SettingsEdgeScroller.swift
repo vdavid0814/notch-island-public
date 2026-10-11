@@ -1,14 +1,15 @@
 import AppKit
 
-/// Widgets' scroller, out of the pages' room: in the gap the room keeps to the island's side, where
-/// nothing else is. The room's own scroller ran over the cards at its edge.
+/// The shown page's scroller, out of the pages' room: in the gap the room keeps to the island's
+/// side, where nothing else is. The room's own scroller ran over the cards at its edge.
 ///
 /// A view over the room and the gap, as tall as the island: its lower outer corner is the island's
 /// own, so the knob at the end of its way is cut round that corner and never stands out of the
 /// island. Only the strip in the gap takes the pointer; everything else passes through to the page.
 ///
-/// It is shown as the system's overlay scrollers are: while the page scrolls, while the pointer is
-/// on its strip and while it is dragged; a moment later it fades.
+/// It is shown only while the pointer is on its strip and while it is dragged, and fades a moment
+/// after: scrolling the page does not bring it up (asked for: a white bar came and went beside
+/// every page at each scroll).
 final class SettingsEdgeScroller: NSView {
     /// The scroll view it stands for now; nil: none (another page).
     var source: () -> NSScrollView? = { nil }
@@ -36,7 +37,7 @@ final class SettingsEdgeScroller: NSView {
     private static let inset: CGFloat = 3
     private static let rest: CGFloat = 0.42
     private static let lit: CGFloat = 0.68
-    private static let linger: TimeInterval = 1.2
+    private static let linger: TimeInterval = 0.4
 
     init() {
         super.init(frame: .zero)
@@ -68,10 +69,7 @@ final class SettingsEdgeScroller: NSView {
                 next.documentView?.postsFrameChangedNotifications = true
                 observers.append(NotificationCenter.default.addObserver(
                     forName: NSView.boundsDidChangeNotification, object: next.contentView, queue: .main) { [weak self] _ in
-                        MainActor.assumeIsolated {
-                            self?.place()
-                            self?.flash()
-                        }
+                        MainActor.assumeIsolated { self?.place() }
                     })
                 if let document = next.documentView {
                     observers.append(NotificationCenter.default.addObserver(

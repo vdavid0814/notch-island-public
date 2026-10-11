@@ -21,8 +21,12 @@ nonisolated enum DesktopBackdropStyle: String, CaseIterable, Identifiable, Senda
     case checkerboard
 
     nonisolated static let key = "ni2.studio.backdrop"
-    /// Previews show the user's own desktop until they pick another.
-    nonisolated static let defaultStyle = DesktopBackdropStyle.desktop
+    /// Previews show the dark default wallpaper until the user picks another.
+    nonisolated static let defaultStyle = DesktopBackdropStyle.system
+    /// The ones to choose from. The user's own desktop is not offered for now: Settings' pictures
+    /// of the island are photographs taken over the drawn desktops (`IslandPhoto`), and there is
+    /// none of the island over a desktop of the user's own (asked for, October 11).
+    nonisolated static let offered: [DesktopBackdropStyle] = allCases.filter { $0 != .desktop }
 
     var id: String { rawValue }
 
@@ -553,7 +557,7 @@ struct WallpaperBar: View {
     @State private var swatches: [DesktopBackdropStyle: NSImage] = [:]
 
     var body: some View {
-        let styles = DesktopBackdropStyle.allCases
+        let styles = DesktopBackdropStyle.offered
         SegmentBar(
             titles: styles.map(\.title),
             images: styles.map { swatches[$0] ?? WallpaperSwatch.drawn($0) },

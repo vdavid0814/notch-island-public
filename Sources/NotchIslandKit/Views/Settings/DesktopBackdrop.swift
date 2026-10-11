@@ -14,12 +14,14 @@ struct PreviewMenuBar: View {
     var darkText = false
     /// A shade behind the whole bar (over the checkerboard, where no text colour would read).
     var backing: Double = 0
+    /// The clock's time (nil: now).
+    var date: Date?
 
     var body: some View {
         GeometryReader { proxy in
             let inset = height * 0.5
             let side = max(0, (proxy.size.width - notchWidth) / 2 - inset - height * 0.4)
-            let now = Date.now
+            let now = date ?? Date.now
             let menusKey = PreviewMenuBarFit.Key(height: height, side: side, text: "")
             let statusKey = PreviewMenuBarFit.Key(height: height, side: side, text: Self.dateText(now, showsDate: true)
                                                   + "|" + Self.dateText(now, showsDate: false))

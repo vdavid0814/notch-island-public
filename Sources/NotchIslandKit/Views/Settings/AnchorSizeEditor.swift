@@ -108,6 +108,8 @@ struct AnchorSizeEditor: View {
         }
     }
 
+    @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
+
     private var picture: some View {
         let scale = scale
         let screenSize = CGSize(width: screen.frame.width * scale, height: screen.frame.height * scale)
@@ -122,10 +124,11 @@ struct AnchorSizeEditor: View {
                            height: onTop ? top + window.height + barHeight : window.height)
         return ZStack(alignment: .topLeading) {
             // The desktop, the menu bar and the notch.
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(LinearGradient(colors: [Color(red: 0.25, green: 0.3, blue: 0.55), Color(red: 0.12, green: 0.12, blue: 0.25)],
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-            Rectangle().fill(.white.opacity(0.12)).frame(height: band)
+            // The preview wallpaper, as in Settings' other pictures.
+            DesktopBackdrop(style: backdrop, detail: .miniature)
+                .frame(width: screenSize.width, height: screenSize.height)
+            PreviewMenuBar(height: band, notchWidth: stage.width, darkText: backdrop.prefersDarkMenuBar, backing: backdrop.menuBarBacking)
+                .frame(width: screenSize.width)
             // Up to the top: the window from the screen's top on the stage (the island's shoulders, the
             // bar under it). Else the window alone, under the menu bar.
             if onTop {

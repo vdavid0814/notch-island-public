@@ -565,7 +565,7 @@ private struct StudioStage: View {
                 // The stage's own choices, on a right click of its desktop.
                 .contextMenu {
                     Picker("Wallpaper", selection: $backdrop) {
-                        ForEach(DesktopBackdropStyle.allCases) { Text($0.title).tag($0) }
+                        ForEach(DesktopBackdropStyle.offered) { Text($0.title).tag($0) }
                     }
                     .pickerStyle(.inline)
                     Divider()

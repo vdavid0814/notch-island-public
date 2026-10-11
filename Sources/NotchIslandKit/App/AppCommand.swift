@@ -2,6 +2,11 @@ import Foundation
 
 /// Fake state for screenshots and visual verification. Kept in release builds on purpose: it is how
 /// the island is checked without waiting for a charger, a timer or a track change.
+/// What the notch shows in a picture of a live activity (`demo/picture?activity=`).
+nonisolated enum PictureActivity: String, Sendable, CaseIterable {
+    case idle, nowPlaying, airPods, volumeBanner, volumePill, power
+}
+
 nonisolated enum DemoCommand: Sendable, Equatable {
     case media, charging, unplug, low, volume(Double), brightness(Double), timerDone, drop, shelf, reset
     /// Pointer over / away from the island, without moving the real pointer.
@@ -36,6 +41,16 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case crash
     /// A made-up newer release, to see the update notice (`demo/update[?on=0]`); Update does nothing.
     case update(Bool)
+    /// The open island, empty, in a surface style and at a size over a drawn desktop: what
+    /// Settings' pictures of the styles and sizes are photographed from
+    /// (`demo/picture?desktop=system|systemLight|checkerboard&style=smoked|black|fade&size=extraSmall|small|compact|standard|large`;
+    /// `Scripts/settings-pictures.sh`).
+    case picture(DesktopBackdropStyle, IslandGlassStyle, IslandScale)
+    /// The same desktop with a live activity in the notch instead (`…&activity=nowPlaying|airPods|
+    /// volumeBanner|volumePill|power`), or nothing but the notch (`idle`).
+    case activityPicture(DesktopBackdropStyle, IslandGlassStyle, PictureActivity)
+    /// That scene put away, and the style and size back as they were (`demo/picture?on=0`).
+    case pictureEnd
 }
 
 /// The widget a `widget/…` link means: the first on the board of a kind, or one instance.
@@ -98,7 +113,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
     ///     demo/media|charging|unplug|low|timerdone|drop|shelf|reset
     ///     demo/volume[?level=0…1]   demo/brightness[?level=0…1]
     ///     demo/hover[?inside=1|0]   demo/state   demo/surface?style=smoked|black|fade   demo/airpods
-    ///     demo/freeze[?t=seconds]   demo/anchortarget[?on=0]
+    ///     demo/freeze[?t=seconds]   demo/anchortarget[?on=0]   demo/picture?style=…&size=…|on=0
     ///     anchor/front   anchor/release
     static func parse(_ url: URL) -> AppCommand? {
         guard url.scheme?.lowercased() == scheme,
@@ -188,6 +203,17 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "demo/siritype": return .demo(.siriType(query["text"] ?? "notch"))
         case "demo/surface":
             return query["style"].flatMap { IslandGlassStyle(rawValue: $0.lowercased()) }.map { .demo(.surface($0)) }
+        case "demo/picture":
+            if query["on"] == "0" { return .demo(.pictureEnd) }
+            guard let style = query["style"].flatMap({ IslandGlassStyle(rawValue: $0.lowercased()) }),
+                  // A drawn desktop: the user's own is not for a picture that ships.
+                  let desktop = DesktopBackdropStyle(rawValue: query["desktop"] ?? DesktopBackdropStyle.system.rawValue),
+                  desktop != .desktop else { return nil }
+            if let activity = query["activity"] {
+                return PictureActivity(rawValue: activity).map { .demo(.activityPicture(desktop, style, $0)) }
+            }
+            guard let scale = query["size"].flatMap(IslandScale.init(rawValue:)) else { return nil }
+            return .demo(.picture(desktop, style, scale))
         case "demo/freeze":
             guard let raw = query["t"] else { return .demo(.freeze(nil)) }
             guard let time = TimeInterval(raw), time >= 0 else { return nil }
