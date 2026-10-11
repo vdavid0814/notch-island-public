@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 // One long-lived process for a whole scenario: commands on stdin, one per line, "ok" after each.
-//   move x y [steps] [stepMs] | click x y | down x y | up x y | pos
+//   move x y [steps] [stepMs] | click x y | down x y | up x y | pos | scroll dx dy frames [momentum]
 //   key <virtual key code> [cmd|shift|opt|ctrl…] | type <text>
 // Every new process that posts events is checked by TCC (and its signature by trustd and
 // syspolicyd) — work the system bills to the app receiving the events, ~100 mJ per spawn, which a
@@ -62,6 +62,26 @@ while let line = readLine() {
                 usleep(20000)
             }
             usleep(100000)
+        }
+    case "scroll":
+        // scroll <dx> <dy> <frames> [momentum frames]: a trackpad-like scroll where the pointer is
+        // (pixel units, gesture phases, 120 Hz), then a momentum tail whose step shrinks by 5 % a frame.
+        let dx = Int32(a[1])!, dy = Int32(a[2])!, frames = Int(a[3])!, momentum = a.count > 4 ? Int(a[4])! : 0
+        let momentumPhase = CGEventField(rawValue: 123)!
+        for i in 0..<frames {
+            guard let e = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: -dy, wheel2: -dx, wheel3: 0) else { continue }
+            e.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            e.setIntegerValueField(.scrollWheelEventScrollPhase, value: i == 0 ? 1 : (i == frames - 1 ? 4 : 2))
+            post(e); usleep(8333)
+        }
+        var fx = Double(dx), fy = Double(dy)
+        for i in 0..<momentum {
+            fx *= 0.95; fy *= 0.95
+            guard let e = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: -Int32(fy.rounded()), wheel2: -Int32(fx.rounded()), wheel3: 0) else { continue }
+            e.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            e.setIntegerValueField(.scrollWheelEventScrollPhase, value: 0)
+            e.setIntegerValueField(momentumPhase, value: i == 0 ? 1 : (i == momentum - 1 ? 3 : 2))
+            post(e); usleep(8333)
         }
     case "pos":
         print(cur())

@@ -73,19 +73,29 @@ import SwiftUI
                 self.prepareSettings(after: .seconds(3))
                 return
             }
-            MainThrift.lowPower(for: 0.5)
-            await Task.yield()
-            if !SettingsWindow.isPrepared {
-                let layout = self.model.layout
-                let size = IslandSettingsView.surfaceSize(layout)
-                let frame = CGRect(x: (metrics.notchRect.midX - size.width / 2).rounded(),
-                                   y: metrics.screenFrame.maxY - layout.notch.height - size.height,
-                                   width: size.width, height: size.height)
-                SettingsWindow.prepare(model: self.model, frame: frame)
-            } else if !SettingsWindow.prepareNextPage(model: self.model) {
-                return
+            // The step in a turn of its own with the thread at background quality of service
+            // (`lowPowerTurn`). Run from here — a task's job runs at the task's priority whatever
+            // the thread's is — the pages were built on a performance core: Activity Monitor
+            // 1370, 1356, 766 and 471 in the four seconds from ten seconds after every launch
+            // (measured with `rest.py`).
+            MainThrift.lowPowerTurn { [weak self] in
+                guard let self, self.isStarted, !self.model.island.presentation.isOpen,
+                      !self.model.island.presentation.isBanner else {
+                    self?.prepareSettings(after: .seconds(3))
+                    return
+                }
+                if !SettingsWindow.isPrepared {
+                    let layout = self.model.layout
+                    let size = IslandSettingsView.surfaceSize(layout)
+                    let frame = CGRect(x: (metrics.notchRect.midX - size.width / 2).rounded(),
+                                       y: metrics.screenFrame.maxY - layout.notch.height - size.height,
+                                       width: size.width, height: size.height)
+                    SettingsWindow.prepare(model: self.model, frame: frame)
+                } else if !SettingsWindow.prepareNextPage(model: self.model) {
+                    return
+                }
+                self.prepareSettings(after: .milliseconds(400))
             }
-            self.prepareSettings(after: .milliseconds(400))
         }
     }
 

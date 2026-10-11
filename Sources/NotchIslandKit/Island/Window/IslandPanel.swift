@@ -54,6 +54,24 @@ final class IslandPanel: NSPanel {
         depthLimit = .twentyfourBitRGB
     }
 
+    /// Scrolls are handed on once a frame (`ScrollPacer`); nothing else overtakes what waits.
+    private lazy var scrollPacer = ScrollPacer { [weak self] event in self?.deliverPaced(event) }
+
+    override func sendEvent(_ event: NSEvent) {
+        if ScrollPacer.isEnabled {
+            if event.type == .scrollWheel {
+                if scrollPacer.take(event) { return }
+            } else {
+                scrollPacer.flush()
+            }
+        }
+        super.sendEvent(event)
+    }
+
+    private func deliverPaced(_ event: NSEvent) {
+        super.sendEvent(event)
+    }
+
     /// Moves the stage and has SwiftUI lay the current content out for it before returning.
     ///
     /// `setFrame(display: true)` is not enough: NSHostingView adopts a new size only in its next

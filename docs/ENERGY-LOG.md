@@ -4,6 +4,45 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-11 (midday): Size mode's unfold, the launch, the Timer's ruler
+
+Real clicks and trackpad-like scrolls (`studio.py`, `ws/moused`'s new `scroll`), the user's board.
+
+| step (1 s Energy Impact) | before | after |
+|---|---|---|
+| Stage mode Size, and back (Settings ▸ Widgets) | 2100–3100 | **570–710** (60 frames a second, where it showed 5–8) |
+| The seconds after a launch (Settings built ahead) | 1370, 1356, 766, 471 … (4.3 J) | 675, 153, 570, 141, 119, 143, 725 (2.6 J) |
+| A swipe along the Timer's ruler (open panel) | 390–430 | **210–255** |
+| The ruler dragged slowly | 170–290 | 170–200 |
+
+- **The unfold** (`StudioStage`, `WidgetStudio.stagePlace` / `stageShown`): the stage's place in the
+  page takes the mode's height in the same layout as the mode's content (known ahead:
+  `stageHeight(in:)`), the stage's picture then grows along the spring inside it, Size's controls
+  follow its foot by an offset (`UnderStage`) and the gallery glides on its own layer
+  (`GalleryGlide`, a Core Animation spring with the same mass, stiffness and damping). The key view
+  loop is left as it is while they move (`SettingsWindow.holdKeyViewLoop`: SwiftUI rebuilt it at
+  every frame, over half of a frame's work) and the pointer's place is not asked for at every frame.
+  Frames 30–100 ms → 7–9 ms. Mid-motion screenshots old and new show the same picture, the new one
+  ~0.06–0.1 s later into Size (it starts a turn after the layout) and ahead on the way back (the
+  old one began with a 0.3 s frame). Top Bar's page still follows every frame (it is as tall as the
+  room under the stage). What is left: the landing (two ~55 ms turns, ~260 mJ) and ~30 frames of
+  7–9 ms on a performance core (~400 mJ).
+- **Top Bar's page follows the stage's height only while shown** (`TopBarSlot`), and the page no
+  longer keeps that height as its own state (it was worked out again a turn after every switch).
+  **The gallery is handed the board only while shown and only when it changed** (`GalleryHost`): it
+  was told at every coming and going that it was seen or unseen.
+- **Settings built ahead after a launch** ran from a task (at the task's priority: a performance
+  core); each step now runs in a `lowPowerTurn`. Left: ~0.6 s of performance-core time in other
+  turns and threads, and 15–50 mJ a second of GPU.
+- **Scrolls over the island are handed on once a frame** (`ScrollPacer`): the moving events of a
+  gesture and of its momentum are summed and delivered from a timer's turn, the first and last of
+  each phase at once. A trackpad sends up to 120 a second; each was a turn with a SwiftUI update.
+  `NI_NO_SCROLL_PACE=1` switches it off for measuring.
+- **Measured, not solved**: a widget picked from the gallery's state (~1100): the inspector slides
+  in over ~20 frames of ~12 ms, its native controls drawn again at each (as Customize's panels were
+  before `RenderServerSlide`); taking the deck's height out of that spring made it worse (2000).
+  From one picked widget to another the turn is ~430 ms long but mostly waiting (~130 mJ).
+
 ## 2026-10-11 (night, on the charger): what the system billed the app for, the shade's memory
 
 Release builds, MacBook Air M5, macOS 27.0.1, on the charger (90 %), music playing, fade style, the
