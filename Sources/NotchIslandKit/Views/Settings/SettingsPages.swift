@@ -486,19 +486,6 @@ struct ActivitiesSettingsPage: View {
                 Toggle(isOn: $preferences.showAirPods) {
                     InfoLabel("Show AirPods connecting", "When AirPods (or other Bluetooth headphones) connect: their picture, name and the batteries of each earbud and the case.")
                 }
-                Picker(selection: $preferences.airPodsSystemCard) {
-                    ForEach(AirPodsSystemCard.allCases) { Text($0.title).tag($0) }
-                } label: {
-                    InfoLabel("With macOS's own card", "macOS shows its own AirPods card when they connect, and an app cannot turn it off. Cover It: the island's card comes at once, above it, and hides it. After It: the island's waits until macOS's has gone. Don't Show: only macOS's.")
-                }
-                .choiceBar()
-                .disabled(!preferences.showAirPods)
-                Toggle(isOn: $preferences.liquidAirPods) {
-                    InfoLabel("Flow out to macOS's card", "Where macOS puts its card away from the notch (on the desktop, beside a tiled window), the island's card runs out of the notch like a liquid, lies exactly on macOS's and runs back when it goes.")
-                }
-                .disabled(!preferences.showAirPods || preferences.airPodsSystemCard != .cover)
-                NoticeDuration(title: "Shown for", value: $preferences.airPodsDuration)
-                    .disabled(!preferences.showAirPods)
             }
 
             Section("Volume and Brightness") {
@@ -513,15 +500,7 @@ struct ActivitiesSettingsPage: View {
                 .opacity(preferences.showLevelHUD ? 1 : 0.5)
                 NoticeDuration(title: "Shown for", value: $preferences.levelDuration)
                     .disabled(!preferences.showLevelHUD)
-                Toggle(isOn: $preferences.liquidVolume) {
-                    InfoLabel("Flow out to macOS's volume card", "An AirPods swipe (or anything else no key tap sees) brings macOS's own volume card up. Away from the notch (on the desktop, beside a tiled window) the island runs out to it like a liquid, lies exactly on it with its own slider, and runs back when it goes.")
-                }
-                .disabled(!preferences.showLevelHUD)
-                Toggle(isOn: $preferences.replaceSystemHUD) {
-                    InfoLabel("Replace the system HUD", "Handles the volume and brightness keys so only the island appears, not the system's own overlay. Needs Accessibility.")
-                }
-                .disabled(!preferences.showLevelHUD)
-                if preferences.showLevelHUD, preferences.replaceSystemHUD, !model.permissions.accessibilityTrusted {
+                if preferences.showLevelHUD, !model.permissions.accessibilityTrusted {
                     LabeledContent {
                         Button("Open System Settings…") { model.permissions.promptOrOpenAccessibilitySettings() }
                     } label: {
@@ -598,6 +577,47 @@ struct ActivitiesSettingsPage: View {
 
 // MARK: - Spotlight (the assistant, called Siri in the code)
 
+/// The switch that puts NotchIsland's Spotlight in place of macOS's, said plainly beside it: which
+/// one the keys open now, and that switching it off brings macOS's back.
+private struct SpotlightChoiceLabel: View {
+    let isOn: Bool
+    let shortcut: SiriShortcut
+
+    private var replaces: Bool { shortcut == .commandSpace }
+
+    private var title: String {
+        replaces ? "Replace macOS Spotlight" : "Open Spotlight with \(shortcut.title)"
+    }
+
+    private var summary: String {
+        switch (isOn, replaces) {
+        case (true, true):
+            "On: \(shortcut.title) opens NotchIsland's Spotlight in the notch instead of macOS's. Switch it off to have \(shortcut.title) open macOS's Spotlight again."
+        case (false, true):
+            "Off: \(shortcut.title) opens macOS's own Spotlight. Switch it on to open NotchIsland's Spotlight in the notch instead."
+        case (true, false):
+            "On: \(shortcut.title) opens NotchIsland's Spotlight in the notch; ⌘ Space still opens macOS's. Switch it off to leave only macOS's."
+        case (false, false):
+            "Off: only macOS's Spotlight, on ⌘ Space. Switch it on to open NotchIsland's Spotlight with \(shortcut.title)."
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SettingsTile(systemImage: "magnifyingglass", tint: .purple, side: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                InfoLabel(title, "Needs Accessibility and Input Monitoring, which let NotchIsland see the shortcut before the system does (About ▸ Permissions).")
+                    .font(.headline)
+                Text(summary)
+                    .font(.subheadline)
+                    .foregroundStyle(SettingsPalette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 struct SiriSettingsPage: View {
     @Environment(AppModel.self) private var model
 
@@ -607,9 +627,11 @@ struct SiriSettingsPage: View {
         let intelligence = Self.intelligenceStatus
         let intelligenceAvailable = if case .available = SystemLanguageModel.default.availability { true } else { false }
         Form {
+            // Which Spotlight the keys open, first and set apart: this switch is how macOS's own
+            // comes back (asked for: it read as one setting among the others).
             Section {
                 Toggle(isOn: $preferences.commandSpaceOpensSiri) {
-                    InfoLabel("Open Spotlight with \(siri.shortcut.title)", "Spotlight opens in the notch instead of the system's search window. Needs Accessibility and Input Monitoring, which let NotchIsland see the shortcut before the system does (About ▸ Permissions).")
+                    SpotlightChoiceLabel(isOn: preferences.commandSpaceOpensSiri, shortcut: siri.shortcut)
                 }
                 if preferences.commandSpaceOpensSiri, case .failed(let reason) = model.commandSpaceState {
                     LabeledContent {
@@ -631,6 +653,11 @@ struct SiriSettingsPage: View {
                 }
                 .choiceBar()
                 .disabled(!preferences.commandSpaceOpensSiri)
+            } header: {
+                Text("Spotlight in the Notch")
+            }
+
+            Section {
                 Toggle(isOn: $preferences.siri.shortcutCloses) {
                     InfoLabel("Shortcut again closes Spotlight", "Like the system's search: the same keys close Spotlight. Off, they only open it and Esc closes it.")
                 }

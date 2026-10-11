@@ -82,6 +82,8 @@ import SwiftUI
             showActivityPicture(desktop: desktop, style: style, activity: activity, model: model)
         case .pictureEnd:
             endPicture(model)
+        case .pictureWidgets(let on):
+            model.pictureShowsWidgets = on
         case .freeze(let time):
             LeanSpring.frozenTime = time
         case .anchorTarget(let on):
@@ -262,6 +264,7 @@ import SwiftUI
         preferences.showNowPlaying = old.showNowPlaying
         preferences.showAirPods = old.showAirPods
         model.isPictureScene = false
+        model.pictureShowsWidgets = false
         scene.backdrop.close()
         model.controller.collapse()
     }

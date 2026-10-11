@@ -51,6 +51,8 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case activityPicture(DesktopBackdropStyle, IslandGlassStyle, PictureActivity)
     /// That scene put away, and the style and size back as they were (`demo/picture?on=0`).
     case pictureEnd
+    /// The picture scene's open island with its widgets on it, or empty again (`demo/picturewidgets?on=1|0`).
+    case pictureWidgets(Bool)
 }
 
 /// The widget a `widget/…` link means: the first on the board of a kind, or one instance.
@@ -71,6 +73,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
     case showSettingsPane(IslandSettingsPane)
     /// A widget's editor in Settings ▸ Widgets (`widget/timer`, `widget/<id>`).
     case editWidget(WidgetTarget)
+    /// The same widget opened straight in Customize (`widget/<kind>?customize=1`).
+    case customizeWidget(WidgetTarget)
     /// The widget editor (Customize Island).
     case customize
     /// ⌘Space (Siri or Spotlight), from the notch.
@@ -141,7 +145,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
             let name = String(route.dropFirst("widget/".count))
             let target: WidgetTarget? = WidgetID(string: name).map { .instance($0) }
                 ?? IslandWidgetKind.allCases.first { $0.rawValue.lowercased() == name }.map { .kind($0) }
-            return target.map { .editWidget($0) }
+            return target.map { query["customize"] == "1" ? .customizeWidget($0) : .editWidget($0) }
         case let route where route.hasPrefix("settings/"):
             return IslandSettingsPane.named(String(route.dropFirst("settings/".count))).map { .showSettingsPane($0) }
         case "customize": return .customize
@@ -203,6 +207,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "demo/siritype": return .demo(.siriType(query["text"] ?? "notch"))
         case "demo/surface":
             return query["style"].flatMap { IslandGlassStyle(rawValue: $0.lowercased()) }.map { .demo(.surface($0)) }
+        case "demo/picturewidgets": return .demo(.pictureWidgets(query["on"] != "0"))
         case "demo/picture":
             if query["on"] == "0" { return .demo(.pictureEnd) }
             guard let style = query["style"].flatMap({ IslandGlassStyle(rawValue: $0.lowercased()) }),

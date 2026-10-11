@@ -236,12 +236,7 @@ private struct ActivitiesSettings: View {
                     Text("Show volume and brightness changes")
                     Text("Changes appear in the island.")
                 }
-                Toggle(isOn: $preferences.replaceSystemHUD) {
-                    Text("Replace the system HUD")
-                    Text("Handles the volume and brightness keys so only the island appears. Needs Accessibility.")
-                }
-                .disabled(!preferences.showLevelHUD)
-                if preferences.showLevelHUD, preferences.replaceSystemHUD, !model.permissions.accessibilityTrusted {
+                if preferences.showLevelHUD, !model.permissions.accessibilityTrusted {
                     LabeledContent {
                         Button("Open System Settings…") {
                             model.permissions.promptOrOpenAccessibilitySettings()

@@ -472,6 +472,14 @@ import Observation
             editWidget(widgets.board.first(of: kind)?.id)
         case .editWidget(.instance(let id)):
             editWidget(boards.page(containing: id) != nil ? id : nil)
+        case .customizeWidget(let target):
+            let id: WidgetID? = switch target {
+            case .kind(let kind): widgets.board.first(of: kind)?.id
+            case .instance(let id): boards.page(containing: id) != nil ? id : nil
+            }
+            editWidget(id)
+            // Once Settings is up on the widget, its Customize, as the Customize… button does.
+            if let id { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.studio.customizing = id } }
         case .customize:
             showCustomize()
         case .assistant:
@@ -518,6 +526,8 @@ import Observation
 
     /// The open island shown empty, for Settings' pictures to be photographed (`demo/picture`).
     var isPictureScene = false
+    /// The same scene with the island's widgets on it, for the website's footage (`demo/picturewidgets`).
+    var pictureShowsWidgets = false
 
     /// Settings ▸ Widgets, with the widget's editor open (nil: the page alone).
     func editWidget(_ id: WidgetID?) {

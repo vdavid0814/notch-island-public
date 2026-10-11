@@ -134,7 +134,7 @@ struct PreferencesTests {
             preferences.showNowPlaying = false
             preferences.showPowerAlerts = false
             preferences.showLevelHUD = false
-            preferences.replaceSystemHUD = false
+            preferences.replaceSystemHUD = false  // no longer in Settings: back on at the next launch
             preferences.shelfEnabled = false
             preferences.timerSound = false
             preferences.showMenuBarIcon = false
@@ -152,7 +152,8 @@ struct PreferencesTests {
             #expect(!reloaded.showNowPlaying)
             #expect(!reloaded.showPowerAlerts)
             #expect(!reloaded.showLevelHUD)
-            #expect(!reloaded.replaceSystemHUD)
+            #expect(reloaded.replaceSystemHUD)
+            #expect(defaults.object(forKey: "ni2.replaceSystemHUD") == nil)
             #expect(!reloaded.shelfEnabled)
             #expect(!reloaded.timerSound)
             #expect(!reloaded.showMenuBarIcon)

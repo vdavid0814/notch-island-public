@@ -188,9 +188,14 @@ import Foundation
         showPowerAlerts = defaults.object(forKey: Key.showPowerAlerts) as? Bool ?? true
         showLevelHUD = defaults.object(forKey: Key.showLevelHUD) as? Bool ?? true
         showAirPods = defaults.object(forKey: Key.showAirPods) as? Bool ?? true
-        let systemCard = defaults.string(forKey: Key.airPodsSystemCard).flatMap(AirPodsSystemCard.init(rawValue:)) ?? .cover
-        airPodsSystemCard = systemCard
-        AirPodsSystemCard.current = systemCard
+        // No longer in Settings (Oct 2026): the island covers macOS's AirPods card and flows out to
+        // its cards, and takes the volume and brightness keys. A choice left otherwise before no
+        // longer counts — with no control left for it, nobody could take it back.
+        for key in [Key.airPodsSystemCard, Key.liquidVolume, Key.liquidAirPods, Key.replaceSystemHUD] {
+            defaults.removeObject(forKey: key)
+        }
+        airPodsSystemCard = .cover
+        AirPodsSystemCard.current = .cover
         func duration(_ key: String, _ fallback: Double) -> Double {
             let value = defaults.object(forKey: key) as? Double ?? fallback
             return min(max(value.isFinite ? value : fallback, Self.noticeDurationRange.lowerBound), Self.noticeDurationRange.upperBound)
@@ -198,7 +203,7 @@ import Foundation
         levelDuration = duration(Key.levelDuration, 1.5)
         airPodsDuration = duration(Key.airPodsDuration, 5)
         powerDuration = duration(Key.powerDuration, 3)
-        replaceSystemHUD = defaults.object(forKey: Key.replaceSystemHUD) as? Bool ?? true
+        replaceSystemHUD = true
         shelfEnabled = defaults.object(forKey: Key.shelfEnabled) as? Bool ?? true
         timerSound = defaults.object(forKey: Key.timerSound) as? Bool ?? true
         showMenuBarIcon = defaults.object(forKey: Key.showMenuBarIcon) as? Bool ?? true
@@ -211,8 +216,8 @@ import Foundation
         // Until chosen on its own, the charger follows the battery's choice.
         musicBarsOnPower = defaults.string(forKey: Key.musicBarsOnPower).flatMap(MusicBarsStyle.init(rawValue:)) ?? barsOnBattery
         musicBarsContinuousOnPower = defaults.object(forKey: Key.musicBarsContinuousOnPower) as? Bool ?? true
-        liquidVolume = defaults.object(forKey: Key.liquidVolume) as? Bool ?? true
-        liquidAirPods = defaults.object(forKey: Key.liquidAirPods) as? Bool ?? true
+        liquidVolume = true
+        liquidAirPods = true
         anchorEnabled = defaults.object(forKey: Key.anchorEnabled) as? Bool ?? true
         anchorByDrag = defaults.object(forKey: Key.anchorByDrag) as? Bool ?? true
         anchorMirror = defaults.object(forKey: Key.anchorMirror) as? Bool ?? true

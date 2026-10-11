@@ -12,16 +12,32 @@ extension View {
     }
 }
 
+/// A page of the open panel kept built while another one is shown (`ExpandedView`): whether it is
+/// the shown one. An object only the leaves that pause read (`WhileShown`, `PanelTimelineView`, the
+/// scrubber's line), so a page switch re-derives only them: an environment value written at each
+/// switch goes through every view of both pages (Settings' deck: 60–80 ms a switch, measured).
+@Observable final class PanelPageShown {
+    var isShown: Bool
+    init(_ isShown: Bool) { self.isShown = isShown }
+}
+
+extension EnvironmentValues {
+    /// The page this view is on, in the open panel (nil: not on one of its pages).
+    @Entry var panelPageShown: PanelPageShown? = nil
+}
+
 private struct WhileShown: ViewModifier {
     let start: () -> Void
     let stop: () -> Void
     @Environment(\.isIslandPanelHidden) private var isPanelHidden
+    @Environment(\.panelPageShown) private var pageShown
     @Environment(\.isWidgetPreview) private var isPreview
     @Environment(\.isHeaderPicture) private var isHeaderPicture
     @State private var isRunning = false
 
     func body(content: Content) -> some View {
-        let isHidden = isPanelHidden || ((isPreview || isHeaderPicture) && !SettingsPresence.shared.isShown)
+        let isHidden = isPanelHidden || pageShown?.isShown == false
+            || ((isPreview || isHeaderPicture) && !SettingsPresence.shared.isShown)
         content
             .onAppear { set(!isHidden) }
             .onDisappear { set(false) }
@@ -55,6 +71,7 @@ struct PanelTimelineView<Schedule: TimelineSchedule, Content: View>: View {
     let schedule: Schedule
     @ViewBuilder let content: (TimelineViewDefaultContext) -> Content
     @Environment(\.isIslandPanelHidden) private var isPanelHidden
+    @Environment(\.panelPageShown) private var pageShown
     /// The editor's canvas is a picture: one entry, never a tick.
     @Environment(\.widgetRenderMode) private var renderMode
     /// Settings' pictures (the gallery's previews, the stage's header) tick only while Settings
@@ -64,7 +81,7 @@ struct PanelTimelineView<Schedule: TimelineSchedule, Content: View>: View {
     @Environment(\.isHeaderPicture) private var isHeaderPicture
 
     private var isHidden: Bool {
-        isPanelHidden || ((isPreview || isHeaderPicture) && !SettingsPresence.shared.isShown)
+        isPanelHidden || pageShown?.isShown == false || ((isPreview || isHeaderPicture) && !SettingsPresence.shared.isShown)
     }
 
     init(_ schedule: Schedule, @ViewBuilder content: @escaping (TimelineViewDefaultContext) -> Content) {

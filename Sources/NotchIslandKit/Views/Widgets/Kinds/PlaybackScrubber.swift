@@ -266,12 +266,14 @@ struct PlayedLine: NSViewRepresentable {
     /// In the kept, hidden panel the line waits: its animation had the window server update it
     /// twice a second for as long as the panel was kept, unseen.
     @Environment(\.isIslandPanelHidden) private var isHidden
+    /// So does it on a page of the panel kept while another one is shown.
+    @Environment(\.panelPageShown) private var pageShown
 
     func makeNSView(context: Context) -> PlayedLineView { PlayedLineView() }
 
     func updateNSView(_ view: PlayedLineView, context: Context) {
         view.style(radius: radius, color: color, knob: knob)
-        view.update(fraction: fraction, rate: rate, opacity: opacity, isPaused: isHidden)
+        view.update(fraction: fraction, rate: rate, opacity: opacity, isPaused: isHidden || pageShown?.isShown == false)
     }
 }
 
