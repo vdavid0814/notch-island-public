@@ -83,6 +83,26 @@ final class IslandPanel: NSPanel {
         return stagedFrame
     }
 
+    /// The view under a scroll gesture's first event: the gesture's later events (and its momentum)
+    /// are that view's, without AppKit finding the view under the pointer again for each — through
+    /// SwiftUI's hit test, a sixth of what a swipe along the timer's ruler cost.
+    private weak var scrollTaker: NSView?
+
+    override func sendEvent(_ event: NSEvent) {
+        guard event.type == .scrollWheel else { return super.sendEvent(event) }
+        let continues = [.changed, .ended, .cancelled].contains(event.phase) || !event.momentumPhase.isEmpty
+        if continues, let taker = scrollTaker, taker.window === self {
+            taker.scrollWheel(with: event)
+            return
+        }
+        // A gesture's first event, or a wheel's click: the view under the pointer, as AppKit finds it.
+        scrollTaker = nil
+        if event.phase == .began, let content = contentView {
+            scrollTaker = content.hitTest(content.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow)
+        }
+        super.sendEvent(event)
+    }
+
     /// True only while the assistant is open: the panel may then become key (without the app
     /// becoming active or taking the front — measured: the frontmost app stays frontmost), so its
     /// text field receives typing. Everywhere else a click on the island must not take focus.

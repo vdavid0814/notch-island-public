@@ -64,10 +64,23 @@ struct TimerWidget: View {
 
     /// `text` in the time's own type (rounded figures, all as wide), `points` large.
     static func textWidth(_ text: String, points: CGFloat) -> CGFloat {
+        let key = TextWidthKey(text: text, points: points)
+        if let width = textWidths[key] { return width }
         let base = NSFont.monospacedDigitSystemFont(ofSize: points, weight: .regular)
         let font = base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: points) } ?? base
-        return ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        let width = ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        if textWidths.count > 64 { textWidths.removeAll(keepingCapacity: true) }
+        textWidths[key] = width
+        return width
     }
+
+    /// Measured once: the widest time is two strings, and the widget's body asked again at every
+    /// frame of the island's growth.
+    private struct TextWidthKey: Hashable {
+        let text: String
+        let points: CGFloat
+    }
+    private static var textWidths: [TextWidthKey: CGFloat] = [:]
 
     /// The room its widest time takes, with a hair to spare.
     static func readoutWidth(_ widget: IslandWidget, inner: CGSize) -> CGFloat {
@@ -191,7 +204,9 @@ struct TimerWidget: View {
                 }
                 .controlSize(.large)
                 if widget.shows(.readout) {
-                    BaselineBottom { readout(timers, units: units) }
+                    BaselineBottom {
+                        TimerReadout(widget: widget, points: Self.readoutPoints(widget, inner: size), units: units, isPicture: isPicture)
+                    }
                 }
             }
             .frame(height: Self.rowHeight(widget, inner: size))
@@ -221,8 +236,7 @@ struct TimerWidget: View {
                 model.banners.dismiss(.timerFinished)
             }
         }
-        // 0:00, on the way to another time: nothing to count down.
-        .disabled(countdown == .idle && !units.canStart(timers.draftDuration))
+        .modifier(DisabledAtZero(units: units))
         if widget.shows(.addMinute) {
             button(.addMinute, title: String(localized: "+1 Minute"), symbol: "plus", prominent: false) {
                 switch countdown {
@@ -241,46 +255,6 @@ struct TimerWidget: View {
         if countdown.isRunning || countdown.isPaused || isEditing {
             button(.timerCancel, title: String(localized: "Cancel"), symbol: "xmark", prominent: false) { timers.cancel() }
         }
-    }
-
-    /// The time: the length being set (following the ruler exactly, unanimated: a cross-fade per
-    /// tick smeared the digits) or what is left; as the widget sets it, or restyled.
-    @ViewBuilder private func readout(_ timers: TimerStore, units: TimerDraftUnits) -> some View {
-        let points = Self.readoutPoints(widget, inner: size)
-        let countdown = timers.countdown
-        // From the row's end (the widget's corner): as its digits grow it grows to the left, and a
-        // box of its own hangs from there too (`hangsFromTrailing`) — it never moves.
-        // Orange, dimmed while paused — restyled with its colour left at Automatic too.
-        let tint = Self.tint.opacity(countdown.isPaused ? 0.55 : 1)
-        let plain = TimerTime(units: units, picture: isPicture)
-            .font(.system(size: points, design: .rounded).monospacedDigit())
-            .foregroundStyle(tint)
-            .lineLimit(1)
-            .minimumScaleFactor(0.5)
-        let segments = Self.timeSegments(timers, units: units, picture: isPicture)
-        let shown = widget.withOwnDesign(.rounded, for: .readout)
-        Group {
-            if widget.textStyle(of: .readout) == .plain, !isEditing {
-                plain
-            } else if countdown.isRunning {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    WidgetLabel(id: .readout, text: Self.timeText(timers, units: units, picture: isPicture, at: context.date),
-                                widget: shown, size: points, weight: .regular, isSecondary: false, segments: segments,
-                                hangsFromTrailing: Self.hangsFromTrailing, automaticColor: tint) { plain }
-                }
-            } else {
-                WidgetLabel(id: .readout, text: Self.timeText(timers, units: units, picture: isPicture, at: .now), widget: shown,
-                            size: points, weight: .regular, isSecondary: false, segments: segments,
-                            hangsFromTrailing: Self.hangsFromTrailing, automaticColor: tint) { plain }
-                    // Restyled, the time is one text: a click moves on to the next unit.
-                    .contentShape(.rect)
-                    .onTapGesture {
-                        guard !isPicture, countdown == .idle, !units.isMinutesOnly else { return }
-                        timers.draftUnit = units.next(after: Self.unit(timers, units: units))
-                    }
-            }
-        }
-        .movableElement(.readout, of: widget)
     }
 
     /// A button as the widget draws it (on glass), or as Customize styled it — either way
@@ -310,6 +284,73 @@ struct TimerWidget: View {
             }
         }
         .movableElement(id, of: widget)
+    }
+}
+
+/// The Start button off at 0:00 (on the way to another time: nothing to count down). Read here and
+/// not in the widget's body: the length changes at every tick of a swipe along the ruler, and the
+/// body then built the whole widget again each time.
+private struct DisabledAtZero: ViewModifier {
+    let units: TimerDraftUnits
+
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        let timers = model.timers
+        content.disabled(timers.countdown == .idle && !units.canStart(timers.draftDuration))
+    }
+}
+
+/// The time: the length being set (following the ruler exactly, unanimated: a cross-fade per tick
+/// smeared the digits) or what is left; as the widget sets it, or restyled. A view of its own: it
+/// alone follows the length being set (the widget's body does not read it).
+private struct TimerReadout: View {
+    let widget: IslandWidget
+    /// The time's size (`TimerWidget.readoutPoints`).
+    let points: CGFloat
+    let units: TimerDraftUnits
+    let isPicture: Bool
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.isElementEditing) private var isEditing
+
+    var body: some View {
+        let timers = model.timers
+        let countdown = timers.countdown
+        // From the row's end (the widget's corner): as its digits grow it grows to the left, and a
+        // box of its own hangs from there too (`hangsFromTrailing`) — it never moves.
+        // Orange, dimmed while paused — restyled with its colour left at Automatic too.
+        let tint = TimerWidget.tint.opacity(countdown.isPaused ? 0.55 : 1)
+        let plain = TimerTime(units: units, picture: isPicture)
+            .font(.system(size: points, design: .rounded).monospacedDigit())
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+        Group {
+            if widget.textStyle(of: .readout) == .plain, !isEditing {
+                plain
+            } else if countdown.isRunning {
+                let shown = widget.withOwnDesign(.rounded, for: .readout)
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    WidgetLabel(id: .readout, text: TimerWidget.timeText(timers, units: units, picture: isPicture, at: context.date),
+                                widget: shown, size: points, weight: .regular, isSecondary: false,
+                                segments: TimerWidget.timeSegments(timers, units: units, picture: isPicture),
+                                hangsFromTrailing: TimerWidget.hangsFromTrailing, automaticColor: tint) { plain }
+                }
+            } else {
+                WidgetLabel(id: .readout, text: TimerWidget.timeText(timers, units: units, picture: isPicture, at: .now),
+                            widget: widget.withOwnDesign(.rounded, for: .readout), size: points, weight: .regular, isSecondary: false,
+                            segments: TimerWidget.timeSegments(timers, units: units, picture: isPicture),
+                            hangsFromTrailing: TimerWidget.hangsFromTrailing, automaticColor: tint) { plain }
+                    // Restyled, the time is one text: a click moves on to the next unit.
+                    .contentShape(.rect)
+                    .onTapGesture {
+                        guard !isPicture, countdown == .idle, !units.isMinutesOnly else { return }
+                        timers.draftUnit = units.next(after: TimerWidget.unit(timers, units: units))
+                    }
+            }
+        }
+        .movableElement(.readout, of: widget)
     }
 }
 
@@ -418,8 +459,14 @@ struct TimerRulerPart: View {
                 .allowsHitTesting(false)
         case .idle:
             TimerRuler(
+                // A tick felt for every change made here (not read by this body: the length changes
+                // at every tick of a swipe, and the body then built the ruler again each time).
                 minutes: Binding(get: { units.value(of: unit, in: timers.draftDuration) },
-                                 set: { timers.draftDuration = units.duration(setting: unit, to: $0, in: timers.draftDuration) }),
+                                 set: {
+                                     let old = timers.draftDuration
+                                     timers.draftDuration = units.duration(setting: unit, to: $0, in: old)
+                                     if timers.draftDuration != old { model.haptics.play(.tick) }
+                                 }),
                 range: shown,
                 minimum: range.lowerBound,
                 unit: unit,
@@ -432,7 +479,6 @@ struct TimerRulerPart: View {
                 markerSize: marker,
                 isAwake: isAwake
             )
-            .onChange(of: timers.draftDuration) { model.haptics.play(.tick) }
         case .running(let endDate, _) where !isPicture:
             // Read again once a minute, on the countdown's own minute boundaries.
             let remaining = max(0, endDate.timeIntervalSinceNow)

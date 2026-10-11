@@ -550,6 +550,9 @@ extension CGRect {
 /// `demo/state`'s dump of the island window's layers: class, frame, and whatever makes the render
 /// server work per frame (masks, filters, shadows, backdrops, running animations).
 enum LayerDump {
+    /// `NI_LAYER_DETAIL=1`: every layer's exact frame, corners, colour and gradient too.
+    static let detailed = ProcessInfo.processInfo.environment["NI_LAYER_DETAIL"] == "1"
+
     static func describe(_ layer: CALayer, depth: Int = 0) -> String {
         var line = String(repeating: "  ", count: depth) + String(describing: type(of: layer))
         line += " \(layer.frame.integral)"
@@ -562,6 +565,13 @@ enum LayerDump {
         if let filter = layer.compositingFilter { line += " comp=\(filter)" }
         if layer.shadowOpacity > 0 { line += " SHADOW(\(layer.shadowOpacity), r \(layer.shadowRadius), path \(layer.shadowPath != nil))" }
         if layer.contents != nil { line += " contents" }
+        if detailed {
+            line += " frame=\(layer.frame) r=\(layer.cornerRadius) \(layer.cornerCurve.rawValue) scale=\(layer.contentsScale) edge=\(layer.edgeAntialiasingMask.rawValue) aa=\(layer.allowsEdgeAntialiasing) flipped=\(layer.isGeometryFlipped)"
+            if let color = layer.backgroundColor { line += " bg=\(color.components ?? []) \(color.colorSpace?.name as String? ?? "?")" }
+            if let gradient = layer as? CAGradientLayer {
+                line += " gradient \(gradient.startPoint)→\(gradient.endPoint) \(gradient.locations ?? []) \(gradient.type.rawValue) \((gradient.colors ?? []).map { ($0 as! CGColor).components ?? [] })"
+            }
+        }
         if let keys = layer.animationKeys(), !keys.isEmpty { line += " anim=\(keys)" }
         if let mask = layer.mask { line += "\n" + String(repeating: "  ", count: depth + 1) + "mask: " + describe(mask, depth: depth + 2).trimmingCharacters(in: .whitespaces) }
         var out = line

@@ -450,6 +450,17 @@ extension TextStyle {
 
     func font(size: CGFloat, weight: NSFont.Weight) -> NSFont {
         let points = CGFloat(self.size ?? Double(size))
+        // Made once: a label asks at every change of its text (the timer's time at every tick of
+        // its ruler), and a font from a descriptor is a fifth of a millisecond.
+        let key = TextStyleFonts.Key(points: points, weight: (isBold ? NSFont.Weight.bold : weight).rawValue, design: design, isItalic: isItalic)
+        if let font = TextStyleFonts.known[key] { return font }
+        let font = makeFont(points: points, weight: weight)
+        if TextStyleFonts.known.count > 128 { TextStyleFonts.known.removeAll(keepingCapacity: true) }
+        TextStyleFonts.known[key] = font
+        return font
+    }
+
+    private func makeFont(points: CGFloat, weight: NSFont.Weight) -> NSFont {
         let base = NSFont.systemFont(ofSize: points, weight: isBold ? .bold : weight)
         var descriptor = base.fontDescriptor
         let design: NSFontDescriptor.SystemDesign? = switch self.design {
@@ -468,6 +479,18 @@ extension TextStyle {
                                                                             tX: 0, tY: 0)])
         return NSFont(descriptor: slanted, size: points) ?? base
     }
+}
+
+/// The fonts text styles have asked for (`TextStyle.font`), by what makes one.
+@MainActor private enum TextStyleFonts {
+    struct Key: Hashable {
+        let points: CGFloat
+        let weight: CGFloat
+        let design: TextStyle.Design
+        let isItalic: Bool
+    }
+
+    static var known: [Key: NSFont] = [:]
 }
 
 extension TextStyle.Alignment {
