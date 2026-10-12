@@ -38,7 +38,7 @@ struct AssistantView: View {
             layout: layout, presentation: .assistant(.gallery),
             outerInset: Metrics.Expanded.horizontalInset, clearance: Metrics.notchClearance
         ).contentInset
-        let below: BelowField = assistant.answer != nil ? .answer : isGallery ? .gallery : assistant.showsQuickPicks ? .picks : .rows
+        let below: BelowField = assistant.answer != nil ? .answer : isGallery ? .gallery : !assistant.needsList ? .picks : .rows
         // Below the field nothing shows while the island is only the field (the rows would peek
         // out under it); they fade in with the island's growth.
         let showsBelowField: Bool = if case .assistant(.field) = model.island.presentation { false } else { true }
@@ -315,8 +315,9 @@ private struct QuickPicks: View {
 
     var body: some View {
         HStack(spacing: Self.spacing) {
-            ForEach(assistant.quickPicks, id: \.self) { category in
-                QuickPick(category: category, radius: radius) { assistant.open(category) }
+            ForEach(Array(assistant.quickPicks.enumerated()), id: \.element) { index, category in
+                QuickPick(category: category, radius: radius,
+                          isMarked: assistant.marksSelection && assistant.selection == index) { assistant.open(category) }
             }
         }
         .frame(height: IslandLayout.assistantPicksHeight)
@@ -329,6 +330,8 @@ private struct QuickPicks: View {
 private struct QuickPick: View {
     let category: AssistantCategory
     let radius: CGFloat
+    /// Chosen with ↑/↓: shown as under the pointer.
+    var isMarked = false
     let open: () -> Void
     @State private var isHovered = false
 
@@ -341,14 +344,14 @@ private struct QuickPick: View {
                 category.tile(side: Self.icon)
                 Text(category.title)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(isHovered ? 1 : 0.8))
+                    .foregroundStyle(.white.opacity(isHovered || isMarked ? 1 : 0.8))
                     .lineLimit(1)
             }
             // The caption's line reaches below its letters: a point lower, the icon's top is as far
             // under the field as the letters are above the panel's bottom.
             .offset(y: 1)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(.white.opacity(isHovered ? 0.1 : 0), in: .rect(cornerRadius: radius, style: .continuous))
+            .background(.white.opacity(isHovered || isMarked ? 0.1 : 0), in: .rect(cornerRadius: radius, style: .continuous))
             .contentShape(.rect(cornerRadius: radius, style: .continuous))
         }
         .buttonStyle(.plain)

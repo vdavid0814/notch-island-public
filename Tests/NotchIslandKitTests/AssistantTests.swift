@@ -122,7 +122,8 @@ import Testing
 
     @Test func bareFieldListsTheSuggestionsButNeedsNoList() {
         let model = model()
-        #expect(model.rows == AssistantCategory.allCases.map(AssistantRow.category))
+        // The quick picks: Applications, Files, Actions and Clipboard (the old list of every suggestion is gone).
+        #expect(model.rows == AssistantModel.quickPickCategories.map(AssistantRow.category))
         #expect(!model.needsList && !model.revealsSuggestions)
         // Return on the bare field does nothing: nothing is shown to run.
         model.activateSelection()
@@ -164,7 +165,7 @@ import Testing
         model.isPointerOver = false
         #expect(model.room == .field)
         model.moveSelection(by: 1)
-        #expect(model.room == .suggestions)
+        #expect(model.room == .quickPicks)
         // A query is exactly as tall as its rows, up to the full list.
         model.query = "zzqx"
         await model.settle()

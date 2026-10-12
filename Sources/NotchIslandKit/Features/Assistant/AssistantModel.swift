@@ -468,17 +468,19 @@ nonisolated struct FileScope: Sendable, Equatable {
             let count = rows.count
             return count < settings().listRows ? .rows(max(count, 1)) : .list
         }
-        // ↓: exactly the suggestions the user has switched on. The pointer alone: the four quick
-        // picks in a row (`showsQuickPicks`), two rows' height.
-        if revealsSuggestions { return .rows(max(settings().categories.count, 1)) }
-        return showsQuickPicks ? .quickPicks : .field
+        // The pointer or ↓: the quick picks in a row (`showsQuickPicks`). The list of every
+        // suggestion they replaced is gone (asked for).
+        return revealsSuggestions || showsQuickPicks ? .quickPicks : .field
     }
 
     /// The categories the pointer over Siri brings down, as large icons in a row: Applications,
     /// Files, Actions and Clipboard (those switched on). The others are a shortcut (⌘5…) or ↓ away,
     /// as before (asked for: not on hover).
     static let quickPickCategories: [AssistantCategory] = [.applications, .files, .actions, .clipboard]
-    var quickPicks: [AssistantCategory] { Self.quickPickCategories.filter(settings().categories.contains) }
+    var quickPicks: [AssistantCategory] { quickPicks(settings()) }
+    private func quickPicks(_ settings: SiriSettings) -> [AssistantCategory] {
+        Self.quickPickCategories.filter(settings.categories.contains)
+    }
 
     /// The pointer over Siri, nothing typed or opened and ↓ not pressed: the quick picks show.
     var showsQuickPicks: Bool {
@@ -563,7 +565,9 @@ nonisolated struct FileScope: Sendable, Equatable {
             if calendar == .granted { rows += events.map(AssistantRow.event) }
             return rows
         case nil:
-            guard !text.isEmpty else { return settings.categories.map(AssistantRow.category) }
+            // Nothing typed: the quick picks (`QuickPicks`), which ↑/↓ and Return go through. The
+            // other suggestions are their shortcuts (⌘5…) away.
+            guard !text.isEmpty else { return quickPicks(settings).map(AssistantRow.category) }
             // A sum or a conversion is worked out at once and comes first, above everything, as in
             // Spotlight: "12 + 30 * 2" had five words and went to Apple Intelligence (seen, v0.4.5).
             // A typed web address first of all, as in Spotlight ("github.com", Return); a typed

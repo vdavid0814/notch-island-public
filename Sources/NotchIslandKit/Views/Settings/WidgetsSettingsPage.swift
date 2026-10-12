@@ -1013,6 +1013,8 @@ private struct UnderStage: ViewModifier {
 
     static func arm(for seconds: TimeInterval = 0.4) {
         armedUntil = ProcessInfo.processInfo.systemUptime + seconds
+        // Glided from where it is now: its place, as last seen, may be from a layout long ago.
+        (view as? GlidingHostingView)?.notePlace()
     }
 
     /// What is wrong with the gallery once things have settled (`demo/studiostress`): drawn where it lies.
@@ -1111,7 +1113,25 @@ final class GlidingHostingView: DeferringHostingView<AnyView> {
         return reference.isFlipped ? rect.minY : reference.bounds.height - rect.maxY
     }
 
+    // Hidden (another mode, a widget picked), it is not where it is seen: where it comes back is
+    // where it lies, not a glide from where it was last seen (Size → Widgets: 816 pt, from above).
+    override func viewDidHide() {
+        super.viewDidHide()
+        lastPlace = nil
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        lastPlace = nil
+    }
+
+    /// Where it lies now, as what a coming move is glided from (`GalleryGlide.arm`).
+    func notePlace() {
+        lastPlace = isHiddenOrHasHiddenAncestor ? nil : place
+    }
+
     private func followPlace() {
+        guard !isHiddenOrHasHiddenAncestor else { lastPlace = nil; return }
         guard let now = place else { return }
         defer { lastPlace = now }
         guard let last = lastPlace else { return }

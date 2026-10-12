@@ -208,6 +208,9 @@ import SwiftUI
             guard let self else { return }
             var instant = Transaction()
             instant.disablesAnimations = true
+            // What the shelf's card coming or going moves under it glides there, from where it
+            // is before the switch (`GlidingHostingView`).
+            GalleryGlide.arm()
             // The board going is as opaque as it is now: under quick clicks, part-way into a fade.
             let shown = self.shownBlend
             withTransaction(instant) {
@@ -224,8 +227,6 @@ import SwiftUI
                 self.page = target
                 self.pendingPage = nil
             }
-            // What the shelf's card coming or going moves under it glides there (`GlidingHostingView`).
-            GalleryGlide.arm()
             // The shelf's card comes with the shelf's board (it goes while the glass slides).
             if target == .shelf { ShelfCardFade.fade(out: false, duration: Self.fadeIn) }
             self.landings += 1
