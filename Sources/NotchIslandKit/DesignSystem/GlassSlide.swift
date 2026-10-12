@@ -83,10 +83,17 @@ import AppKit
     /// Where the last press in a window landed (`SettingsWindow.sendEvent`): the bar clicked is
     /// the one under it. SwiftUI's segmented picker hit-tests to its hosting view, not to the bar.
     static func pressed(at point: NSPoint, in window: NSWindow) {
-        lastPress = (point, window, ProcessInfo.processInfo.systemUptime)
+        lastPress = Press(point: point, window: window, time: ProcessInfo.processInfo.systemUptime)
     }
 
-    private static var lastPress: (point: NSPoint, window: NSWindow?, time: TimeInterval)?
+    /// Held weakly: a window given up (Settings on the charger) must not be kept by its last click.
+    private struct Press {
+        let point: NSPoint
+        weak var window: NSWindow?
+        let time: TimeInterval
+    }
+
+    private static var lastPress: Press?
 
     /// The segmented control under the last press, if it was a moment ago.
     private static func clickedControl() -> NSSegmentedControl? {

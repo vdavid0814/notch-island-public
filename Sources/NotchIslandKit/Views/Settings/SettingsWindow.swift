@@ -42,7 +42,8 @@ final class SettingsWindow: NSPanel {
 
     /// How long Settings may go unused (closed, after it was built or last open) before it is given
     /// up where it is not kept.
-    static let unusedDelay: TimeInterval = 15 * 60
+    /// `NI_SETTINGS_UNUSED=<seconds>` (measuring) shortens it.
+    static let unusedDelay: TimeInterval = ProcessInfo.processInfo.environment["NI_SETTINGS_UNUSED"].flatMap(TimeInterval.init) ?? 15 * 60
     private static var discarding: DispatchWorkItem?
 
     static func discardLater() {
@@ -65,6 +66,7 @@ final class SettingsWindow: NSPanel {
         window.surface.removeFromSuperview()
         window.contentView = nil
         window.close()
+        WallpaperLibrary.shared.release()
         Log.window.notice("settings given up while closed (not kept on the charger)")
     }
 
@@ -141,6 +143,8 @@ final class SettingsWindow: NSPanel {
         surface.deck.show(model.settingsPane)
         surface.deck.closed()
     }
+
+    deinit { Log.window.debug("settings window released") }
 
     private init(model: AppModel, placement: SettingsPlacement, frame: CGRect) {
         self.model = model

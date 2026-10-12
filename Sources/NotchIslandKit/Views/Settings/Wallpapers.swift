@@ -175,6 +175,14 @@ struct ChosenDesktopBackdrop: View {
         // The pictures stay: Settings keeps its pages (`SettingsPageDeck`), which still show them.
     }
 
+    /// Settings given up (on the charger, `SettingsWindow.discard`): nothing shows the pictures any
+    /// more, and they are the largest part of what it left behind (~12 MB, measured with `heap`).
+    func release() {
+        purge()
+        images.removeAll()
+        defaultSources.removeAll()
+    }
+
     func cached(_ style: DesktopBackdropStyle, detail: WallpaperDetail = .full) -> NSImage? {
         switch style {
         case .checkerboard: nil

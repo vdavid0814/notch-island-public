@@ -63,6 +63,23 @@ while let line = readLine() {
             post(e)
             usleep(30000)
         }
+    case "flags":
+        // A modifier pressed or let go (`flags cmd` … `flags`): a flagsChanged event, as a keyboard sends.
+        var flags: CGEventFlags = []
+        for f in a.dropFirst() {
+            switch f {
+            case "cmd": flags.insert(.maskCommand)
+            case "shift": flags.insert(.maskShift)
+            case "opt": flags.insert(.maskAlternate)
+            case "ctrl": flags.insert(.maskControl)
+            default: break
+            }
+        }
+        let e = CGEvent(keyboardEventSource: nil, virtualKey: 55, keyDown: !flags.isEmpty)
+        e?.type = .flagsChanged
+        e?.flags = flags
+        post(e)
+        usleep(30000)
     case "type":
         let text = a.dropFirst().joined(separator: " ")
         for scalar in text.utf16 {
