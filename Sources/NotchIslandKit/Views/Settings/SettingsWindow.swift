@@ -319,7 +319,19 @@ final class SettingsWindow: NSPanel {
         }
         orderingOut = work
         if let fade {
-            DispatchQueue.main.asyncAfter(deadline: .now() + fade + 0.02, execute: work)
+            // Out of sight by then: its pictures taken out and the window ordered out in a turn on
+            // the efficiency cores (`MainThrift.lowPowerTurn`). At the main thread's own priority
+            // that teardown was a burst on the performance cores in the second after every close.
+            let token = ObjectIdentifier(work)
+            let timer = Timer(timeInterval: fade + 0.02, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    MainThrift.lowPowerTurn { [weak self] in
+                        guard let self, let work = self.orderingOut, ObjectIdentifier(work) == token, !work.isCancelled else { return }
+                        work.perform()
+                    }
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
         } else {
             work.perform()
         }

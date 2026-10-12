@@ -18,6 +18,10 @@ import Observation
     /// `state`, so those changes do not re-evaluate them (the island's root among them).
     private(set) var isOnBattery = false
 
+    /// `NI_POWER=battery` or `charger` (measuring): the island's lighter work on battery chosen as
+    /// on that power source, whatever the Mac is on (Settings kept, content swaps, …).
+    static let forcedOnBattery: Bool? = ProcessInfo.processInfo.environment["NI_POWER"].flatMap { ["battery": true, "charger": false][$0] }
+
     /// `state.hasBattery` on its own, for what only exists with a battery (the battery page): the
     /// level's changes do not re-evaluate it.
     private(set) var hasBattery = false
@@ -159,7 +163,8 @@ import Observation
         // Observation notifies on every assignment; IOKit posts for fields we do not
         // model, so skip no-op writes.
         if state != next { state = next }
-        if isOnBattery != next.isOnBattery { isOnBattery = next.isOnBattery }
+        let onBattery = Self.forcedOnBattery ?? next.isOnBattery
+        if isOnBattery != onBattery { isOnBattery = onBattery }
         if hasBattery != next.hasBattery { hasBattery = next.hasBattery }
     }
 
