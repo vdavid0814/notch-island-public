@@ -44,6 +44,7 @@ import SwiftUI
         model.island.didTransition = { [weak self] from, to in
             self?.armSettle()
             self?.keyboardFollows(from: from, to: to)
+            if to.isOpen { self?.prepareSettingsAgain() }
         }
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -63,10 +64,14 @@ import SwiftUI
     /// its first opening then costs what any later one does (Energy Impact ~340 → ~40, measured).
     static let settingsPreparationDelay: Duration = .seconds(6)
 
-    /// Energy on battery, memory on the charger: on battery Settings is built ahead and kept (its
-    /// opening then costs a ninth, and ~150 MB stay with the app); on the charger it is built when
-    /// opened and given up after it closes (`SettingsWindow.isKept`). A Mac without a battery is
-    /// on the charger. `NI_KEEP_SETTINGS=1` or `0` (measuring): kept or not, whatever the power.
+    /// Settings is built ahead, unseen, on the efficiency cores, on battery and on the charger alike:
+    /// built when opened, as the charger had it, its opening cost ~3 J in one second on the
+    /// performance cores (Activity Monitor 1500–2800, measured). On battery it is kept for as long
+    /// as the app runs; on the charger it is given up once it has gone unused a while
+    /// (`SettingsWindow.unusedDelay`), and built again ahead, unseen, after the panel is next opened
+    /// (`prepareSettingsAgain`). A change of power source only changes that rule: nothing is built or
+    /// given up at the switch itself. A Mac without a battery is on the charger.
+    /// `NI_KEEP_SETTINGS=1` or `0` (measuring): kept or not, whatever the power.
     private func followPowerSource() {
         let generation = observationGeneration
         let onBattery = withObservationTracking {
@@ -81,24 +86,42 @@ import SwiftUI
         let forced = ProcessInfo.processInfo.environment["NI_KEEP_SETTINGS"].flatMap { ["1": true, "0": false][$0] }
         let keeps = forced ?? onBattery
         guard keeps != SettingsWindow.isKept || !hasFollowedPowerSource else { return }
+        let isFirst = !hasFollowedPowerSource
         hasFollowedPowerSource = true
         SettingsWindow.isKept = keeps
-        Log.window.notice("settings \(keeps ? "kept (on battery)" : "built when opened (on the charger)", privacy: .public)")
+        Log.window.notice("settings \(keeps ? "kept (on battery)" : "given up when unused (on the charger)", privacy: .public)")
+        if ProcessInfo.processInfo.environment["NI_NO_PREPARE"] == "1" { return }
+        if isFirst || (keeps && !SettingsWindow.isPrepared) {
+            preparation += 1
+            prepareSettings(after: Self.settingsPreparationDelay, preparation: preparation)
+        }
+    }
+
+    /// The panel opened: Settings, given up on the charger while unused, is built again ahead of
+    /// the gear's next click (once the island has closed again: a step waits while it is open).
+    private func prepareSettingsAgain() {
+        guard hasFollowedPowerSource, !SettingsWindow.isPrepared, !isPreparingSettings else { return }
         preparation += 1
-        if keeps { prepareSettings(after: Self.settingsPreparationDelay, preparation: preparation) }
+        prepareSettings(after: .seconds(1), preparation: preparation)
     }
 
     private var hasFollowedPowerSource = false
     /// Which run of `prepareSettings` goes on: one from before the power source changed stops.
     private var preparation = 0
+    /// A run of `prepareSettings` is under way (or waiting for the island to close).
+    private var isPreparingSettings = false
 
     /// One piece of Settings per step, at background quality of service (efficiency cores), only
     /// while the island is closed: a step waits while it is open.
     private func prepareSettings(after delay: Duration, preparation: Int) {
+        isPreparingSettings = true
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay, tolerance: .milliseconds(200))
-            guard let self, self.isStarted, SettingsWindow.isKept, preparation == self.preparation,
-                  let metrics = self.metrics else { return }
+            guard let self else { return }
+            guard self.isStarted, preparation == self.preparation, let metrics = self.metrics else {
+                if preparation == self.preparation { self.isPreparingSettings = false }
+                return
+            }
             guard !self.model.island.presentation.isOpen, !self.model.island.presentation.isBanner else {
                 self.prepareSettings(after: .seconds(3), preparation: preparation)
                 return
@@ -109,11 +132,17 @@ import SwiftUI
             // 1370, 1356, 766 and 471 in the four seconds from ten seconds after every launch
             // (measured with `rest.py`).
             MainThrift.lowPowerTurn { [weak self] in
-                guard let self, self.isStarted, SettingsWindow.isKept, preparation == self.preparation else { return }
+                guard let self else { return }
+                guard self.isStarted, preparation == self.preparation else {
+                    if preparation == self.preparation { self.isPreparingSettings = false }
+                    return
+                }
                 guard !self.model.island.presentation.isOpen, !self.model.island.presentation.isBanner else {
                     self.prepareSettings(after: .seconds(3), preparation: preparation)
                     return
                 }
+                let stepStart = CACurrentMediaTime()
+                defer { Log.window.debug("settings preparation step \(Int((CACurrentMediaTime() - stepStart) * 1000), privacy: .public) ms") }
                 if !SettingsWindow.isPrepared {
                     let layout = self.model.layout
                     let size = IslandSettingsView.surfaceSize(layout)
@@ -122,6 +151,9 @@ import SwiftUI
                                        width: size.width, height: size.height)
                     SettingsWindow.prepare(model: self.model, frame: frame)
                 } else if !SettingsWindow.prepareNextPage(model: self.model) {
+                    self.isPreparingSettings = false
+                    // Built: on the charger it waits to be used, and goes if it is not.
+                    if !SettingsWindow.isKept { SettingsWindow.discardLater() }
                     return
                 }
                 self.prepareSettings(after: .milliseconds(400), preparation: preparation)

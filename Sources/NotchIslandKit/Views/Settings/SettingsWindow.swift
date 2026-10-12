@@ -28,28 +28,28 @@ final class SettingsWindow: NSPanel {
     /// Ordering out after the fade.
     private var orderingOut: DispatchWorkItem?
 
-    /// Whether Settings is kept built while it is closed (and built ahead after a launch): on
-    /// battery, where an opening of the kept window costs a ninth of building it. On the charger
-    /// memory comes first: it is built when opened and given up `discardDelay` after it closes
-    /// (~150 MB with every page built). Set by the island's window controller as the power source
-    /// changes (`IslandWindowController.followPowerSource`).
+    /// Whether Settings is kept built for as long as the app runs: on battery, where an opening of
+    /// the kept window costs a ninth of building it. On the charger it is built ahead too (built
+    /// when opened, the opening cost ~3 J in a second, measured), and given up once it has gone
+    /// unused for `unusedDelay` (~150 MB with every page built). Set by the island's window
+    /// controller as the power source changes (`IslandWindowController.followPowerSource`).
     static var isKept = true {
         didSet {
             guard isKept != oldValue else { return }
-            if isKept { discarding?.cancel() } else { discardLater() }
+            if isKept { discarding?.cancel() } else if current != nil { discardLater() }
         }
     }
 
-    /// How long after it closes Settings is given up where it is not kept: opened again within it
-    /// (to change one more thing), it is still there.
-    static let discardDelay: TimeInterval = 30
+    /// How long Settings may go unused (closed, after it was built or last open) before it is given
+    /// up where it is not kept.
+    static let unusedDelay: TimeInterval = 15 * 60
     private static var discarding: DispatchWorkItem?
 
-    private static func discardLater() {
+    static func discardLater() {
         discarding?.cancel()
         let work = DispatchWorkItem { discard() }
         discarding = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + discardDelay, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + unusedDelay, execute: work)
     }
 
     /// Settings given up while it is closed: its window, its pages and what they drew. Its next
@@ -58,7 +58,7 @@ final class SettingsWindow: NSPanel {
         discarding = nil
         guard !isKept, let window = current else { return }
         // Open (or closing): after it has closed.
-        guard !window.isVisible || window.isRehearsing, !window.model.island.presentation.isSettings else { return discardLater() }
+        guard !window.isVisible, !window.model.island.presentation.isSettings else { return discardLater() }
         if window.isRehearsing { window.endRehearsal() }
         window.orderingOut?.cancel()
         current = nil
@@ -162,6 +162,8 @@ final class SettingsWindow: NSPanel {
         isExcludedFromWindowsMenu = true
         tabbingMode = .disallowed
         depthLimit = .twentyfourBitRGB
+        // The key view loop is built when Tab asks for it (`keyViewLoopForTab`), not at every change.
+        autorecalculatesKeyViewLoop = Self.buildsKeyViewLoopOnTab
 
         root.frame = CGRect(origin: .zero, size: frame.size)
         root.autoresizingMask = [.width, .height]
@@ -364,26 +366,63 @@ final class SettingsWindow: NSPanel {
 
     // MARK: Keyboard
 
-    /// The key view loop (what Tab steps through) left as it is for `seconds`: while something
-    /// only moves. SwiftUI builds the loop again at every change of where a control that takes the
-    /// keyboard lies — every frame of the Widgets page's stage unfolding, where that was most of
-    /// each frame's work (sampled) — unless the window says it sees to the loop itself; the order
-    /// of the controls does not change by their moving together, so nothing is lost. Off again
-    /// afterwards: SwiftUI's own loop is the one Tab has always stepped through here.
-    func holdKeyViewLoop(for seconds: TimeInterval) {
-        autorecalculatesKeyViewLoop = true
+    /// The key view loop (what Tab steps through) is built when Tab asks for it. SwiftUI builds it
+    /// again at every change of where a control that takes the keyboard lies or which there are —
+    /// every view a page adds, every frame of the Widgets stage unfolding, every hosting view put in
+    /// the window as Settings is built — unless the window says it sees to the loop itself: half of
+    /// the main thread's time while a widget was picked and let go on the Widgets page (sampled).
+    /// So the window says so, and at a Tab the loop is built at once, by SwiftUI as before, and kept
+    /// up to date by it for a while (`liveKeyViewLoopDuration`): what Tab steps through is the same.
+    /// `NI_EXP_EAGERLOOP=1` (measuring): SwiftUI's loop at every change, as before.
+    static let buildsKeyViewLoopOnTab = ProcessInfo.processInfo.environment["NI_EXP_EAGERLOOP"] != "1"
+    /// How long after a Tab SwiftUI keeps the loop up to date at every change.
+    static let liveKeyViewLoopDuration: TimeInterval = 15
+
+    /// Whether SwiftUI keeps the loop up to date now (after a Tab, or eager by the switch).
+    private var isKeyViewLoopLive: Bool { !Self.buildsKeyViewLoopOnTab || keyViewLoopRelease != nil }
+
+    /// A Tab (or ⇧Tab) is about to step: the loop built now, as SwiftUI builds it, then kept.
+    private func keyViewLoopForTab() {
+        guard Self.buildsKeyViewLoopOnTab else { return }
+        if keyViewLoopRelease == nil {
+            keyViewLoopHold?.invalidate()
+            keyViewLoopHold = nil
+            autorecalculatesKeyViewLoop = false
+            recalculateKeyViewLoop()
+        }
         keyViewLoopRelease?.invalidate()
-        let timer = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
+        let timer = Timer(timeInterval: Self.liveKeyViewLoopDuration, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.autorecalculatesKeyViewLoop = false
-                self?.keyViewLoopRelease = nil
+                guard let self else { return }
+                self.keyViewLoopRelease = nil
+                self.keyViewLoopHold?.invalidate()
+                self.keyViewLoopHold = nil
+                self.autorecalculatesKeyViewLoop = true
             }
         }
         RunLoop.main.add(timer, forMode: .common)
         keyViewLoopRelease = timer
     }
 
+    /// The key view loop left as it is for `seconds` while something only moves (where SwiftUI keeps
+    /// it up to date, after a Tab): the order of the controls does not change by their moving together.
+    func holdKeyViewLoop(for seconds: TimeInterval) {
+        guard isKeyViewLoopLive else { return }
+        autorecalculatesKeyViewLoop = true
+        keyViewLoopHold?.invalidate()
+        let timer = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.keyViewLoopHold = nil
+                if self.isKeyViewLoopLive { self.autorecalculatesKeyViewLoop = false }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        keyViewLoopHold = timer
+    }
+
     private var keyViewLoopRelease: Timer?
+    private var keyViewLoopHold: Timer?
 
     /// The first click in the window makes it key and is handled as any other: as a window that
     /// was not key, it went only to making the window key, and the sidebar or a field missed it.
@@ -404,6 +443,7 @@ final class SettingsWindow: NSPanel {
         }
         // A click (or a key) lands where the page is drawn: the scroll is handed over first.
         if [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown].contains(event.type) { coalescer.commit() }
+        if event.type == .keyDown, event.keyCode == 48 { keyViewLoopForTab() }
         super.sendEvent(event)
     }
 
