@@ -24,6 +24,8 @@ struct WidgetsSettingsPage: View {
     /// The gallery's own height, as its graph lays it out (`GalleryHost`).
     @State private var galleryHeight: CGFloat = 400
     @Environment(\.settingsPageVisit) private var visit
+    /// Handed to the inspector's own graph (`InspectorLayer`).
+    @Environment(\.self) private var environment
     @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
     /// Letting go of the picks once the page has gone (`pickResetDelay`).
     @State private var pendingReset: Timer?
@@ -51,23 +53,52 @@ struct WidgetsSettingsPage: View {
                     let inspects = mode == .widgets && (picked.count >= 2 || selection.map { model.editedWidgets.board.contains($0) } == true)
                     let shown: ModeDeck.Slot = mode == .topBar ? .topBar : mode == .size ? .size : inspects ? .inspector : .gallery
                     ModeDeck(shown: shown) {
+                        // Each mode's content in a layer of its own, faded out and in on the render
+                        // server as the mode switches (`DeckFade`): faded by SwiftUI, every frame of
+                        // it drew the content again (9–14 ms a frame into Size mode, measured).
                         // As tall as the room under the stage: its Reset is level with the sidebar's foot.
-                        TopBarSlot(room: viewportHeight - Self.topInset - Self.spacing - bottomInset, isShown: shown == .topBar)
-                            .deckSlot(.topBar, shown: shown)
-                        VStack(alignment: .leading, spacing: 16) {
-                            SizeInspector()
-                            ParkedTray()
+                        MeasuredHosting(input: TopBarSlot.Input(room: viewportHeight - Self.topInset - Self.spacing - bottomInset,
+                                                                isShown: shown == .topBar),
+                                        made: DeckFade.register) { input in
+                            TopBarSlot(room: input.room, isShown: input.isShown)
+                                .environment(\.self, environment)
                         }
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { inspectorHeight = $0 }
+                        .deckSlot(.topBar, shown: shown)
+                        MeasuredHosting(input: true, made: DeckFade.register, measured: { inspectorHeight = $0 }) { _ in
+                            VStack(alignment: .leading, spacing: 16) {
+                                SizeInspector()
+                                ParkedTray()
+                            }
+                            // Its ready-made sizes: out of their button, over the Size cards and buttons.
+                            .overlayPreferenceValue(ReadyMadeAnchors.self, alignment: .topLeading) { anchors in
+                                ReadyMadeOverlay(anchors: anchors)
+                            }
+                            .environment(\.self, environment)
+                        }
                         .modifier(UnderStage())
                         .deckSlot(.size, shown: shown)
                         VStack(alignment: .leading, spacing: 22) {
-                            if model.studio.page == .shelf {
+                            // The shelf's card, in a layer of its own faded in and out on the render
+                            // server (`ShelfCardFade`). Always there, measured, and only as tall as it
+                            // is on the shelf's page: built as the shelf came, it was measured a turn
+                            // later — the gallery under it jumped instead of gliding, and the card
+                            // was half faded in before it had its height.
+                            let isShelf = model.studio.page == .shelf
+                            MeasuredHosting(input: true, made: { view in
+                                ShelfCardFade.made(view, isShown: isShelf)
+                                DeckFade.register(view)
+                            }) { _ in
                                 StudioCard("Shelf", subtitle: "Files dropped on the notch wait on this page. It has no widgets to arrange; General switches it on and off.") {
                                     EmptyView()
                                 }
-                                .modifier(UnderStage())
+                                .environment(\.colorScheme, .dark)
                             }
+                            .frame(height: isShelf ? nil : 0, alignment: .top)
+                            // No gap for it either while it is not there.
+                            .padding(.bottom, isShelf ? 0 : -22)
+                            .allowsHitTesting(isShelf)
+                            .accessibilityHidden(!isShelf)
+                            .modifier(UnderStage())
                             ParkedTray()
                                 .modifier(UnderStage())
                             // In a view graph of its own (`GalleryHost`): kept built while another
@@ -81,26 +112,27 @@ struct WidgetsSettingsPage: View {
                                         measured: { height in if galleryHeight != height { galleryHeight = height } })
                         }
                         .deckSlot(.gallery, shown: shown)
-                        VStack(alignment: .leading, spacing: 0) {
-                            if mode != .widgets {
-                                EmptyView()
-                            } else if picked.count >= 2 {
-                                GroupInspector(ids: picked, selection: $selection, group: $group)
-                                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
-                                                            removal: .opacity))
-                            } else if let id = selection, model.editedWidgets.board.contains(id) {
-                                WidgetInspector(id: id, selection: $selection, notice: $notice)
-                                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
-                                                            removal: .opacity))
+                        // The picked widget's inspector in a layer of its own, coming up into place on
+                        // the render server as a widget is picked (`InspectorLayer`). Moved in by
+                        // SwiftUI, the whole page was laid out at every frame of the spring.
+                        let inspected = Self.inspected(mode: mode, picked: picked, selection: selection,
+                                                       board: model.editedWidgets.board)
+                        MeasuredHosting(input: inspected, made: InspectorLayer.made,
+                                        changing: { old, new, view in
+                                            if !new.isEmpty, new != old { InspectorLayer.rise(view) }
+                                        }) { inspected in
+                            Group {
+                                if inspected.count >= 2 {
+                                    GroupInspector(ids: Set(inspected), selection: $selection, group: $group)
+                                } else if let id = inspected.first {
+                                    WidgetInspector(id: id, selection: $selection, notice: $notice)
+                                }
                             }
+                            .environment(\.self, environment)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .deckSlot(.inspector, shown: shown)
                     }
-                    .animation(.spring(duration: 0.35, bounce: 0.12), value: selection)
-                    .animation(.spring(duration: 0.35, bounce: 0.12), value: group.count >= 2)
-                    // Faded out while the stage switches modes (`WidgetStudio.switchMode`).
-                    .opacity(model.studio.contentOpacity)
                 }
                 // As wide as the pages' room: that is a box beside the sidebar's, as far from the
                 // island's side and its foot as the sidebar is (`SettingsSurfaceView`).
@@ -113,14 +145,6 @@ struct WidgetsSettingsPage: View {
             // room's own ran over the cards at its edge.
             .scrollIndicators(.hidden)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
-            // Size mode's ready-made sizes: out of their button, over the Size cards and buttons.
-            .overlayPreferenceValue(ReadyMadeAnchors.self, alignment: .topLeading) { anchors in
-                GeometryReader { proxy in
-                    if model.studio.mode == .size, let area = anchors[.area], let button = anchors[.button] {
-                        ReadyMadeBox(button: proxy[button], area: proxy[area])
-                    }
-                }
-            }
         }
         .background { StudioUndoKeys(selection: $selection, group: $group) }
         .onAppear {
@@ -204,6 +228,14 @@ struct WidgetsSettingsPage: View {
     private var bottomInset: CGFloat { model.studio.mode == .widgets ? 28 : 0 }
     private static let spacing: CGFloat = 22
 
+    /// What the inspector shows: the picked widgets (two or more), the selected one, or none.
+    static func inspected(mode: WidgetStudio.Mode, picked: Set<WidgetID>, selection: WidgetID?, board: WidgetBoard) -> [WidgetID] {
+        guard mode == .widgets else { return [] }
+        if picked.count >= 2 { return picked.sorted { $0.rawValue.uuidString < $1.rawValue.uuidString } }
+        guard let selection, board.contains(selection) else { return [] }
+        return [selection]
+    }
+
     /// Exactly the area the home page gives its board.
     static func boardSize(_ layout: IslandLayout) -> CGSize { BoardSizing.board(layout) }
 
@@ -279,10 +311,11 @@ private struct ModeDeck: Layout {
 }
 
 private extension View {
-    /// One of `ModeDeck`'s: seen and used only while it is the one shown, fading as it comes and goes.
+    /// One of `ModeDeck`'s: seen and used only while it is the one shown. What fades as it comes is
+    /// faded on the render server (the inspector's, the gallery's layers; a mode's content with
+    /// `WidgetStudio.contentOpacity`): faded here, the page was drawn again at every frame.
     func deckSlot(_ slot: ModeDeck.Slot, shown: ModeDeck.Slot) -> some View {
         opacity(slot == shown ? 1 : 0)
-            .animation(.easeOut(duration: 0.18), value: slot == shown)
             .allowsHitTesting(slot == shown)
             .accessibilityHidden(slot != shown)
     }
@@ -324,39 +357,56 @@ private struct GalleryHost: NSViewRepresentable {
         var add: (IslandWidgetKind) -> Void = { _ in }
         var open: (IslandWidgetKind) -> Void = { _ in }
         var measured: (CGFloat) -> Void = { _ in }
-        weak var view: DeferringHostingView<AnyView>?
+        weak var view: GlidingHostingView?
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> DeferringHostingView<AnyView> {
+    func makeNSView(context: Context) -> GlidingHostingView {
         follow(context.coordinator)
         context.coordinator.input = Input(board: board, isShelf: isShelf)
-        let view = DeferringHostingView(rootView: root(context.coordinator))
+        let view = GlidingHostingView(rootView: root(context.coordinator))
         // Its size comes from here: its width the page's, its height the one it measured.
         view.sizingOptions = []
         view.safeAreaRegions = []
         // Laid out the first time even unseen (the page is built before it is first shown).
         view.forcesLayout = true
         view.isHidden = !isShown
+        // Faint on the shelf's page (dimmed on the render server as the page switches).
+        view.alphaValue = isShelf ? Self.shelfAlpha : 1
         context.coordinator.view = view
         GalleryGlide.view = view
+        DeckFade.register(view)
         return view
     }
 
-    func updateNSView(_ view: DeferringHostingView<AnyView>, context: Context) {
+    func updateNSView(_ view: GlidingHostingView, context: Context) {
         follow(context.coordinator)
-        if view.isHidden == isShown { view.isHidden = !isShown }
+        if view.isHidden == isShown {
+            view.isHidden = !isShown
+            // Back from a picked widget: in again on the render server.
+            if isShown, view.window != nil { view.fadeInOnRenderServer(duration: 0.2) }
+        }
         // Unseen, it stands still: moving a widget on the stage does not go over its cards. It
         // catches up when it is shown again, if anything it shows has changed.
         guard isShown else { return }
         let input = Input(board: board, isShelf: isShelf)
         guard context.coordinator.input != input else { return }
+        if context.coordinator.input?.isShelf != isShelf {
+            PerfTrace.mark("gallery dims \(isShelf)")
+            NSAnimationContext.runAnimationGroup { animation in
+                animation.duration = 0.25
+                animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                view.animator().alphaValue = isShelf ? Self.shelfAlpha : 1
+            }
+        }
         context.coordinator.input = input
         view.rootView = root(context.coordinator)
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: DeferringHostingView<AnyView>, context: Context) -> CGSize? {
+    static let shelfAlpha: CGFloat = 0.35
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: GlidingHostingView, context: Context) -> CGSize? {
         CGSize(width: proposal.width ?? 600, height: max(height, 1))
     }
 
@@ -370,7 +420,6 @@ private struct GalleryHost: NSViewRepresentable {
     private func root(_ coordinator: Coordinator) -> AnyView {
         AnyView(
             WidgetStoreView(board: board, add: { coordinator.add($0) }, open: { coordinator.open($0) })
-                .opacity(isShelf ? 0.35 : 1)
                 .allowsHitTesting(!isShelf)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded(.up) } action: { height in
@@ -498,6 +547,8 @@ private struct StudioStage: View {
     var fillHeight: CGFloat = 0
 
     @Environment(AppModel.self) private var model
+    /// Handed to the stage's own graphs (`StageSurface`).
+    @Environment(\.self) private var environment
     /// The mode bar's height: the hint's capsule is made as tall, and the stage's lower corners
     /// concentric with both.
     @State private var controlHeight: CGFloat = 28
@@ -516,7 +567,7 @@ private struct StudioStage: View {
     @State private var unfoldsUntil: TimeInterval = 0
 
     /// The stage unfolding into Size mode's room, and folding back.
-    static let unfoldSpring = Spring(duration: 0.55, bounce: 0.12)
+    static let unfoldSpring = StudioStageSpring.unfold
     static let unfold: Animation = .spring(unfoldSpring)
 
     /// Between the hint and the button and the stage's edges.
@@ -544,53 +595,113 @@ private struct StudioStage: View {
         // stage keeps its own width (measured from its frame, a wider box widened it for good) —
         // and as tall as the island drawn.
         let box = CGSize(width: stageWidth > 0 ? stageWidth : (room.width * fit).rounded(), height: (room.height * fit).rounded())
-        let shape = UnevenRoundedRectangle(
-            topLeadingRadius: 18,
-            bottomLeadingRadius: controlHeight / 2 + Self.controlInset,
-            bottomTrailingRadius: controlHeight / 2 + Self.controlInset,
-            topTrailingRadius: 18,
-            style: .continuous
-        )
         let ownHeight = (layout.notch.height + box.height + Self.badgeRoom + 56).rounded()
         let height = max(ownHeight, fillHeight.rounded())
         // For `WidgetStudio.stageHeight(in:)` (not observed: nothing is drawn from it).
         let _ = model.studio.stageOwnHeight = ownHeight
-        ZStack(alignment: .top) {
-            DesktopBackdrop(style: backdrop)
-                .contentShape(.rect)
-                .onTapGesture {
-                    selection = nil
-                    group = []
-                }
-                // The stage's own choices, on a right click of its desktop.
-                .contextMenu {
-                    Picker("Wallpaper", selection: $backdrop) {
-                        ForEach(DesktopBackdropStyle.offered) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.inline)
-                    Divider()
-                    Button("Reset to Default Widgets", role: .destructive) {
+        // Its desktop, outline and bar as layers the render server moves into Size mode and back
+        // out of it (`StageSurface`).
+        StageSurface(mode: mode, topRadius: 18, bottomRadius: controlHeight / 2 + Self.controlInset,
+                     spring: Self.unfoldSpring, model: model) {
+            ZStack(alignment: .top) {
+                DesktopBackdrop(style: backdrop)
+                    .contentShape(.rect)
+                    .onTapGesture {
                         selection = nil
-                        withAnimation(.spring(duration: 0.35)) { model.editedWidgets.reset() }
+                        group = []
                     }
+                    // The stage's own choices, on a right click of its desktop.
+                    .contextMenu {
+                        Picker("Wallpaper", selection: $backdrop) {
+                            ForEach(DesktopBackdropStyle.offered) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.inline)
+                        Divider()
+                        Button("Reset to Default Widgets", role: .destructive) {
+                            selection = nil
+                            withAnimation(.spring(duration: 0.35)) { model.editedWidgets.reset() }
+                        }
+                    }
+                PreviewMenuBar(height: layout.notch.height, notchWidth: island.width, darkText: backdrop.prefersDarkMenuBar,
+                               backing: backdrop.menuBarBacking)
+                    .allowsHitTesting(false)
+                // In a graph of its own: the live widgets on it (clocks, readings) keep ticking, and
+                // each tick would otherwise update all of Settings (`IsolatedHosting`). Handed over
+                // again only when the picked widgets change: the model (the board, the layout) is
+                // observed inside.
+                // Shown smaller inside its own graph, not by scaling the host: AppKit hit-tests a
+                // scaled view where it was laid out, and clicks near the island's edges missed.
+                IsolatedHosting(size: CGSize(width: box.width, height: box.height + Self.badgeRoom),
+                                input: StagePick(selection: selection, group: group, mode: mode, room: room, fit: fit),
+                                pausesWithSettings: true) {
+                    StageIsland(selection: $selection, group: $group, room: room, fit: fit)
+                        .frame(width: box.width, height: box.height + Self.badgeRoom, alignment: .top)
+                        .environment(model)
+                        .environment(\.appearsActive, true)
                 }
-            PreviewMenuBar(height: layout.notch.height, notchWidth: island.width, darkText: backdrop.prefersDarkMenuBar,
-                           backing: backdrop.menuBarBacking)
-                .allowsHitTesting(false)
-            // In a graph of its own: the live widgets on it (clocks, readings) keep ticking, and
-            // each tick would otherwise update all of Settings (`IsolatedHosting`). Handed over
-            // again only when the picked widgets change: the model (the board, the layout) is
-            // observed inside.
-            // Shown smaller inside its own graph, not by scaling the host: AppKit hit-tests a
-            // scaled view where it was laid out, and clicks near the island's edges missed.
-            IsolatedHosting(size: CGSize(width: box.width, height: box.height + Self.badgeRoom),
-                            input: StagePick(selection: selection, group: group, mode: mode, room: room, fit: fit),
-                            pausesWithSettings: true) {
-                StageIsland(selection: $selection, group: $group, room: room, fit: fit)
-                    .frame(width: box.width, height: box.height + Self.badgeRoom, alignment: .top)
-                    .environment(model)
-                    .environment(\.appearsActive, true)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        } bar: {
+                HStack(spacing: 10) {
+                    // Which page's board the stage edits (the top bar is every page's).
+                    if mode != .topBar {
+                        StudioPageBar {
+                            selection = nil
+                            group = []
+                        }
+                    }
+                    if mode == .topBar, !hidesTopBarHint {
+                        // On glass, as the notices are; its cross closes it for good.
+                        HStack(spacing: 8) {
+                            Text("Drag and drop icons to edit")
+                                .font(.callout.weight(.medium))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                            Button {
+                                withAnimation(.easeOut(duration: 0.2)) { hidesTopBarHint = true }
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.85))
+                                    .frame(width: 18, height: 18)
+                                    .background(.white.opacity(0.16), in: .circle)
+                                    .contentShape(.circle)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Hide this")
+                            .accessibilityLabel("Hide the hint")
+                        }
+                        .padding(.leading, 12)
+                        .padding(.trailing, 5)
+                        .frame(minHeight: controlHeight)
+                        .glassEffect(.regular, in: .capsule)
+                        .layoutPriority(-1)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .leading)))
+                    }
+                    // What went wrong, for a moment (no room, a widget set aside): nothing otherwise.
+                    if let notice {
+                        Label(notice, systemImage: "exclamationmark.triangle.fill")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.orange)
+                            .lineLimit(1)
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: controlHeight)
+                            .glassEffect(.regular, in: .capsule)
+                            .layoutPriority(-1)
+                    }
+                    Spacer(minLength: 0)
+                    // What the stage edits: the widgets, the top bar, or the panel's size and grid.
+                    Picker("Edit", selection: Binding(get: { model.studio.pendingMode ?? model.studio.mode },
+                                                      set: { model.studio.switchMode(to: $0) })) {
+                        ForEach(WidgetStudio.Mode.allCases) { Text($0.title).tag($0) }
+                    }
+                    .choiceBar()
+                    .labelsHidden()
+                    .fixedSize()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlHeight = $0 }
+                }
+                .padding(Self.controlInset)
+                .environment(\.colorScheme, .dark)
         }
         .modifier(StageDrawnHeight(own: height))
         .onAppear {
@@ -605,7 +716,7 @@ private struct StudioStage: View {
             // as the island grows.
             let now = ProcessInfo.processInfo.systemUptime
             if heightMode != mode {
-                unfoldsUntil = now + 0.8
+                unfoldsUntil = now + StageSurface<EmptyView, EmptyView>.unfoldWindow
                 heightMode = mode
             }
             let studio = model.studio
@@ -619,101 +730,27 @@ private struct StudioStage: View {
                 }
                 return
             }
-            // Unfolding or folding: its place takes the new height now, in one layout of the page;
-            // what is under the stage is drawn where it was (`UnderStage`, `GalleryGlide`), and
-            // then follows the stage's foot along the same spring with no layout of the page.
-            // Laid out at every frame the page took 30–100 ms a frame, all of the spring on a
-            // performance core: 2.1–3.1 J for a switch into Size mode or out of it (measured by
-            // real clicks, `Scripts/perf/studio.py`), against ~0.3 J without the motion.
-            if studio.stageShown == nil { studio.stageShown = old }
+            // Unfolding or folding: the stage and its place take the new height at once, in one
+            // layout of the page, and the render server moves the stage's foot there
+            // (`StageSurface`) and the gallery after it (`GalleryGlide`). Laid out at every frame,
+            // the page took 30–100 ms a frame, all of the spring on a performance core: 2.1–3.1 J
+            // for a switch into Size mode or out of it (measured by real clicks,
+            // `Scripts/perf/studio.py`).
             let lift = (studio.stagePlace ?? old) - new
             var instant = Transaction()
             instant.disablesAnimations = true
-            withTransaction(instant) { studio.stagePlace = new }
-            GalleryGlide.hold(by: lift)
-            // The controls that take the keyboard only move, in their order: the key view loop is
-            // left as it is meanwhile (SwiftUI built it again at every frame: over half of each
-            // frame's work, sampled), and the pointer's place is not asked for at every frame.
-            SettingsWindow.current?.holdKeyViewLoop(for: 0.9)
-            ScrollActivity.hold(for: 0.7)
-            // In a turn of its own: the layout above is on screen first, with nothing moved yet.
-            DispatchQueue.main.async {
-                withAnimation(Self.unfold) { studio.stageShown = new }
-                GalleryGlide.settle(Self.unfoldSpring)
+            withTransaction(instant) {
+                studio.stageShown = new
+                studio.stagePlace = new
             }
+            // The gallery follows the stage's foot along the same spring (`GlidingHostingView`).
+            if lift != 0 { GalleryGlide.nextSpring = Self.unfoldSpring }
         }
         // Grown or shrunk by a row while sizing: what is under the stage glides with it.
         .animation(.spring(duration: 0.3, bounce: 0.05), value: box.height)
         .onChange(of: model.studio.draft != nil) { _, isSizing in sizingFit = isSizing ? shown : nil }
         .frame(maxWidth: .infinity)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { stageWidth = $0 }
-        .clipShape(shape)
-        .overlay {
-            shape.strokeBorder(.white.opacity(0.1))
-        }
-        .overlay(alignment: .bottom) {
-            HStack(spacing: 10) {
-                // Which page's board the stage edits (the top bar is every page's).
-                if mode != .topBar {
-                    StudioPageBar {
-                        selection = nil
-                        group = []
-                    }
-                }
-                if mode == .topBar, !hidesTopBarHint {
-                    // On glass, as the notices are; its cross closes it for good.
-                    HStack(spacing: 8) {
-                        Text("Drag and drop icons to edit")
-                            .font(.callout.weight(.medium))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                        Button {
-                            withAnimation(.easeOut(duration: 0.2)) { hidesTopBarHint = true }
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.85))
-                                .frame(width: 18, height: 18)
-                                .background(.white.opacity(0.16), in: .circle)
-                                .contentShape(.circle)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Hide this")
-                        .accessibilityLabel("Hide the hint")
-                    }
-                    .padding(.leading, 12)
-                    .padding(.trailing, 5)
-                    .frame(minHeight: controlHeight)
-                    .glassEffect(.regular, in: .capsule)
-                    .layoutPriority(-1)
-                    .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .leading)))
-                }
-                // What went wrong, for a moment (no room, a widget set aside): nothing otherwise.
-                if let notice {
-                    Label(notice, systemImage: "exclamationmark.triangle.fill")
-                        .font(.callout.weight(.medium))
-                        .foregroundStyle(.orange)
-                        .lineLimit(1)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: controlHeight)
-                        .glassEffect(.regular, in: .capsule)
-                        .layoutPriority(-1)
-                }
-                Spacer(minLength: 0)
-                // What the stage edits: the widgets, the top bar, or the panel's size and grid.
-                Picker("Edit", selection: Binding(get: { model.studio.pendingMode ?? model.studio.mode },
-                                                  set: { model.studio.switchMode(to: $0) })) {
-                    ForEach(WidgetStudio.Mode.allCases) { Text($0.title).tag($0) }
-                }
-                .choiceBar()
-                .labelsHidden()
-                .fixedSize()
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlHeight = $0 }
-                .help("What the stage edits")
-            }
-            .padding(Self.controlInset)
-            .environment(\.colorScheme, .dark)
-        }
         .modifier(StagePlace())
     }
 }
@@ -728,6 +765,177 @@ private struct StageDrawnHeight: ViewModifier {
 
     func body(content: Content) -> some View {
         content.frame(height: model.studio.stageShown ?? own)
+    }
+}
+
+/// Size mode's ready-made sizes, over the Size cards (`ReadyMadeAnchors`).
+private struct ReadyMadeOverlay: View {
+    let anchors: [ReadyMadeAnchors.Part: Anchor<CGRect>]
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        GeometryReader { proxy in
+            if model.studio.mode == .size, let area = anchors[.area], let button = anchors[.button] {
+                ReadyMadeBox(button: proxy[button], area: proxy[area])
+            }
+        }
+    }
+}
+
+/// What lies under the stage, each in a layer of its own (the gallery, the inspector, Size's and Top
+/// Bar's content, the shelf's card): faded out and in on the render server as the stage's mode
+/// switches (`WidgetStudio.switchMode`), with nothing drawn by the app at any frame of it.
+@MainActor enum DeckFade {
+    private final class Weak { weak var view: NSView?; init(_ view: NSView) { self.view = view } }
+    private static var views: [Weak] = []
+    private static let key = "deckFade"
+
+    static func register(_ view: NSView) {
+        views.removeAll { $0.view == nil || $0.view === view }
+        views.append(Weak(view))
+    }
+
+    static func fade(out: Bool, duration: TimeInterval) {
+        for view in views.compactMap(\.view) {
+            guard let layer = view.layer else { continue }
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = layer.animation(forKey: key) != nil ? layer.presentation()?.opacity : (out ? layer.opacity : 0)
+            fade.toValue = out ? 0 : layer.opacity
+            fade.duration = duration
+            fade.timingFunction = CAMediaTimingFunction(name: out ? .easeIn : .easeOut)
+            // Out: held there until it comes back in.
+            fade.fillMode = .forwards
+            fade.isRemovedOnCompletion = !out
+            layer.add(fade, forKey: key)
+        }
+    }
+}
+
+/// The picked widget's inspector, in a layer of its own (`MeasuredHosting`): it comes up a little
+/// into place and fades in on the render server as a widget is picked.
+@MainActor enum InspectorLayer {
+    private(set) static weak var view: NSView?
+
+    static func made(_ view: NSView) {
+        self.view = view
+        DeckFade.register(view)
+    }
+
+    static func rise(_ view: NSView) {
+        guard let layer = view.layer, view.window != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0
+        fade.toValue = 1
+        fade.duration = 0.22
+        fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(fade, forKey: "inspectorFade")
+        let rise = CASpringAnimation(keyPath: "sublayerTransform.translation.y")
+        let flipped = layer.isGeometryFlipped || layer.contentsAreFlipped()
+        rise.fromValue = flipped ? 28 : -28
+        rise.toValue = 0
+        rise.mass = 1
+        rise.stiffness = 240
+        rise.damping = 26
+        rise.duration = rise.settlingDuration
+        layer.add(rise, forKey: "inspectorRise")
+    }
+
+    /// `change` made at once, the inspector as it was drawn fading out over it: its controls come,
+    /// go and move with no layout at every frame. The picture is taken of what is on screen of it.
+    static func crossfade(_ change: () -> Void) {
+        guard let view, let layer = view.layer, view.window != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              case let seen = view.visibleRect, seen.width > 0, seen.height > 0,
+              let picture = view.bitmapImageRepForCachingDisplay(in: seen) else { return change() }
+        view.cacheDisplay(in: seen, to: picture)
+        let cover = CALayer()
+        cover.contents = picture.cgImage
+        cover.contentsGravity = .resize
+        // A view's own layer lays its sublayers out in the view's coordinates (AppKit flips its
+        // geometry with the view's).
+        cover.frame = seen
+        cover.zPosition = 1000
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.addSublayer(cover)
+        CATransaction.commit()
+        change()
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { cover.removeFromSuperlayer() }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 1
+        fade.toValue = 0
+        fade.duration = 0.24
+        fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        cover.opacity = 0
+        cover.add(fade, forKey: "crossfade")
+        CATransaction.commit()
+    }
+}
+
+/// The shelf's card under the stage, faded in as it appears and out as the shelf is left, on the
+/// render server: faded by SwiftUI, every frame of it worked out the Widgets page again (~11 ms).
+@MainActor enum ShelfCardFade {
+    private static weak var view: NSView?
+    private static let key = "shelfCardFade"
+
+    /// What is wrong with the card for the page shown, once things have settled (`demo/studiostress`).
+    static func problems(isShelf: Bool) -> [String] {
+        guard let view else { return ["no card"] }
+        var problems: [String] = []
+        let drawn = CGFloat(view.layer?.presentation()?.opacity ?? Float(view.alphaValue))
+        if abs(drawn - (isShelf ? 1 : 0)) > 0.01 { problems.append(String(format: "card drawn %.2f", drawn)) }
+        if abs(view.alphaValue - (isShelf ? 1 : 0)) > 0.01 { problems.append(String(format: "card alpha %.2f", view.alphaValue)) }
+        if isShelf != (view.frame.height > 2) { problems.append(String(format: "card height %.0f", view.frame.height)) }
+        return problems
+    }
+
+    /// For `demo/studiostate`.
+    static var describe: String {
+        guard let view else { return "card none" }
+        return String(format: "card alpha %.2f shown %.2f height %.0f", view.alphaValue, view.layer?.presentation()?.opacity ?? -1, view.frame.height)
+    }
+
+    static func made(_ view: NSView, isShown: Bool) {
+        self.view = view
+        view.wantsLayer = true
+        view.alphaValue = isShown ? 1 : 0
+    }
+
+    /// In (the shelf's page shown) or out, from where it is drawn now.
+    static func fade(out: Bool, duration: TimeInterval) {
+        guard let view, let layer = view.layer else { return }
+        let from = layer.presentation()?.opacity ?? layer.opacity
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        view.alphaValue = out ? 0 : 1
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = from
+        fade.toValue = out ? 0 : 1
+        fade.duration = duration
+        fade.timingFunction = CAMediaTimingFunction(name: out ? .easeIn : .easeOut)
+        layer.add(fade, forKey: key)
+        CATransaction.commit()
+    }
+}
+
+/// The boards on the stage: the shown page's, and while it comes, the one going.
+enum StageBoards {
+    static func pages(current: ExpandedPage, outgoing: ExpandedPage?) -> [ExpandedPage] {
+        guard let outgoing, outgoing != current else { return [current] }
+        return [outgoing, current]
+    }
+}
+
+/// A board on the stage, going or coming as the page switches (`WidgetStudio.boardBlend`). A view of
+/// its own: read in `StageIsland`, every frame of the fade worked out the whole island again.
+private struct BoardBlend: ViewModifier {
+    let isOutgoing: Bool
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        let studio = model.studio
+        let blend = studio.outgoingPage == nil ? 1 : studio.boardBlend
+        content.opacity(isOutgoing ? studio.outgoingFrom * (1 - blend) : blend)
     }
 }
 
@@ -746,6 +954,11 @@ private struct TopBarSlot: View {
     /// The page's room less the stage: the viewport without the insets and the gap.
     let room: CGFloat
     let isShown: Bool
+
+    struct Input: Equatable {
+        let room: CGFloat
+        let isShown: Bool
+    }
 
     @Environment(AppModel.self) private var model
     @State private var kept = Kept()
@@ -786,38 +999,129 @@ private struct UnderStage: ViewModifier {
 /// over them asked for again (80–165 ms a frame as the stage folded back, measured).
 @MainActor enum GalleryGlide {
     static weak var view: NSView?
-    private static let key = "stageUnfold"
+    private static let key = "galleryGlide"
+    /// Down for the shelf's card or a parked widget's tray, or back up.
+    static let pageSpring = Spring(duration: 0.4, bounce: 0.08)
+    /// The spring of the next move only (the stage's unfolding, `StudioStage`).
+    static var nextSpring: Spring? {
+        didSet { if nextSpring != nil { arm() } }
+    }
+    /// Until when a move of the gallery glides: only the moves a page switch or the stage's
+    /// unfolding makes. Any other (a mode's content shown, a widget picked or let go, the page laid
+    /// out) is where it lands at once, as before.
+    private(set) static var armedUntil: TimeInterval = 0
 
-    /// Drawn `distance` points lower than it now is (higher, if negative), at once.
-    static func hold(by distance: CGFloat) {
-        guard distance != 0, let layer = view?.layer else { return }
-        // Down the screen is down the layer when its geometry is flipped, up otherwise.
-        let flipped = layer.isGeometryFlipped || layer.contentsAreFlipped()
-        let drawn = layer.presentation()?.sublayerTransform ?? layer.sublayerTransform
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        layer.removeAnimation(forKey: key)
-        layer.sublayerTransform = CATransform3DTranslate(drawn, 0, flipped ? distance : -distance, 0)
-        CATransaction.commit()
+    static func arm(for seconds: TimeInterval = 0.4) {
+        armedUntil = ProcessInfo.processInfo.systemUptime + seconds
     }
 
-    /// Back to where it lies, along `spring`.
-    static func settle(_ spring: Spring) {
-        guard let layer = view?.layer, !CATransform3DIsIdentity(layer.sublayerTransform) else { return }
-        let from = layer.presentation()?.sublayerTransform ?? layer.sublayerTransform
+    /// What is wrong with the gallery once things have settled (`demo/studiostress`): drawn where it lies.
+    static var problems: [String] {
+        guard let layer = view?.layer else { return [] }
+        let shift = (layer.presentation() ?? layer).sublayerTransform.m42
+        return abs(shift) > 0.5 ? [String(format: "gallery shifted %.0f", shift)] : []
+    }
+
+    /// For `demo/studiostate`.
+    static var describe: String {
+        guard let view, let window = view.window else { return "gallery none" }
+        let drawn = view.layer?.presentation()?.sublayerTransform.m42 ?? 0
+        return String(format: "gallery y %.0f shift %.0f alpha %.2f", view.convert(view.bounds, to: nil).maxY - window.frame.height, drawn, view.alphaValue)
+    }
+
+    /// Drawn `distance` points lower than where it now lies (higher, if negative) — on top of any
+    /// glide still going — and gliding from there into place, in the same commit as its move.
+    static func glide(_ view: NSView, by distance: CGFloat) {
+        guard let layer = view.layer else { return }
+        let spring = nextSpring ?? pageSpring
+        nextSpring = nil
+        // Down the screen is down the layer when its geometry is flipped, up otherwise.
+        let flipped = layer.isGeometryFlipped || layer.contentsAreFlipped()
+        // Where it is drawn now, down the screen from where it lies: as the render server shows it,
+        // or — another move in this same turn — where the last glide set out from (the server has
+        // not seen that one yet: two opposite moves of one layout cancel out).
+        let now = CACurrentMediaTime()
+        let shown = layer.presentation()?.sublayerTransform.m42 ?? layer.sublayerTransform.m42
+        let drawn = now - lastGlide.at < 0.004 ? lastGlide.from : (flipped ? shown : -shown)
+        let from = drawn + distance
+        lastGlide = (from, now)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.removeAnimation(forKey: key)
         layer.sublayerTransform = CATransform3DIdentity
-        let animation = CASpringAnimation(keyPath: "sublayerTransform")
-        animation.mass = spring.mass
-        animation.stiffness = spring.stiffness
-        animation.damping = spring.damping
-        animation.duration = animation.settlingDuration
-        animation.fromValue = NSValue(caTransform3D: from)
-        animation.toValue = NSValue(caTransform3D: CATransform3DIdentity)
-        layer.add(animation, forKey: key)
+        if abs(from) > 0.5 {
+            let animation = CASpringAnimation(keyPath: "sublayerTransform")
+            animation.mass = spring.mass
+            animation.stiffness = spring.stiffness
+            animation.damping = spring.damping
+            animation.duration = animation.settlingDuration
+            animation.fromValue = NSValue(caTransform3D: CATransform3DMakeTranslation(0, flipped ? from : -from, 0))
+            animation.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+            layer.add(animation, forKey: key)
+        }
         CATransaction.commit()
+    }
+
+    /// The last glide: how far down the screen it set out from, and when.
+    private static var lastGlide: (from: CGFloat, at: CFTimeInterval) = (0, 0)
+}
+
+/// The stage unfolding into Size mode's room, and folding back (`StudioStage`).
+enum StudioStageSpring {
+    static let unfold = Spring(duration: 0.55, bounce: 0.12)
+}
+
+/// The gallery's host: moved in the page (the shelf's card above it coming or going, a parked
+/// widget's tray, the stage folding back), it glides to its new place on the render server from
+/// where it was drawn — the moment its frame changes, so the glide and the move are one commit.
+/// Started from SwiftUI's report of the move, the glide sometimes ran a turn before the view
+/// moved: it glided where it was and then jumped (quick page switches, recorded).
+final class GlidingHostingView: DeferringHostingView<AnyView> {
+    /// SwiftUI moves the views around this one, not this one: their moves are watched.
+    private var watched: [NSObjectProtocol] = []
+    /// Where it lay in the page's content (`place`), last seen.
+    private var lastPlace: CGFloat?
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        watched.forEach(NotificationCenter.default.removeObserver)
+        watched = []
+        lastPlace = nil
+        var ancestor = superview
+        for _ in 0..<3 {
+            guard let view = ancestor else { break }
+            view.postsFrameChangedNotifications = true
+            watched.append(NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: view,
+                                                                  queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.followPlace() }
+            })
+            ancestor = view.superview
+        }
+    }
+
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        super.setFrameOrigin(newOrigin)
+        followPlace()
+    }
+
+    /// Its top in the scrolled content (down the page: larger), whatever is scrolled.
+    private var place: CGFloat? {
+        guard let reference = enclosingScrollView?.documentView ?? window?.contentView else { return nil }
+        let rect = convert(bounds, to: reference)
+        return reference.isFlipped ? rect.minY : reference.bounds.height - rect.maxY
+    }
+
+    private func followPlace() {
+        guard let now = place else { return }
+        defer { lastPlace = now }
+        guard let last = lastPlace else { return }
+        let down = now - last
+        guard abs(down) > 0.5, ProcessInfo.processInfo.systemUptime < GalleryGlide.armedUntil,
+              bounds.width > 0, let window, window.isVisible, !isHiddenOrHasHiddenAncestor,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        PerfTrace.mark(String(format: "gallery glides %.0f", down))
+        // Drawn where it was (that much higher), then gliding down into place — or up.
+        GalleryGlide.glide(self, by: -down)
     }
 }
 
@@ -869,23 +1173,29 @@ private struct StageIsland: View {
                             .frame(width: layout.notch.width, height: layout.notch.height)
                     }
                 ZStack {
-                    if model.studio.page == .shelf, mode == .widgets {
-                        // The shelf has no widgets: as it is while empty.
-                        IslandEmptyState(title: "Drop Files Here", systemImage: "tray.and.arrow.down",
-                                         message: "Files you drop on the notch wait here until you drag them out.")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .transition(.opacity)
-                    } else {
-                        BoardEditor(selection: $selection, group: $group, showsGrid: mode == .size)
-                            // Only the Widgets mode arranges them.
-                            .allowsHitTesting(mode == .widgets)
-                            // Another page: its board fades in over the one left (opacity alone, on
-                            // the board built once).
-                            .id(model.studio.page == .shelf ? .home : model.studio.page)
-                            .transition(.opacity)
+                    // The page's board — and, as another page's comes, the one going, faded into
+                    // each other (`WidgetStudio.switchPage`): the going one kept as it was built.
+                    let current = model.studio.page
+                    ForEach(StageBoards.pages(current: current, outgoing: model.studio.outgoingPage), id: \.self) { shown in
+                        let isCurrent = shown == current
+                        Group {
+                            if shown == .shelf, mode == .widgets {
+                                // The shelf has no widgets: as it is while empty.
+                                IslandEmptyState(title: "Drop Files Here", systemImage: "tray.and.arrow.down",
+                                                 message: "Files you drop on the notch wait here until you drag them out.")
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            } else {
+                                BoardEditor(selection: isCurrent ? $selection : .constant(nil),
+                                            group: isCurrent ? $group : .constant([]),
+                                            showsGrid: mode == .size,
+                                            store: isCurrent ? nil : model.boards.store(for: shown == .shelf ? .home : shown))
+                            }
+                        }
+                        // Only the Widgets mode arranges them, and only the shown page's.
+                        .allowsHitTesting(mode == .widgets && isCurrent)
+                        .modifier(BoardBlend(isOutgoing: !isCurrent))
                     }
                 }
-                    .animation(.easeOut(duration: 0.22), value: model.studio.page)
                     .opacity(mode == .topBar ? 0.4 : 1)
                     .padding(layout.boardInset)
                     .padding(.top, Metrics.Expanded.pageTopInset)
@@ -924,6 +1234,8 @@ private struct GroupInspector: View {
 
     @Environment(AppModel.self) private var model
     @State private var isMixing = false
+    @State private var pendingBackground: WidgetBackground?
+    @State private var backgroundSlide = GlassSlide()
 
     var body: some View {
         let widgets = model.editedWidgets.board.widgets.filter { ids.contains($0.id) }
@@ -961,10 +1273,17 @@ private struct GroupInspector: View {
             }
             StudioCard("Background", subtitle: "Applies to every picked widget.") {
                 Picker("Background", selection: Binding(
-                    get: { backgrounds.count == 1 ? backgrounds.first : nil },
+                    get: { pendingBackground ?? (backgrounds.count == 1 ? backgrounds.first : nil) },
                     set: { (new: WidgetBackground?) in
                         guard let new else { return }
-                        withAnimation(.spring(duration: 0.4, bounce: 0.18)) { apply { $0.background = new } }
+                        // As the single widget's (`WidgetInspector`): once the glass has slid there.
+                        pendingBackground = new
+                        backgroundSlide.afterSettling {
+                            InspectorLayer.crossfade {
+                                apply { $0.background = new }
+                                pendingBackground = nil
+                            }
+                        }
                     }
                 )) {
                     ForEach(WidgetBackground.allCases) { Text($0.title).tag(Optional($0)) }
@@ -1006,6 +1325,9 @@ private struct WidgetInspector: View {
     @State private var width: CGFloat = 0
     /// The colour mixer open under the Colour background's settings.
     @State private var isMixing = false
+    /// The background picked, until its bar's glass has slid there.
+    @State private var pendingBackground: WidgetBackground?
+    @State private var backgroundSlide = GlassSlide()
 
     static let inset: CGFloat = 20
     static let spacing: CGFloat = 10
@@ -1018,8 +1340,16 @@ private struct WidgetInspector: View {
                 header(widget)
                 VStack(alignment: .leading, spacing: 18) {
                     section("Background") {
-                        Picker("Background", selection: Binding(get: { widget.background }, set: { background in
-                            withAnimation(.spring(duration: 0.4, bounce: 0.18)) { model.editedWidgets.update(id) { $0.background = background } }
+                        // Shown at once; set once the bar's glass has slid there (`GlassSlide`), the
+                        // inspector's new rows crossfaded in on the render server (`InspectorLayer`).
+                        Picker("Background", selection: Binding(get: { pendingBackground ?? widget.background }, set: { background in
+                            pendingBackground = background
+                            backgroundSlide.afterSettling {
+                                InspectorLayer.crossfade {
+                                    model.editedWidgets.update(id) { $0.background = background }
+                                    pendingBackground = nil
+                                }
+                            }
                         })) {
                             ForEach(WidgetBackground.allCases) { Text($0.title).tag($0) }
                         }
@@ -1295,6 +1625,10 @@ private struct WidgetStoreView: View {
 
     @Environment(AppModel.self) private var model
     @State private var category: WidgetCategory?
+    /// The category the cards show: the picked one, once its bar's glass has slid there
+    /// (`GalleryCards.Switch`).
+    @State private var shownCategory: WidgetCategory?
+    @State private var cardsSwitch = GalleryCards.Switch()
     @State private var search = ""
 
     /// The search field's width, at the row's right end.
@@ -1311,7 +1645,7 @@ private struct WidgetStoreView: View {
 
     var body: some View {
         let offered = IslandWidgetKind.allCases.filter(\.isOffered)
-        let kinds = offered.filter { kind in (category == nil || kind.category == category) && matches(kind) }
+        let kinds = offered.filter { kind in (shownCategory == nil || kind.category == shownCategory) && matches(kind) }
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("All Widgets").font(.title3.weight(.semibold))
@@ -1341,63 +1675,184 @@ private struct WidgetStoreView: View {
                 var quiet = Transaction()
                 quiet.disablesAnimations = true
                 withTransaction(quiet) {
+                    cardsSwitch.cancel()
                     category = nil
+                    shownCategory = nil
                     search = ""
                 }
             })
+            .onChange(of: category) { _, picked in
+                guard picked != shownCategory || cardsSwitch.isRunning else { return }
+                cardsSwitch.start {
+                    // Back to the one shown before it went: nothing to lay out, only to fade in.
+                    guard shownCategory != picked else { return cardsSwitch.fadeIn() }
+                    var instant = Transaction()
+                    instant.disablesAnimations = true
+                    withTransaction(instant) { shownCategory = picked }
+                }
+            }
 
             if kinds.isEmpty {
                 ContentUnavailableView.search(text: search)
                     .frame(maxWidth: .infinity, minHeight: 140)
             }
-            // One group per category, each kept whichever is picked: a category picked folds the
-            // others away (their cards and previews stay built), so it is there at once and All
-            // comes back at once — only what a search leaves out is taken away.
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(WidgetCategory.allCases) { group in
-                    let inGroup = group.kinds.filter { $0.isOffered && matches($0) }
-                    let folded = inGroup.isEmpty || (category != nil && category != group)
-                    VStack(alignment: .leading, spacing: 8) {
-                        // Its name over it among all the others; alone, the bar says which it is.
-                        if category == nil, search.isEmpty {
-                            Label(group.title, systemImage: group.systemImage)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(SettingsPalette.secondary)
-                        }
-                        grid(inGroup, board: board)
-                    }
-                    .padding(.top, category == nil && search.isEmpty ? 18 : 14)
-                    .opacity(folded ? 0 : 1)
-                    .animation(.easeOut(duration: 0.22), value: folded)
-                    .frame(height: folded ? 0 : nil, alignment: .top)
-                    .clipped()
-                    .allowsHitTesting(!folded)
-                    .accessibilityHidden(folded)
-                }
+            // The cards in a layer of their own: another category is crossfaded on the render
+            // server (`GalleryCards.crossfade`), the cards laid out once. Folded and unfolded by
+            // SwiftUI, the groups slid in from below over several uneven frames (asked about).
+            MeasuredHosting(input: GalleryCards.Input(board: board, category: shownCategory, search: search),
+                            made: { cardsSwitch.view = $0 },
+                            changing: { old, new, view in
+                                if old.category != new.category { cardsSwitch.fadeIn() }
+                            }) { input in
+                GalleryCards(input: input, add: add, open: open)
+                    .environment(model)
+                    .environment(\.colorScheme, .dark)
+                    .environment(\.appearsActive, true)
+                    .toggleStyle(.islandSwitch)
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
             }
             .padding(.top, -14)
         }
     }
+}
 
-    private func grid(_ kinds: [IslandWidgetKind], board: WidgetBoard) -> some View {
-        GalleryGrid(minimum: 200, maximum: 300, spacing: 12) {
-            ForEach(kinds) { kind in
-                GalleryCard(kind: kind, grid: board.grid,
-                            isAdded: board.contains(kind),
-                            add: { add(kind) }, open: { open(kind) })
+/// The gallery's cards, one group per category, each kept whichever is picked: a category picked
+/// folds the others away (their cards and previews stay built), so it is there at once and All
+/// comes back at once — only what a search leaves out is taken away.
+private struct GalleryCards: View {
+    struct Input: Equatable {
+        let board: WidgetBoard
+        let category: WidgetCategory?
+        let search: String
+    }
+
+    let input: Input
+    let add: (IslandWidgetKind) -> Void
+    let open: (IslandWidgetKind) -> Void
+
+    private func matches(_ kind: IslandWidgetKind) -> Bool {
+        input.search.isEmpty || kind.title.localizedStandardContains(input.search) || kind.summary.localizedStandardContains(input.search)
+    }
+
+    var body: some View {
+        let category = input.category
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(WidgetCategory.allCases) { group in
+                let inGroup = group.kinds.filter { $0.isOffered && matches($0) }
+                let folded = inGroup.isEmpty || (category != nil && category != group)
+                VStack(alignment: .leading, spacing: 8) {
+                    // Its name over it among all the others; alone, the bar says which it is.
+                    if category == nil, input.search.isEmpty {
+                        Label(group.title, systemImage: group.systemImage)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(SettingsPalette.secondary)
+                    }
+                    grid(inGroup)
+                }
+                .padding(.top, category == nil && input.search.isEmpty ? 18 : 14)
+                .opacity(folded ? 0 : 1)
+                .frame(height: folded ? 0 : nil, alignment: .top)
+                .clipped()
+                .allowsHitTesting(!folded)
+                .accessibilityHidden(folded)
             }
         }
+    }
+
+    private func grid(_ kinds: [IslandWidgetKind]) -> some View {
+        GalleryGrid(minimum: 200, maximum: 300, spacing: 12) {
+            ForEach(kinds) { kind in
+                GalleryCard(kind: kind, grid: input.board.grid,
+                            isAdded: input.board.contains(kind),
+                            add: { add(kind) }, open: { open(kind) })
+                    // Another page's board: only the cards whose Add or Edit changes are worked
+                    // out again. Its new closures alone had all 55 (and their buttons) updated,
+                    // half of the ~80 ms a page switch stopped the page bar's slide for.
+                    .equatable()
+            }
+        }
+    }
+
+    /// Another category, without a stutter and on the render server. The category bar's glass
+    /// slides on the main thread, and laying out the other cards (~50–80 ms) stopped it;
+    /// a crossfade from the old cards to the new (`CATransition`) drew the old ones from the
+    /// wrong end once the gallery's height changed. So: the cards fade out while the glass slides,
+    /// the other category is laid out while none are seen, and its cards fade in, coming up a
+    /// little into place.
+    @MainActor final class Switch {
+        weak var view: NSView?
+        private let slide = GlassSlide()
+        var isRunning: Bool { slide.isWaiting }
+
+        func start(_ land: @escaping @MainActor () -> Void) {
+            slide.cancel()
+            guard let layer = view?.layer, view?.window != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+                land()
+                return
+            }
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = layer.presentation()?.opacity ?? 1
+            fade.toValue = 0
+            fade.duration = Self.fadeOut
+            fade.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            fade.fillMode = .forwards
+            fade.isRemovedOnCompletion = false
+            layer.removeAnimation(forKey: Self.riseKey)
+            layer.add(fade, forKey: Self.fadeKey)
+            // Laid out once the category bar's glass has slid to its segment (`GlassSlide`).
+            slide.afterSettling(minimum: Self.fadeOut, land)
+        }
+
+        /// The new cards in: called as they are handed to their graph, so it starts in the commit
+        /// they are drawn in.
+        func fadeIn() {
+            guard let layer = view?.layer else { return }
+            guard layer.animation(forKey: Self.fadeKey) != nil else { return }
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 0
+            fade.toValue = 1
+            fade.duration = 0.24
+            fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            layer.add(fade, forKey: Self.fadeKey)
+            let rise = CASpringAnimation(keyPath: "sublayerTransform.translation.y")
+            let flipped = layer.isGeometryFlipped || layer.contentsAreFlipped()
+            rise.fromValue = flipped ? 12 : -12
+            rise.toValue = 0
+            rise.mass = 1
+            rise.stiffness = 220
+            rise.damping = 28
+            rise.duration = rise.settlingDuration
+            layer.add(rise, forKey: Self.riseKey)
+        }
+
+        func cancel() {
+            slide.cancel()
+            view?.layer?.removeAnimation(forKey: Self.fadeKey)
+            view?.layer?.removeAnimation(forKey: Self.riseKey)
+        }
+
+        private static let fadeKey = "categoryFade"
+        private static let riseKey = "categoryRise"
+        /// The fade out, as the page bar's (`WidgetStudio.switchPage`).
+        private static let fadeOut: TimeInterval = 0.14
     }
 }
 
 /// A widget in the gallery, on one even card (no bands or seams): its live preview in a dark
 /// rounded well, then its icon, name and the quiet Add / Edit, and two lines on what it shows.
-private struct GalleryCard: View {
+private struct GalleryCard: View, Equatable {
     let kind: IslandWidgetKind
     let grid: BoardGrid
     let isAdded: Bool
+    /// What it calls goes on through the gallery's coordinator (`GalleryHost`), whichever page
+    /// the card was last worked out for: they are left out of its equality.
     let add: () -> Void
     let open: () -> Void
+
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.kind == b.kind && a.grid == b.grid && a.isAdded == b.isAdded
+    }
 
     @Environment(AppModel.self) private var model
     @State private var isHovered = false
@@ -1607,6 +2062,9 @@ struct NativeSearchField: NSViewRepresentable {
         field.sendsSearchStringImmediately = true
         field.delegate = context.coordinator
         field.controlSize = .large
+        // No blue ring while typing: drawn outside the field, it stood out past the gallery's
+        // right edge and was cut there (asked for).
+        field.focusRingType = .none
         return field
     }
 
@@ -1629,3 +2087,4 @@ struct NativeSearchField: NSViewRepresentable {
         }
     }
 }
+

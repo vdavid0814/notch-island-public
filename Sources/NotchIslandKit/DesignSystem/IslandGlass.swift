@@ -74,6 +74,14 @@ nonisolated enum IslandGlassStyle: String, Sendable, CaseIterable, Identifiable,
 
     /// The black under the glass at the slider's tinted end.
     static let fullTint = 0.5
+    /// Black added under Liquid Glass in Light Mode: a bright wallpaper showed straight through
+    /// the clear glass (asked for: 20 %).
+    static let lightModeTint = 0.2
+
+    /// The black under Liquid Glass: the system slider's share, and in Light Mode a little more.
+    static func plainTint(isDark: Bool) -> Double {
+        min(fullTint * systemTint + (isDark ? 0 : lightModeTint), 1)
+    }
 
     /// The shoulders beside the glass body, which no glass is drawn in: nothing beside plain
     /// glass, black beside the Fade's black band.
@@ -127,7 +135,7 @@ private struct IslandGlassModifier<S: Shape>: ViewModifier {
             // Under the content, over the glass: black for the solid style. Liquid Glass: nothing
             // at the clear end of the system's Liquid Glass slider, and an even black, without a
             // colour, towards its tinted end (`IslandGlassStyle.systemTint`). Fade: nothing.
-            .background(Color.black.opacity(isSolid ? 1 : isPlain ? IslandGlassStyle.fullTint * IslandGlassStyle.systemTint : 0), in: shape)
+            .background(Color.black.opacity(isSolid ? 1 : isPlain ? IslandGlassStyle.plainTint(isDark: SystemAppearance.shared.glassIsDark) : 0), in: shape)
             // Liquid Glass: the glass's own white veil taken back out (`IslandGlassStyle.glassVeil`):
             // first the white it added is subtracted, then what is left is brought back to full
             // strength. Black and white come out as they went in (measured over the test pattern:

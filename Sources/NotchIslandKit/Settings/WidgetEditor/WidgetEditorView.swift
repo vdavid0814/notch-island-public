@@ -24,6 +24,9 @@ struct BoardEditor: View {
     var onEdit: ((WidgetID) -> Void)?
     /// Every cell drawn, the widgets faint over them (Settings ▸ Widgets ▸ Size).
     var showsGrid = false
+    /// The board edited: the studio's page's unless given (a page's board going while another
+    /// comes, `StageIsland`).
+    var store: WidgetStore?
 
     @Environment(AppModel.self) private var model
     /// A drag in progress: where the widget is under the pointer, and the cells it will land on.
@@ -36,14 +39,16 @@ struct BoardEditor: View {
 
     private static let settle: Animation = .spring(duration: 0.32, bounce: 0.18)
 
+    private var edited: WidgetStore { store ?? model.editedWidgets }
+
     var body: some View {
         GeometryReader { proxy in
             // While the panel is being sized (`StudioDraft`): the board on the draft's grid, each
             // widget on its cells — never the old grid stretched to the new size.
-            let board = model.studio.draft.map { $0.board(model.editedWidgets.board) } ?? model.editedWidgets.board
+            let board = model.studio.draft.map { $0.board(edited.board) } ?? edited.board
             let geometry = WidgetBoardGeometry(size: proxy.size, grid: board.grid)
             ZStack(alignment: .topLeading) {
-                GridLayer(geometry: geometry, isEmphasized: interaction != nil || showsGrid,
+                GridLayer(geometry: geometry, isEmphasized: interaction != nil || showsGrid, isDragging: interaction != nil,
                           occupied: showsGrid ? [] : board.widgets.filter { $0.id != interaction?.id }.map(\.frame))
                     .contentShape(.rect)
                     .onTapGesture {
@@ -88,7 +93,7 @@ struct BoardEditor: View {
         .onDeleteCommand {
             let doomed = group.wrappedValue.isEmpty ? Set([selection].compactMap { $0 }) : group.wrappedValue
             guard !doomed.isEmpty else { return }
-            withAnimation(Self.settle) { doomed.forEach { model.editedWidgets.remove($0) } }
+            withAnimation(Self.settle) { doomed.forEach { edited.remove($0) } }
             selection = nil
             group.wrappedValue = []
         }
@@ -206,20 +211,20 @@ struct BoardEditor: View {
     }
 
     private func update(_ interaction: inout DragSession<WidgetID, GridRect>, candidate: GridRect, kind: IslandWidgetKind) {
-        interaction.land(on: candidate, isValid: model.editedWidgets.board.isFree(candidate, for: kind, excluding: interaction.id))
+        interaction.land(on: candidate, isValid: edited.board.isFree(candidate, for: kind, excluding: interaction.id))
     }
 
     private func finish() {
         guard let current = interaction else { return }
         withAnimation(Self.settle) {
-            if current.isValid { model.editedWidgets.setFrame(current.candidate, for: current.id) }
+            if current.isValid { edited.setFrame(current.candidate, for: current.id) }
             interaction = nil
         }
     }
 
     /// Arrow keys move the selected widget one cell, when there is room.
     private func nudge(_ key: KeyEquivalent) -> Bool {
-        guard let selection, let widget = model.editedWidgets.board.widget(selection) else { return false }
+        guard let selection, let widget = edited.board.widget(selection) else { return false }
         var rect = widget.frame
         switch key {
         case .leftArrow: rect.column -= 1
@@ -229,7 +234,7 @@ struct BoardEditor: View {
         default: return false
         }
         var moved = false
-        withAnimation(Self.settle) { moved = model.editedWidgets.setFrame(rect, for: selection) }
+        withAnimation(Self.settle) { moved = edited.setFrame(rect, for: selection) }
         if !moved { NSSound.beep() }
         return true
     }
@@ -241,6 +246,10 @@ private enum BoardSpace { static let name = "widgetBoard" }
 private struct GridLayer: View {
     let geometry: WidgetBoardGeometry
     let isEmphasized: Bool
+    /// A drag brightens the grid gradually; Size mode's grid comes at once. Faded in with the
+    /// stage's mode, every frame of the fade drew the whole stage again on the main thread
+    /// (~10 ms a frame, measured), while the mode's content fades in on the render server.
+    let isDragging: Bool
     /// Cells under widgets are not drawn: the grid shows where there is room.
     let occupied: [GridRect]
 
@@ -259,7 +268,7 @@ private struct GridLayer: View {
             }
         }
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
-        .animation(.easeOut(duration: 0.15), value: isEmphasized)
+        .animation(.easeOut(duration: 0.15), value: isDragging)
     }
 }
 

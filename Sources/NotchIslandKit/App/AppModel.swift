@@ -41,6 +41,8 @@ import Observation
     let widgets = WidgetStore()
     /// Every page's board, home's among them.
     @ObservationIgnored private(set) var boards: WidgetPages!
+    /// Widgets on the black in Light Mode with Liquid Glass (`LightGlassBackdrop`).
+    @ObservationIgnored private var lightBackdrop: LightGlassBackdrop!
     let studio = WidgetStudio()
     let fullscreen = FullscreenMonitor()
     let assistant = AssistantModel()
@@ -132,7 +134,7 @@ import Observation
             let store = boards.store(for: page)
             store.load(style.boards[page.rawValue] ?? WidgetBoard(widgets: [], grid: style.panel.grid))
         }
-        if !preferences.header.orderedPages.contains(studio.page) { studio.page = .home }
+        if !preferences.header.orderedPages.contains(studio.pendingPage ?? studio.page) { studio.showPage(.home) }
         if !preferences.header.orderedPages.contains(island.page) { island.page = .home }
     }
 
@@ -153,9 +155,10 @@ import Observation
 
     /// A new page of the user's, an empty board, at the picker's end; nil at the limit.
     @discardableResult
-    func addPage() -> ExpandedPage? {
+    func addPage(title: String? = nil, symbol: String = CustomPage.defaultSymbol) -> ExpandedPage? {
         var header = preferences.header
-        guard let page = header.addCustomPage(title: header.nextCustomTitle) else { return nil }
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let page = header.addCustomPage(title: trimmed.isEmpty ? header.nextCustomTitle : trimmed, symbol: symbol) else { return nil }
         preferences.header = header
         _ = boards.store(for: page)
         return page
@@ -165,7 +168,7 @@ import Observation
     func removePage(_ page: ExpandedPage) {
         guard page.isCustom else { return }
         preferences.header.removeCustomPage(page)
-        if studio.page == page { studio.page = .home }
+        if studio.page == page || studio.pendingPage == page { studio.showPage(.home) }
         if island.page == page { island.page = .home }
         boards.sync(preferences.header.orderedPages)
     }
@@ -345,6 +348,8 @@ import Observation
         power.start()
         airPods.start()
         shelf.pruneMissingInBackground()
+        lightBackdrop = LightGlassBackdrop(model: self)
+        lightBackdrop.start()
 
         // The window controller must exist before the island controller applies its first
         // presentation, because it stages the panel in `willTransition`.
@@ -531,7 +536,7 @@ import Observation
 
     /// Settings ▸ Widgets, with the widget's editor open (nil: the page alone).
     func editWidget(_ id: WidgetID?) {
-        if let page = id.flatMap(boards.page(containing:)) { studio.page = page }
+        if let page = id.flatMap(boards.page(containing:)) { studio.showPage(page) }
         editingWidget = id
         settingsPane = .widgets
         showSettings()

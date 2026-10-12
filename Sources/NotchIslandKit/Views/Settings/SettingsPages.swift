@@ -18,15 +18,6 @@ struct GeneralSettingsPage: View {
         @Bindable var launchAtLogin = model.launchAtLogin
         Form {
             Section {
-                Label("NotchIsland is still in beta. If some gestures don't work, check in About that its permissions are allowed.",
-                      systemImage: "exclamationmark.triangle.fill")
-                Label("Once they are, quit NotchIsland and open it again from Applications with Spotlight.",
-                      systemImage: "arrow.clockwise")
-            }
-            .font(.callout)
-            .foregroundStyle(SettingsPalette.secondary)
-
-            Section {
                 SurfacePicker(selection: $preferences.glassStyle, scale: preferences.scale, desktop: previewWallpaper)
                 if model.activity.isLowPowerMode {
                     Label("Low Power Mode is on: the island is drawn plain black to save battery.",
@@ -603,16 +594,13 @@ private struct SpotlightChoiceLabel: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            SettingsTile(systemImage: "magnifyingglass", tint: .purple, side: 28)
-            VStack(alignment: .leading, spacing: 2) {
-                InfoLabel(title, "Needs Accessibility and Input Monitoring, which let NotchIsland see the shortcut before the system does (About ▸ Permissions).")
-                    .font(.headline)
-                Text(summary)
-                    .font(.subheadline)
-                    .foregroundStyle(SettingsPalette.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        VStack(alignment: .leading, spacing: 2) {
+            InfoLabel(title, "Needs Accessibility and Input Monitoring, which let NotchIsland see the shortcut before the system does (About ▸ Permissions).")
+                .font(.headline)
+            Text(summary)
+                .font(.subheadline)
+                .foregroundStyle(SettingsPalette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 2)
     }

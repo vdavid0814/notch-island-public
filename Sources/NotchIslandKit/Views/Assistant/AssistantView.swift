@@ -38,16 +38,14 @@ struct AssistantView: View {
             layout: layout, presentation: .assistant(.gallery),
             outerInset: Metrics.Expanded.horizontalInset, clearance: Metrics.notchClearance
         ).contentInset
-        let below: BelowField = assistant.answer != nil ? .answer : isGallery ? .gallery : .rows
+        let below: BelowField = assistant.answer != nil ? .answer : isGallery ? .gallery : assistant.showsQuickPicks ? .picks : .rows
         // Below the field nothing shows while the island is only the field (the rows would peek
         // out under it); they fade in with the island's growth.
         let showsBelowField: Bool = if case .assistant(.field) = model.island.presentation { false } else { true }
         VStack(spacing: 0) {
             NotchSplitBand(split: split, height: layout.notch.height) {
-                Image(systemName: "siri")
-                    .foregroundStyle(AssistantGlow.gradient)
-                    .imageScale(.large)
-                    .accessibilityLabel("Siri")
+                // The Spotlight mark is in the field now (asked for: not twice).
+                EmptyView()
             } trailing: {
                 EmptyView()
             }
@@ -60,6 +58,14 @@ struct AssistantView: View {
                     } else if isGallery {
                         AppGallery(assistant: assistant, plateRadius: layout.assistantGalleryPlateRadius)
                             .frame(width: galleryWidth)
+                    } else if below == .picks {
+                        // Each box's corners concentric with the panel's lower corners.
+                        QuickPicks(assistant: assistant,
+                                   radius: layout.bottomRadius(for: .assistant(.picks)) - IslandLayout.assistantPicksGap)
+                            .padding(.top, IslandLayout.assistantPicksGap - IslandLayout.assistantTopInset)
+                            // Out to 2 pt from the panel's sides, past the page's inset (its body starts
+                            // `outerInset` outside the content; the shoulders are beyond).
+                            .padding(.horizontal, IslandLayout.assistantPicksGap - split.outerInset)
                     } else {
                         RowsList(assistant: assistant,
                                  extraInset: layout.assistantRowInset - Metrics.Expanded.horizontalInset)
@@ -151,7 +157,7 @@ struct AssistantView: View {
     }
 
     /// What shows under the field.
-    private enum BelowField { case rows, gallery, answer }
+    private enum BelowField { case rows, gallery, answer, picks }
 
     /// The swap under the field: as short as the content's swap while the island moves.
     static let swap: Animation = .easeOut(duration: 0.18)
@@ -172,8 +178,11 @@ struct AssistantView: View {
                 if let category = assistant.category {
                     category.tile
                 } else {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
+                    // NotchIsland's Spotlight mark where the magnifier was, in the field's grey.
+                    SpotlightMark()
+                        .fill(.secondary)
+                        .frame(width: 17, height: 17)
+                        .accessibilityLabel("Spotlight")
                 }
                 // In Clipboard the field shows the copy the selection is on, as Spotlight does.
                 TextField(assistant.selectedClip?.preview ?? assistant.category?.title ?? String(localized: "Search or Ask"),
@@ -241,34 +250,111 @@ extension AssistantCategory {
     /// ⌘1–⌘8.
     var key: KeyEquivalent { KeyEquivalent(Character(String(rawValue))) }
 
-    var tile: some View {
+    /// The tile at another size (the quick picks').
+    func tile(side: CGFloat) -> some View {
+        AssistantTile(symbol: tileSymbol, color: tileColor, side: side)
+    }
+
+    private var tileSymbol: String {
         switch self {
-        case .applications: AssistantTile(symbol: "square.grid.2x2.fill", color: .blue)
-        case .files: AssistantTile(symbol: "folder.fill", color: .cyan)
-        case .actions: AssistantTile(symbol: "bolt.fill", color: .orange)
-        case .clipboard: AssistantTile(symbol: "list.clipboard.fill", color: .gray)
-        case .system: AssistantTile(symbol: "switch.2", color: .indigo)
-        case .windows: AssistantTile(symbol: "macwindow.on.rectangle", color: .purple)
-        case .emoji: AssistantTile(symbol: "face.smiling.inverse", color: .yellow)
-        case .people: AssistantTile(symbol: "person.2.fill", color: .green)
+        case .applications: "square.grid.2x2.fill"
+        case .files: "folder.fill"
+        case .actions: "bolt.fill"
+        case .clipboard: "list.clipboard.fill"
+        case .system: "switch.2"
+        case .windows: "macwindow.on.rectangle"
+        case .emoji: "face.smiling.inverse"
+        case .people: "person.2.fill"
         }
+    }
+
+    private var tileColor: Color {
+        switch self {
+        case .applications: .blue
+        case .files: .cyan
+        case .actions: .orange
+        case .clipboard: .gray
+        case .system: .indigo
+        case .windows: .purple
+        case .emoji: .yellow
+        case .people: .green
+        }
+    }
+
+    var tile: some View {
+        AssistantTile(symbol: tileSymbol, color: tileColor)
     }
 }
 
-/// A symbol on a small coloured tile, the size of an app icon in the list.
+/// A symbol on a small coloured tile, the size of an app icon in the list (larger in the quick
+/// picks, `side`).
 struct AssistantTile: View {
     let symbol: String
     let color: Color
+    var side: CGFloat = 22
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
+        RoundedRectangle(cornerRadius: side * 0.27, style: .continuous)
             .fill(color.gradient)
-            .frame(width: 22, height: 22)
+            .frame(width: side, height: side)
             .overlay {
                 Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: side * 0.5, weight: .semibold))
                     .foregroundStyle(.white)
             }
+    }
+}
+
+/// The pointer over Siri: Applications, Files, Actions and Clipboard as large icons side by side,
+/// each opening its list as its row in the suggestions would. Each in a box of the same size — the
+/// outer ones' sides on the field's, all of them as far above the panel's bottom as that, their
+/// corners concentric with the panel's — shown grey under the pointer.
+private struct QuickPicks: View {
+    let assistant: AssistantModel
+    let radius: CGFloat
+
+    var body: some View {
+        HStack(spacing: Self.spacing) {
+            ForEach(assistant.quickPicks, id: \.self) { category in
+                QuickPick(category: category, radius: radius) { assistant.open(category) }
+            }
+        }
+        .frame(height: IslandLayout.assistantPicksHeight)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    static let spacing: CGFloat = 4
+}
+
+private struct QuickPick: View {
+    let category: AssistantCategory
+    let radius: CGFloat
+    let open: () -> Void
+    @State private var isHovered = false
+
+    /// The icon as large as the box leaves it beside its caption.
+    static let icon: CGFloat = 60
+
+    var body: some View {
+        Button(action: open) {
+            VStack(spacing: 2) {
+                category.tile(side: Self.icon)
+                Text(category.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(isHovered ? 1 : 0.8))
+                    .lineLimit(1)
+            }
+            // The caption's line reaches below its letters: a point lower, the icon's top is as far
+            // under the field as the letters are above the panel's bottom.
+            .offset(y: 1)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(.white.opacity(isHovered ? 0.1 : 0), in: .rect(cornerRadius: radius, style: .continuous))
+            .contentShape(.rect(cornerRadius: radius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .accessibilityLabel(category.title)
     }
 }
 

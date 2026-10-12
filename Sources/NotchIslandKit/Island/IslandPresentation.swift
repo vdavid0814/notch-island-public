@@ -190,6 +190,8 @@ nonisolated struct CustomPage: Sendable, Hashable, Codable, Identifiable {
 /// answer; and a larger window for the app gallery.
 nonisolated enum AssistantRoom: Sendable, Hashable, Comparable {
     case field
+    /// The field and the pointer's quick picks under it: a row of large icons (`AssistantModel.quickPicks`).
+    case picks
     /// The field and this many rows under it.
     case rows(Int)
     case list
@@ -208,12 +210,15 @@ nonisolated enum AssistantRoom: Sendable, Hashable, Comparable {
 
     /// The field and every suggestion (Applications, Files, Actions, Clipboard, System, Windows, Emoji).
     static let suggestions = AssistantRoom.rows(AssistantCategory.allCases.count)
+    /// The pointer's quick picks under the field.
+    static let quickPicks = AssistantRoom.picks
 
     static let allCases: [AssistantRoom] = [.field, .suggestions, .list, .gallery]
 
     private var rank: Double {
         switch self {
         case .field: 0
+        case .picks: 0.5
         case .rows(let count): 1 + Double(min(max(count, 0), 999)) / 1000
         case .list: 2
         case .galleryRows(let count): 2.5 + Double(min(max(count, 0), 99)) / 1000

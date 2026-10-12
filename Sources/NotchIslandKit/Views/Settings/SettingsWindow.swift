@@ -403,6 +403,7 @@ final class SettingsWindow: NSPanel {
         if !isKeyWindow, canBecomeKey, [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
             makeKey()
         }
+        if event.type == .leftMouseDown { GlassSlide.pressed(at: event.locationInWindow, in: self) }
         // A wheel or trackpad scroll goes straight to the scroll view under the pointer. Routed by
         // AppKit, every event of a scroll (120 a second on a trackpad) hit-tested the whole page
         // through SwiftUI first (~a third of a scroll's main-thread time, measured).

@@ -15,6 +15,25 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case state
     /// Logs every segmented control on screen: its frame and the width it wants.
     case segments
+    /// The page Settings ▸ Widgets edits, switched as its page bar does (`demo/studiopage?page=battery`).
+    case studioPage(ExpandedPage)
+    /// What Settings ▸ Widgets' stage edits, switched as its mode bar does (`demo/studiomode?mode=size`).
+    case studioMode(String)
+    /// Logs the widget studio's page switch state (`demo/studiostate`), for stress tests.
+    case studioState
+    /// A new page of the user's, switched to as its "+" does (`demo/studionewpage`).
+    case studioNewPage
+    /// A click on the page bar's `n`th button after the pages (`demo/pressbarbutton?n=1`: the "+" on home).
+    case pressBarButton(Int)
+    /// A page of the user's taken away (`demo/studioremovepage?page=page.…`), for cleaning up after tests.
+    case studioRemovePage(ExpandedPage)
+    /// `rounds` bursts of quick page switches at random intervals, the state checked after each
+    /// (`demo/studiostress?rounds=20&press=1`: with `press`, half of them pressed on the page bar).
+    case studioStress(rounds: Int, press: Bool)
+    /// A press on segment `segment` of the `bar`th segmented bar of Settings (top to bottom), held
+    /// `hold` seconds, sent to the window as a click would be (`demo/pressbar?bar=2&segment=4&hold=0.1`):
+    /// for measuring what a click on a bar costs while its glass slides, without the pointer.
+    case pressBar(bar: Int, segment: Int, hold: Double)
     /// The AirPods-connected banner with sample batteries.
     case airPods
     /// The card for the AirPods' noise control changing (`demo/airpodsmode?mode=anc|transparency|adaptive|off`).
@@ -207,6 +226,19 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "demo/siritype": return .demo(.siriType(query["text"] ?? "notch"))
         case "demo/surface":
             return query["style"].flatMap { IslandGlassStyle(rawValue: $0.lowercased()) }.map { .demo(.surface($0)) }
+        case "demo/pressbar":
+            guard let bar = query["bar"].flatMap(Int.init), let segment = query["segment"].flatMap(Int.init) else { return nil }
+            return .demo(.pressBar(bar: bar, segment: segment, hold: query["hold"].flatMap(Double.init) ?? 0.1))
+        case "demo/studiostate": return .demo(.studioState)
+        case "demo/studionewpage": return .demo(.studioNewPage)
+        case "demo/pressbarbutton": return .demo(.pressBarButton(query["n"].flatMap(Int.init) ?? 0))
+        case "demo/studioremovepage": return query["page"].flatMap(ExpandedPage.init(rawValue:)).map { .demo(.studioRemovePage($0)) }
+        case "demo/studiostress":
+            return .demo(.studioStress(rounds: query["rounds"].flatMap(Int.init) ?? 20, press: query["press"] == "1"))
+        case "demo/studiomode":
+            guard let mode = query["mode"]?.lowercased(), ["widgets", "topbar", "size"].contains(mode) else { return nil }
+            return .demo(.studioMode(mode))
+        case "demo/studiopage": return query["page"].flatMap(ExpandedPage.init(rawValue:)).map { .demo(.studioPage($0)) }
         case "demo/picturewidgets": return .demo(.pictureWidgets(query["on"] != "0"))
         case "demo/picture":
             if query["on"] == "0" { return .demo(.pictureEnd) }

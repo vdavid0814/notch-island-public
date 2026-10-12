@@ -219,6 +219,15 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     /// The field and the three suggestions under it.
     static var assistantSuggestionsPageHeight: CGFloat { assistantRowsPageHeight(3) }
 
+    /// The quick picks' boxes (`QuickPicks`): 2 pt from the field above them and from the panel's
+    /// sides and bottom, their corners concentric with the panel's. The icon and caption centred
+    /// in them, so the icon is as far under the field as the caption is above the bottom.
+    static let assistantPicksGap: CGFloat = 2
+    static let assistantPicksHeight: CGFloat = 84
+    static var assistantPicksPageHeight: CGFloat {
+        assistantTopInset + assistantFieldHeight + assistantPicksGap + assistantPicksHeight + assistantPicksGap
+    }
+
     /// The field and `count` rows under it.
     static func assistantRowsPageHeight(_ count: Int) -> CGFloat {
         let rows = CGFloat(max(count, 1))
@@ -330,6 +339,7 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             let list = (Self.assistantPageHeight * f * CGFloat(siri.listRows) / 7).rounded()
             let page: CGFloat = switch room {
             case .field: Self.assistantFieldPageHeight
+            case .picks: Self.assistantPicksPageHeight
             // The last row as far above the bottom as the rows are in from the side
             // (`assistantRowInset`), instead of the field's bottom inset.
             case .rows(let count): min(Self.assistantRowsPageHeight(count) - Self.assistantBottomInset + assistantRowInset,

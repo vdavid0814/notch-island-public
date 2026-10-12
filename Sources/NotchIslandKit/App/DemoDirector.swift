@@ -56,6 +56,41 @@ import SwiftUI
             model.logIslandState()
         case .segments:
             Self.logSegments()
+        case .pressBar(let bar, let segment, let hold):
+            Self.pressBar(bar, segment: segment, hold: hold)
+        case .studioStress(let rounds, let press):
+            Task { @MainActor in await Self.stress(model, rounds: rounds, press: press) }
+        case .studioRemovePage(let page):
+            model.removePage(page)
+        case .pressBarButton(let n):
+            Self.pressPageBarButton(model, n)
+        case .studioNewPage:
+            // At the limit: the newest of the user's pages goes first (a test's own, made last).
+            if model.preferences.header.customPages.count >= CustomPage.limit, let last = model.preferences.header.customPages.last {
+                model.removePage(last.page)
+            }
+            PerfTrace.mark("studio new page")
+            if let added = model.addPage() { model.studio.switchPage(to: added) } else { Log.window.notice("STRESS no page added") }
+        case .studioState:
+            let studio = model.studio
+            Log.window.notice("STUDIO page \(studio.page.rawValue, privacy: .public) pending \(studio.pendingPage?.rawValue ?? "-", privacy: .public) outgoing \(studio.outgoingPage?.rawValue ?? "-", privacy: .public) blend \(studio.boardBlend, privacy: .public) bar \(studio.barPage?.rawValue ?? "-", privacy: .public) \(ShelfCardFade.describe, privacy: .public) \(GalleryGlide.describe, privacy: .public)")
+        case .studioMode(let name):
+            let mode: WidgetStudio.Mode = name == "size" ? .size : name == "topbar" ? .topBar : .widgets
+            RunLoop.main.add(Timer(timeInterval: 0.01, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    PerfTrace.mark("studio mode \(mode.title)")
+                    model.studio.switchMode(to: mode)
+                }
+            }, forMode: .common)
+        case .studioPage(let page):
+            // From a run-loop timer: at the main thread's own priority, as a click is (an Apple
+            // event's turn runs at the sender's, in the background).
+            RunLoop.main.add(Timer(timeInterval: 0.01, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    PerfTrace.mark("studio page \(page.rawValue)")
+                    model.studio.switchPage(to: page)
+                }
+            }, forMode: .common)
         case .airPods:
             model.airPodsConnected(.demo)
         case .airPodsMode(let mode):
@@ -198,6 +233,8 @@ import SwiftUI
         clearActivities(model)
         scene.desktop.style = desktop
         scene.desktop.activity = nil
+        // The glass as it is in the Mode this desktop goes with (`SystemAppearance.glassOverride`).
+        SystemAppearance.shared.glassOverride = desktop != .systemLight
         placeBackdrop(overIsland: false)
         set(style, model: model)
         model.preferences.scale = scale
@@ -224,6 +261,7 @@ import SwiftUI
         clearActivities(model)
         scene.desktop.style = desktop
         scene.desktop.activity = activity
+        SystemAppearance.shared.glassOverride = desktop != .systemLight
         set(style, model: model)
         if model.island.isPinned { model.island.isPinned = false }
         model.controller.collapse()
@@ -250,6 +288,7 @@ import SwiftUI
     private func endPicture(_ model: AppModel) {
         guard let scene = pictureScene else { return }
         pictureScene = nil
+        SystemAppearance.shared.glassOverride = nil
         clearActivities(model)
         model.media.injectDemo(nil, playing: false)
         let old = scene.restore, preferences = model.preferences
@@ -385,6 +424,113 @@ private extension PowerState {
 extension DemoDirector {
     /// Each segmented control in the app's windows as AppKit has it: its frame against the width
     /// it wants (how the bars' first-click widening was found).
+    /// Quick page switches in bursts; after each, once things have settled, every part of the switch
+    /// is checked to be where the page says it should be.
+    static func stress(_ model: AppModel, rounds: Int, press: Bool) async {
+        var failures = 0
+        for round in 1...rounds {
+            let switches = Int.random(in: 1...5)
+            var trail: [String] = []
+            for _ in 0..<switches {
+                let pages = StudioPageBar.pages(model)
+                let target = pages.randomElement() ?? .home
+                trail.append(target.rawValue)
+                PerfTrace.mark("stress to \(target.rawValue)")
+                if press, Bool.random(), let index = pages.firstIndex(of: target) {
+                    pressPageBar(model, segment: index, hold: Double.random(in: 0.03...0.15))
+                } else {
+                    model.studio.switchPage(to: target)
+                }
+                try? await Task.sleep(for: .milliseconds(Int.random(in: 40...600)))
+            }
+            try? await Task.sleep(for: .seconds(2))
+            let studio = model.studio
+            let isShelf = studio.page == .shelf
+            var problems: [String] = []
+            if studio.pendingPage != nil { problems.append("pending") }
+            if studio.outgoingPage != nil { problems.append("outgoing") }
+            if studio.boardBlend != 1 { problems.append("blend \(studio.boardBlend)") }
+            if studio.barPage != nil { problems.append("barPage") }
+            problems += ShelfCardFade.problems(isShelf: isShelf)
+            problems += GalleryGlide.problems
+            if !problems.isEmpty { failures += 1 }
+            Log.window.notice("STRESS round \(round, privacy: .public) \(trail.joined(separator: ">"), privacy: .public) -> \(studio.page.rawValue, privacy: .public): \(problems.isEmpty ? "ok" : problems.joined(separator: ", "), privacy: .public)")
+        }
+        Log.window.notice("STRESS done: \(failures, privacy: .public) of \(rounds, privacy: .public) rounds wrong")
+    }
+
+    /// A press on the page bar under the stage (the leftmost bar with the pages' count of segments).
+    static func pressPageBar(_ model: AppModel, segment: Int, hold: Double) {
+        guard let window = NSApp.windows.first(where: { $0 is SettingsWindow && $0.isVisible }), let content = window.contentView,
+              let control = pageBar(model, in: content) else { return }
+        let width = control.bounds.width / CGFloat(max(1, control.segmentCount))
+        let point = control.convert(NSPoint(x: width * (CGFloat(segment) + 0.5), y: control.bounds.midY), to: nil)
+        func event(_ type: NSEvent.EventType) -> NSEvent? {
+            NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)
+        }
+        if let down = event(.leftMouseDown) { window.sendEvent(down) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + hold) { if let up = event(.leftMouseUp) { window.sendEvent(up) } }
+    }
+
+    /// The page bar under the stage: the bar with a segment per page, the lowest of them (the stage's
+    /// island has its own picker higher up).
+    static func pageBar(_ model: AppModel, in content: NSView) -> NSSegmentedControl? {
+        let count = StudioPageBar.pages(model).count
+        var bars: [NSSegmentedControl] = []
+        func walk(_ view: NSView) {
+            if let control = view as? NSSegmentedControl, !control.isHiddenOrHasHiddenAncestor, control.segmentCount == count { bars.append(control) }
+            view.subviews.forEach(walk)
+        }
+        walk(content)
+        return bars.min { $0.convert($0.bounds, to: nil).minY < $1.convert($1.bounds, to: nil).minY }
+    }
+
+    /// A click on the `n`th of the round buttons right of the page bar under the stage (24 pt, 8 apart).
+    static func pressPageBarButton(_ model: AppModel, _ n: Int) {
+        guard let window = NSApp.windows.first(where: { $0 is SettingsWindow && $0.isVisible }), let content = window.contentView,
+              let control = pageBar(model, in: content) else { return }
+        let bar = control.convert(control.bounds, to: nil)
+        let point = NSPoint(x: bar.maxX + 8 + 12 + CGFloat(n) * 32, y: bar.midY)
+        let hit = content.hitTest(content.convert(point, from: nil))
+        Log.window.notice("PRESSBUTTON bar \(String(describing: bar), privacy: .public) point \(String(describing: point), privacy: .public) hit \(String(describing: hit.map { type(of: $0) }), privacy: .public)")
+        func event(_ type: NSEvent.EventType) -> NSEvent? {
+            NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)
+        }
+        if let down = event(.leftMouseDown) { window.sendEvent(down) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { if let up = event(.leftMouseUp) { window.sendEvent(up) } }
+    }
+
+    static func pressBar(_ index: Int, segment: Int, hold: Double) {
+        guard let window = NSApp.windows.first(where: { $0 is SettingsWindow && $0.isVisible }), let content = window.contentView else {
+            return Log.window.notice("PRESSBAR no Settings window")
+        }
+        var bars: [NSSegmentedControl] = []
+        func walk(_ view: NSView) {
+            if let control = view as? NSSegmentedControl, !control.isHiddenOrHasHiddenAncestor, control.window != nil { bars.append(control) }
+            view.subviews.forEach(walk)
+        }
+        walk(content)
+        bars.sort { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }
+        Log.window.notice("PRESSBAR \(bars.count, privacy: .public) bars: \(bars.map { "\($0.segmentCount)@\(Int($0.convert($0.bounds, to: nil).minY))" }.joined(separator: " "), privacy: .public)")
+        guard bars.indices.contains(index) else { return }
+        let control = bars[index]
+        let width = control.bounds.width / CGFloat(max(1, control.segmentCount))
+        let point = control.convert(NSPoint(x: width * (CGFloat(segment) + 0.5), y: control.bounds.midY), to: nil)
+        func event(_ type: NSEvent.EventType) -> NSEvent? {
+            NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                               pressure: type == .leftMouseDown ? 1 : 0)
+        }
+        PerfTrace.mark("pressbar down")
+        if let down = event(.leftMouseDown) { window.sendEvent(down) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + hold) {
+            PerfTrace.mark("pressbar up")
+            if let up = event(.leftMouseUp) { window.sendEvent(up) }
+        }
+    }
+
     static func logSegments() {
         func walk(_ view: NSView) {
             if let control = view as? NSSegmentedControl {

@@ -241,3 +241,83 @@ extension NSView {
 
     static let fadeInKey = "fadeIn"
 }
+
+/// SwiftUI in a view graph of its own, as wide as it is offered and as tall as its content: a
+/// layer of its own in a page, for what Core Animation moves or fades on the render server
+/// (the widget gallery's cards as their category changes, the shelf's card on Settings' stage).
+///
+/// The content is handed to its graph again only when `input` changes; `changing` is told first,
+/// with the view, while the change can still be animated (a `CATransition` added to its layer
+/// then covers the content's change in the same commit). `made` gets the view once it exists.
+struct MeasuredHosting<Input: Equatable, Content: View>: View {
+    let input: Input
+    var made: (NSView) -> Void = { _ in }
+    var changing: (_ old: Input, _ new: Input, _ view: NSView) -> Void = { _, _, _ in }
+    /// Its content's height, as laid out.
+    var measured: (CGFloat) -> Void = { _ in }
+    @ViewBuilder let content: (Input) -> Content
+
+    @State private var height: CGFloat = 0
+
+    var body: some View {
+        Host(input: input, height: height, made: made, changing: changing, content: content) { new in
+            if height != new { height = new }
+            measured(new)
+        }
+    }
+
+    private struct Host: NSViewRepresentable {
+        let input: Input
+        let height: CGFloat
+        let made: (NSView) -> Void
+        let changing: (Input, Input, NSView) -> Void
+        let content: (Input) -> Content
+        let measured: (CGFloat) -> Void
+
+        @MainActor final class Coordinator {
+            var input: Input?
+            var measured: (CGFloat) -> Void = { _ in }
+            weak var view: DeferringHostingView<AnyView>?
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator() }
+
+        func makeNSView(context: Context) -> DeferringHostingView<AnyView> {
+            context.coordinator.measured = measured
+            context.coordinator.input = input
+            let view = DeferringHostingView(rootView: root(context.coordinator))
+            view.sizingOptions = []
+            view.safeAreaRegions = []
+            view.forcesLayout = true
+            view.wantsLayer = true
+            context.coordinator.view = view
+            made(view)
+            return view
+        }
+
+        func updateNSView(_ view: DeferringHostingView<AnyView>, context: Context) {
+            context.coordinator.measured = measured
+            guard let old = context.coordinator.input, old != input else { return }
+            changing(old, input, view)
+            context.coordinator.input = input
+            view.rootView = root(context.coordinator)
+        }
+
+        func sizeThatFits(_ proposal: ProposedViewSize, nsView: DeferringHostingView<AnyView>, context: Context) -> CGSize? {
+            // Folded away (`frame(height: 0)`): no room at all, its content still measured.
+            CGSize(width: proposal.width ?? 600, height: proposal.height == 0 ? 0 : max(height, 1))
+        }
+
+        private func root(_ coordinator: Coordinator) -> AnyView {
+            AnyView(
+                content(input)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded(.up) } action: { height in
+                        coordinator.view?.forcesLayout = false
+                        coordinator.measured(height)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            )
+        }
+    }
+}

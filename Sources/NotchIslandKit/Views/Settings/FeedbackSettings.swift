@@ -284,21 +284,21 @@ struct DiagnosticsSection: View {
         @Bindable var diagnostics = model.diagnostics
         Section {
             Toggle(isOn: $diagnostics.isEnabled) {
-                Text("Send Diagnostics to the Developer")
-                Text("Crashes, hangs and problems, and NotchIsland's energy and memory once an hour. Nothing runs in between: no measurable battery use.")
+                Text("Send Diagnostics")
+                Text("Crashes, hangs, energy and memory, once an hour. No measurable battery use.")
             }
             .disabled(!diagnostics.sendsReports)
             Toggle(isOn: $diagnostics.isDetailed) {
                 Text("Detailed Diagnostics")
-                Text("For tracking down a problem: the full report every hour, a closer watch on crashes, hangs and energy (every 2 minutes), and the steps you took, including what you type into Spotlight. Uses noticeably more battery; turn it off once the problem is found.")
+                Text("For tracking down a problem: a full report every hour, checks every 2 minutes and the steps you take. Uses more battery.")
             }
             .disabled(!diagnostics.sendsReports || !diagnostics.isEnabled)
-            SettingsTextField("Your name", text: $diagnostics.name, prompt: Text("Optional, so the developer knows who you are"))
+            SettingsTextField("Your name", text: $diagnostics.name, prompt: Text("Optional"))
             LabeledContent("Status") {
                 status(diagnostics)
             }
             if let power = diagnostics.ownPowerMW {
-                LabeledContent("NotchIsland's energy use") {
+                LabeledContent("Energy Use") {
                     Text(Self.energy(power, reference: diagnostics.referencePowerMW))
                         .foregroundStyle(SettingsPalette.secondary)
                 }
@@ -322,28 +322,18 @@ struct DiagnosticsSection: View {
             Text("Diagnostics")
         } footer: {
             Text("""
-                Sent: NotchIsland's version, where it runs from and its permissions; the Mac's model, macOS \
-                version, language, displays, sound and Bluetooth devices; the battery's health and charge; how \
-                the menu bar, Dock, Spaces, keyboard shortcuts, trackpad, appearance, accessibility and power \
-                are set up; every installed app and its version, login items and the names of running apps; \
-                how much energy, CPU and memory NotchIsland uses (a reading every 10 minutes), and the apps \
-                using the most energy; every NotchIsland setting and its full state, including what is \
-                playing, what you typed into Spotlight and the files on the Shelf; whether macOS's Spotlight index has your \
-                apps; NotchIsland's log, crash reports and the hangs or exceptions macOS itself reports. The numbers and settings are compared with the \
-                developer's Mac, and anything unusual is reported at once. \
-                Crashes, hangs, errors and the full report go to Sentry; the hourly numbers (energy, memory, which \
-                features run) go to Mixpanel without your location. Both keep the data in the EU, under an anonymous \
-                id (and your name, if you gave one). The full report goes when you send one or something went wrong \
-                (every hour with Detailed Diagnostics); what you type into Spotlight only in it, or with Detailed \
-                Diagnostics on. \
-                Never sent: what is on your clipboard, or your passwords.
+                Sent: the Mac's model and setup, its apps, devices and battery; NotchIsland's settings, state, \
+                energy use, log and crash reports. Full reports (sent by you, after a problem, or hourly with \
+                Detailed Diagnostics) also hold what you typed into Spotlight and the files on the Shelf. Kept in \
+                the EU (Sentry, Mixpanel) under an anonymous ID, and your name if you gave one. Never sent: your \
+                clipboard or passwords.
                 """)
         }
         .task { await diagnostics.refreshStatus() }
     }
 
     static func energy(_ power: Double, reference: Double?) -> String {
-        let own = String(format: "%.1f mW on average", power)
+        let own = String(format: "%.1f mW", power)
         guard let reference, reference > 0 else { return own }
         return own + String(format: " (developer's Mac: %.1f mW)", reference)
     }

@@ -310,7 +310,7 @@ private struct SettingsSidebar: View {
                             Label {
                                 Text(pane.title).font(.system(size: 13.5, weight: .medium))
                             } icon: {
-                                SettingsTile(systemImage: pane.systemImage, tint: pane.tint, side: 24)
+                                PaneTile(pane: pane, side: 24)
                             }
                             .padding(.vertical, 3)
                             .padding(.horizontal, 6)
@@ -352,6 +352,20 @@ extension SettingsSidebar {
 }
 
 /// A symbol on a small coloured squircle, like System Settings' sidebar icons.
+/// A page's tile in the sidebar and over the page: Spotlight's is NotchIsland's Spotlight icon.
+struct PaneTile: View {
+    let pane: IslandSettingsPane
+    let side: CGFloat
+
+    var body: some View {
+        if pane == .siri {
+            SpotlightIcon(side: side)
+        } else {
+            SettingsTile(systemImage: pane.systemImage, tint: pane.tint, side: side)
+        }
+    }
+}
+
 struct SettingsTile: View {
     let systemImage: String
     let tint: Color
@@ -428,7 +442,7 @@ struct SettingsPageHeader: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            SettingsTile(systemImage: pane.systemImage, tint: pane.tint, side: Self.tileSide)
+            PaneTile(pane: pane, side: Self.tileSide)
             VStack(alignment: .leading, spacing: 2) {
                 Text(pane.title).font(.system(size: 22, weight: .bold))
                 Text(pane.subtitle).font(.system(size: 13)).foregroundStyle(SettingsPalette.secondary)

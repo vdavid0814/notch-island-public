@@ -116,6 +116,11 @@ import Foundation
         board.update(id, change)
     }
 
+    /// A change the app makes, not the user (`LightGlassBackdrop`): no step for ⌘Z to take back.
+    func updateOutsideHistory(_ id: WidgetID, _ change: (inout IslandWidget) -> Void) {
+        restoring { board.update(id, change) }
+    }
+
     func setOption(_ option: ElementID, _ on: Bool, for id: WidgetID) {
         board.setOption(option, on, for: id)
     }

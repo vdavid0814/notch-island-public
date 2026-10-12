@@ -11,7 +11,7 @@ struct HomePage: View {
         WidgetBoardView(board: model.boards.store(for: page).board)
             .contextMenu {
                 Button("Customize Island…", systemImage: "square.grid.3x2") {
-                    model.studio.page = page
+                    model.studio.showPage(page)
                     model.showCustomize()
                 }
             }

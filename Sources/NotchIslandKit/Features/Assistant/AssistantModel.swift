@@ -350,7 +350,12 @@ nonisolated struct FileScope: Sendable, Equatable {
     private(set) var revealsSuggestions = false
 
     /// The pointer is over the island (kept by the island controller).
-    @ObservationIgnored var isPointerOver = false
+    @ObservationIgnored var isPointerOver = false {
+        didSet { if pointerIsOver != isPointerOver { pointerIsOver = isPointerOver } }
+    }
+    /// The same, observed: the quick picks come and go with it (`showsQuickPicks`). Set only as
+    /// the pointer comes or goes, never at its moves.
+    private(set) var pointerIsOver = false
     /// Closes the assistant (the island controller owns that).
     @ObservationIgnored var onClose: (() -> Void)?
     /// Runs an island action; the app also closes the assistant (or lets the panel take its place).
@@ -463,8 +468,21 @@ nonisolated struct FileScope: Sendable, Equatable {
             let count = rows.count
             return count < settings().listRows ? .rows(max(count, 1)) : .list
         }
-        // Exactly the suggestions the user has switched on.
-        return revealsSuggestions || hoverReveals ? .rows(max(settings().categories.count, 1)) : .field
+        // ↓: exactly the suggestions the user has switched on. The pointer alone: the four quick
+        // picks in a row (`showsQuickPicks`), two rows' height.
+        if revealsSuggestions { return .rows(max(settings().categories.count, 1)) }
+        return showsQuickPicks ? .quickPicks : .field
+    }
+
+    /// The categories the pointer over Siri brings down, as large icons in a row: Applications,
+    /// Files, Actions and Clipboard (those switched on). The others are a shortcut (⌘5…) or ↓ away,
+    /// as before (asked for: not on hover).
+    static let quickPickCategories: [AssistantCategory] = [.applications, .files, .actions, .clipboard]
+    var quickPicks: [AssistantCategory] { Self.quickPickCategories.filter(settings().categories.contains) }
+
+    /// The pointer over Siri, nothing typed or opened and ↓ not pressed: the quick picks show.
+    var showsQuickPicks: Bool {
+        pointerIsOver && settings().hoverRevealsSuggestions && !revealsSuggestions && !needsList && !quickPicks.isEmpty
     }
 
     /// The pointer over Siri brings the suggestions down (unless the user turned that off).

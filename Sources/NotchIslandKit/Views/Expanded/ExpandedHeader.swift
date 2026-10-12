@@ -357,15 +357,13 @@ private struct PagePicker: View {
         // A page shown without its segment (the battery's, left out where it would reach under the
         // notch, or a page the user hid): no segment is selected.
         Picker("Page", selection: Binding {
-            picksStudioPage ? model.studio.page : model.panelPage
+            picksStudioPage ? model.studio.pendingPage ?? model.studio.page : model.panelPage
         } set: { page in
             guard picksStudioPage else { return island.page = page }
-            // On Settings' stage: the page shown there, as the stage's own page picker sets it (at
-            // once: the stage fades its board over).
+            // On Settings' stage: the page shown there, as the stage's own page picker sets it (its
+            // glass slides first, the board fades over: `WidgetStudio.switchPage`).
             guard page.isBoard || page == .shelf else { return NSSound.beep() }
-            var instant = Transaction()
-            instant.disablesAnimations = true
-            withTransaction(instant) { model.studio.page = page }
+            model.studio.switchPage(to: page)
         }) {
             ForEach(pages, id: \.self) { page in
                 PageSymbolLabel(page: page, tint: tints[page])

@@ -157,8 +157,10 @@ import Testing
     @Test func roomFollowsWhatShows() async {
         let model = model(stubSources(apps: ["Safari", "Safari Technology Preview", "Safe"]))
         #expect(model.room == .field)
+        // The pointer: the quick picks (Applications, Files, Actions, Clipboard in a row); ↓: the list.
         model.isPointerOver = true
-        #expect(model.room == .suggestions)
+        #expect(model.room == .quickPicks && model.showsQuickPicks)
+        #expect(model.quickPicks == AssistantModel.quickPickCategories)
         model.isPointerOver = false
         #expect(model.room == .field)
         model.moveSelection(by: 1)

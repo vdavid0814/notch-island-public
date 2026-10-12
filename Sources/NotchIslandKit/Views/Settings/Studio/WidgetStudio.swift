@@ -92,9 +92,8 @@ import SwiftUI
 
     /// The mode picked and on its way in (`switchMode`): the picker shows it at once.
     var pendingMode: Mode?
-    /// The Widgets page's content under the stage: faded out while the mode switches.
-    var contentOpacity: Double = 1
     @ObservationIgnored private var switching: Task<Void, Never>?
+    @ObservationIgnored private let modeSlide = GlassSlide()
 
     /// To another mode, without a stutter. Building a mode's page and laying Settings out again
     /// takes one frame of ~100 ms whatever is done (measured: ~35 ms the page under the stage, the
@@ -104,17 +103,18 @@ import SwiftUI
     @MainActor func switchMode(to target: Mode) {
         guard target != (pendingMode ?? mode) else { return }
         switching?.cancel()
+        modeSlide.cancel()
         guard target != mode else {
             // Back to the mode still shown, before it went.
             pendingMode = nil
-            withAnimation(.easeOut(duration: Self.fadeIn)) { contentOpacity = 1 }
+            DeckFade.fade(out: false, duration: Self.fadeIn)
             return
         }
         pendingMode = target
-        withAnimation(.easeIn(duration: Self.fadeOut)) { contentOpacity = 0 }
-        switching = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(Self.fadeOut))
-            guard let self, !Task.isCancelled else { return }
+        DeckFade.fade(out: true, duration: Self.fadeOut)
+        // Once the mode bar's glass has slid to its segment (`GlassSlide`), the content faded out.
+        modeSlide.afterSettling(minimum: Self.fadeOut) { [weak self] in
+            guard let self else { return }
             var instant = Transaction()
             instant.disablesAnimations = true
             // The stage's place takes the mode's height in the same layout as the mode's content
@@ -122,16 +122,19 @@ import SwiftUI
             // to have changed, the page was laid out twice (~55 ms more on a performance core).
             let place = target != .topBar && self.stageShown != nil
                 && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? self.stageHeight(in: target) : nil
-            if let place, let was = self.stagePlace, was != place { GalleryGlide.hold(by: was - place) }
+            // The gallery follows the stage's foot along its spring (`GlidingHostingView`).
+            if let place, let was = self.stagePlace, was != place { GalleryGlide.nextSpring = StudioStageSpring.unfold }
             withTransaction(instant) {
                 self.mode = target
                 self.pendingMode = nil
                 if let place, self.stagePlace != nil { self.stagePlace = place }
             }
             // After the long frame: a fade started before it would be half over when it ends.
-            try? await Task.sleep(for: .milliseconds(30))
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: Self.fadeIn)) { self.contentOpacity = 1 }
+            self.switching = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(30))
+                guard let self, !Task.isCancelled else { return }
+                DeckFade.fade(out: false, duration: Self.fadeIn)
+            }
         }
     }
 
@@ -155,8 +158,117 @@ import SwiftUI
         readyMadeContentIn = false
     }
 
+    /// The page picked and on its way in (`switchPage`): the pickers show it at once.
+    var pendingPage: ExpandedPage?
+    /// The page the page bar's buttons are for, while a switch lands: the old one, so they change
+    /// once the long turn of the switch is over and animate whole (`StudioPageBar`).
+    var barPage: ExpandedPage?
+    /// The page whose board is going while the shown one's comes (`StageIsland`), and how far the
+    /// one has gone into the other (0–1).
+    var outgoingPage: ExpandedPage?
+    var boardBlend: Double = 1
+    /// How opaque the going board was as it began to go.
+    var outgoingFrom: Double = 1
+    /// When the last fade began (`shownBlend`).
+    @ObservationIgnored private var blendStarted: TimeInterval?
+    /// Switches landed so far: a fade is only its own switch's to start and end.
+    @ObservationIgnored private var landings = 0
+
+    /// How far the shown board has faded in, as drawn now: the ease-in-out of `boardCrossfade`.
+    private var shownBlend: Double {
+        guard outgoingPage != nil else { return 1 }
+        guard let started = blendStarted, boardBlend >= 1 else { return 0 }
+        let t = min(1, max(0, (ProcessInfo.processInfo.systemUptime - started) / Self.boardCrossfade))
+        return t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+    }
+    @ObservationIgnored private var pageSwitching: Task<Void, Never>?
+    /// The switch, held until the page bar's glass has slid to its segment (`GlassSlide`).
+    @ObservationIgnored private let pageSlide = GlassSlide()
+
+    /// To another page's board, without a stutter. The page bar's glass slides to its segment
+    /// on the app's main thread, and the switch (another board on the stage, the gallery's Add and
+    /// Edit, ~60–80 ms in one turn) stopped it for frames — the bar hitched on every pressed click.
+    /// So the pickers move at once, the board shown stays while the glass slides (faded out then,
+    /// the island stood empty for most of half a second, and empty all along under quick clicks),
+    /// the switch lands once nothing moves, and the old board fades into the new one — both kept
+    /// built, opacity only.
+    @MainActor func switchPage(to target: ExpandedPage) {
+        guard target != (pendingPage ?? page) else { return }
+        pageSlide.cancel()
+        // A fade still going (quick clicks) goes on as it was; the next one starts from where it is.
+        guard target != page else {
+            // Back to the page still shown, before it went.
+            pendingPage = nil
+            if page == .shelf { ShelfCardFade.fade(out: false, duration: Self.fadeIn) }
+            return
+        }
+        pendingPage = target
+        if page == .shelf { ShelfCardFade.fade(out: true, duration: Self.pageFadeOut) }
+        pageSlide.afterSettling { [weak self] in
+            guard let self else { return }
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            // The board going is as opaque as it is now: under quick clicks, part-way into a fade.
+            let shown = self.shownBlend
+            withTransaction(instant) {
+                // The page bar's buttons stay the old page's in this long turn (`barPage`), and the
+                // old board stays as it is, the new one built unseen under it.
+                self.barPage = self.page
+                // The board going is the one seen: if the last one never began to come, the one
+                // before it is still the one going.
+                if self.outgoingPage == nil || self.boardBlend > 0 {
+                    self.outgoingPage = self.page
+                    self.outgoingFrom = shown
+                }
+                self.boardBlend = 0
+                self.page = target
+                self.pendingPage = nil
+            }
+            // What the shelf's card coming or going moves under it glides there (`GlidingHostingView`).
+            GalleryGlide.arm()
+            // The shelf's card comes with the shelf's board (it goes while the glass slides).
+            if target == .shelf { ShelfCardFade.fade(out: false, duration: Self.fadeIn) }
+            self.landings += 1
+            let landing = self.landings
+            // Once the new board is drawn (the long turn and two shorter ones after it, ~150 ms):
+            // started sooner, the old board faded while the new one was not there yet.
+            self.pageSwitching = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(80))
+                // A later switch has landed meanwhile: its own fade takes over.
+                guard let self, !Task.isCancelled, self.landings == landing else { return }
+                withAnimation(.easeInOut(duration: Self.boardCrossfade)) { self.boardBlend = 1 }
+                self.blendStarted = ProcessInfo.processInfo.systemUptime
+                self.barPage = nil
+                // The old board let go once the bar's buttons have flowed into place: its teardown
+                // (up to ~150 ms the first time) would stop them.
+                try? await Task.sleep(for: .seconds(0.7))
+                guard !Task.isCancelled, self.landings == landing else { return }
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { self.outgoingPage = nil }
+            }
+        }
+    }
+
+    /// Set at once, with no fade (a page removed, a widget opened on another page): whatever
+    /// switch was on its way ends.
+    @MainActor func showPage(_ target: ExpandedPage) {
+        pageSwitching?.cancel()
+        pageSlide.cancel()
+        barPage = nil
+        pendingPage = nil
+        outgoingPage = nil
+        boardBlend = 1
+        outgoingFrom = 1
+        page = target
+    }
+
     private static let fadeOut: TimeInterval = 0.12
     private static let fadeIn: TimeInterval = 0.2
+    /// The shelf's card fading out, while the page bar's glass slides.
+    private static let pageFadeOut: TimeInterval = 0.14
+    /// One page's board into another's.
+    private static let boardCrossfade: TimeInterval = 0.28
 }
 
 /// What something was before each change of it, the latest last, and the changes undone: ⌘Z and ⌘⇧Z
