@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.4.6 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.5 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,30 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.5
+
+- **Spotlight's quick picks.** The pointer over Spotlight shows Applications, Files, Actions and
+  Clipboard as large icons in a row; the other suggestions are still a shortcut (⌘5–⌘8) or ↓ away.
+- **Clearer in Light Mode.** With Liquid Glass and the Mac in Light Mode the island is a little
+  darker, and widgets on no background or a plate get a black Colour background at 40 % — in their
+  own settings, so you can change it. Back in Dark Mode they get theirs back.
+- **Settings ▸ Widgets moves smoothly.** Page, category and mode switches no longer hitch the bar's
+  glass; pages crossfade (quick clicks too); Size mode and the inspector move without redrawing the
+  page every frame.
+- **A new page is named first.** The + opens the page editor — name, symbol, Create Page — and
+  brings back Home, Battery or Shelf if they were taken out of the picker.
+- **NotchIsland's own Spotlight mark**, and Settings' preview wallpaper follows Light/Dark Mode.
+- Fixed: switching to a page of your own could freeze Settings; the Spotlight mark shown twice.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.5 in place and keeps your permissions (signed
+exactly as 0.8.4.6). Or download **NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 
