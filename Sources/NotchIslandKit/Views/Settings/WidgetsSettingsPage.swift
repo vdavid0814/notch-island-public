@@ -834,6 +834,7 @@ private struct StageIsland: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        let _ = ProcessInfo.processInfo.environment["NI_EXP_LAYOUTLOG"] == "1" ? Self._printChanges() : ()
         let mode = model.studio.mode
         let base = model.layout
         // Size mode: as the edge being dragged makes it, before that is stored.

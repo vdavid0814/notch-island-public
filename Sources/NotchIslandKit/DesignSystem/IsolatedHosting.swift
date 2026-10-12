@@ -126,6 +126,8 @@ private final class PictureHostingView<Content: View>: DeferringHostingView<Cont
 /// A hosting view that lays nothing out while it is hidden (it or a view around it): Settings keeps
 /// the pages not shown hidden (`SettingsPageDeckView`), and a change around them laid them out —
 /// their nested previews too — for nothing. The layout it put off runs once it shows again.
+private let deferringLogsLayout = ProcessInfo.processInfo.environment["NI_EXP_LAYOUTLOG"] == "1"
+
 class DeferringHostingView<Content: View>: NSHostingView<Content> {
     private var deferredLayout = false
 
@@ -138,6 +140,17 @@ class DeferringHostingView<Content: View>: NSHostingView<Content> {
 
     /// Laid out even while hidden (building a page ahead of its first showing).
     var forcesLayout = false
+
+    override var needsLayout: Bool {
+        get { super.needsLayout }
+        set {
+            if newValue, deferringLogsLayout, !super.needsLayout, !isHiddenOrHasHiddenAncestor {
+                let stack = Thread.callStackSymbols.prefix(70).map { $0.replacingOccurrences(of: "  +", with: " ") }.joined(separator: "\n")
+                Log.window.notice("NEEDSLAYOUT \(String(describing: type(of: self)), privacy: .public)\n\(stack, privacy: .public)")
+            }
+            super.needsLayout = newValue
+        }
+    }
 
     override func layout() {
         if !forcesLayout, window != nil, isHiddenOrHasHiddenAncestor {

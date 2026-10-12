@@ -162,8 +162,6 @@ final class SettingsWindow: NSPanel {
         isExcludedFromWindowsMenu = true
         tabbingMode = .disallowed
         depthLimit = .twentyfourBitRGB
-        // The key view loop is built when Tab asks for it (`keyViewLoopForTab`), not at every change.
-        autorecalculatesKeyViewLoop = Self.buildsKeyViewLoopOnTab
 
         root.frame = CGRect(origin: .zero, size: frame.size)
         root.autoresizingMask = [.width, .height]
@@ -378,63 +376,26 @@ final class SettingsWindow: NSPanel {
 
     // MARK: Keyboard
 
-    /// The key view loop (what Tab steps through) is built when Tab asks for it. SwiftUI builds it
-    /// again at every change of where a control that takes the keyboard lies or which there are —
-    /// every view a page adds, every frame of the Widgets stage unfolding, every hosting view put in
-    /// the window as Settings is built — unless the window says it sees to the loop itself: half of
-    /// the main thread's time while a widget was picked and let go on the Widgets page (sampled).
-    /// So the window says so, and at a Tab the loop is built at once, by SwiftUI as before, and kept
-    /// up to date by it for a while (`liveKeyViewLoopDuration`): what Tab steps through is the same.
-    /// `NI_EXP_EAGERLOOP=1` (measuring): SwiftUI's loop at every change, as before.
-    static let buildsKeyViewLoopOnTab = ProcessInfo.processInfo.environment["NI_EXP_EAGERLOOP"] != "1"
-    /// How long after a Tab SwiftUI keeps the loop up to date at every change.
-    static let liveKeyViewLoopDuration: TimeInterval = 15
-
-    /// Whether SwiftUI keeps the loop up to date now (after a Tab, or eager by the switch).
-    private var isKeyViewLoopLive: Bool { !Self.buildsKeyViewLoopOnTab || keyViewLoopRelease != nil }
-
-    /// A Tab (or ⇧Tab) is about to step: the loop built now, as SwiftUI builds it, then kept.
-    private func keyViewLoopForTab() {
-        guard Self.buildsKeyViewLoopOnTab else { return }
-        if keyViewLoopRelease == nil {
-            keyViewLoopHold?.invalidate()
-            keyViewLoopHold = nil
-            autorecalculatesKeyViewLoop = false
-            recalculateKeyViewLoop()
-        }
+    /// The key view loop (what Tab steps through) left as it is for `seconds`: while something
+    /// only moves. SwiftUI builds the loop again at every change of where a control that takes the
+    /// keyboard lies — every frame of the Widgets page's stage unfolding, where that was most of
+    /// each frame's work (sampled) — unless the window says it sees to the loop itself; the order
+    /// of the controls does not change by their moving together, so nothing is lost. Off again
+    /// afterwards: SwiftUI's own loop is the one Tab has always stepped through here.
+    func holdKeyViewLoop(for seconds: TimeInterval) {
+        autorecalculatesKeyViewLoop = true
         keyViewLoopRelease?.invalidate()
-        let timer = Timer(timeInterval: Self.liveKeyViewLoopDuration, repeats: false) { [weak self] _ in
+        let timer = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
-                self.keyViewLoopRelease = nil
-                self.keyViewLoopHold?.invalidate()
-                self.keyViewLoopHold = nil
-                self.autorecalculatesKeyViewLoop = true
+                self?.autorecalculatesKeyViewLoop = false
+                self?.keyViewLoopRelease = nil
             }
         }
         RunLoop.main.add(timer, forMode: .common)
         keyViewLoopRelease = timer
     }
 
-    /// The key view loop left as it is for `seconds` while something only moves (where SwiftUI keeps
-    /// it up to date, after a Tab): the order of the controls does not change by their moving together.
-    func holdKeyViewLoop(for seconds: TimeInterval) {
-        guard isKeyViewLoopLive else { return }
-        autorecalculatesKeyViewLoop = true
-        keyViewLoopHold?.invalidate()
-        let timer = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.keyViewLoopHold = nil
-                if self.isKeyViewLoopLive { self.autorecalculatesKeyViewLoop = false }
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        keyViewLoopHold = timer
-    }
-
     private var keyViewLoopRelease: Timer?
-    private var keyViewLoopHold: Timer?
 
     /// The first click in the window makes it key and is handled as any other: as a window that
     /// was not key, it went only to making the window key, and the sidebar or a field missed it.
@@ -455,7 +416,6 @@ final class SettingsWindow: NSPanel {
         }
         // A click (or a key) lands where the page is drawn: the scroll is handed over first.
         if [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown].contains(event.type) { coalescer.commit() }
-        if event.type == .keyDown, event.keyCode == 48 { keyViewLoopForTab() }
         super.sendEvent(event)
     }
 
