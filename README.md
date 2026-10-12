@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.5 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.5.1 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,24 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.5.1
+
+Two fixes on top of 0.8.5 (below):
+
+- **Widgets no longer fly in after Size.** Back from Size to Widgets, the gallery came in from the
+  top of the page; it is simply there now.
+- **Spotlight's old list is gone.** Folding back, the old list of suggestions showed for a moment.
+  Only the quick picks show; ↑/↓ and Return go through them.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.5.1 in place and keeps your permissions. Or download
+**NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 

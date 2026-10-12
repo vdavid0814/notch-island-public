@@ -52,7 +52,7 @@ nonisolated struct ReleaseNotes: Sendable, Equatable {
     var sections: [Section] { Section.allCases.filter { !items($0).isEmpty } }
 
     static let current = ReleaseNotes(
-        version: "0.8.5",
+        version: "0.8.5.1",
         new: [
             Item(title: "Spotlight's quick picks",
                  detail: "The pointer over Spotlight shows Applications, Files, Actions and Clipboard as large icons in a row. System, Windows, Emoji and People & Calendar are still a shortcut (⌘5–⌘8) or ↓ away.",
@@ -70,6 +70,10 @@ nonisolated struct ReleaseNotes: Sendable, Equatable {
                  isChange: true),
         ],
         fixed: [
+            Item(title: "Widgets flying in after Size",
+                 detail: "Back from Size to Widgets, the gallery flew in from the top of the page."),
+            Item(title: "Spotlight's old list",
+                 detail: "Folding back, Spotlight showed the old list of suggestions for a moment. Only the quick picks show now; ↑/↓ and Return go through them."),
             Item(title: "Spotlight icon twice",
                  detail: "The mark stood both over the field and in it."),
             Item(title: "A page of your own froze the app",
