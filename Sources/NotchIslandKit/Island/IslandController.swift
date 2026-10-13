@@ -232,6 +232,7 @@ nonisolated extension BannerKind {
     // MARK: Explicit intents
 
     func expand(page: ExpandedPage? = nil, pinned: Bool = false, userInitiated: Bool) {
+        if userInitiated { MainThrift.raise() }
         hoverDwell.cancel()
         // A page asked for by name (a file dragged to the shelf, `open?page=`) is the panel, also
         // while recording; the pointer and a plain open bring the recording card then.
@@ -303,6 +304,7 @@ nonisolated extension BannerKind {
     /// to the notch, not to the panel); from anywhere else it grows out of the notch. It shows even
     /// while the island is hidden for a full-screen video: the user asked for it.
     func openAssistant() {
+        MainThrift.raise()
         for timer in [hoverDwell, closeTimer, unvisitedTimer] { timer.cancel() }
         wantsExpanded = false
         if model.island.isPinned { model.island.isPinned = false }
@@ -323,6 +325,7 @@ nonisolated extension BannerKind {
 
     /// Settings in the island, on `pane`. It takes the open panel's or the assistant's place.
     func openSettings(pane: IslandSettingsPane? = nil) {
+        MainThrift.raise()
         for timer in [hoverDwell, closeTimer, unvisitedTimer] { timer.cancel() }
         if let pane { model.settingsPane = pane }
         wantsExpanded = false

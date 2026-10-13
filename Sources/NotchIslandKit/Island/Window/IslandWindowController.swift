@@ -90,7 +90,7 @@ import SwiftUI
         let isFirst = !hasFollowedPowerSource
         hasFollowedPowerSource = true
         SettingsWindow.isKept = keeps
-        Log.window.notice("settings \(keeps ? "kept (on battery)" : "given up when unused (on the charger)", privacy: .public)")
+        Log.window.notice("settings \(keeps ? "kept (on battery)" : "kept while in use, given up when nobody is at the Mac (on the charger)", privacy: .public)")
         if ProcessInfo.processInfo.environment["NI_NO_PREPARE"] == "1" { return }
         if isFirst || !SettingsWindow.isPrepared {
             preparation += 1

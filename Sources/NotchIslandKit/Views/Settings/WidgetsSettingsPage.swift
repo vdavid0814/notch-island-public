@@ -1959,13 +1959,40 @@ private struct GalleryCard: View, Equatable {
     /// While Settings is closed (the gallery coming back unseen after a widget was picked): short
     /// turns far apart, each on the efficiency cores, instead of a second of them back to back.
     static let unseenSpacing: Duration = .milliseconds(120)
-    private static var nextTurn = ContinuousClock.now
+
+    /// The cards waiting for their turn, first come first served, handed it by one pump. Each card
+    /// slept until a slot it took as it appeared: those taken while Settings was built ahead,
+    /// unseen, stayed 120 ms apart after it opened, and the gallery's first cards were still empty
+    /// seconds later (seen, Oct 13 2026). The pump's pace follows whether Settings is shown now.
+    private static var waiting: [CheckedContinuation<Void, Never>] = []
+    private static var pump: Task<Void, Never>?
+    private static var lastTurn = ContinuousClock.now - .seconds(1)
+
+    private static var pace: Duration { SettingsPresence.shared.isShown ? spacing : unseenSpacing }
 
     static func turn() async {
-        let now = ContinuousClock.now
-        let slot = max(now, nextTurn)
-        nextTurn = slot + (SettingsPresence.shared.isShown ? spacing : unseenSpacing)
-        if slot > now { try? await Task.sleep(until: slot, tolerance: .milliseconds(2)) }
+        // A card that appears alone gets its preview at once.
+        if waiting.isEmpty, ContinuousClock.now - lastTurn >= pace {
+            lastTurn = .now
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiting.append(continuation)
+            startPump()
+        }
+    }
+
+    private static func startPump() {
+        guard pump == nil else { return }
+        pump = Task { @MainActor in
+            while !waiting.isEmpty {
+                let next = lastTurn + pace
+                if next > .now { try? await Task.sleep(until: next, tolerance: .milliseconds(2)) }
+                lastTurn = .now
+                if !waiting.isEmpty { waiting.removeFirst().resume() }
+            }
+            pump = nil
+        }
     }
 }
 
