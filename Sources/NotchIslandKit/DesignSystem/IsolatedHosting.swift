@@ -121,6 +121,25 @@ private final class PictureHostingView<Content: View>: DeferringHostingView<Cont
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// Coming into a window, a hosting view has SwiftUI build the window's key view loop (what Tab
+    /// steps through) again over the whole window: the gallery's ~55 previews put back as Settings
+    /// opens on the Widgets page built it ~55 times in that turn. A picture holds nothing Tab can
+    /// reach, so for its own coming in the window says it sees to the loop itself and SwiftUI leaves
+    /// it as it is (what Tab steps through is the same: `tabtest.py`, old and new).
+    /// `NI_EAGER_LOOP=1` (measuring): built for every picture, as before.
+    override func viewDidMoveToWindow() {
+        guard let window, PictureLoop.skips, !window.autorecalculatesKeyViewLoop else {
+            return super.viewDidMoveToWindow()
+        }
+        window.autorecalculatesKeyViewLoop = true
+        super.viewDidMoveToWindow()
+        window.autorecalculatesKeyViewLoop = false
+    }
+}
+
+private enum PictureLoop {
+    static let skips = ProcessInfo.processInfo.environment["NI_EAGER_LOOP"] != "1"
 }
 
 /// A hosting view that lays nothing out while it is hidden (it or a view around it): Settings keeps
