@@ -21,7 +21,8 @@ granted that night).
 | Memory with Settings built (either source) | 209 MB | 209 MB |
 | Hover open, single (battery / charger) | 95–118 / 91–115 | same (90–114) |
 | Hover spam, 1 open a second | 85–95 | same |
-| Settings from the gear, first after launch / later; close | 550–640 / 190–330; 140–205 | same |
+| Settings from the gear on the Widgets page (kept, battery) | 280–355 (mean 316) | 152–299 (mean 204) |
+| Settings from the gear, first after a launch; close | 530–670; 140–240 | same |
 | Siri ⌘Space open / close / spam | 26–42 / 16–67 / 33–98 | same (noise) |
 | Hover across the open panel / page swipes (battery) | 7–22 / 39–46 | same |
 
