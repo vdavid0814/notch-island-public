@@ -295,7 +295,7 @@ private func scratchDefaults() -> (UserDefaults, String) {
             == [.dateTime, .stopwatch, .nowPlaying, .systemStats, .worldClock, .clipboard, .battery, .batteryChart,
                 .batteryTime, .batteryHealth, .batteryCycles, .batteryPower, .batteryTemperature, .charger, .batteryLastCharge,
                 .uptime, .diskSpace, .timer, .shelf, .analogClock, .monthCalendar, .batteryUsage, .memory, .chipTemperature,
-                .fanControl])
+                .fanControl, .appUsage])
         // The figures are readouts as World Clock is: its parts, styled as its are.
         for kind in IslandWidgetKind.allCases where kind.isReadout {
             #expect(kind.spec.texts == [.value, .label] && kind.spec.buttons == [.symbol], "\(kind)")

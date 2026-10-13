@@ -19,7 +19,7 @@ nonisolated enum IslandGlassStyle: String, Sendable, CaseIterable, Identifiable,
 
     var title: String {
         switch self {
-        case .liquidGlass: "Liquid Glass"
+        case .liquidGlass: "Clear"
         case .black: "Black"
         case .fade: "Fade"
         }

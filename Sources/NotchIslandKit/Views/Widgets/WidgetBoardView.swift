@@ -4,6 +4,8 @@ import SwiftUI
 /// bottom corner of the board is concentric with the panel's (`WidgetBoardShape`).
 struct WidgetBoardView: View {
     let board: WidgetBoard
+    /// Its page, at whose size it is drawn.
+    let page: ExpandedPage
 
     @Environment(AppModel.self) private var model
 
@@ -20,7 +22,7 @@ struct WidgetBoardView: View {
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
         }
         // The gap carves the widgets' room out of the cells (`IslandLayout.boardInset`).
-        .padding(model.layout.boardInset)
-        .environment(\.widgetBoard, WidgetBoardShape(grid: board.grid, cornerRadius: ConcentricGeometry.boardCornerRadius(model.layout)))
+        .padding(model.layout(for: page).boardInset)
+        .environment(\.widgetBoard, WidgetBoardShape(grid: board.grid, cornerRadius: ConcentricGeometry.boardCornerRadius(model.layout(for: page))))
     }
 }

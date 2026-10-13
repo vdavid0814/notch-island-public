@@ -142,7 +142,7 @@ struct ProgressPartsPanel: View {
 
     /// The widget's inside, as the board draws it.
     private var inner: CGSize {
-        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.preferences.panel.grid)
+        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.studioLayout), grid: model.panel(for: model.studio.page).grid)
         let natural = geometry.laidSize(for: widget.frame), padding = WidgetMetrics.padding(for: widget)
         return CGSize(width: max(0, natural.width - 2 * padding), height: max(0, natural.height - 2 * padding))
     }
@@ -527,7 +527,7 @@ struct ProgressPartsPanel: View {
 
     private var basePoints: CGFloat {
         if id == .cpuLoad || id == .memoryLoad {
-            let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.preferences.panel.grid)
+            let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.studioLayout), grid: model.panel(for: model.studio.page).grid)
             let natural = geometry.laidSize(for: widget.frame), padding = WidgetMetrics.padding(for: widget)
             return SystemStatsWidget.barTextSize(widget, inner: CGSize(width: natural.width - 2 * padding, height: natural.height - 2 * padding))
         }

@@ -133,6 +133,16 @@ which did not, and how to keep the look identical. The numbers are in `ENERGY-LO
   motion: trace both with the same gestures (the clip's origin at every change) and hook the
   same AppKit call SwiftUI does — list a class's methods and protocols at run time
   (`class_copyMethodList`, `objc_copyProtocolList`) to find it.
+- **Motion that follows the pointer or the clock goes on layers of its own**: Fan Control's graph
+  once showed the moment pointed at through SwiftUI state, and on the island (one glass container)
+  the moves came to the screen in bursts — a screen recording frame by frame showed the line
+  standing two or three frames, then jumping 200 px, while the cursor moved every frame. Moving
+  `CALayer`s from the hover handler with actions off (no state) cost 0.04–0.16 ms a move against
+  2.6 ms for the graph drawn again (that feature was dropped later). An `NSTrackingArea` of the
+  layers' own view did not work on the island: the panel takes no mouse-moved events and the area
+  sat wrong in the scaled view; SwiftUI's own hover gives the right points. The same graph now
+  slides between readings: drawn once a reading into a layer, a linear `CABasicAnimation` carries
+  it to where the next one comes in (`FanGraphLayerView`) — nothing on the main thread between.
 - **A model value that changes sixty times a second must be read by leaves only**: a small view or
   modifier for each place it is shown. Read in a widget's body (or by an `onChange` there), the
   whole widget is built again at every change.

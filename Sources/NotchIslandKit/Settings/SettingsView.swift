@@ -125,7 +125,8 @@ private struct GeneralSettings: View {
                     Text("Animation length")
                     Text("How long the island takes to grow out of the notch and to shrink back into it.")
                 }
-                Picker("Size when open", selection: $preferences.scale) {
+                // Every page's, those sized by themselves too.
+                Picker("Size when open", selection: Binding(get: { preferences.scale }, set: { model.setScaleEverywhere($0) })) {
                     ForEach(IslandScale.allCases) { scale in
                         Text(scale.title).tag(scale)
                     }
@@ -136,7 +137,7 @@ private struct GeneralSettings: View {
                     }
                 } label: {
                     Text("Surface")
-                    Text("Liquid Glass, solid black like the hardware island, or black at the notch fading into glass.")
+                    Text("Clear glass that follows the system's Liquid Glass, solid black like the hardware island, or black at the notch fading into glass.")
                 }
                 Toggle(isOn: $preferences.commandSpaceOpensSiri) {
                     Text("Open Spotlight with ⌘Space")

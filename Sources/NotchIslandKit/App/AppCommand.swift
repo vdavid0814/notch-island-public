@@ -25,6 +25,9 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case segments
     /// The page Settings ▸ Widgets edits, switched as its page bar does (`demo/studiopage?page=battery`).
     case studioPage(ExpandedPage)
+    /// A widget of `kind` added to a page's board, as the gallery adds one
+    /// (`demo/addwidget?kind=appUsage&page=battery`); `on=0` removes the page's widgets of that kind.
+    case addWidget(IslandWidgetKind, ExpandedPage, Bool)
     /// What Settings ▸ Widgets' stage edits, switched as its mode bar does (`demo/studiomode?mode=size`).
     case studioMode(String)
     /// Logs the widget studio's page switch state (`demo/studiostate`), for stress tests.
@@ -164,7 +167,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
         switch route {
         case "open":
             guard let page = query["page"] else { return .open(nil) }
-            return ExpandedPage(rawValue: page.lowercased()).map { .open($0) }
+            // A page of the user's is named by its UUID as stored (capitals): as given first.
+            return (ExpandedPage(rawValue: page) ?? ExpandedPage(rawValue: page.lowercased())).map { .open($0) }
         case "close": return .close
         case "pin": return .togglePin
         case "settings": return .showSettings
@@ -256,6 +260,9 @@ nonisolated enum AppCommand: Sendable, Equatable {
             guard let mode = query["mode"]?.lowercased(), ["widgets", "topbar", "size"].contains(mode) else { return nil }
             return .demo(.studioMode(mode))
         case "demo/studiopage": return query["page"].flatMap(ExpandedPage.init(rawValue:)).map { .demo(.studioPage($0)) }
+        case "demo/addwidget":
+            guard let kind = query["kind"].flatMap(IslandWidgetKind.init(rawValue:)) else { return nil }
+            return .demo(.addWidget(kind, query["page"].flatMap(ExpandedPage.init(rawValue:)) ?? .home, query["on"] != "0"))
         case "demo/picturewidgets": return .demo(.pictureWidgets(query["on"] != "0"))
         case "demo/picture":
             if query["on"] == "0" { return .demo(.pictureEnd) }

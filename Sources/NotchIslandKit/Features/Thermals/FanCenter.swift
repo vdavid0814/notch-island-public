@@ -67,8 +67,8 @@ import ServiceManagement
 
     static let interval: TimeInterval = 1
 
-    /// Each reading's average speed (for the speed graph, `ThermalMonitor.record`).
-    @ObservationIgnored var onRead: ((Double) -> Void)?
+    /// Each reading's average speed and the fans' fastest (for the graph's rhythm, `ThermalMonitor.record`).
+    @ObservationIgnored var onRead: ((_ rpm: Double, _ maximum: Double) -> Void)?
 
     @ObservationIgnored private var observers = 0
     @ObservationIgnored private var timer: Timer?
@@ -161,7 +161,7 @@ import ServiceManagement
                     && $0.minimum == $1.minimum && $0.maximum == $1.maximum
             }
             if !same { fans = read }
-            if !read.isEmpty { onRead?(read.map(\.rpm).reduce(0, +) / Double(read.count)) }
+            if !read.isEmpty { onRead?(read.map(\.rpm).reduce(0, +) / Double(read.count), read.map(\.maximum).max() ?? 1) }
             if isTooHot, Date.now.timeIntervalSince(tooHotAt) > Self.heatNotice { isTooHot = false }
             // Held by hand, and the fans are not (macOS took them back and the helper has not held
             // them again, or gave them up): asked for again. The speed stays the user's until they

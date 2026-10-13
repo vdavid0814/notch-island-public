@@ -4,6 +4,35 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-13 (evening, on the charger): Fan Control's animations on the render server
+
+Release build, MacBook Air M5 on the charger, simulated fans (`NI_DEMO_FANS=1`), the panel opened
+and pinned on the page with Fan Control (12 × 3, an 11 s graph) by `open?page=page.<UUID>` + `pin`,
+15 s measured from 3 s after the opening, two rounds each, A B A B from fresh launches (25 s settle).
+mW = the coalition's energy (own + GPU + billed) a second; CPU = ms a second. Medians.
+
+| | app | app CPU | WindowServer | WindowServer CPU |
+|---|---|---|---|---|
+| Dials animated by SwiftUI (as before; `NI_EXP_SWIFTUI_RINGS=1`) | 16.9 mW | 55 ms/s | 251 mW | 367 ms/s |
+| Dials as Core Animation layers (`RingLayers`) | **4.1 mW** | **21 ms/s** | 296 mW (noise: 247–344) | 361 ms/s |
+| The graph's slide on (as now) | 4.1 mW | 14 ms/s | 255 mW | 352 ms/s |
+| The graph's slide off (`NI_EXP_NO_SLIDE=1`: a step at each reading) | 3.2 mW | 18 ms/s | 93 mW | 231 ms/s |
+
+- **The dials.** Each reading glided the fan's and the chip's fills for 0.6 s as SwiftUI animation:
+  every frame a SwiftUI update in the island's glass container (600 ms of the main thread in 0.8 s
+  for one change in a debug build). As layers (`strokeEnd`, the bead along the arc, the colour) the
+  glide runs on the render server: the app's energy a quarter, its CPU 40 %.
+- **The graph's slide** costs the window server ~160 mW and ~120 ms/s while the panel shows a short
+  graph: the whole graph layer moves at the display's rate. The app does nothing meanwhile (one
+  drawing a reading). A step under 2 pt (a long graph) is not slid.
+- **The slide made a short glide** (0.35 s, soft at both ends, then still until the next reading),
+  the user's pick: the window server 250 → 156 mW, 355 → 266 ms/s (two rounds each, continuous
+  build vs glide build, same setup); the app 3.6 → 5.0 mW (within its rounds' spread, 2.5–6.4).
+- The minimum's dotted line gliding as SwiftUI animation was another 300 ms of the main thread in
+  0.8 s (debug build): a layer too now.
+- `open?page=` lowercased the page's name, so the user's own pages (`page.<UUID>`, stored with
+  capitals) could not be opened by URL: as given first now.
+
 ## 2026-10-13 (night, on the charger, battery simulated): memory after Settings, the charger's 3900
 
 Release builds, MacBook Air M5 on the charger; battery behaviour simulated with `NI_POWER=battery`

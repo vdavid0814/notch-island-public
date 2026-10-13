@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Under the stage in Size mode: the panel's board by its cells (`PanelSettings`, `BoardSizing`).
+/// Under the stage in Size mode: the board of the page shown, by its cells (`PanelSettings`,
+/// `BoardSizing`) — this page's alone; Apply to All Pages makes it every page's.
 /// Its cells' size — the same room divided into more, smaller cells or fewer, larger ones — and the
 /// gap between them; how many columns and rows (as the handles on the stage set them, one at a
 /// time). Under them, Reset Size and the island's ready-made sizes, which open over all of it and
@@ -17,8 +18,8 @@ struct SizeInspector: View {
 
     var body: some View {
         let studio = model.studio
-        let panel = studio.draft?.panel ?? model.preferences.panel
-        let layout = model.layout.replacing(panel: panel.layout)
+        let panel = studio.draft?.panel ?? model.panel(for: studio.page)
+        let layout = model.studioLayout.replacing(panel: panel.layout)
         let island = layout.size(for: .expanded(.home))
         VStack(spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
@@ -27,10 +28,10 @@ struct SizeInspector: View {
                         SliderRow(title: "Size", value: "\(Int(panel.cell)) pt",
                                   widest: "\(Int(PanelSettings.cellRange.upperBound)) pt") {
                             Slider(value: Binding(get: { panel.cell }, set: { new in
-                                let room = cellRoom ?? BoardSizing.board(model.layout)
-                                draft(BoardSizing.dividing(room, into: new.rounded(), from: panel, layout: model.layout))
+                                let room = cellRoom ?? BoardSizing.board(model.studioLayout)
+                                draft(BoardSizing.dividing(room, into: new.rounded(), from: panel, layout: model.studioLayout))
                             }), in: PanelSettings.cellRange) { editing in
-                                cellRoom = editing ? BoardSizing.board(model.layout) : nil
+                                cellRoom = editing ? BoardSizing.board(model.studioLayout) : nil
                                 if !editing { commit() }
                             } label: { Text("Cell size") }
                         }
@@ -69,6 +70,8 @@ struct SizeInspector: View {
             }
             // The two cards as tall as each other.
             .fixedSize(horizontal: false, vertical: true)
+            // Under the cards: Reset Size as wide as the Cells card (red: it takes back), the ready-made
+            // size and Apply to All Pages sharing the Panel card's width (blue: it changes every page).
             HStack(spacing: 12) {
                 // Back to exactly what Size mode found: the cells, the ready-made size, every
                 // widget where it was.
@@ -83,24 +86,45 @@ struct SizeInspector: View {
                 } label: {
                     Label("Reset Size", systemImage: "arrow.counterclockwise").frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
                 .disabled(studio.sizeEntry.map { $0 == model.sizeSnapshot() && studio.draft == nil } ?? true)
                 .help("Everything back as it was when Size was opened")
-                Button {
-                    studio.toggleReadyMade()
-                } label: {
-                    HStack(spacing: 6) {
-                        Text("Ready-made Size")
-                        Spacer(minLength: 8)
-                        Text(model.preferences.scale.title).foregroundStyle(SettingsPalette.secondary)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(SettingsPalette.secondary)
+                .frame(maxWidth: .infinity)
+                HStack(spacing: 8) {
+                    Button {
+                        studio.toggleReadyMade()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("Ready-made Size").lineLimit(1)
+                            Spacer(minLength: 4)
+                            Text(model.size(of: studio.page).scale.title).foregroundStyle(SettingsPalette.secondary).lineLimit(1)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(SettingsPalette.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
                     }
-                    .frame(maxWidth: .infinity)
+                    .help("This page's panel larger or smaller: its cells, the gap and every widget together")
+                    // The ready-made sizes unfold out of it (`ReadyMadeBox`).
+                    .anchorPreference(key: ReadyMadeAnchors.self, value: .bounds) { [.button: $0] }
+                    // What is set here is this page's size; this makes it every page's.
+                    Button {
+                        cellRoom = nil
+                        gapBase = nil
+                        withAnimation(Self.settle) {
+                            studio.draft = nil
+                            model.applySizeToAllPages()
+                        }
+                    } label: {
+                        Label("Apply to All Pages", systemImage: "square.on.square").lineLimit(1).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                    .disabled(!model.pagesDifferInSize)
+                    .help("Every page of the panel at this page's size: its cells, the gap and its ready-made size")
                 }
-                .help("The whole panel larger or smaller: its cells, the gap and every widget together")
-                // The ready-made sizes unfold out of it (`ReadyMadeBox`).
-                .anchorPreference(key: ReadyMadeAnchors.self, value: .bounds) { [.button: $0] }
+                .frame(maxWidth: .infinity)
             }
             .controlSize(.large)
             .buttonBorderShape(.capsule)
@@ -215,10 +239,11 @@ struct ReadyMadePanel: View {
                     .buttonBorderShape(.capsule)
                     .controlSize(.small)
             }
-            PictureChoice(options: IslandScale.allCases, selection: Binding(get: { model.preferences.scale }, set: { scale in
-                model.preferences.scale = scale
+            PictureChoice(options: IslandScale.allCases, selection: Binding(get: { model.size(of: model.studio.page).scale }, set: { scale in
+                // This page's (Apply to All Pages makes it every page's).
+                model.setScale(scale)
                 // The same cells at another scale: as many as still fit.
-                model.setPanel(BoardSizing.fitted(model.preferences.panel, layout: model.layout))
+                model.setPanel(BoardSizing.fitted(model.panel(for: model.studio.page), layout: model.studioLayout))
             }), title: \.title) { scale in
                 IslandSizePicture(scale: scale)
             }

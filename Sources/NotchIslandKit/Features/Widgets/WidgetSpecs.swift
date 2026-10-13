@@ -330,14 +330,31 @@ nonisolated enum WidgetSpecs {
             charts: [.chart],
             isAvailable: { BatteryAvailability.hasBattery }
         ),
-        // A dial round a fan, a dial of the chip's temperature and a graph of it over the last ten
-        // minutes, in a row: the fan dial turned to set the speed, the fan in it a button that gives
-        // the fans back to macOS; the speed's graph beside the temperature's where the widget is wide
-        // (as wide as the panel). Each part moved and resized in Customize — a graph made lower. The
-        // two dials are made alike: each one's texts are its own, placed in its panel.
+        // The iPhone's Battery Usage by App: the apps that used the most energy on battery on the
+        // day Daily Usage picked, each with its icon, name and share. The list moves as one part.
+        .appUsage: WidgetKindSpec(
+            title: "Usage by App", summary: "Which apps used the most battery today, or on the day picked in Daily Usage.",
+            symbol: "list.bullet.rectangle.fill", iconColors: green, category: .battery,
+            minimumSize: GridSize(width: 3, height: 2), defaultSize: GridSize(width: 4, height: 3),
+            maximumSize: GridSize(width: 8, height: 3),
+            elements: [
+                ElementSpec(.label, "Title", symbol: "textformat"),
+                ElementSpec(.usageDay, "Day", symbol: "calendar"),
+                ElementSpec(.appList, "Apps", symbol: "list.bullet", isRequired: true),
+            ],
+            movable: [.label, .usageDay, .appList],
+            texts: [.label, .usageDay],
+            settings: [.count],
+            isAvailable: { BatteryAvailability.hasBattery }
+        ),
+        // A dial of the fans' speed, a dial of the chip's temperature and one graph of both, in a
+        // row, each coloured by its reading (green, yellow, red): the fan dial turned to set the
+        // speed, its Manual a button that gives the fans back to macOS; the graph the heat as a line
+        // over the fans as a rhythm, as far back as its ruler (or Settings) sets it. Each part moved and resized in Customize — the graph made lower.
+        // The two dials are made alike: each one's texts are its own, placed in its panel.
         // Only where there is a fan: MacBook Pro.
         .fanControl: WidgetKindSpec(
-            title: "Fan Control", summary: "The fans' speed and the chip's temperature. Turn the fan's dial to set it; click the fan for automatic.",
+            title: "Fan Control", summary: "The fans' speed and the chip's temperature, and how the two went. Turn the fan's dial to set it; click Manual for automatic.",
             symbol: "fan.fill", iconColors: [.rgb(0.4, 0.78, 1.0), .rgb(0.12, 0.45, 0.95)], category: .system,
             minimumSize: GridSize(width: 2, height: 1), defaultSize: GridSize(width: 7, height: 2),
             maximumSize: GridSize(width: 12, height: 3),
@@ -346,14 +363,14 @@ nonisolated enum WidgetSpecs {
                 ElementSpec(.value, "Speed", symbol: "number"),
                 ElementSpec(.label, "Automatic or Manual", symbol: "textformat"),
                 ElementSpec(.tempDial, "Temperature", symbol: "thermometer.medium"),
-                ElementSpec(.tempGraph, "Temperature graph", symbol: "chart.xyaxis.line"),
-                ElementSpec(.rpmGraph, "Speed graph", symbol: "waveform.path.ecg", defaultVisible: false),
+                ElementSpec(.tempGraph, "Graph", symbol: "chart.xyaxis.line"),
             ],
-            movable: [.fanDial, .tempDial, .tempGraph, .rpmGraph],
-            // The dials set as lines are, the graphs as charts are.
+            movable: [.fanDial, .tempDial, .tempGraph],
+            // The dials set as lines are, the graph as a chart is.
             progressBars: [.fanDial, .tempDial],
-            innerTexts: [.fanName, .value, .tempName, .tempValue, .tempGraphText, .rpmGraphText],
-            charts: [.tempGraph, .rpmGraph],
+            innerTexts: [.fanName, .value, .tempName, .tempValue, .tempGraphText],
+            charts: [.tempGraph],
+            settings: [.history],
             isAvailable: { FanSensors.hasFans }
         ),
     ]

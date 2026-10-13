@@ -67,13 +67,30 @@ import Observation
     private(set) var metrics: NotchMetrics?
 
     /// Recomputed from `metrics` and the preferences that size the island (scale, Siri's window,
-    /// the panel); the window controller observes it to re-stage the panel when any changes.
-    var layout: IslandLayout {
-        IslandLayout(notch: metrics?.notchSize ?? Self.fallbackNotchSize, scale: preferences.scale,
-                     screen: metrics?.screenFrame.size ?? .zero, siri: preferences.siri.layout, panel: preferences.panel.layout,
-                     display: DisplayProfile.factor(for: metrics),
-                     settingsFillsLikeReference: DisplayProfile.isKnown(metrics))
+    /// the panel) — at the size of the page the island shows (`size(of:)`); the window controller
+    /// observes it to re-stage the panel when any changes, a page of another size too.
+    var layout: IslandLayout { layout(for: island.page) }
+
+    /// The island at `page`'s size: its own (`PageSize`), or every page's.
+    func layout(for page: ExpandedPage) -> IslandLayout {
+        let size = size(of: page)
+        return IslandLayout(notch: metrics?.notchSize ?? Self.fallbackNotchSize, scale: size.scale,
+                            screen: metrics?.screenFrame.size ?? .zero, siri: preferences.siri.layout, panel: size.panel.layout,
+                            display: DisplayProfile.factor(for: metrics),
+                            settingsFillsLikeReference: DisplayProfile.isKnown(metrics))
     }
+
+    /// The island at the size of the page Settings ▸ Widgets shows and edits.
+    var studioLayout: IslandLayout { layout(for: studio.page) }
+
+    /// A page's size: its own (set on it in Size), or every page's (`preferences.panel`, `.scale`).
+    /// A page drawn otherwise (the shelf) takes every page's.
+    func size(of page: ExpandedPage) -> PageSize {
+        preferences.pageSizes[page.rawValue] ?? PageSize(panel: preferences.panel, scale: preferences.scale)
+    }
+
+    /// The board's cells of `page`.
+    func panel(for page: ExpandedPage) -> PanelSettings { size(of: page).panel }
 
     /// The panel's pages on this Mac with these settings: the shelf while it is on, the battery page
     /// only with a battery (`open?page=` and Spotlight ask for the others in vain).
@@ -87,11 +104,52 @@ import Observation
         } + preferences.header.customPages.map(\.page)
     }
 
-    /// The panel's board set (Settings ▸ Widgets ▸ Size): every page's board follows its grid, each
-    /// widget on its cells; `leadingColumns` of the columns added (or taken away) at the leading side.
+    /// The panel's board set (Settings ▸ Widgets ▸ Size) for the page Size shows, not the others:
+    /// its board follows the grid, each widget on its cells; `leadingColumns` of the columns added
+    /// (or taken away) at the leading side.
     func setPanel(_ panel: PanelSettings, leadingColumns: Int? = nil) {
-        preferences.panel = panel
-        boards.follow(panel.grid, leadingColumns: leadingColumns)
+        let page = studio.page
+        setSize(PageSize(panel: panel, scale: size(of: page).scale), of: page)
+        boards.store(for: page).follow(panel.grid, leadingColumns: leadingColumns)
+    }
+
+    /// The ready-made size (Settings ▸ Widgets ▸ Size) of the page Size shows, not the others.
+    func setScale(_ scale: IslandScale) {
+        let page = studio.page
+        setSize(PageSize(panel: size(of: page).panel, scale: scale), of: page)
+    }
+
+    /// The ready-made size of every page (General's Size when Open): none keeps one of its own.
+    func setScaleEverywhere(_ scale: IslandScale) {
+        preferences.scale = scale
+        preferences.pageSizes = preferences.pageSizes.mapValues { PageSize(panel: $0.panel, scale: scale) }
+        dropSizesLikeEveryPages()
+    }
+
+    /// The page Size shows, at its size, made every page's: each board on its grid.
+    func applySizeToAllPages() {
+        let size = size(of: studio.page)
+        preferences.panel = size.panel
+        preferences.scale = size.scale
+        preferences.pageSizes = [:]
+        boards.follow(size.panel.grid)
+    }
+
+    /// Whether some page's size differs from the one Size shows (Apply to All Pages would change it).
+    var pagesDifferInSize: Bool {
+        let shown = size(of: studio.page)
+        return preferences.header.orderedPages.filter(\.isBoard).contains { size(of: $0) != shown }
+    }
+
+    private func setSize(_ size: PageSize, of page: ExpandedPage) {
+        preferences.pageSizes[page.rawValue] = size
+        dropSizesLikeEveryPages()
+    }
+
+    /// A page's own size that is every page's anyway is not kept.
+    private func dropSizesLikeEveryPages() {
+        let every = PageSize(panel: preferences.panel, scale: preferences.scale)
+        preferences.pageSizes = preferences.pageSizes.filter { $0.value != every }
     }
 
     /// The saved notch styles (Settings ▸ Widgets' Save Notch Style and Open Notch Styles).
@@ -105,14 +163,14 @@ import Observation
                                    musicBars: preferences.musicBars.rawValue, musicBarsOnPower: preferences.musicBarsOnPower.rawValue,
                                    levelStyle: preferences.levelStyle.rawValue)
         return NotchStyle(name: "", panel: preferences.panel, scale: preferences.scale, header: preferences.header, boards: boards,
-                          look: look)
+                          look: look, pageSizes: preferences.pageSizes)
     }
 
     /// Whether the island is as `style` has it.
     func isCurrent(_ style: NotchStyle) -> Bool {
         let now = currentNotchStyle()
         return now.panel == style.panel && now.scale == style.scale && now.header == style.header && now.boards == style.boards
-            && (style.look == nil || now.look == style.look)
+            && (style.look == nil || now.look == style.look) && now.pageSizes ?? [:] == style.pageSizes ?? [:]
     }
 
     /// The island as `style` has it: its look, its pages and top bar, its cells and size, every board. A page
@@ -130,9 +188,10 @@ import Observation
         boards.sync(preferences.header.orderedPages)
         preferences.scale = style.scale
         preferences.panel = style.panel
+        preferences.pageSizes = style.pageSizes ?? [:]
         for page in preferences.header.orderedPages where page.isBoard {
             let store = boards.store(for: page)
-            store.load(style.boards[page.rawValue] ?? WidgetBoard(widgets: [], grid: style.panel.grid))
+            store.load(style.boards[page.rawValue] ?? WidgetBoard(widgets: [], grid: panel(for: page).grid))
         }
         if !preferences.header.orderedPages.contains(studio.pendingPage ?? studio.page) { studio.showPage(.home) }
         if !preferences.header.orderedPages.contains(island.page) { island.page = .home }
@@ -140,14 +199,15 @@ import Observation
 
     /// The panel, its scale and every board as they are now (Settings ▸ Widgets ▸ Size).
     func sizeSnapshot() -> SizeSnapshot {
-        SizeSnapshot(panel: preferences.panel, scale: preferences.scale, boards: boards.snapshot())
+        SizeSnapshot(panel: preferences.panel, scale: preferences.scale, pageSizes: preferences.pageSizes, boards: boards.snapshot())
     }
 
     /// All of it back as `snapshot` had it, every widget where it was.
     func restoreSize(_ snapshot: SizeSnapshot) {
         preferences.scale = snapshot.scale
         preferences.panel = snapshot.panel
-        boards.restore(snapshot.boards, grid: snapshot.panel.grid)
+        preferences.pageSizes = snapshot.pageSizes
+        boards.restore(snapshot.boards)
     }
 
     /// The board the Widgets stage shows and edits: the studio's page's.
@@ -171,6 +231,7 @@ import Observation
         if studio.page == page || studio.pendingPage == page { studio.showPage(.home) }
         if island.page == page { island.page = .home }
         boards.sync(preferences.header.orderedPages)
+        preferences.pageSizes[page.rawValue] = nil
     }
 
     /// The pages the top bar's picker offers, in the user's order (`HeaderLayout`). A hidden page
@@ -229,7 +290,11 @@ import Observation
             let grid = widgets.board.grid
             preferences.panel = PanelSettings(cell: PanelSettings().cell, gap: Double(grid.gap), columns: grid.columns, rows: grid.rows)
         }
-        boards.follow(preferences.panel.grid)
+        // Each page on its own size's grid.
+        boards.grid = { [unowned preferences] page in
+            (preferences.pageSizes[page.rawValue]?.panel ?? preferences.panel).grid
+        }
+        boards.followPages()
         boards.sync(preferences.header.orderedPages)
         haptics = Haptics(preferences: preferences)
         controller = IslandController(model: self)
@@ -370,7 +435,7 @@ import Observation
         diagnostics.start(model: self)
         updater.startAutomaticChecks()
         // Fan Control's graphs: their past kept once one is on a board (and its readings recorded).
-        fans.onRead = { [weak self] in self?.thermals.record(speed: $0) }
+        fans.onRead = { [weak self] in self?.thermals.record(speed: $0, maximum: $1) }
         if FanSensors.hasFans, boards.snapshot().values.contains(where: { $0.widgets.contains { $0.kind == .fanControl } }) {
             thermals.keepHistory()
         }

@@ -27,6 +27,9 @@ struct ProgressRing: View {
     var forcesKnob = false
     /// Whether the knob follows its place smoothly (not while it is dragged).
     var animatesKnob = true
+    /// Where the look has no knob: a bead of this colour at the fill's end, cut out of what is
+    /// behind it (Fan Control's dials).
+    var bead: Color?
     /// How the fill follows a new value; nil: at once.
     var animation: Animation?
     /// In Customize's panel for the line: where it is drawn (`ProgressPartFramesKey`).
@@ -64,6 +67,14 @@ struct ProgressRing: View {
                     .rotationEffect(.degrees(angle + 90))
                     .offset(x: cos(angle * .pi / 180) * radius, y: sin(angle * .pi / 180) * radius)
                     .animation(animatesKnob ? .easeOut(duration: 0.3) : nil, value: place)
+            } else if let bead, filled > 0.005 {
+                let angle = start + sweep * filled
+                Circle()
+                    .fill(bead)
+                    .overlay { Circle().stroke(.black.opacity(0.85), lineWidth: thickness * 0.29) }
+                    .frame(width: thickness * 1.43, height: thickness * 1.43)
+                    .offset(x: cos(angle * .pi / 180) * radius, y: sin(angle * .pi / 180) * radius)
+                    .animation(animation, value: filled)
             }
         }
         .frame(width: metrics.diameter, height: metrics.diameter)

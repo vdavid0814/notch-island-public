@@ -12,13 +12,17 @@ nonisolated struct WidgetConfig: Codable, Hashable, Sendable {
     var count: Int?
     /// The rows that have a symbol, from 1, in order (clipboard's; nil: the first alone).
     var symbolRows: [Int]?
+    /// How far back a graph reaches, in seconds (Fan Control's; nil: its longest).
+    var seconds: Int?
 
     static let countRange = 1...8
+    /// A graph's reach: ten seconds to ten minutes (the history kept, `ThermalMonitor.window`).
+    static let secondsRange = 10...600
     static let labelLimit = 40
 
     init() {}
 
-    private enum CodingKeys: String, CodingKey { case timeZone, label, count, symbolRows }
+    private enum CodingKeys: String, CodingKey { case timeZone, label, count, symbolRows, seconds }
 
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -26,6 +30,7 @@ nonisolated struct WidgetConfig: Codable, Hashable, Sendable {
         label = (try? c.decodeIfPresent(String.self, forKey: .label)).flatMap { $0 }
         count = (try? c.decodeIfPresent(Int.self, forKey: .count)).flatMap { $0 }
         symbolRows = (try? c.decodeIfPresent([Int].self, forKey: .symbolRows)).flatMap { $0 }
+        seconds = (try? c.decodeIfPresent(Int.self, forKey: .seconds)).flatMap { $0 }
     }
 
     /// An unknown time zone, an empty caption and an out-of-range count are left out.
@@ -35,6 +40,7 @@ nonisolated struct WidgetConfig: Codable, Hashable, Sendable {
             .flatMap { $0.isEmpty ? nil : $0 }
         count = count.map { min(max($0, Self.countRange.lowerBound), Self.countRange.upperBound) }
         symbolRows = symbolRows.map { Array(Set($0.filter(Self.countRange.contains))).sorted() }.flatMap { $0.isEmpty ? nil : $0 }
+        seconds = seconds.map { min(max($0, Self.secondsRange.lowerBound), Self.secondsRange.upperBound) }
     }
 }
 
@@ -50,4 +56,6 @@ nonisolated enum WidgetSetting: Sendable, Hashable {
     case symbols
     /// How many files share the shelf's row (`count`, `ShelfWidget.fileCounts`).
     case files
+    /// How far back a graph reaches (`seconds`): Fan Control's, set on its ruler too.
+    case history
 }

@@ -67,6 +67,8 @@ nonisolated enum IslandWidgetKind: String, Sendable, Codable, CaseIterable, Iden
     /// A dial round a fan (MacBook Pro only): the fans' speed, set by turning it; the fan in its
     /// middle gives them back to macOS.
     case fanControl
+    /// A list: the apps that used the battery most on the day Daily Usage picked.
+    case appUsage
 
     var id: String { rawValue }
 

@@ -1,16 +1,21 @@
 import SwiftUI
 
-/// Fan Control: in a row, a dial round the fan, a dial of the chip's temperature, and a graph of
-/// the temperature over the last thirty seconds — with the fans' speed graphed beside it where the
-/// widget is wide enough (about as wide as the panel).
+/// Fan Control: in a row, a dial of the fans' speed, a dial of the chip's temperature, and one graph
+/// of both — the heat as a line, the fans under it as a row of strokes, far apart while they turn
+/// slowly, packed together while they turn fast. The fan is the answer to the heat: the line
+/// climbs, the strokes tighten a moment later. Everything is coloured by its reading, green where
+/// it is low, yellow halfway, red at the top (`FanTint`).
 ///
 /// The dials are plain arcs open at the bottom, filled as far as the fans turn between standing
-/// still and their fastest (the chip between 30 and 100 °C), the value in the middle. Turning the
-/// fan's dial — dragging anywhere on it — holds the fans at that speed, down to none (Manual, a dot
-/// where they are held), and they stay there; the fan in it is a button that gives them back to
-/// macOS (Auto, its own curve, as from the factory). Which of the two it is stands between the fan
-/// and the speed; the dial's name stays in its opening.
-/// Every part is moved and resized in Customize; a graph keeps its lines thin when made lower.
+/// still and their fastest (the chip between 25 and 100 °C), a bead at the fill's end; over the
+/// value a word — the fans' (Auto, Manual, Resting, At max,
+/// Off), the chip's (Cool, Warm, Hot) — and under it the dial's name. Turning the fan's dial —
+/// dragging anywhere on it — holds the fans at that speed, down to none (a dot where they are
+/// held), and they stay there; its word, Manual, is a button that gives them back to macOS.
+///
+/// The graph reaches back ten seconds to ten minutes: a click on its time under it unfolds the timer's
+/// ruler in its place to set that (Done at its left), as Customize's Settings does. Every part is
+/// moved and resized in Customize; a graph keeps its lines thin when made lower.
 ///
 /// Read every second while shown (`FanCenter`, `ThermalMonitor`); a picture (the gallery,
 /// Customize) shows samples. Offered only on a Mac with a fan (MacBook Pro).
@@ -25,32 +30,58 @@ struct FanControlWidget: View {
     @Environment(\.isWidgetPreview) private var isPreview
     @Environment(\.widgetRenderMode) private var renderMode
 
-    /// A MacBook Pro's fan turning at two fifths of what it can, left to macOS, the chip at 46 °C.
-    static let sample = [FanReading(index: 0, rpm: 2450, minimum: 1200, maximum: 5800, target: 0, isManual: false)]
+    /// A MacBook Pro's fan turning at a little over half of what it can, left to macOS.
+    static let sample = [FanReading(index: 0, rpm: 3400, minimum: 1200, maximum: 5800, target: 0, isManual: false)]
+    /// The chip warm after a load, for the pictures.
+    static let sampleChip = ChipReading(average: 71, hottest: 78)
 
-    /// Half a minute of a chip working now and then, for the pictures: a reading a second up to
-    /// `now`.
-    static func sampleTemperatures(now: Date) -> [SensorSample] {
-        (0...30).map { step in
-            let t = Double(step)
-            return SensorSample(date: now.addingTimeInterval(-ThermalMonitor.window + t),
-                                value: 46 + 7 * sin(t / 3.2) + 4 * sin(t / 1.3) + (step > 22 ? Double(step - 22) * 1.1 : 0))
+    /// Ten minutes of a chip given a load and the fans answering it, for the pictures: a reading
+    /// every five seconds up to `now`, ending at `sample` and `sampleChip`.
+    static func sampleHistory(now: Date) -> (temperatures: [SensorSample], speeds: [SensorSample]) {
+        func ease(_ a: Double, _ b: Double, _ t: Double) -> Double {
+            let x = min(max((t - a) / (b - a), 0), 1)
+            return x * x * (3 - 2 * x)
         }
+        let window = ThermalMonitor.window
+        var temperatures: [SensorSample] = [], speeds: [SensorSample] = []
+        for step in 0...120 {
+            let t = Double(step) / 120
+            let date = now.addingTimeInterval(-window * (1 - t))
+            let celsius = 52 + 24 * ease(0.42, 0.55, t) - 5 * ease(0.7, 1, t) + 0.8 * sin(t * 40)
+            let rpm = 2300 + 2200 * ease(0.48, 0.6, t) - 1100 * ease(0.72, 0.98, t)
+            let phase = speeds.last.map { $0.phase + FanRhythm.advance(rpm: $0.value, maximum: 5800, seconds: date.timeIntervalSince($0.date)) } ?? 0
+            temperatures.append(SensorSample(date: date, value: celsius))
+            speeds.append(SensorSample(date: date, value: rpm, phase: phase))
+        }
+        return (temperatures, speeds)
     }
 
-    static func sampleSpeeds(now: Date) -> [SensorSample] {
-        sampleTemperatures(now: now).map { SensorSample(date: $0.date, value: 1200 + ($0.value - 34) * 75) }
+    /// How far back the graph reaches, in seconds: as set, or its longest.
+    static func seconds(_ widget: IslandWidget) -> Int {
+        clamped(widget.config.seconds ?? WidgetConfig.secondsRange.upperBound)
     }
 
-    /// The speed graph's own range: from nothing (a fan stopped) to the fastest any fan turns.
-    static func speedRange(_ fans: [FanReading]) -> ClosedRange<Double> {
-        0...max(fans.map(\.maximum).max() ?? 1, 1)
+    static func clamped(_ seconds: Int) -> Int {
+        min(max(seconds, WidgetConfig.secondsRange.lowerBound), WidgetConfig.secondsRange.upperBound)
+    }
+
+    /// The seconds as stored: the longest is the graph's own (nil).
+    static func stored(_ seconds: Int) -> Int? {
+        let clamped = clamped(seconds)
+        return clamped == WidgetConfig.secondsRange.upperBound ? nil : clamped
+    }
+
+    /// A reach in words: "10 min", "45 s", "2 min 30 s".
+    static func span(_ seconds: Int) -> String {
+        let minutes = seconds / 60, rest = seconds % 60
+        if minutes == 0 { return String(localized: "\(rest) s") }
+        return rest == 0 ? String(localized: "\(minutes) min") : String(localized: "\(minutes) min \(rest) s")
     }
 
     // MARK: Layout
 
     /// What the row holds at a size: the dials' diameter, whether the temperature's dial fits, and
-    /// the graphs that fit with their width.
+    /// whether the graph does, with its width.
     struct Layout: Equatable {
         var dial: CGFloat
         var gap: CGFloat
@@ -60,8 +91,6 @@ struct FanControlWidget: View {
 
         /// A graph narrower than this is not drawn.
         static let minimumGraph: CGFloat = 80
-        /// Two graphs side by side need this room: the widget about as wide as the panel.
-        static let twoGraphs: CGFloat = 250
     }
 
     static func layout(_ widget: IslandWidget, inner: CGSize) -> Layout {
@@ -72,11 +101,8 @@ struct FanControlWidget: View {
         let tempDial = widget.shows(.tempDial) && inner.width - used >= gap + dial
         if tempDial { used += gap + dial }
         let room = inner.width - used - gap
-        var graphs = [ElementID.tempGraph, .rpmGraph].filter { widget.shows($0) }
-        if graphs.count == 2, room < Layout.twoGraphs { graphs = [graphs[0]] }
-        if room < Layout.minimumGraph { graphs = [] }
-        let width = graphs.isEmpty ? 0 : (room - gap * CGFloat(graphs.count - 1)) / CGFloat(graphs.count)
-        return Layout(dial: dial, gap: gap, showsTempDial: tempDial, graphs: graphs, graphWidth: width)
+        let graphs: [ElementID] = widget.shows(.tempGraph) && room >= Layout.minimumGraph ? [.tempGraph] : []
+        return Layout(dial: dial, gap: gap, showsTempDial: tempDial, graphs: graphs, graphWidth: graphs.isEmpty ? 0 : room)
     }
 
     /// Whether `element` has room at this size (one switched on that has none is not drawn).
@@ -86,7 +112,7 @@ struct FanControlWidget: View {
         let layout = layout(shown, inner: inner)
         return switch element {
         case .tempDial: layout.showsTempDial
-        case .tempGraph, .rpmGraph: layout.graphs.contains(element)
+        case .tempGraph: layout.graphs.contains(element)
         case .value, .label: FanDial.showsTexts(diameter: layout.dial)
         default: true
         }
@@ -105,30 +131,48 @@ struct FanControlWidget: View {
     /// "2,450": the fans' average, to ten rpm.
     static func rpmText(_ fans: [FanReading], locale: Locale = .current) -> String {
         guard !fans.isEmpty else { return "—" }
-        return rpm(fans.map(\.rpm).reduce(0, +) / Double(fans.count), locale: locale)
+        return rpm(averageRPM(fans), locale: locale)
+    }
+
+    static func averageRPM(_ fans: [FanReading]) -> Double {
+        fans.isEmpty ? 0 : fans.map(\.rpm).reduce(0, +) / Double(fans.count)
     }
 
     static func rpm(_ value: Double, locale: Locale) -> String {
         Int((value / 10).rounded() * 10).formatted(.number.locale(locale))
     }
 
-    /// Between the fan and the speed: Auto or Manual; what is missing when the fans cannot be set;
+    /// The fans' word over their speed: Auto — Resting while they stand still, At max at their
+    /// fastest — or Manual (Off where held at none); what is missing when the fans cannot be set;
     /// for a few seconds, that the chip was too hot to keep them held.
-    static func modeText(manual: Bool, access: FanCenter.Access, tooHot: Bool = false) -> String {
+    static func modeText(manual: Bool, access: FanCenter.Access, tooHot: Bool = false, rpm: Double? = nil,
+                         maximum: Double? = nil) -> String {
         switch access {
-        case .needsApproval: String(localized: "Allow in Login Items")
-        case .installing: String(localized: "Password…")
-        case .failed: String(localized: "Unavailable")
-        default: manual ? String(localized: "Manual") : tooHot ? String(localized: "Too hot") : String(localized: "Auto")
+        case .needsApproval: return String(localized: "Allow in Login Items")
+        case .installing: return String(localized: "Password…")
+        case .failed: return String(localized: "Unavailable")
+        default: break
         }
+        let stopped = rpm.map { $0 < 1 } ?? false
+        if manual { return stopped ? String(localized: "Off") : String(localized: "Manual") }
+        if tooHot { return String(localized: "Too hot") }
+        if stopped { return String(localized: "Resting") }
+        if let rpm, let maximum, maximum > 0, rpm >= maximum * 0.98 { return String(localized: "At max") }
+        return String(localized: "Auto")
     }
 
-    /// Held by hand, or not settable: the mode says so in orange.
+    /// Something is missing to set the fans, or the chip was too hot to hold them: the word in
+    /// orange. Held by hand is no warning: the graph shows what that does.
     static func isAlert(manual: Bool, access: FanCenter.Access, tooHot: Bool = false) -> Bool {
         switch access {
         case .needsApproval, .installing, .failed: true
-        default: manual || tooHot
+        default: tooHot && !manual
         }
+    }
+
+    /// The chip's word over its degrees: cool under 55 °C, hot from 90 °C.
+    static func warmth(_ celsius: Double) -> String {
+        celsius < 55 ? String(localized: "Cool") : celsius < 90 ? String(localized: "Warm") : String(localized: "Hot")
     }
 
     /// The dial's tooltip: how to set the fans, or why they cannot be.
@@ -137,7 +181,7 @@ struct FanControlWidget: View {
         case .needsApproval: String(localized: "Switch NotchIsland on in System Settings ▸ General ▸ Login Items, then turn the dial again.")
         case .installing: String(localized: "macOS is asking for an administrator's password, once, to install the helper that sets the fans.")
         case .failed(let reason): String(localized: "The fans cannot be set: \(reason) Turn the dial to try again.")
-        default: String(localized: "Turn the dial to set the fans' speed, down to none; it stays until you click the fan for automatic.")
+        default: String(localized: "Turn the dial to set the fans' speed, down to none; it stays until you click Manual for automatic.")
         }
     }
 
@@ -177,14 +221,14 @@ struct FanControlWidget: View {
                     .frame(width: layout.dial, height: layout.dial)
                     .movableElement(.tempDial, of: widget)
             }
-            ForEach(layout.graphs, id: \.self) { id in
-                // A graph, as large as Customize resized it (from its top-leading corner), its lines as thin.
-                let scale = widget.scale(of: id)
+            if !layout.graphs.isEmpty {
+                // The graph, as large as Customize resized it (from its top-leading corner), its lines as thin.
+                let scale = widget.scale(of: .tempGraph)
                 let drawn = CGSize(width: layout.graphWidth * scale.x, height: size.height * scale.y)
-                FanGraphPart(widget: widget, id: id, picture: picture, size: drawn)
+                FanGraphPart(widget: widget, picture: picture, size: drawn)
                     .frame(width: drawn.width, height: drawn.height)
                     .frame(width: layout.graphWidth, height: size.height, alignment: .topLeading)
-                    .movableElement(id, of: widget, drawsScale: false)
+                    .movableElement(.tempGraph, of: widget, drawsScale: false)
             }
         }
         .frame(width: size.width, height: size.height, alignment: lone ? .center : .leading)
@@ -220,12 +264,14 @@ private struct FanDialPart: View {
         let manual = !picture && center.isManual
         let access = picture ? FanCenter.Access.unknown : center.access
         let tooHot = !picture && center.isTooHot
+        let rpm = FanControlWidget.averageRPM(fans)
         FanDial(fans: fans, held: picture ? nil : center.heldFraction, isManual: manual, diameter: diameter,
                 number: widget.shows(.value) ? FanControlWidget.rpmText(fans, locale: locale) : nil,
-                mode: widget.shows(.label) ? FanControlWidget.modeText(manual: manual, access: access, tooHot: tooHot) : nil,
+                mode: widget.shows(.label) ? FanControlWidget.modeText(manual: manual, access: access, tooHot: tooHot, rpm: rpm,
+                                                                        maximum: fans.map(\.maximum).max()) : nil,
                 modeIsAlert: FanControlWidget.isAlert(manual: manual, access: access, tooHot: tooHot),
                 look: widget.progressLook(of: .fanDial), nameStyle: widget.textStyles[.fanName],
-                valueStyle: widget.textStyles[.value], reportsFrame: reportsParts,
+                valueStyle: widget.textStyles[.value], reportsFrame: reportsParts, isLive: !picture,
                 set: { center.setSpeed($0) }, automatic: { center.setAutomatic() },
                 onInteraction: { model.island.isInteracting = $0 })
             .help(FanControlWidget.accessHelp(access))
@@ -243,20 +289,19 @@ private struct ChipDialPart: View {
     @Environment(\.reportsProgressParts) private var reportsParts
 
     var body: some View {
-        let chip = picture ? SystemReadings.sampleChip : model.thermals.chip
+        let chip = picture ? FanControlWidget.sampleChip : model.thermals.chip
         TemperatureDial(celsius: chip?.average, diameter: diameter,
                         number: chip.map { FanControlWidget.degreeNumber($0.average, locale: locale) },
                         unit: FanControlWidget.degreeUnit(locale: locale), look: widget.progressLook(of: .tempDial),
                         nameStyle: widget.textStyles[.tempName], valueStyle: widget.textStyles[.tempValue],
-                        reportsFrame: reportsParts)
+                        reportsFrame: reportsParts, isLive: !picture)
     }
 }
 
-/// A graph of the last thirty seconds: the chip's temperature, or the fans' speed from nothing to
-/// their fastest.
+/// The graph of the heat and the fans, as far back as the widget is set to — or, unfolded by a
+/// click on its time, the timer's ruler setting that (`FanHistorySetter`).
 private struct FanGraphPart: View {
     let widget: IslandWidget
-    let id: ElementID
     let picture: Bool
     let size: CGSize
 
@@ -264,27 +309,144 @@ private struct FanGraphPart: View {
     @Environment(\.widgetDate) private var fixedDate
     @Environment(\.locale) private var locale
 
+    @State private var isSetting = false
+    @State private var draft = WidgetConfig.secondsRange.upperBound
+
     var body: some View {
-        let now = fixedDate ?? .now
-        let look = widget.chartLook(of: id)
-        let locale = locale
-        if id == .tempGraph {
-            SensorGraph(title: String(localized: "Chip"),
-                        samples: picture ? FanControlWidget.sampleTemperatures(now: now) : model.thermals.temperatures, now: now,
-                        minimumSpan: 8, fixedRange: look.range(own: SensorGraph.temperatureRange, gap: 5),
-                        colors: SensorGraph.colors(look, automatic: TemperatureDial.colors, model: model),
-                        showsAverage: true, format: { FanControlWidget.degrees($0, locale: locale) }, size: size,
-                        look: look, ownStep: SensorGraph.temperatureStep, textStyle: widget.textStyles[.tempGraphText])
-        } else {
-            let fans = picture || model.fans.fans.isEmpty ? FanControlWidget.sample : model.fans.fans
-            let own = FanControlWidget.speedRange(fans)
-            SensorGraph(title: String(localized: "Fan"),
-                        samples: picture ? FanControlWidget.sampleSpeeds(now: now) : model.thermals.speeds, now: now,
-                        minimumSpan: 1, fixedRange: look.range(own: own, gap: 100),
-                        colors: SensorGraph.colors(look, automatic: FanTint.colors, model: model),
-                        showsAverage: false, format: { FanControlWidget.rpm($0, locale: locale) }, size: size,
-                        look: look, ownStep: SensorGraph.speedStep(own), textStyle: widget.textStyles[.rpmGraphText])
+        ZStack(alignment: .top) {
+            if isSetting {
+                FanHistorySetter(seconds: $draft, size: size, done: fold)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            } else {
+                graph
+                    .transition(.opacity)
+            }
         }
+        .frame(width: size.width, height: size.height, alignment: .top)
+        .clipped()
+        // Away before Done (the island closed): what was set stays.
+        .onDisappear { if isSetting { commit() } }
+    }
+
+    private var graph: some View {
+        let now = fixedDate ?? .now
+        let look = widget.chartLook(of: .tempGraph)
+        let colors = FanHeatGraph.colors(look, model: model)
+        let history: (temperatures: [SensorSample], speeds: [SensorSample]) =
+            picture ? FanControlWidget.sampleHistory(now: now) : (model.thermals.temperatures, model.thermals.speeds)
+        let stopped = !picture && model.fans.isManual ? String(localized: "Fan off") : String(localized: "Fan resting")
+        let window = TimeInterval(FanControlWidget.seconds(widget))
+        let range = look.range(own: FanHeatGraph.temperatureRange, gap: 5)
+        let setHistory: (() -> Void)? = picture ? nil : { unfold() }
+        let fans = picture || model.fans.fans.isEmpty ? FanControlWidget.sample : model.fans.fans
+        return FanHeatGraph(temperatures: history.temperatures, speeds: history.speeds, now: now, window: window, range: range,
+                            heat: colors.heat, fan: colors.fan, fanMaximum: fans.map(\.maximum).max() ?? 5800, corners: look.corners,
+                            stopped: stopped, locale: locale, size: size, textStyle: widget.textStyles[.tempGraphText],
+                            setHistory: setHistory)
+    }
+
+    private func unfold() {
+        draft = FanControlWidget.seconds(widget)
+        withAnimation(Motion.content) { isSetting = true }
+    }
+
+    private func fold() {
+        commit()
+        withAnimation(Motion.content) { isSetting = false }
+    }
+
+    private func commit() {
+        let seconds = FanControlWidget.stored(draft)
+        guard widget.config.seconds != seconds else { return }
+        model.boards.store(containing: widget.id)?.update(widget.id) { $0.config.seconds = seconds }
+    }
+}
+
+/// How far back the graph reaches, set as the timer is: its ruler over a row of Done (at the left)
+/// and the time (at the right), in the timer's orange. The ruler sets the minutes or the seconds —
+/// a click on either in the time, or on the unit's name beside the marker, picks which — and each
+/// step of it is felt.
+struct FanHistorySetter: View {
+    @Binding var seconds: Int
+    let size: CGSize
+    let done: () -> Void
+
+    @Environment(AppModel.self) private var model
+    @State private var unit = TimerUnit.minutes
+
+    var body: some View {
+        let space = TimerWidget.rulerSpace(inner: size)
+        let spacing = TimerWidget.spacing(inner: size)
+        let row = size.height - space - spacing
+        let diameter = min(max(row * 0.82, 22), 40).rounded()
+        let points = max(min(WidgetMetrics.points(row, ratio: 0.72, min: 12, max: 44), (size.width * 0.45 / 2.6).rounded(.down)), 10)
+        let range = Self.range(of: unit, at: seconds)
+        VStack(spacing: spacing) {
+            TimerRuler(minutes: Binding(get: { unit == .minutes ? seconds / 60 : seconds % 60 }, set: set),
+                       range: range, minimum: 0, unit: unit, nextUnit: nextUnit, unitName: RulerUnitName(),
+                       showsLabels: size.height >= 100, tint: TimerWidget.tint,
+                       onInteraction: { model.island.isInteracting = $0 }, markerSize: space < 30 ? 7 : 9, isAwake: true)
+                .frame(height: space)
+            HStack(alignment: .bottom) {
+                Button(action: done) {
+                    Label {
+                        Text("Done")
+                    } icon: {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: diameter * 0.4, weight: .semibold))
+                            .frame(width: diameter - 2 * TimerWidget.glassPadding, height: diameter - 2 * TimerWidget.glassPadding)
+                    }
+                }
+                .islandButton(.circle, prominent: true)
+                .controlSize(.large)
+                .help("Done")
+                Spacer(minLength: 4)
+                // "2:30", as the timer writes it: the part the ruler sets bright, a click on the other picks it.
+                HStack(spacing: 0) {
+                    part(.minutes, "\(seconds / 60)")
+                    Text(":").opacity(LabelSegment.fadedOpacity)
+                    part(.seconds, String(format: "%02d", seconds % 60))
+                }
+                .font(.system(size: points, design: .rounded).monospacedDigit())
+                .foregroundStyle(TimerWidget.tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .transaction { $0.animation = nil }
+            }
+            .frame(height: max(row, 0), alignment: .bottom)
+        }
+        .frame(width: size.width, height: size.height, alignment: .top)
+        .tint(TimerWidget.tint)
+    }
+
+    /// What the ruler offers in `unit` at a reach of `seconds`: minutes 0 to 10; seconds from 10
+    /// while the minutes are 0 (nothing it cannot be set to), from 0 once a minute is set.
+    static func range(of unit: TimerUnit, at seconds: Int) -> ClosedRange<Int> {
+        if unit == .minutes { return 0...(WidgetConfig.secondsRange.upperBound / 60) }
+        return (seconds < 60 ? WidgetConfig.secondsRange.lowerBound : 0)...59
+    }
+
+    private func part(_ part: TimerUnit, _ text: String) -> some View {
+        Text(text)
+            .opacity(unit == part ? 1 : LabelSegment.fadedOpacity)
+            .contentShape(.rect)
+            .onTapGesture { unit = part }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(Text("\(part == .minutes ? seconds / 60 : seconds % 60) \(part.accessibilityTitle)"))
+    }
+
+    private func nextUnit() {
+        unit = unit == .minutes ? .seconds : .minutes
+    }
+
+    /// The ruler moved: the unit it sets to `value`, the other kept, held between ten seconds and
+    /// ten minutes; a tick felt for each change.
+    private func set(_ value: Int) {
+        let total = unit == .minutes ? value * 60 + seconds % 60 : seconds / 60 * 60 + value
+        let held = FanControlWidget.clamped(total)
+        guard held != seconds else { return }
+        seconds = held
+        model.haptics.play(.tick)
     }
 }
 
@@ -296,10 +458,10 @@ nonisolated enum FanDialGeometry {
     static let sweep: Double = 270
 }
 
-/// The fan's dial, made as the chip's is: its arc, the fan (a button: back to Auto), under it the
-/// mode ("Auto", "Manual" while the fans are held), then the speed with "rpm", and its name in the
-/// arc's opening, always; a dot on the arc where they are held. Too small for texts (under 56 pt),
-/// the fan alone.
+/// The fan's dial, made as the chip's is: its arc, in the colour of the speed, with a bead at the fill's end, the fans' word
+/// over their speed with "rpm", and its name in the arc's opening, always; a dot on the arc where
+/// they are held. Standing still, the word alone in the middle. Held by hand, the word (Manual) is
+/// a button that gives them back to macOS. Too small for texts (under 56 pt), the arc alone.
 struct FanDial: View {
     let fans: [FanReading]
     /// Where the fans are held (0…1), while manual.
@@ -310,10 +472,9 @@ struct FanDial: View {
     /// "2,450"; nil: the speed is not shown.
     let number: String?
     var unit = "rpm"
-    /// "Auto" or "Manual" (or what is missing to set the fans), between the fan and the speed; nil:
-    /// not shown.
+    /// "Auto", "Manual"… (or what is missing to set the fans), over the speed; nil: not shown.
     var mode: String?
-    /// The mode in orange (held by hand, or something is missing).
+    /// The word in orange (something is missing).
     var modeIsAlert = false
     /// "Fan": in the arc's opening, whatever the mode.
     var name = String(localized: "Fan")
@@ -322,36 +483,28 @@ struct FanDial: View {
     var nameStyle: TextStyle?
     var valueStyle: TextStyle?
     var reportsFrame = false
+    /// On the island (not a picture): the arc's glides on the render server.
+    var isLive = false
     let set: (Double) -> Void
     let automatic: () -> Void
     var onInteraction: (Bool) -> Void = { _ in }
 
     @State private var dragged: Double?
-    @State private var taps = 0
 
     static var start: Double { FanDialGeometry.start }
     static var sweep: Double { FanDialGeometry.sweep }
 
     static func showsTexts(diameter: CGFloat) -> Bool { diameter >= 56 }
 
-    static func line(diameter: CGFloat) -> CGFloat { max(diameter * 0.055, 2) }
+    static func line(diameter: CGFloat) -> CGFloat { max(diameter * 0.059, 2) }
 
-    /// The fan's middle, from the dial's (y down): over the speed when the texts are drawn — a
-    /// little higher (and the fan smaller) where the mode stands between the two.
-    static func iconCenter(diameter: CGFloat, showsTexts: Bool, showsMode: Bool = false) -> CGPoint {
-        guard showsTexts && self.showsTexts(diameter: diameter) else { return .zero }
-        return CGPoint(x: 0, y: -diameter * (showsMode ? 0.3 : 0.235))
-    }
+    /// The word's middle, from the dial's (y down): over the speed.
+    static func modeCenter(diameter: CGFloat) -> CGFloat { -diameter * 0.178 }
 
-    static func iconPoints(diameter: CGFloat, showsTexts: Bool, showsMode: Bool = false) -> CGFloat {
-        guard showsTexts && self.showsTexts(diameter: diameter) else { return diameter * 0.36 }
-        return diameter * (showsMode ? 0.165 : 0.19)
-    }
+    static func modePoints(diameter: CGFloat) -> CGFloat { WidgetMetrics.points(diameter, ratio: 0.1, min: 7, max: 12) }
 
-    /// The mode's middle, from the dial's: between the fan and the speed.
-    static func modeCenter(diameter: CGFloat) -> CGFloat { -diameter * 0.155 }
-
-    static func modePoints(diameter: CGFloat) -> CGFloat { WidgetMetrics.points(diameter, ratio: 0.09, min: 7, max: 11) }
+    /// The word alone in the middle, while the fans stand still.
+    static func restingPoints(diameter: CGFloat) -> CGFloat { WidgetMetrics.points(diameter, ratio: 0.17, min: 8, max: 22) }
 
     /// 0…1 at a point of the dial (its middle `center`): along the arc; in its opening, the nearer
     /// end — the one the drag came from (`previous`), so it never jumps across.
@@ -376,58 +529,59 @@ struct FanDial: View {
         let running = fan.map { $0.fraction(of: $0.rpm) } ?? 0
         let knob = dragged ?? held ?? running
         let texts = showsTexts && Self.showsTexts(diameter: diameter)
-        let icon = Self.iconCenter(diameter: diameter, showsTexts: showsTexts, showsMode: mode != nil)
-        let points = Self.iconPoints(diameter: diameter, showsTexts: showsTexts, showsMode: mode != nil)
+        let stopped = FanControlWidget.averageRPM(fans) < 1
         ZStack {
             // The arc, dragged anywhere on the dial.
             ZStack {
                 Circle().fill(.white.opacity(0.001))
-                // A dot where the fans are held; any other knob the look picks, where they turn too.
-                ProgressRing(fraction: running, diameter: diameter, line: line, look: look, start: Self.start, sweep: Self.sweep,
-                             automaticTrack: .white.opacity(0.1), minimumFill: 0.004, automaticFill: AnyShapeStyle(FanTint.color(running)),
-                             knobAt: knob, forcesKnob: isManual || dragged != nil, animatesKnob: dragged == nil,
-                             animation: .easeOut(duration: 0.6), reportsFrame: reportsFrame)
+                // A dot where the fans are held; any other knob the look picks, where they turn too;
+                // else a bead at the fill's end.
+                if isLive, RingLayers.supports(look) {
+                    // Live: the glides on the render server (`RingLayers`).
+                    RingLayers(fraction: running, diameter: diameter, line: line, look: look, start: Self.start, sweep: Self.sweep,
+                               automaticTrack: .white.opacity(0.08), minimumFill: stopped ? 0 : 0.004,
+                               automaticFill: FanTint.at(running).color, knobAt: knob, forcesKnob: isManual || dragged != nil,
+                               animatesKnob: dragged == nil, bead: FanTint.at(running).color)
+                } else {
+                    ProgressRing(fraction: running, diameter: diameter, line: line, look: look, start: Self.start, sweep: Self.sweep,
+                                 // Standing still: no fill at all (a round end's dot read as turning).
+                                 automaticTrack: .white.opacity(0.08), minimumFill: stopped ? 0 : 0.004,
+                                 automaticFill: AnyShapeStyle(FanTint.at(running).color),
+                                 knobAt: knob, forcesKnob: isManual || dragged != nil, animatesKnob: dragged == nil,
+                                 bead: FanTint.at(running).color, animation: isLive ? .easeOut(duration: 0.6) : nil, reportsFrame: reportsFrame)
+                }
             }
             .contentShape(Circle())
             .gesture(drag)
 
             if texts {
-                // The speed with its unit, and the dial's name in its opening: as the chip's dial.
-                if let number {
-                    let points = WidgetMetrics.points(diameter, ratio: 0.2, min: 8, max: 26)
-                    RingText(text: speed(number, points: points), style: valueStyle, size: points, weight: .semibold, design: .rounded,
-                             automatic: AnyShapeStyle(.primary), part: .remaining, look: look, reportsFrame: reportsFrame,
-                             limit: RingText.valueLimit(diameter: diameter, line: line))
-                        .offset(y: diameter * 0.02)
-                        // A new reading each second: it just changes (a cross-fade a second smeared).
-                        .transaction { $0.animation = nil }
-                        .allowsHitTesting(false)
+                if stopped, let mode {
+                    // Standing still: the word alone, no bare zero.
+                    word(mode, points: Self.restingPoints(diameter: diameter), opacity: 0.72)
+                        .frame(maxWidth: diameter * 0.7)
+                } else {
+                    if let number {
+                        let points = WidgetMetrics.points(diameter, ratio: 0.2, min: 8, max: 26)
+                        RingText(text: speed(number, points: points), style: valueStyle, size: points, weight: .semibold, design: .rounded,
+                                 automatic: AnyShapeStyle(.primary), part: .remaining, look: look, reportsFrame: reportsFrame,
+                                 limit: RingText.valueLimit(diameter: diameter, line: line))
+                            .offset(y: diameter * 0.02)
+                            // A new reading each second: it just changes (a cross-fade a second smeared).
+                            .transaction { $0.animation = nil }
+                            .allowsHitTesting(false)
+                    }
+                    if let mode {
+                        word(mode, points: Self.modePoints(diameter: diameter), opacity: 0.5)
+                            .frame(maxWidth: diameter * 0.6)
+                            .offset(y: Self.modeCenter(diameter: diameter))
+                    }
                 }
                 RingText(text: Text(name), style: nameStyle, size: WidgetMetrics.points(diameter, ratio: 0.095, min: 7, max: 12),
                          weight: .semibold, part: .elapsed, look: look, reportsFrame: reportsFrame,
                          limit: RingText.nameLimit(diameter: diameter))
                     .offset(y: diameter * 0.39)
                     .allowsHitTesting(false)
-                if let mode {
-                    // The mode, in the name's type: with the fan, none of the line's own parts.
-                    Text(mode)
-                        .font(modeFont(Self.modePoints(diameter: diameter)))
-                        .foregroundStyle(modeIsAlert ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .frame(maxWidth: diameter * 0.6)
-                        .offset(y: Self.modeCenter(diameter: diameter))
-                        .transaction { $0.animation = nil }
-                        .allowsHitTesting(false)
-                        .besideProgressParts()
-                }
             }
-            FanButton(isManual: isManual, color: FanTint.color(knob), points: points, taps: taps) {
-                taps += 1
-                if isManual { automatic() }
-            }
-            .offset(x: icon.x, y: icon.y)
-            .besideProgressParts()
         }
         .frame(width: diameter, height: diameter)
         .accessibilityElement(children: .contain)
@@ -436,11 +590,32 @@ struct FanDial: View {
         }
     }
 
-    /// The mode's type: the name's where Customize set one (at the mode's own size), else the dial's.
+    /// The fans' word, in the name's type: held by hand, a button back to Automatic.
+    @ViewBuilder private func word(_ text: String, points: CGFloat, opacity: Double) -> some View {
+        let label = Text(text)
+            .font(modeFont(points))
+            .foregroundStyle(modeIsAlert ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.white.opacity(opacity)))
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+            .transaction { $0.animation = nil }
+        if isManual {
+            Button(action: automatic) { label.contentShape(.rect) }
+                .buttonStyle(.plain)
+                .help("Back to Automatic")
+                .accessibilityLabel(Text("Back to Automatic"))
+                .besideProgressParts()
+        } else {
+            label
+                .allowsHitTesting(false)
+                .besideProgressParts()
+        }
+    }
+
+    /// The word's type: the name's where Customize set one (at the word's own size), else the dial's.
     private func modeFont(_ points: CGFloat) -> Font {
-        guard var style = nameStyle else { return .system(size: points, weight: .semibold) }
+        guard var style = nameStyle else { return .system(size: points, weight: .medium, design: .rounded) }
         style.size = Double(points)
-        return Font(style.font(size: points, weight: .semibold))
+        return Font(style.font(size: points, weight: .medium))
     }
 
     /// "2,450 rpm": the speed with its unit under half as large and dimmer — in the style's type
@@ -448,7 +623,7 @@ struct FanDial: View {
     private func speed(_ number: String, points: CGFloat) -> Text {
         guard let valueStyle = RingText.capped(valueStyle) else {
             return Text(number)
-                + Text(" " + unit).font(.system(size: points * 0.45, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+                + Text(" " + unit).font(.system(size: points * 0.45, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.5))
         }
         var small = valueStyle
         small.size = (valueStyle.size ?? Double(points)) * 0.45
@@ -473,32 +648,9 @@ struct FanDial: View {
     }
 }
 
-/// The fan: a button that gives the fans back to macOS. In the speed's colour while they are held,
-/// white while macOS runs them.
-private struct FanButton: View {
-    let isManual: Bool
-    let color: Color
-    let points: CGFloat
-    let taps: Int
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "fan.fill")
-                .font(.system(size: points, weight: .medium))
-                .foregroundStyle(isManual ? AnyShapeStyle(color) : AnyShapeStyle(.primary.opacity(0.85)))
-                .symbolEffect(.bounce, value: taps)
-                .frame(width: points * 1.6, height: points * 1.6)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .help(isManual ? "Back to Automatic" : "Automatic")
-        .accessibilityLabel(Text(isManual ? "Back to Automatic" : "Automatic"))
-    }
-}
-
-/// The chip's temperature as a dial like the fan's: filled from 30 to 110 °C, the thermometer, the
-/// degrees with their unit, and "Chip" in its opening.
+/// The chip's temperature as a dial like the fan's: its arc, in the colour of the warmth, filled from 25 to 100 °C with a
+/// bead at the end, its word (Cool, Warm, Hot) over the degrees with their unit, and "Chip" in its
+/// opening.
 struct TemperatureDial: View {
     let celsius: Double?
     let diameter: CGFloat
@@ -511,37 +663,43 @@ struct TemperatureDial: View {
     var nameStyle: TextStyle?
     var valueStyle: TextStyle?
     var reportsFrame = false
+    /// On the island (not a picture): the arc's glides on the render server.
+    var isLive = false
 
-    /// The dial's and the graph's: fixed, so a reading is always as far along.
-    static let range = 30.0...110.0
-    static let colors: [Color] = [Color(red: 0.25, green: 0.7, blue: 1.0), Color(red: 0.35, green: 0.9, blue: 0.55),
-                                  Color(red: 1.0, green: 0.8, blue: 0.25), Color(red: 1.0, green: 0.4, blue: 0.25)]
+    /// The dial's: fixed, so a reading is always as far along.
+    static let range = 25.0...100.0
 
     static func fraction(_ celsius: Double) -> Double {
         min(max((celsius - range.lowerBound) / (range.upperBound - range.lowerBound), 0), 1)
-    }
-
-    static func color(_ fraction: Double) -> Color {
-        colors[min(Int(fraction * Double(colors.count)), colors.count - 1)]
     }
 
     var body: some View {
         let line = FanDial.line(diameter: diameter)
         let fraction = celsius.map(Self.fraction) ?? 0
         let texts = FanDial.showsTexts(diameter: diameter)
-        let points = FanDial.iconPoints(diameter: diameter, showsTexts: true)
         ZStack {
-            ProgressRing(fraction: fraction, diameter: diameter, line: line, look: look, start: FanDialGeometry.start,
-                         sweep: FanDialGeometry.sweep, automaticTrack: .white.opacity(0.1), minimumFill: 0.004,
-                         automaticFill: AnyShapeStyle(Self.color(fraction)), animation: .easeOut(duration: 0.6),
-                         reportsFrame: reportsFrame)
-            Image(systemName: fraction < 0.25 ? "thermometer.low" : fraction < 0.65 ? "thermometer.medium" : "thermometer.high")
-                .font(.system(size: points, weight: .medium))
-                .foregroundStyle(.primary.opacity(0.85))
-                .offset(y: FanDial.iconCenter(diameter: diameter, showsTexts: true).y)
-                .besideProgressParts()
+            if isLive, RingLayers.supports(look) {
+                RingLayers(fraction: fraction, diameter: diameter, line: line, look: look, start: FanDialGeometry.start,
+                           sweep: FanDialGeometry.sweep, automaticTrack: .white.opacity(0.08), minimumFill: celsius == nil ? 0 : 0.004,
+                           automaticFill: FanTint.at(fraction).color, bead: FanTint.at(fraction).color)
+            } else {
+                ProgressRing(fraction: fraction, diameter: diameter, line: line, look: look, start: FanDialGeometry.start,
+                             sweep: FanDialGeometry.sweep, automaticTrack: .white.opacity(0.08), minimumFill: celsius == nil ? 0 : 0.004,
+                             automaticFill: AnyShapeStyle(FanTint.at(fraction).color), bead: FanTint.at(fraction).color,
+                             animation: isLive ? .easeOut(duration: 0.6) : nil, reportsFrame: reportsFrame)
+            }
             if texts {
                 let points = WidgetMetrics.points(diameter, ratio: 0.2, min: 8, max: 26)
+                if let celsius {
+                    Text(FanControlWidget.warmth(celsius))
+                        .font(wordFont(FanDial.modePoints(diameter: diameter)))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .frame(maxWidth: diameter * 0.6)
+                        .minimumScaleFactor(0.5)
+                        .offset(y: FanDial.modeCenter(diameter: diameter))
+                        .transaction { $0.animation = nil }
+                        .besideProgressParts()
+                }
                 RingText(text: degrees(points: points), style: valueStyle, size: points, weight: .semibold, design: .rounded,
                          automatic: AnyShapeStyle(.primary), part: .remaining, look: look, reportsFrame: reportsFrame,
                          limit: RingText.valueLimit(diameter: diameter, line: line))
@@ -559,12 +717,19 @@ struct TemperatureDial: View {
         .accessibilityLabel(Text("Chip temperature \(number ?? "—") \(unit)"))
     }
 
+    /// The word's type: the name's where Customize set one (at the word's own size), else the dial's.
+    private func wordFont(_ points: CGFloat) -> Font {
+        guard var style = nameStyle else { return .system(size: points, weight: .medium, design: .rounded) }
+        style.size = Double(points)
+        return Font(style.font(size: points, weight: .medium))
+    }
+
     /// "52°C": the degrees with their unit half as large and dimmer — in the style's type where it
     /// has one (its colour then the unit's too).
     private func degrees(points: CGFloat) -> Text {
         guard let valueStyle = RingText.capped(valueStyle) else {
             return Text(number ?? "—")
-                + Text(unit).font(.system(size: points * 0.5, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+                + Text(unit).font(.system(size: points * 0.5, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.5))
         }
         var half = valueStyle
         half.size = (valueStyle.size ?? Double(points)) * 0.5
@@ -572,256 +737,797 @@ struct TemperatureDial: View {
     }
 }
 
-// MARK: - The graphs
+// MARK: - The graph
 
-/// A series over the last thirty seconds: its line over a soft fill, in the colours of its values (cool
-/// at the bottom, hot at the top), faint guides with their values beside them, and over it its name,
-/// the average (dashed, where asked) and the value now. Lower than 40 pt, the line alone.
+/// Green where a reading is low, yellow halfway, red at the top — smoothly between them: the fan's
+/// dial by its speed, the chip's dial and the heat line by the temperature, each of the fans'
+/// strokes by their speed at its moment.
+nonisolated struct FanTint: Equatable, Sendable {
+    var red: Double
+    var green: Double
+    var blue: Double
+
+    static let low = FanTint(red: 0.30, green: 0.85, blue: 0.45)
+    static let middle = FanTint(red: 1.0, green: 0.82, blue: 0.25)
+    static let high = FanTint(red: 1.0, green: 0.30, blue: 0.25)
+
+    /// At `fraction` of the way from low (0) to high (1).
+    static func at(_ fraction: Double) -> FanTint {
+        let f = min(max(fraction.isFinite ? fraction : 0, 0), 1)
+        let (from, to, t) = f < 0.5 ? (low, middle, f * 2) : (middle, high, (f - 0.5) * 2)
+        // Weighted so that the ends come out exactly.
+        return FanTint(red: from.red * (1 - t) + to.red * t, green: from.green * (1 - t) + to.green * t,
+                       blue: from.blue * (1 - t) + to.blue * t)
+    }
+
+    /// A colour Customize picked, as a tint.
+    init(_ color: Color) {
+        let rgb = NSColor(color).usingColorSpace(.sRGB) ?? .white
+        self.init(red: rgb.redComponent, green: rgb.greenComponent, blue: rgb.blueComponent)
+    }
+
+    init(red: Double, green: Double, blue: Double) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
+
+    var color: Color { Color(.sRGB, red: red, green: green, blue: blue) }
+
+    func cgColor(_ alpha: Double = 1) -> CGColor {
+        CGColor(srgbRed: red, green: green, blue: blue, alpha: alpha)
+    }
+}
+
+/// The heat and the fans over the last minutes, in one graph: the chip's temperature as a line
+/// over a soft fill, from 30° up to a dotted limit (100°, written over it), in the colour of its
+/// warmth, its newest reading a dot at the right; a dotted line at the lowest temperature in view,
+/// written at its left; under it the fans as a row of strokes, one stamped wherever their run
+/// passes a step (`FanRhythm`) — the faster they turn, the closer and the redder. Under the row,
+/// its key: how far back it reaches (a button: the ruler to set that), slow and fast, now.
 ///
-/// Set in Customize as a chart is (`ChartLook`): its corners are the line's joins and the mark at
-/// the newest reading, its colours the low, the middle and the high readings', and its step how
-/// often a value is written beside it (each with its guide); its texts in one style.
-struct SensorGraph: View {
-    let title: String
-    let samples: [SensorSample]
+/// Live, it slides: each new reading is drawn once, and Core Animation carries the drawing left in
+/// a short soft glide on the render server (`FanGraphLayerView`) — one step a reading looked like a
+/// jump on a short graph.
+///
+/// Where the fans stand still the row is empty and says so; a graph whose past is shorter than it
+/// reaches says it fills in. Lower than 56 pt, the lines and the row alone; lower than 22, the line.
+///
+/// Set in Customize as a chart is (`ChartLook`): its corners are the line's joins and the dot at
+/// the newest reading, its high colour the heat's, its low colour the fans' (each by its reading
+/// while Automatic), its range the line's; its texts in one style.
+struct FanHeatGraph: View {
+    let temperatures: [SensorSample]
+    let speeds: [SensorSample]
     let now: Date
-    /// The values' span at least (degrees, rpm), so a steady reading is not drawn as a storm.
-    let minimumSpan: Double
-    /// The range drawn; nil: the values' own, padded.
-    let fixedRange: ClosedRange<Double>?
-    let colors: [Color]
-    let showsAverage: Bool
-    let format: (Double) -> String
+    /// How far back it reaches, in seconds.
+    let window: TimeInterval
+    /// The temperatures from the bottom of the line's room to its dotted limit.
+    let range: ClosedRange<Double>
+    /// The line's colour and the strokes'; nil: by the reading (`FanTint`).
+    var heat: Color?
+    var fan: Color?
+    /// The fans' fastest, for the strokes' colours.
+    var fanMaximum: Double = 5800
+    var corners: ChartLook.Corners = .rounded
+    /// Where the fans stand still, in the row: "Fan resting" (or "Fan off", held there).
+    let stopped: String
+    let locale: Locale
     let size: CGSize
-    var look: ChartLook = .plain
-    /// A value written every this much (degrees, rpm) where the look sets no step of its own.
-    var ownStep: Double = 0
     /// The texts' type and colour; nil: the graph's own.
     var textStyle: TextStyle?
+    /// A click on its time: the ruler setting how far back it reaches; nil: a picture (drawn still).
+    var setHistory: (() -> Void)?
 
     @Environment(AppModel.self) private var model
 
-    /// The temperature graph's own range and step: 25, 50, 75 and 100 °C.
-    static let temperatureRange = 25.0...100.0
-    static let temperatureStep = 25.0
+    /// The line's own range: a floor of 30° up to the 100° limit.
+    static let temperatureRange = 30.0...100.0
     /// The texts' sizes Customize offers.
     static let textSizes = 6.0...15.0
 
-    /// The speed graph's own step: nothing, half and its fastest.
-    static func speedStep(_ range: ClosedRange<Double>) -> Double { (range.upperBound - range.lowerBound) / 2 }
-
     /// The texts' own size on a graph `height` tall.
-    static func textPoints(height: CGFloat) -> CGFloat { WidgetMetrics.points(height, ratio: 0.11, min: 8, max: 11) }
+    static func textPoints(height: CGFloat) -> CGFloat { WidgetMetrics.points(height, ratio: 0.075, min: 8, max: 11) }
 
-    /// The values with a guide, low to high: the lowest, then every `step` up, and the highest.
-    /// No step (0): the lowest and the highest alone. Never more than forty.
-    static func marks(_ range: ClosedRange<Double>, step: Double) -> [Double] {
-        let low = range.lowerBound, high = range.upperBound
-        guard step > 0, (high - low) / step <= 40 else { return [low, high] }
-        var marks = Array(stride(from: low, to: high - step * 0.001, by: step))
-        marks.append(high)
-        return marks
-    }
-
-    static func range(of values: [Double], minimumSpan: Double) -> ClosedRange<Double> {
-        guard let low = values.min(), let high = values.max() else { return 0...1 }
-        let middle = (low + high) / 2, span = max(high - low, minimumSpan) * 1.2
-        return (middle - span / 2)...(middle + span / 2)
-    }
-
-    /// How far back the graph reaches: as far as it has readings, from ten seconds up to the thirty
-    /// it shows — so a graph just started fills its width and spreads out as its past grows.
-    static func span(of samples: [SensorSample], now: Date) -> TimeInterval {
-        let reach = samples.first.map { now.timeIntervalSince($0.date) } ?? 0
-        return min(max(reach, 10), ThermalMonitor.window)
-    }
-
-    /// The line's colours, bottom to top: the graph's own, or — once the look picks any — the
-    /// look's low, middle and high (one left automatic keeps the graph's there).
-    @MainActor static func colors(_ look: ChartLook, automatic: [Color], model: AppModel) -> [Color] {
-        guard look.lowColor != .automatic || look.mediumColor != .automatic || look.highColor != .automatic,
-              let first = automatic.first, let last = automatic.last else { return automatic }
-        func resolve(_ color: TextStyle.TextColor, _ own: Color) -> Color {
+    /// The line's colour and the strokes' where the look picks one; nil: by the reading.
+    @MainActor static func colors(_ look: ChartLook, model: AppModel) -> (heat: Color?, fan: Color?) {
+        func resolve(_ color: TextStyle.TextColor) -> Color? {
             switch color {
-            case .automatic: own
+            case .automatic: nil
             case .custom(let rgb): rgb.color
             case .artwork: model.media.artworkColor.map { Color($0) } ?? .islandAccent
             }
         }
-        return [resolve(look.lowColor, first), resolve(look.mediumColor, automatic[automatic.count / 2]), resolve(look.highColor, last)]
+        return (resolve(look.highColor), resolve(look.lowColor))
     }
 
-    /// A value's line height beside the plot, at its type's size.
-    static func captionHeight(points: CGFloat) -> CGFloat { (points * 1.25).rounded(.up) }
-
-    /// A value's top beside a plot `height` tall: centred on its guide (`share` of the way up, 0…1),
-    /// kept inside at the ends.
-    static func captionTop(_ share: Double, height: CGFloat, caption: CGFloat) -> CGFloat {
-        min(max(height * (1 - CGFloat(share)) - caption / 2, 0), max(height - caption, 0))
+    /// Where its parts are, at a size: the dotted limit (the range's top) and the line's floor, the
+    /// row of strokes under them, and the key under the row.
+    nonisolated struct Layout: Equatable, Sendable {
+        var showsTexts: Bool
+        var limit: CGFloat
+        var floor: CGFloat
+        /// The row of strokes; empty where it has no room.
+        var row: ClosedRange<CGFloat>?
+        var key: CGFloat
+        var line: CGFloat
+        /// The newest reading's x: the dot clear of the right edge.
+        var right: CGFloat
     }
 
-    /// The marks written: the ends always, those between where they are clear of the last one
-    /// written and of the top (as the battery chart's percentages are).
-    static func written(_ marks: [Double], range: ClosedRange<Double>, height: CGFloat, caption: CGFloat) -> [Double] {
-        guard let first = marks.first, let last = marks.last else { return [] }
-        let span = max(range.upperBound - range.lowerBound, 0.001)
-        func top(_ value: Double) -> CGFloat { captionTop((value - range.lowerBound) / span, height: height, caption: caption) }
-        var kept = [first]
-        for value in marks.dropFirst() where value != last {
-            if abs(top(value) - top(kept[kept.count - 1])) >= caption, abs(top(value) - top(last)) >= caption { kept.append(value) }
+    static func layout(_ size: CGSize, caption: CGFloat) -> Layout {
+        let h = size.height
+        let line = max(1.25, h * 0.0125)
+        let right = max(size.width - line * 3 - 1, 1)
+        if h >= 56 {
+            // The proposal's proportions: the line's room 63 %, a gap, the strokes 20 %, a gap.
+            let room = h - 2 * caption - 2
+            let limit = caption + 2
+            return Layout(showsTexts: true, limit: limit, floor: limit + room * 0.63,
+                          row: (limit + room * 0.723)...(limit + room * 0.927), key: h - caption, line: line, right: right)
         }
-        if last != first { kept.append(last) }
-        return kept
+        let limit = line * 3
+        if h >= 22 {
+            return Layout(showsTexts: false, limit: limit, floor: h * 0.62, row: (h * 0.72)...h, key: h, line: line, right: right)
+        }
+        return Layout(showsTexts: false, limit: limit, floor: h - 1, row: nil, key: h, line: line, right: right)
+    }
+
+    /// How far back it reaches, under its left end: "10 min ago", "2 min 30 s ago".
+    static func reach(_ window: TimeInterval) -> String {
+        String(localized: "\(FanControlWidget.span(Int(window.rounded()))) ago")
     }
 
     var body: some View {
-        let window = ThermalMonitor.window
-        let shown = samples.filter { now.timeIntervalSince($0.date) <= window }
-        let values = shown.map(\.value)
-        let range = fixedRange ?? Self.range(of: values, minimumSpan: minimumSpan)
-        let average = values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
-        let header = size.height >= 40
-        let step = look.valueStep ?? ownStep
-        let marks = Self.marks(range, step: step)
-        let axis = size.height >= 54 && size.width >= 110 && step > 0
-        let titlePoints = CGFloat(min(textStyle?.size ?? Double(Self.textPoints(height: size.height)), Self.textSizes.upperBound))
-        let headerHeight = header ? (titlePoints * 1.15 * 1.25).rounded(.up) : 0
-        let plotHeight = max(size.height - headerHeight - (header ? 3 : 0), 0)
-        let axisPoints = max(titlePoints * 0.82, 7)
-        let caption = Self.captionHeight(points: axisPoints)
-        VStack(alignment: .leading, spacing: 3) {
-            if header {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(title)
-                        .foregroundStyle(ink(0.6, automatic: .secondary))
-                    if showsAverage, let average {
-                        Text("avg \(format(average))")
-                            .foregroundStyle(ink(0.4, automatic: .tertiary))
-                    }
-                    Spacer(minLength: 2)
-                    Text(values.last.map(format) ?? "—")
-                        .font(font(titlePoints * 1.15, weight: .semibold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(ink(1, automatic: .primary))
-                }
-                .font(font(titlePoints, weight: .medium))
-                .lineLimit(1)
-                .frame(height: headerHeight)
-                .transaction { $0.animation = nil }
+        let points = CGFloat(min(textStyle?.size ?? Double(Self.textPoints(height: size.height)), Self.textSizes.upperBound))
+        let caption = (points * 1.25).rounded(.up)
+        let layout = Self.layout(size, caption: caption)
+        // Drawn from the newest reading (at the right edge), not from the moment the body is made.
+        let newest = temperatures.last?.date ?? now
+        let start = newest.addingTimeInterval(-window)
+        // Live, the drawing reaches a slide's length further left, under the edge: a slide starts
+        // with the picture a step to the right, and without it that strip flashed empty.
+        let lead = setHistory == nil ? 0 : min(Self.leadSeconds, window)
+        let shown = Self.within(temperatures, from: start.addingTimeInterval(-lead))
+        let drawing = drawing(layout: layout, newest: newest, shown: shown, lead: lead)
+        let lowest = shown.filter { $0.date >= start }.map(\.value).min()
+        let ink = inkColor
+        ZStack(alignment: .topLeading) {
+            limitLine(layout: layout, points: points, caption: caption, ink: ink)
+            if setHistory == nil, let lowest {
+                // A picture's; the live graph's is a layer of its own, gliding on the render server.
+                lowestLine(lowest, layout: layout, points: points, caption: caption, ink: ink)
             }
-            HStack(spacing: 4) {
-                if axis {
-                    let span = range.upperBound - range.lowerBound
-                    ZStack(alignment: .topTrailing) {
-                        ForEach(Self.written(marks, range: range, height: plotHeight, caption: caption), id: \.self) { value in
-                            Text(format(value))
-                                .frame(height: caption)
-                                .offset(y: Self.captionTop((value - range.lowerBound) / max(span, 0.001), height: plotHeight, caption: caption))
-                        }
-                    }
-                    .frame(height: plotHeight, alignment: .topTrailing)
-                    .font(font(axisPoints, weight: .medium).monospacedDigit())
-                    .foregroundStyle(ink(0.4, automatic: .tertiary))
-                    .fixedSize(horizontal: true, vertical: false)
+            if setHistory == nil {
+                // A picture: drawn still, its newest dot with it.
+                Canvas { context, _ in
+                    context.withCGContext { drawing.draw(in: $0, fade: fadesIn, dot: true) }
                 }
-                plot(shown, range: range, marks: marks, average: showsAverage ? average : nil)
-                    .frame(height: plotHeight)
+                .frame(width: size.width, height: size.height)
+                .allowsHitTesting(false)
+            } else {
+                FanGraphLayers(drawing: drawing, newest: newest, window: window, fadesIn: fadesIn,
+                               dot: shown.last.map { FanGraphLayers.Dot(y: y($0.value, layout: layout), tint: drawing.heatTint(at: y($0.value, layout: layout))) },
+                               lowest: lowest.map { celsius in
+                                   FanGraphLayers.Lowest(y: y(celsius, layout: layout),
+                                                         text: layout.showsTexts ? FanControlWidget.degrees(celsius, locale: locale) : nil,
+                                                         font: Self.nsFont(points, weight: .medium, style: textStyle, digits: true),
+                                                         ink: FanTint(ink), width: size.width)
+                               })
+                    .frame(width: size.width, height: size.height)
+            }
+            if layout.showsTexts {
+                texts(layout: layout, points: points, caption: caption, drawing: drawing, ink: ink)
+                FanGraphKey(graph: self, points: points, ink: ink)
+                    .frame(width: size.width, height: caption)
+                    .offset(y: layout.key)
             }
         }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
         .underline(textStyle?.isUnderlined ?? false)
         .strikethrough(textStyle?.isStruckThrough ?? false)
-        .frame(width: size.width, height: size.height)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("\(title) \(values.last.map(format) ?? "—")"))
+        .accessibilityLabel(Text("Chip \(temperatures.last.map { FanControlWidget.degrees($0.value, locale: locale) } ?? "—")"))
+    }
+
+    /// A full past fades in at the left: it goes on beyond the edge.
+    private var fadesIn: Bool {
+        guard let first = temperatures.first, let last = temperatures.last else { return false }
+        return first.date <= last.date.addingTimeInterval(-window + 5)
+    }
+
+    /// How far left of the edge the live drawing reaches: the longest slide (`FanGraphLayerView`).
+    static let leadSeconds: TimeInterval = 3
+
+    /// What is drawn, from the newest reading: the line's points and colours, the strokes and theirs
+    /// — `lead` seconds of them left of the graph's edge.
+    private func drawing(layout: Layout, newest: Date, shown: [SensorSample], lead: TimeInterval) -> FanGraphDrawing {
+        let room = layout.right * CGFloat(lead / window)
+        func x(_ date: Date) -> CGFloat {
+            room + layout.right * CGFloat(1 - min(max(newest.timeIntervalSince(date) / window, -1), 1 + lead / window))
+        }
+        let strokes = FanRhythm.strokes(speeds, window: window, after: newest.addingTimeInterval(-window - lead))
+        let strokeTints: [FanTint] = strokes.map { date in
+            if let fan { return FanTint(fan) }
+            return FanTint.at((Self.value(speeds, at: date) ?? 0) / max(fanMaximum, 1))
+        }
+        // The line coloured by its height: nine stops from the floor to the limit, each the
+        // warmth there (as the chip's dial), or the look's one colour.
+        let heatStops: [FanGraphDrawing.Stop] = if let heat {
+            [FanGraphDrawing.Stop(y: layout.floor, tint: FanTint(heat)), FanGraphDrawing.Stop(y: layout.limit, tint: FanTint(heat))]
+        } else {
+            (0...8).map { step in
+                let celsius = range.lowerBound + (range.upperBound - range.lowerBound) * Double(step) / 8
+                return FanGraphDrawing.Stop(y: y(celsius, layout: layout), tint: FanTint.at(TemperatureDial.fraction(celsius)))
+            }
+        }
+        return FanGraphDrawing(size: CGSize(width: layout.right + room, height: size.height), lead: room, layout: layout,
+                               points: shown.map { CGPoint(x: x($0.date), y: y($0.value, layout: layout)) },
+                               breaks: Self.breaks(shown), strokes: strokes.map(x), strokeTints: strokeTints,
+                               heatStops: heatStops, corners: corners)
+    }
+
+    /// The readings from `start` on, with the one before it (the line comes in from the left edge).
+    static func within(_ samples: [SensorSample], from start: Date) -> [SensorSample] {
+        guard let first = samples.firstIndex(where: { $0.date >= start }) else { return [] }
+        return Array(samples[max(first - 1, 0)...])
+    }
+
+    /// Where the line breaks: the readings that come after a gap.
+    static func breaks(_ samples: [SensorSample]) -> Set<Int> {
+        Set(zip(samples, samples.dropFirst()).enumerated()
+            .filter { $0.element.1.date.timeIntervalSince($0.element.0.date) > FanRhythm.gap }.map { $0.offset + 1 })
+    }
+
+    /// The value at `date` in readings oldest first, as the line draws it: between the two readings
+    /// round it, in proportion; nil across a gap or beyond the ends.
+    static func value(_ samples: [SensorSample], at date: Date) -> Double? {
+        guard let first = samples.first, let last = samples.last else { return nil }
+        var low = 0, high = samples.count
+        while low < high {
+            let middle = (low + high) / 2
+            if samples[middle].date < date { low = middle + 1 } else { high = middle }
+        }
+        if low == 0 { return abs(first.date.timeIntervalSince(date)) < 2 ? first.value : nil }
+        if low == samples.count { return date.timeIntervalSince(last.date) < FanRhythm.gap ? last.value : nil }
+        let before = samples[low - 1], after = samples[low]
+        let span = after.date.timeIntervalSince(before.date)
+        guard span <= FanRhythm.gap else { return nil }
+        guard span > 0 else { return after.value }
+        return before.value + (after.value - before.value) * date.timeIntervalSince(before.date) / span
+    }
+
+    func y(_ value: Double, layout: Layout) -> CGFloat {
+        let span = max(range.upperBound - range.lowerBound, 0.001)
+        let share = min(max((value - range.lowerBound) / span, 0), 1)
+        return layout.floor - (layout.floor - layout.limit) * CGFloat(share)
+    }
+
+    // MARK: Lines and texts
+
+    /// The limit, dotted, at the top of the line's room, its value over its left end.
+    @ViewBuilder private func limitLine(layout: Layout, points: CGFloat, caption: CGFloat, ink: Color) -> some View {
+        FanDottedLine()
+            .stroke(Color.white.opacity(0.22), style: StrokeStyle(lineWidth: 0.75, dash: [1.5, 3.5]))
+            .frame(width: size.width, height: 1)
+            .offset(y: layout.limit - 0.5)
+        if layout.showsTexts {
+            Text(FanControlWidget.degrees(range.upperBound, locale: locale))
+                .font(Self.font(points, weight: .medium, style: textStyle))
+                .foregroundStyle(ink.opacity(0.45))
+                .frame(height: caption)
+                .offset(y: layout.limit - caption - 1)
+        }
+    }
+
+    /// The lowest temperature in view: a dotted line at its height, its value at its left (a
+    /// picture's: the live graph's glides to a new lowest as layers, `FanGraphLayerView`).
+    @ViewBuilder private func lowestLine(_ celsius: Double, layout: Layout, points: CGFloat, caption: CGFloat, ink: Color) -> some View {
+        let level = y(celsius, layout: layout)
+        HStack(spacing: 4) {
+            if layout.showsTexts {
+                Text(FanControlWidget.degrees(celsius, locale: locale))
+                    .font(Self.font(points, weight: .medium, style: textStyle).monospacedDigit())
+                    .foregroundStyle(ink.opacity(0.45))
+                    .fixedSize()
+            }
+            FanDottedLine()
+                .stroke(Color.white.opacity(0.22), style: StrokeStyle(lineWidth: 0.75, dash: [1.5, 3.5]))
+                .frame(height: 1)
+        }
+        .frame(width: size.width, height: caption)
+        .offset(y: level - caption / 2)
+        .allowsHitTesting(false)
+    }
+
+    /// What a short past is missing, and where the fans stand still.
+    @ViewBuilder private func texts(layout: Layout, points: CGFloat, caption: CGFloat, drawing: FanGraphDrawing, ink: Color) -> some View {
+        // A past shorter than the graph: what is missing says it fills in.
+        if let first = temperatures.first, let last = temperatures.last {
+            let reach = last.date.timeIntervalSince(first.date)
+            let left = drawing.points.first.map { $0.x - drawing.lead } ?? layout.right
+            if reach < window * 0.6, left > size.width * 0.3 {
+                Text("Fills in over \(FanControlWidget.span(Int(window.rounded())))")
+                    .font(Self.font(points, weight: .medium, style: textStyle))
+                    .foregroundStyle(ink.opacity(0.34))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(width: left - 8, height: caption)
+                    .offset(y: (layout.limit + layout.floor - caption) / 2)
+            }
+        }
+        // The fans standing still: the row says so after its last stroke.
+        if let row = layout.row, let rpm = speeds.last?.value, rpm < 1 {
+            let after = drawing.strokes.last.map { $0 - drawing.lead + 8 } ?? 0
+            if after < size.width * 0.72 {
+                Text(stopped)
+                    .font(Self.font(points, weight: .medium, style: textStyle))
+                    .foregroundStyle(ink.opacity(0.45))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .frame(height: caption)
+                    .offset(x: max(after, 0), y: (row.lowerBound + row.upperBound - caption) / 2)
+            }
+        }
     }
 
     /// The texts' type: the style's (at `points`), or the graph's own.
-    private func font(_ points: CGFloat, weight: NSFont.Weight, design: Font.Design = .default) -> Font {
-        guard var style = textStyle else {
-            return .system(size: points, weight: weight == .semibold ? .semibold : .medium, design: design)
+    static func font(_ points: CGFloat, weight: NSFont.Weight, style: TextStyle?) -> Font {
+        guard var style else {
+            return .system(size: points, weight: weight == .semibold ? .semibold : .medium, design: .rounded)
         }
         style.size = Double(points)
         return Font(style.font(size: points, weight: weight))
     }
 
-    /// The texts' colour: the style's, as strong as the text is in the graph's own.
-    private func ink(_ strength: Double, automatic: some ShapeStyle) -> AnyShapeStyle {
-        switch textStyle?.color ?? .automatic {
-        case .automatic: AnyShapeStyle(automatic)
-        case .custom(let rgb): AnyShapeStyle(rgb.color.opacity(strength))
-        case .artwork: AnyShapeStyle((model.media.artworkColor.map { Color($0) } ?? .islandAccent).opacity(strength))
+    /// The same type for the layers; its figures all as wide where `digits`.
+    static func nsFont(_ points: CGFloat, weight: NSFont.Weight, style: TextStyle?, digits: Bool = false) -> NSFont {
+        if var style {
+            style.size = Double(points)
+            return style.font(size: points, weight: weight)
         }
+        let base = digits ? NSFont.monospacedDigitSystemFont(ofSize: points, weight: weight) : NSFont.systemFont(ofSize: points, weight: weight)
+        return base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: points) } ?? base
     }
 
-    private func plot(_ shown: [SensorSample], range: ClosedRange<Double>, marks: [Double], average: Double?) -> some View {
-        let window = Self.span(of: shown, now: now)
-        let corners = look.corners
-        return Canvas { context, size in
-            let span = max(range.upperBound - range.lowerBound, 0.001)
-            func y(_ value: Double) -> CGFloat { size.height * (1 - CGFloat((value - range.lowerBound) / span)) }
-            func x(_ date: Date) -> CGFloat {
-                // The newest reading's mark clear of the right edge.
-                (size.width - 3) * CGFloat(1 - min(max(now.timeIntervalSince(date) / window, 0), 1))
-            }
-            // The guides: the top and the bottom, and those between fainter.
-            for value in marks {
-                var guide = Path()
-                let level = y(value)
-                guide.move(to: CGPoint(x: 0, y: level))
-                guide.addLine(to: CGPoint(x: size.width, y: level))
-                let isEnd = value == range.lowerBound || value == range.upperBound
-                context.stroke(guide, with: .color(.white.opacity(isEnd ? 0.1 : 0.06)), lineWidth: 0.5)
-            }
-            guard shown.count >= 2 else { return }
-            var line = Path()
-            for (index, sample) in shown.enumerated() {
-                let point = CGPoint(x: x(sample.date), y: min(max(y(sample.value), 0), size.height))
-                if index == 0 { line.move(to: point) } else { line.addLine(to: point) }
-            }
-            var area = line
-            area.addLine(to: CGPoint(x: x(shown[shown.count - 1].date), y: size.height))
-            area.addLine(to: CGPoint(x: x(shown[0].date), y: size.height))
-            area.closeSubpath()
-            let shading = GraphicsContext.Shading.linearGradient(Gradient(colors: colors), startPoint: CGPoint(x: 0, y: size.height),
-                                                                 endPoint: .zero)
-            context.drawLayer { layer in
-                layer.opacity = 0.16
-                layer.fill(area, with: shading)
-            }
-            let stroke: StrokeStyle = switch corners {
-            case .rounded: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
-            case .slight: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .bevel)
-            case .square: StrokeStyle(lineWidth: 1.5, lineCap: .square, lineJoin: .miter)
-            }
-            context.stroke(line, with: shading, style: stroke)
-            if let average {
-                var dash = Path()
-                dash.move(to: CGPoint(x: 0, y: y(average)))
-                dash.addLine(to: CGPoint(x: size.width, y: y(average)))
-                context.stroke(dash, with: .color(.white.opacity(0.45)), style: StrokeStyle(lineWidth: 0.75, dash: [3, 3]))
-            }
-            let last = shown[shown.count - 1]
-            let mark = CGRect(x: x(last.date) - 2.5, y: min(max(y(last.value), 0), size.height) - 2.5, width: 5, height: 5)
-            let shape: Path = switch corners {
-            case .rounded: Path(ellipseIn: mark)
-            case .slight: Path(roundedRect: mark, cornerRadius: 1.25)
-            case .square: Path(mark)
-            }
-            context.fill(shape, with: .color(.white))
+    /// The texts' colour at full strength: the style's, else white.
+    private var inkColor: Color {
+        switch textStyle?.color ?? .automatic {
+        case .automatic: .white
+        case .custom(let rgb): rgb.color
+        case .artwork: model.media.artworkColor.map { Color($0) } ?? .islandAccent
         }
     }
 }
 
-/// The fans' colours, slowest to fastest: blue, cyan, green, yellow, orange, red.
-enum FanTint {
-    static let stops: [(Double, Color)] = [
-        (0, Color(red: 0.25, green: 0.55, blue: 1.0)), (0.25, Color(red: 0.2, green: 0.82, blue: 0.95)),
-        (0.5, Color(red: 0.35, green: 0.9, blue: 0.45)), (0.7, Color(red: 1.0, green: 0.82, blue: 0.25)),
-        (0.85, Color(red: 1.0, green: 0.55, blue: 0.15)), (1, Color(red: 1.0, green: 0.27, blue: 0.25)),
-    ]
+/// A line across its rectangle's middle, to be dotted.
+nonisolated private struct FanDottedLine: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        return path
+    }
+}
 
-    static var colors: [Color] { stops.map(\.1) }
+/// The graph's drawing in Core Graphics — the strokes, the line over its fill, the newest dot — so
+/// that the live graph's layer and a picture's Canvas draw the same pixels. `size` is the room up to
+/// the newest reading's x.
+nonisolated struct FanGraphDrawing: Equatable, Sendable {
+    struct Stop: Equatable, Sendable {
+        var y: CGFloat
+        var tint: FanTint
+    }
 
-    static func color(_ fraction: Double) -> Color {
-        stops.last { $0.0 <= fraction }?.1 ?? stops[0].1
+    var size: CGSize
+    /// The room left of the graph's edge the drawing reaches into (live: under the edge).
+    var lead: CGFloat = 0
+    var layout: FanHeatGraph.Layout
+    var points: [CGPoint]
+    var breaks: Set<Int>
+    var strokes: [CGFloat]
+    var strokeTints: [FanTint]
+    /// The line's colour by its height, from the floor up.
+    var heatStops: [Stop]
+    var corners: ChartLook.Corners
+
+    /// The line's colour at a height.
+    func heatTint(at y: CGFloat) -> FanTint {
+        guard let first = heatStops.first, let last = heatStops.last else { return .middle }
+        if y >= first.y { return first.tint }
+        if y <= last.y { return last.tint }
+        for (below, above) in zip(heatStops, heatStops.dropFirst()) where y <= below.y && y >= above.y {
+            let t = Double((below.y - y) / max(below.y - above.y, 0.001))
+            return FanTint(red: below.tint.red + (above.tint.red - below.tint.red) * t,
+                           green: below.tint.green + (above.tint.green - below.tint.green) * t,
+                           blue: below.tint.blue + (above.tint.blue - below.tint.blue) * t)
+        }
+        return last.tint
+    }
+
+    /// The heat's gradient from the floor to the limit, each stop at `alpha(y)`.
+    private func heatGradient(_ alpha: (CGFloat) -> Double) -> CGGradient? {
+        let span = max(layout.floor - layout.limit, 0.001)
+        let stops = heatStops.isEmpty ? [Stop(y: layout.floor, tint: .middle)] : heatStops
+        return CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+                          colors: stops.map { $0.tint.cgColor(alpha($0.y)) } as CFArray,
+                          locations: stops.map { min(max((layout.floor - $0.y) / span, 0), 1) })
+    }
+
+    func draw(in cg: CGContext, fade: Bool, dot: Bool) {
+        if fade { cg.beginTransparencyLayer(auxiliaryInfo: nil) }
+        let floorPoint = CGPoint(x: 0, y: layout.floor), limitPoint = CGPoint(x: 0, y: layout.limit)
+
+        // The fans: a stroke at each of their moments, in their colour then, fading downwards.
+        if let row = layout.row {
+            let width = max(1, (row.upperBound - row.lowerBound) * 0.08)
+            for (x, tint) in zip(strokes, strokeTints) where x >= -width && x <= size.width + width {
+                cg.saveGState()
+                cg.addPath(CGPath(roundedRect: CGRect(x: x - width / 2, y: row.lowerBound, width: width, height: row.upperBound - row.lowerBound),
+                                  cornerWidth: width / 2, cornerHeight: width / 2, transform: nil))
+                cg.clip()
+                if let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+                                             colors: [tint.cgColor(0.95), tint.cgColor(0.35)] as CFArray, locations: [0, 1]) {
+                    cg.drawLinearGradient(gradient, start: CGPoint(x: 0, y: row.lowerBound), end: CGPoint(x: 0, y: row.upperBound), options: [])
+                }
+                cg.restoreGState()
+            }
+        }
+
+        // The heat: each run of readings a line over its fill (a gap breaks it).
+        var runs: [[CGPoint]] = [[]]
+        for (index, point) in points.enumerated() {
+            if breaks.contains(index) { runs.append([]) }
+            runs[runs.count - 1].append(point)
+        }
+        let span = max(layout.floor - layout.limit, 0.001)
+        let fill = heatGradient { 0.15 * Double(min(max((layout.floor - $0) / span, 0), 1)) }
+        let line = heatGradient { _ in 1 }
+        for run in runs where run.count >= 2 {
+            let path = CGMutablePath()
+            path.addLines(between: run)
+            let area = CGMutablePath()
+            area.addPath(path)
+            area.addLine(to: CGPoint(x: run[run.count - 1].x, y: layout.floor))
+            area.addLine(to: CGPoint(x: run[0].x, y: layout.floor))
+            area.closeSubpath()
+            if let fill {
+                cg.saveGState()
+                cg.addPath(area)
+                cg.clip()
+                cg.drawLinearGradient(fill, start: floorPoint, end: limitPoint, options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+                cg.restoreGState()
+            }
+            if let line {
+                cg.saveGState()
+                cg.addPath(path)
+                cg.setLineWidth(layout.line)
+                switch corners {
+                case .rounded: cg.setLineCap(.round); cg.setLineJoin(.round)
+                case .slight: cg.setLineCap(.butt); cg.setLineJoin(.bevel)
+                case .square: cg.setLineCap(.square); cg.setLineJoin(.miter)
+                }
+                cg.replacePathWithStrokedPath()
+                cg.clip()
+                cg.drawLinearGradient(line, start: floorPoint, end: limitPoint, options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+                cg.restoreGState()
+            }
+        }
+
+        // The newest reading: a dot cut out of what is behind it.
+        if dot, let last = points.last {
+            Self.dot(in: cg, at: last, radius: layout.line * 2, ring: layout.line, tint: heatTint(at: last.y), corners: corners)
+        }
+
+        if fade {
+            cg.setBlendMode(.destinationOut)
+            if let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+                                         colors: [CGColor(gray: 0, alpha: 1), CGColor(gray: 0, alpha: 0)] as CFArray, locations: [0, 1]) {
+                cg.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size.width * 0.12, y: 0), options: [])
+            }
+            cg.endTransparencyLayer()
+        }
+    }
+
+    static func dotPath(_ center: CGPoint, radius: CGFloat, corners: ChartLook.Corners) -> CGPath {
+        let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+        return switch corners {
+        case .rounded: CGPath(ellipseIn: rect, transform: nil)
+        case .slight: CGPath(roundedRect: rect, cornerWidth: radius / 2, cornerHeight: radius / 2, transform: nil)
+        case .square: CGPath(rect: rect, transform: nil)
+        }
+    }
+
+    static func dot(in cg: CGContext, at point: CGPoint, radius: CGFloat, ring: CGFloat, tint: FanTint, corners: ChartLook.Corners) {
+        cg.addPath(dotPath(point, radius: radius + ring, corners: corners))
+        cg.setFillColor(CGColor(gray: 0, alpha: 0.85))
+        cg.fillPath()
+        cg.addPath(dotPath(point, radius: radius, corners: corners))
+        cg.setFillColor(tint.cgColor())
+        cg.fillPath()
+    }
+}
+
+/// Under the row of strokes: how far back the graph reaches (a glass button: the ruler), slow and
+/// fast, now.
+private struct FanGraphKey: View {
+    let graph: FanHeatGraph
+    let points: CGFloat
+    let ink: Color
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // On Liquid Glass, so it reads as the button it is (a picture draws the glass still).
+            Button(action: graph.setHistory ?? {}) {
+                Text(FanHeatGraph.reach(graph.window))
+                    .font(FanHeatGraph.font(points, weight: .semibold, style: graph.textStyle))
+                    .foregroundStyle(ink.opacity(0.85))
+            }
+            .islandButton(.capsule)
+            .controlSize(.mini)
+            .help("How far back the graph reaches: click to set it")
+            Spacer(minLength: 4)
+            if graph.size.width >= 190 {
+                rhythmKey
+                Spacer(minLength: 4)
+            }
+            if graph.size.width >= 120 {
+                Text("now").foregroundStyle(ink.opacity(0.45))
+            }
+        }
+        .font(FanHeatGraph.font(points, weight: .medium, style: graph.textStyle))
+        .lineLimit(1)
+    }
+
+    /// "slow ||| ||||fast": seven strokes closing up between the two words, green to red.
+    private var rhythmKey: some View {
+        let scale = points / 24
+        let offsets: [CGFloat] = [0, 24, 44, 60, 72, 82, 90]
+        let width = max(3.5 * scale, 1)
+        return HStack(spacing: 16 * scale) {
+            Text("slow").foregroundStyle(ink.opacity(0.6))
+            ZStack(alignment: .leading) {
+                ForEach(Array(offsets.enumerated()), id: \.offset) { index, offset in
+                    RoundedRectangle(cornerRadius: width / 2)
+                        .fill(graph.fan ?? FanTint.at(Double(index) / Double(offsets.count - 1)).color)
+                        .frame(width: width, height: 20 * scale)
+                        .offset(x: offset * scale)
+                }
+            }
+            .frame(width: 90 * scale + width, alignment: .leading)
+            Text("fast").foregroundStyle(ink.opacity(0.6))
+        }
+    }
+}
+
+/// The live graph's drawing as layers: drawn once a reading, then slid left by Core Animation in a
+/// short soft glide to where it now stands, the newest dot gliding up or down at the right edge
+/// with it, the lowest's dotted line gliding to a new lowest — on the render server, nothing done
+/// on the main thread between readings (the lowest's glide as SwiftUI animation was 300 ms of the
+/// main thread in 0.8 s, measured). A step under two points (a long graph) is not slid: it is too
+/// small to be seen as a jump.
+struct FanGraphLayers: NSViewRepresentable {
+    struct Dot: Equatable {
+        var y: CGFloat
+        var tint: FanTint
+    }
+
+    let drawing: FanGraphDrawing
+    let newest: Date
+    let window: TimeInterval
+    let fadesIn: Bool
+    let dot: Dot?
+    let lowest: Lowest?
+
+    /// The lowest temperature's dotted line: its height, its value (nil: none written) in the
+    /// graph's type and colour, across `width`.
+    struct Lowest {
+        var y: CGFloat
+        var text: String?
+        var font: NSFont
+        var ink: FanTint
+        var width: CGFloat
+    }
+
+    func makeNSView(context: Context) -> FanGraphLayerView { FanGraphLayerView() }
+
+    func updateNSView(_ view: FanGraphLayerView, context: Context) {
+        view.show(drawing, newest: newest, window: window, fadesIn: fadesIn, dot: dot)
+        view.showLowest(lowest)
+    }
+}
+
+final class FanGraphLayerView: NSView {
+    private let clip = CALayer()
+    private let content = CALayer()
+    private let fade = CAGradientLayer()
+    private let ring = CAShapeLayer()
+    private let fill = CAShapeLayer()
+
+    /// A reading's glide: how long, and its curve (soft at both ends).
+    static let glide: TimeInterval = 0.35
+    static let easing = CAMediaTimingFunction(controlPoints: 0.45, 0, 0.25, 1)
+
+    private let lowest = CALayer()
+    private let lowestLine = CAShapeLayer()
+    private let lowestText = CATextLayer()
+    private var lowestShown: (text: String?, width: CGFloat, fontSize: CGFloat)?
+
+    private var drawing: FanGraphDrawing?
+    private var drawnScale: CGFloat = 0
+    private var newest: Date?
+    private var dotY: CGFloat?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .never
+        clip.masksToBounds = true
+        clip.addSublayer(content)
+        fade.colors = [CGColor(gray: 0, alpha: 0), CGColor(gray: 0, alpha: 1)]
+        fade.startPoint = CGPoint(x: 0, y: 0.5)
+        fade.endPoint = CGPoint(x: 0.12, y: 0.5)
+        ring.fillColor = CGColor(gray: 0, alpha: 0.85)
+        lowestLine.strokeColor = CGColor(gray: 1, alpha: 0.22)
+        lowestLine.fillColor = nil
+        lowestLine.lineWidth = 0.75
+        lowestLine.lineDashPattern = [1.5, 3.5]
+        lowest.addSublayer(lowestLine)
+        lowest.addSublayer(lowestText)
+        lowest.isHidden = true
+        for sublayer in [clip, content, fade, ring, fill, lowest, lowestLine, lowestText] as [CALayer] {
+            sublayer.actions = ["position": NSNull(), "bounds": NSNull(), "frame": NSNull(), "contents": NSNull(),
+                                "path": NSNull(), "fillColor": NSNull(), "transform": NSNull(), "hidden": NSNull(), "mask": NSNull()]
+        }
+        layer?.addSublayer(lowest)
+        layer?.addSublayer(clip)
+        layer?.addSublayer(ring)
+        layer?.addSublayer(fill)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var isFlipped: Bool { true }
+
+    /// Clicks go to what is under it.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        // Drawn again at the new screen's pixels.
+        drawnScale = 0
+        lowestText.contentsScale = window?.backingScaleFactor ?? 2
+        if let drawing { render(drawing) }
+    }
+
+    /// The lowest's dotted line, its value at its left: moved to a new lowest in a short glide on the
+    /// render server (from wherever a glide under way has it).
+    func showLowest(_ new: FanGraphLayers.Lowest?) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        guard let new else {
+            lowest.isHidden = true
+            return
+        }
+        let height = ceil(new.font.ascender - new.font.descender + new.font.leading)
+        if lowestShown.map({ $0.text != new.text || $0.width != new.width || $0.fontSize != new.font.pointSize }) ?? true {
+            lowestShown = (new.text, new.width, new.font.pointSize)
+            var start: CGFloat = 0
+            if let text = new.text {
+                let string = NSAttributedString(string: text, attributes: [.font: new.font, .foregroundColor: NSColor(cgColor: new.ink.cgColor(0.45)) ?? .white])
+                let width = ceil(string.size().width)
+                lowestText.string = string
+                lowestText.contentsScale = window?.backingScaleFactor ?? 2
+                lowestText.frame = CGRect(x: 0, y: 0, width: width, height: height)
+                lowestText.isHidden = false
+                start = width + 4
+            } else {
+                lowestText.isHidden = true
+            }
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: start, y: height / 2))
+            path.addLine(to: CGPoint(x: new.width, y: height / 2))
+            lowestLine.path = path
+        }
+        lowest.bounds = CGRect(x: 0, y: 0, width: new.width, height: height)
+        lowest.anchorPoint = .zero
+        let top = new.y - height / 2
+        // The same lowest again: a glide under way goes on.
+        guard lowest.isHidden || lowest.position.y != top else { return }
+        let was = lowest.presentation()?.position.y ?? lowest.position.y
+        let moved = !lowest.isHidden && abs(was - top) > 0.25
+        lowest.isHidden = false
+        lowest.position = CGPoint(x: 0, y: top)
+        lowest.removeAnimation(forKey: "glide")
+        if moved {
+            let glide = CABasicAnimation(keyPath: "position.y")
+            glide.fromValue = was
+            glide.toValue = top
+            glide.duration = 0.4
+            glide.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            lowest.add(glide, forKey: "glide")
+        }
+    }
+
+    func show(_ drawing: FanGraphDrawing, newest: Date, window: TimeInterval, fadesIn: Bool, dot: FanGraphLayers.Dot?) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        let frame = CGRect(x: 0, y: 0, width: drawing.size.width - drawing.lead, height: drawing.size.height)
+        let resized = clip.frame != frame
+        clip.frame = frame
+        // Its lead under the clip's left edge.
+        content.frame = CGRect(x: -drawing.lead, y: 0, width: drawing.size.width, height: drawing.size.height)
+        fade.frame = clip.bounds
+        clip.mask = fadesIn ? fade : nil
+        if drawing != self.drawing { render(drawing) }
+
+        // Slid from where the last drawing stood (a slide under way, too) to rest, in a short glide
+        // that starts and settles softly, then still until the next reading: the window server
+        // draws a third of the time it did for a slide as long as the readings are apart (that one
+        // was ~160 mW of it for a short graph, measured).
+        let step = self.newest.map { newest.timeIntervalSince($0) } ?? 0
+        let shift = drawing.layout.right * CGFloat(step / max(window, 1))
+        let slides = !resized && step > 0 && step <= 3 && shift >= 2
+        let under = (content.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? 0
+        // The same reading again (another part of the widget changed): the slide under way goes on.
+        let isNew = step > 0 || resized || self.newest == nil
+        if isNew { content.removeAnimation(forKey: "slide") }
+        if slides {
+            let slide = CABasicAnimation(keyPath: "transform.translation.x")
+            slide.fromValue = under + shift
+            slide.toValue = 0
+            slide.duration = min(Self.glide, step)
+            slide.timingFunction = Self.easing
+            content.add(slide, forKey: "slide")
+        }
+        if step > 0 || self.newest == nil { self.newest = newest }
+
+        // The newest dot at the right edge, on the line there.
+        if let dot, !drawing.points.isEmpty {
+            let center = CGPoint(x: drawing.layout.right, y: dot.y)
+            ring.path = FanGraphDrawing.dotPath(center, radius: drawing.layout.line * 3, corners: drawing.corners)
+            fill.path = FanGraphDrawing.dotPath(center, radius: drawing.layout.line * 2, corners: drawing.corners)
+            fill.fillColor = dot.tint.cgColor()
+            ring.isHidden = false
+            fill.isHidden = false
+            let was = (fill.presentation()?.value(forKeyPath: "transform.translation.y") as? CGFloat) ?? 0
+            if isNew { for layer in [ring, fill] { layer.removeAnimation(forKey: "glide") } }
+            if slides, let dotY {
+                let glide = CABasicAnimation(keyPath: "transform.translation.y")
+                glide.fromValue = dotY + was - dot.y
+                glide.toValue = 0
+                glide.duration = min(Self.glide, step)
+                glide.timingFunction = Self.easing
+                for layer in [ring, fill] { layer.add(glide, forKey: "glide") }
+            }
+            dotY = dot.y
+        } else {
+            ring.isHidden = true
+            fill.isHidden = true
+            dotY = nil
+        }
+    }
+
+    /// The drawing as the content layer's picture, at the screen's pixels.
+    private func render(_ drawing: FanGraphDrawing) {
+        self.drawing = drawing
+        let scale = window?.backingScaleFactor ?? 2
+        let width = Int((drawing.size.width * scale).rounded(.up)), height = Int((drawing.size.height * scale).rounded(.up))
+        guard width > 0, height > 0,
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            content.contents = nil
+            return
+        }
+        // Top-left, in points, as SwiftUI draws.
+        context.translateBy(x: 0, y: CGFloat(height))
+        context.scaleBy(x: scale, y: -scale)
+        drawing.draw(in: context, fade: false, dot: false)
+        drawnScale = scale
+        content.contentsScale = scale
+        content.contents = context.makeImage()
     }
 }

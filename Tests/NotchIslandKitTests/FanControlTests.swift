@@ -8,8 +8,9 @@ import Testing
     var automatic = 0
 }
 
-/// Fan Control: the SMC's numbers, a fan's range, where on the dial is which speed, and the dial
-/// taking real mouse events — a drag on the ring sets the speed, a click on the fan gives it back.
+/// Fan Control: the SMC's numbers, a fan's range, where on the dial is which speed, the graph's
+/// reach and rhythm, and the dial taking real mouse events — a drag on the ring sets the speed, a
+/// click on Manual gives it back.
 @MainActor @Suite(.serialized) struct FanControlTests {
     @Test func smcNumbersRoundTrip() {
         for rpm in [0.0, 1200, 2450, 5800, 6550] {
@@ -30,7 +31,6 @@ import Testing
         #expect(fan.rpm(at: 2) == 5800 && fan.rpm(at: -1) == 0)
         #expect(abs(fan.fraction(of: 2450) - 2450.0 / 5800) < 0.0001)
         #expect(fan.fraction(of: 9000) == 1 && fan.fraction(of: 0) == 0)
-        #expect(FanControlWidget.speedRange([fan]) == 0...5800)
     }
 
     /// A speed set by hand is the user's until they give it back: fans read as not held at it are
@@ -67,18 +67,62 @@ import Testing
         #expect(!center.isManual && center.heldFraction == nil)
     }
 
-    /// The graphs reach back thirty seconds, and a graph just started fills its width.
-    @Test func theGraphsShowTheLastHalfMinute() {
-        #expect(ThermalMonitor.window == 30)
+    /// The graph reaches back ten seconds to ten minutes (ten its own), and the history keeps ten.
+    @Test func theGraphReachesBackAsSet() {
+        #expect(ThermalMonitor.window == 600)
+        var widget = IslandWidget(kind: .fanControl, frame: GridRect(column: 0, row: 0, width: 7, height: 2),
+                                  options: IslandWidgetKind.fanControl.defaultOptions)
+        #expect(FanControlWidget.seconds(widget) == 600)
+        widget.config.seconds = 150
+        #expect(FanControlWidget.seconds(widget) == 150)
+        widget.config.seconds = 4000
+        widget.config.sanitize()
+        #expect(widget.config.seconds == 600 && FanControlWidget.stored(600) == nil && FanControlWidget.stored(0) == 10)
+        #expect(FanControlWidget.span(600) == "10 min" && FanControlWidget.span(150) == "2 min 30 s" && FanControlWidget.span(45) == "45 s")
+        #expect(IslandWidgetKind.fanControl.spec.settings == [.history])
         let now = Date(timeIntervalSince1970: 1_790_235_660)
-        func samples(_ ages: [TimeInterval]) -> [SensorSample] { ages.map { SensorSample(date: now.addingTimeInterval(-$0), value: 1) } }
-        #expect(SensorGraph.span(of: samples([3, 2, 1]), now: now) == 10)
-        #expect(SensorGraph.span(of: samples([22, 2, 1]), now: now) == 22)
-        #expect(SensorGraph.span(of: samples([44, 30, 1]), now: now) == 30)
-        let pictured = FanControlWidget.sampleTemperatures(now: now)
-        #expect(pictured.first?.date == now.addingTimeInterval(-30) && pictured.last?.date == now)
-        // The speed's graph starts at nothing: 0, half and the fastest are its values.
-        #expect(SensorGraph.marks(0...5800, step: SensorGraph.speedStep(0...5800)) == [0, 2900, 5800])
+        let pictured = FanControlWidget.sampleHistory(now: now)
+        #expect(pictured.temperatures.first?.date == now.addingTimeInterval(-600) && pictured.temperatures.last?.date == now)
+        #expect(FanHeatGraph.reach(600) == "10 min ago" && FanHeatGraph.reach(150) == "2 min 30 s ago")
+        // The ruler: no 0 to 9 seconds while the minutes are 0; from 0 once a minute is set.
+        #expect(FanHistorySetter.range(of: .seconds, at: 10) == 10...59 && FanHistorySetter.range(of: .seconds, at: 45) == 10...59)
+        #expect(FanHistorySetter.range(of: .seconds, at: 60) == 0...59 && FanHistorySetter.range(of: .seconds, at: 125) == 0...59)
+        #expect(FanHistorySetter.range(of: .minutes, at: 10) == 0...10)
+        #expect(FanControlWidget.clamped(0 * 60 + 5) == 10)
+        // A reading between two: in proportion, as the line draws it; across a gap, none.
+        let samples = [SensorSample(date: now, value: 40), SensorSample(date: now.addingTimeInterval(10), value: 60),
+                       SensorSample(date: now.addingTimeInterval(100), value: 80)]
+        #expect(FanHeatGraph.value(samples, at: now.addingTimeInterval(5)) == 50)
+        #expect(FanHeatGraph.value(samples, at: now.addingTimeInterval(50)) == nil)
+    }
+
+    /// The fans' rhythm: strokes closer the faster they turn, none while they stand still or across
+    /// a gap, and each stroke at its moment however much of the past is cut away.
+    @Test func theFansRhythm() throws {
+        #expect(FanRhythm.share(1) < FanRhythm.share(0.5) && FanRhythm.share(0.5) < FanRhythm.share(0))
+        #expect(FanRhythm.advance(rpm: 0, maximum: 5800, seconds: 1) == 0)
+        #expect(FanRhythm.advance(rpm: 3000, maximum: 5800, seconds: FanRhythm.gap + 1) == 0)
+        let start = Date(timeIntervalSince1970: 1_790_235_000)
+        func run(_ rpms: [Double]) -> [SensorSample] {
+            var samples: [SensorSample] = []
+            for (index, rpm) in rpms.enumerated() {
+                let date = start.addingTimeInterval(Double(index))
+                let phase = samples.last.map { $0.phase + FanRhythm.advance(rpm: $0.value, maximum: 5800, seconds: 1) } ?? 0
+                samples.append(SensorSample(date: date, value: rpm, phase: phase))
+            }
+            return samples
+        }
+        let slow = FanRhythm.strokes(run(Array(repeating: 1500, count: 600)), window: 600, after: start)
+        let fast = FanRhythm.strokes(run(Array(repeating: 5800, count: 600)), window: 600, after: start)
+        #expect(fast.count > slow.count * 2 && !slow.isEmpty)
+        #expect(FanRhythm.strokes(run(Array(repeating: 0, count: 600)), window: 600, after: start).isEmpty)
+        // Cut the first five minutes away: the strokes after the cut are where they were.
+        let all = run(Array(repeating: 3000, count: 600))
+        let later = start.addingTimeInterval(300)
+        let cut = FanRhythm.strokes(Array(all.drop { $0.date < later.addingTimeInterval(-1) }), window: 600, after: later)
+        #expect(cut == FanRhythm.strokes(all, window: 600, after: later))
+        // A shorter graph, the same past: more strokes in it, as close on the graph.
+        #expect(FanRhythm.strokes(all, window: 60, after: start).count > fast.count)
     }
 
     @Test func whereOnTheDialIsWhichSpeed() {
@@ -102,7 +146,8 @@ import Testing
     func use(manual: Bool, from: CGPoint, to: CGPoint) -> FanCalls {
         let calls = FanCalls()
         let fans = [FanReading(index: 0, rpm: 2450, minimum: 1200, maximum: 5800, target: 3000, isManual: manual)]
-        let view = FanDial(fans: fans, held: manual ? 0.4 : nil, isManual: manual, diameter: 136, number: "2 450", name: "Fan",
+        let view = FanDial(fans: fans, held: manual ? 0.4 : nil, isManual: manual, diameter: 136, number: "2 450",
+                           mode: manual ? "Manual" : "Auto", name: "Fan",
                            set: { calls.speeds.append($0) }, automatic: { calls.automatic += 1 })
             .frame(width: 150, height: 150)
         let host = NSHostingView(rootView: view)
@@ -142,35 +187,30 @@ import Testing
         #expect(abs(last - 0.5) < 0.02)
     }
 
-    @Test func aClickOnTheFanGivesItBack() {
-        // The fan sits over the speed (y up here, down in the dial) — higher where the mode is
-        // written between the two.
-        #expect(FanDial.iconCenter(diameter: 136, showsTexts: true, showsMode: true).y < FanDial.iconCenter(diameter: 136, showsTexts: true).y)
-        #expect(FanDial.iconCenter(diameter: 136, showsTexts: true, showsMode: true).y < FanDial.modeCenter(diameter: 136))
-        let icon = FanDial.iconCenter(diameter: 136, showsTexts: true)
-        let point = CGPoint(x: icon.x, y: -icon.y)
+    @Test func aClickOnManualGivesItBack() {
+        // The word sits over the speed (y up here, down in the dial).
+        let point = CGPoint(x: 0, y: -FanDial.modeCenter(diameter: 136))
         let calls = use(manual: true, from: point, to: point)
         #expect(calls.automatic == 1)
         #expect(calls.speeds.isEmpty)
-        // Already automatic: nothing to give back.
+        // Automatic: the word is no button, and a click there sets the speed as anywhere on the dial.
         #expect(use(manual: false, from: point, to: point).automatic == 0)
     }
 
-    /// The row: the fan's dial, the temperature's, then a graph; the speed's graph beside it only
-    /// where there is room for both (about as wide as the panel).
+    /// The row: the fan's dial, the temperature's, then the graph where it has room.
     @Test func theRowFillsAsTheWidgetWidens() {
-        var widget = IslandWidget(kind: .fanControl, frame: GridRect(column: 0, row: 0, width: 7, height: 2),
+        let widget = IslandWidget(kind: .fanControl, frame: GridRect(column: 0, row: 0, width: 7, height: 2),
                                   options: IslandWidgetKind.fanControl.defaultOptions)
         let narrow = FanControlWidget.layout(widget, inner: CGSize(width: 80, height: 80))
         #expect(!narrow.showsTempDial && narrow.graphs.isEmpty)
         let standard = FanControlWidget.layout(widget, inner: CGSize(width: 320, height: 80))
-        #expect(standard.showsTempDial && standard.graphs == [.tempGraph])
-        #expect(!FanControlWidget.hasRoom(for: .rpmGraph, in: widget, inner: CGSize(width: 320, height: 80)))
-        widget.options.insert(.rpmGraph)
-        let full = FanControlWidget.layout(widget, inner: CGSize(width: 560, height: 80))
-        #expect(full.graphs == [.tempGraph, .rpmGraph] && full.graphWidth >= FanControlWidget.Layout.minimumGraph)
+        #expect(standard.showsTempDial && standard.graphs == [.tempGraph] && standard.graphWidth >= FanControlWidget.Layout.minimumGraph)
         // Small: the fan alone, without its texts.
         #expect(!FanControlWidget.hasRoom(for: .value, in: widget, inner: CGSize(width: 80, height: 36)))
+        // The graph's texts from 56 pt; under 22, no strokes.
+        #expect(FanHeatGraph.layout(CGSize(width: 200, height: 80), caption: 10).showsTexts)
+        #expect(!FanHeatGraph.layout(CGSize(width: 200, height: 32), caption: 10).showsTexts)
+        #expect(FanHeatGraph.layout(CGSize(width: 200, height: 18), caption: 10).row == nil)
     }
 
     @Test func fanControlIsOfferedOnlyWithAFan() {

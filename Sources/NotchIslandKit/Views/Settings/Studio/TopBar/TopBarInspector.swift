@@ -65,7 +65,7 @@ struct TopBarInspector: View {
 
     var body: some View {
         let header = model.preferences.header
-        let layout = model.layout
+        let layout = model.studioLayout
         let split = NotchSplit(layout: layout, presentation: .expanded(.home),
                                outerInset: Metrics.Expanded.horizontalInset, clearance: Metrics.notchClearance)
         let size = Metrics.Control.size(fittingBand: layout.notch.height)

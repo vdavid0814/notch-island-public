@@ -26,7 +26,7 @@ struct GeneralSettingsPage: View {
                         .foregroundStyle(SettingsPalette.secondary)
                 }
             } header: {
-                InfoLabel("Appearance", "What the island is made of: Liquid Glass that follows the system, solid black like the hardware island, or black at the notch fading into the glass below it.")
+                InfoLabel("Appearance", "What the island is made of: Clear glass that follows the system's Liquid Glass, solid black like the hardware island, or black at the notch fading into the glass below it.")
             }
 
             Section {
@@ -40,7 +40,9 @@ struct GeneralSettingsPage: View {
                 // Each size photographed in the style in use; drawn where there are no photographs.
                 let style = preferences.glassStyle
                 let photographed = IslandPhoto.image(desktop: previewWallpaper, style: style, scale: preferences.scale) != nil
-                PictureChoice(options: IslandScale.allCases, selection: $preferences.scale, title: \.title,
+                // Every page's, those sized by themselves too.
+                PictureChoice(options: IslandScale.allCases, selection: Binding(get: { preferences.scale }, set: { model.setScaleEverywhere($0) }),
+                              title: \.title,
                               filling: photographed ? IslandPhoto.size : MiniMetrics.sizePicture) { scale in
                     if let photo = IslandPhoto.image(desktop: previewWallpaper, style: style, scale: scale) {
                         IslandPhoto(image: photo)

@@ -40,6 +40,7 @@ import Foundation
         static let showAirPods = prefix + "showAirPods"
         static let siri = prefix + "siri"
         static let panel = prefix + "panel"
+        static let pageSizes = prefix + "pageSizes"
         static let header = prefix + "header"
         static let levelDuration = prefix + "levelDuration"
         static let airPodsDuration = prefix + "airPodsDuration"
@@ -117,11 +118,20 @@ import Foundation
             defaults.set(data, forKey: Key.siri)
         }
     }
-    /// The open panel's width and board height (Settings ▸ Widgets ▸ Size).
+    /// The open panel's width and board height (Settings ▸ Widgets ▸ Size): every page's that has
+    /// none of its own (`pageSizes`).
     var panel: PanelSettings {
         didSet {
             guard panel != oldValue, let data = try? JSONEncoder().encode(panel) else { return }
             defaults.set(data, forKey: Key.panel)
+        }
+    }
+    /// The pages sized by themselves (Settings ▸ Widgets ▸ Size sets the page it shows), by their
+    /// names (`ExpandedPage.rawValue`); the others take `panel` and `scale`.
+    var pageSizes: [String: PageSize] {
+        didSet {
+            guard pageSizes != oldValue, let data = try? JSONEncoder().encode(pageSizes) else { return }
+            defaults.set(data, forKey: Key.pageSizes)
         }
     }
     /// The panel's top bar: what stands left and right of the notch, and the picker's pages.
@@ -226,6 +236,7 @@ import Foundation
         anchorBar = defaults.string(forKey: Key.anchorBar).flatMap(AnchorBarPlacement.init(rawValue:)) ?? .belowWindow
         siri = defaults.data(forKey: Key.siri).flatMap { try? JSONDecoder().decode(SiriSettings.self, from: $0) } ?? SiriSettings()
         panel = defaults.data(forKey: Key.panel).flatMap { try? JSONDecoder().decode(PanelSettings.self, from: $0) } ?? PanelSettings()
+        pageSizes = defaults.data(forKey: Key.pageSizes).flatMap { try? JSONDecoder().decode([String: PageSize].self, from: $0) } ?? [:]
         let header = defaults.data(forKey: Key.header).flatMap { try? JSONDecoder().decode(HeaderLayout.self, from: $0) } ?? .standard
         Self.catalogue(header)
         self.header = header

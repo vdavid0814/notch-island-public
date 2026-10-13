@@ -253,7 +253,7 @@ struct WidgetCustomizeView: View {
 
     /// The widget's own size on the board.
     private func natural(of widget: IslandWidget) -> CGSize {
-        WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
+        WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.studioLayout), grid: model.editedWidgets.board.grid)
             .laidSize(for: widget.frame)
     }
 
@@ -261,7 +261,7 @@ struct WidgetCustomizeView: View {
     /// moved there (`WidgetElementEditor`).
     private func editor(_ widget: IslandWidget) -> some View {
         GeometryReader { proxy in
-            let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
+            let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.studioLayout), grid: model.editedWidgets.board.grid)
             let natural = geometry.laidSize(for: widget.frame)
             let room = CGSize(width: max(proxy.size.width - 2 * Self.editorMargin, 40),
                               height: max(proxy.size.height - 2 * Self.editorMargin, 40))
@@ -356,7 +356,7 @@ private struct CustomizePanel: View, Equatable {
                 let switchable = kind.spec.elements.filter { !$0.isRequired }
                 // The panel's grid (every board follows it), not the board's own: read from the board,
                 // this panel was gone over again at every change to any widget on it.
-                let size = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.preferences.panel.grid)
+                let size = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.studioLayout), grid: model.panel(for: model.studio.page).grid)
                     .laidSize(for: widget.frame)
                 if !switchable.isEmpty {
                     StudioDivider()

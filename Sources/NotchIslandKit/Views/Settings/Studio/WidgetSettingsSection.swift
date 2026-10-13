@@ -18,6 +18,7 @@ struct WidgetSettingsSection: View {
             if settings.contains(.label) { captionField }
             if settings.contains(.count) { count }
             if settings.contains(.files) { files }
+            if settings.contains(.history) { history }
             // How many rows have a symbol, while Symbols is on (off: none).
             if settings.contains(.symbols), widget.shows(.clipSymbols) { symbols }
         }
@@ -106,7 +107,7 @@ struct WidgetSettingsSection: View {
     // MARK: The rows
 
     private var count: some View {
-        let value = ClipboardWidget.count(widget)
+        let value = widget.kind == .appUsage ? AppUsageWidget.count(widget) : ClipboardWidget.count(widget)
         return Stepper(value: Binding(get: { value }, set: { new in withAnimation(Motion.content) { update { $0.count = new } } }),
                        in: WidgetConfig.countRange) {
             HStack {
@@ -129,6 +130,20 @@ struct WidgetSettingsSection: View {
             }
         }
         .help("How many files the row shows at once; they are sized to fill it")
+    }
+
+    /// How far back the graph reaches (also set on its own ruler: a click on its time).
+    private var history: some View {
+        let value = FanControlWidget.seconds(widget)
+        return Stepper(value: Binding(get: { value }, set: { new in update { $0.seconds = FanControlWidget.stored(new) } }),
+                       in: WidgetConfig.secondsRange, step: 10) {
+            HStack {
+                Text("History")
+                Spacer(minLength: 8)
+                Text(IslandFormat.minutesClock(TimeInterval(value))).monospacedDigit().foregroundStyle(SettingsPalette.secondary)
+            }
+        }
+        .help("How far back the graph reaches; on the island, click its time to set it on a ruler")
     }
 
     /// How many rows have a symbol: one more goes on the first row without one (styled as the last

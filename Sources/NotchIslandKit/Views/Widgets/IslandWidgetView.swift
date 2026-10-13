@@ -201,6 +201,7 @@ struct IslandWidgetView: View {
         case .memory: MemoryWidget(widget: Self.resolved(widget, size: size), size: inner)
         case .chipTemperature: ChipTemperatureWidget(widget: Self.resolved(widget, size: size), size: inner)
         case .fanControl: FanControlWidget(widget: Self.resolved(widget, size: size), size: inner)
+        case .appUsage: AppUsageWidget(widget: Self.resolved(widget, size: size), size: inner)
         default:
             if let control = widget.kind.control {
                 ControlWidget(control: control, widget: Self.resolved(widget, size: size), size: inner)

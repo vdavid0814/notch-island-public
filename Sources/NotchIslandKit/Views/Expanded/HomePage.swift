@@ -8,7 +8,7 @@ struct HomePage: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        WidgetBoardView(board: model.boards.store(for: page).board)
+        WidgetBoardView(board: model.boards.store(for: page).board, page: page)
             .contextMenu {
                 Button("Customize Island…", systemImage: "square.grid.3x2") {
                     model.studio.showPage(page)

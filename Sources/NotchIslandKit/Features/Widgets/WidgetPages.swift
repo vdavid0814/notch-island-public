@@ -7,6 +7,8 @@ import Foundation
     let home: WidgetStore
     private let defaults: UserDefaults
     private var stores: [ExpandedPage: WidgetStore] = [:]
+    /// Each page's grid: its own size's, or the panel's (`AppModel.panel(for:)`); home's while unset.
+    var grid: ((ExpandedPage) -> BoardGrid)?
 
     nonisolated static func key(for page: ExpandedPage) -> String {
         page == .home ? WidgetStore.key : WidgetStore.key + "." + page.rawValue
@@ -22,9 +24,10 @@ import Foundation
     func store(for page: ExpandedPage) -> WidgetStore {
         guard page.isBoard else { return home }
         if let store = stores[page] { return store }
-        let store = WidgetStore(defaults: defaults, key: Self.key(for: page), seed: WidgetBoard(widgets: [], grid: home.board.grid))
-        // Every page on the panel's grid (a board stored before may have its own).
-        store.follow(home.board.grid)
+        let grid = grid?(page) ?? home.board.grid
+        let store = WidgetStore(defaults: defaults, key: Self.key(for: page), seed: WidgetBoard(widgets: [], grid: grid))
+        // Every page on its size's grid (a board stored before may have its own).
+        store.follow(grid)
         stores[page] = store
         return store
     }
@@ -58,13 +61,19 @@ import Foundation
         for store in stores.values where store !== home { store.follow(grid, leadingColumns: leadingColumns) }
     }
 
+    /// Each board made so far on its own page's grid (`grid`).
+    func followPages(leadingColumns: Int? = nil) {
+        for (page, store) in stores { store.follow(grid?(page) ?? home.board.grid, leadingColumns: leadingColumns) }
+    }
+
     /// Every board made so far, as it is now.
     func snapshot() -> [ExpandedPage: WidgetBoard] { stores.mapValues(\.board) }
 
-    /// The boards as `snapshot` had them; one made since then on `grid`, each widget on its cells.
-    func restore(_ snapshot: [ExpandedPage: WidgetBoard], grid: BoardGrid) {
+    /// The boards as `snapshot` had them; one made since then on its page's grid, each widget on
+    /// its cells.
+    func restore(_ snapshot: [ExpandedPage: WidgetBoard]) {
         for (page, store) in stores {
-            if let board = snapshot[page] { store.replace(with: board) } else { store.follow(grid) }
+            if let board = snapshot[page] { store.replace(with: board) } else { store.follow(grid?(page) ?? home.board.grid) }
         }
     }
 

@@ -58,7 +58,7 @@ struct SizeStageOverlay: View {
         DragGesture(minimumDistance: 1, coordinateSpace: .global)
             .tracking($isDragging)
             .onChanged { value in
-                var current = drag ?? Drag(handle: handle, start: model.preferences.panel, startIsland: island,
+                var current = drag ?? Drag(handle: handle, start: model.panel(for: model.studio.page), startIsland: island,
                                            fit: max(fit, 0.1), live: island)
                 let dx = value.translation.width / current.fit, dy = value.translation.height / current.fit
                 switch handle {

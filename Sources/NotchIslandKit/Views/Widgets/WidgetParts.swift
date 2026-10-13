@@ -39,6 +39,7 @@ import SwiftUI
             case .analogClock: ClockFaceWidget.caption(widget.config, here: .current)
             case .monthCalendar: MonthGrid(date: .now, calendar: .current, locale: .current).title
             case .batteryUsage: DailyUsageWidget.title
+            case .appUsage: AppUsageWidget.title
             case .fanControl: FanControlWidget.modeText(manual: false, access: .unknown)
             default: Readouts.picture(widget).caption
             }
@@ -80,11 +81,12 @@ import SwiftUI
             case .analogClock: ClockFaceWidget.captionPoints(inner: inner)
             case .monthCalendar: MonthCalendarWidget.titlePoints(inner: inner)
             case .batteryUsage: DailyUsageWidget.titlePoints(inner: inner)
+            case .appUsage: AppUsageWidget.titlePoints(inner: inner)
             case .fanControl: FanControlWidget.labelPoints(inner: inner)
             default: ReadingWidget.captionPoints(inner: inner)
             }
         case .usageDay: DailyUsageWidget.dayPoints(inner: inner)
-        case .tempGraphText, .rpmGraphText: WidgetMetrics.points(inner.height, ratio: 0.11, min: 8, max: 11)
+        case .tempGraphText: FanHeatGraph.textPoints(height: inner.height)
         case .rulerUnit: RulerUnitName.points(markerSize: TimerWidget.rulerSpace(inner: inner) < 30 ? 6 : 9)
         case .monthDays: MonthCalendarWidget.dayPoints(widget, inner: inner)
         case .shelfCount: ShelfWidget.countPoints(inner: inner)
@@ -100,7 +102,8 @@ import SwiftUI
     static func weight(of id: ElementID, in widget: IslandWidget) -> NSFont.Weight {
         switch id {
         case .trackInfo, .controlName, .value, .percentage: .semibold
-        case .label: widget.kind == .monthCalendar || widget.kind == .batteryUsage || widget.kind == .fanControl ? .semibold : .medium
+        case .label: widget.kind == .monthCalendar || widget.kind == .batteryUsage || widget.kind == .appUsage
+            || widget.kind == .fanControl ? .semibold : .medium
         case .readout: widget.kind == .stopwatch || widget.kind == .timer ? .regular : .semibold
         case .usageDay, .shelfCount, .monthDays: .medium
         case .rulerUnit: RulerUnitName.weight

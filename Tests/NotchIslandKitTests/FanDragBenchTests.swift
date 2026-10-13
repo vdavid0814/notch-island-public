@@ -3,7 +3,7 @@ import SwiftUI
 import Testing
 @testable import NotchIslandKit
 
-/// What a turn of the fan's dial costs: Fan Control at its widest (both dials, both graphs) in a
+/// What a turn of the fan's dial costs: Fan Control at its widest (both dials and the graph) in a
 /// window, live, with simulated fans, and the dial dragged round its arc by real mouse events.
 /// Prints the main thread's CPU milliseconds a step (the event, the update it causes and the
 /// drawing). A benchmark, not a check: only with NI_BENCH=1 and NI_DEMO_FANS=1.
@@ -12,14 +12,12 @@ import Testing
 struct FanDragBenchTests {
     @Test func turningTheDial() async throws {
         let model = AppModel()
-        model.fans.onRead = { [weak model] in model?.thermals.record(speed: $0) }
+        model.fans.onRead = { [weak model] in model?.thermals.record(speed: $0, maximum: $1) }
         let layout = IslandLayout(notch: CGSize(width: 185, height: 32), scale: .standard)
         let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(layout), grid: .standard)
         let rect = GridRect(column: 0, row: 0, width: 12, height: 3)
         let size = geometry.frame(for: rect).size
-        var options = IslandWidgetKind.fanControl.defaultOptions
-        options.insert(.rpmGraph)
-        let widget = IslandWidget(kind: .fanControl, frame: rect, options: options)
+        let widget = IslandWidget(kind: .fanControl, frame: rect, options: IslandWidgetKind.fanControl.defaultOptions)
         let host = NSHostingView(rootView: IslandWidgetView(widget: widget, size: size)
             .frame(width: size.width, height: size.height)
             .background(.black)

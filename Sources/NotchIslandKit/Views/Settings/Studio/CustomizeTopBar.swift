@@ -193,7 +193,6 @@ struct CustomizeTopBar: View, Equatable {
                             $0.chartLooks[selected] = nil
                             // A graph's texts go back with it.
                             if selected == .tempGraph { $0.textStyles[.tempGraphText] = nil }
-                            if selected == .rpmGraph { $0.textStyles[.rpmGraphText] = nil }
                             // A line's times go back with it.
                             if $0.kind.spec.progressBars.contains(selected) {
                                 for part in ProgressLook.Part.allCases {

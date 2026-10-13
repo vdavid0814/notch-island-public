@@ -7,6 +7,38 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-10-13 18:30** — Released as 0.8.5.3.
+- **2026-10-13 18:20** — Settings ▸ Widgets ▸ Size sets the page it shows (`Preferences.pageSizes`: its cells
+  and its ready-made size); Apply to All Pages makes it every page's; General's Size when Open is every
+  page's. The island is at the size of the page it shows. *The user: one page sized, not all.*
+- **2026-10-13 17:50** — Fan Control's animations on the render server: the dials as layers (`RingLayers`),
+  the graph drawn once a reading and glided 0.35 s (soft) by Core Animation (`FanGraphLayerView`).
+  SwiftUI per-frame animation on the island cost 300–600 ms of main thread per 0.8 s (debug build).
+  *The user picked the short glide over a continuous slide (window server 250 → 156 mW).*
+- **2026-10-13 17:20** — Fan Control has no pointer read-out (removed after it lagged on the island:
+  SwiftUI state per move came in bursts; an NSTrackingArea of the widget's own got no moves, as the
+  panel takes no mouse-moved events). *The user asked to take it out.*
+- **2026-10-13 16:00** — Fan Control redesigned from the proposal the user chose: one graph (heat line,
+  the fans as strokes whose spacing is the speed, `FanRhythm`), colours by reading green → yellow → red,
+  a dotted line at the lowest temperature, words on the dials, Manual the button back to automatic;
+  reach 10 s–10 min on the timer's ruler (minutes and seconds, haptics), seconds below 10 only once a
+  minute is set. The speed graph went (its looks are left out of saved widgets).
+- **2026-10-13 15:50** — Usage by App counts percent of the battery, not energy shares (replaces 15:18's
+  shares): each percent the battery drops goes to the apps by the energy they used since the drop
+  before (a sweep at each drop, plus every 5 min between), so a day's rows add up to Daily Usage's
+  figure; what no app was measured for is a "Not measured" row. Calendar days, from midnight.
+  *The user: the apps must add up to what the day really used.*
+- **2026-10-13 15:43** — Battery Chart's hours (replaces 15:33's "23"): 00, 06, 12, 18, 24, each centred on its
+  line, the plot inset by half an hour's text on each side for the ends; every other one, or the ends
+  alone, where they would touch. *The user: evenly spaced, so the bars show to the hour when it ran down.*
+- **2026-10-13 15:33** — Battery Chart writes its percentages at every size (was only 220 pt wide and 60 pt tall
+  and up); the plot narrows for them, a low chart writes only 0 and 100 %. The hours too, at every size, the last one
+  (23) at the axis's end; a chart a row tall writes both at 8 pt. *The user: they must stay.*
+- **2026-10-13 15:18** — Usage by App (`appUsage`, the iPhone's Battery Usage by App): every user process's
+  energy counter (`proc_pid_rusage`) read every 5 min on a background queue, only while on battery
+  (no timer on the charger), attributed to the responsible app's outermost `.app`; macOS's own parts
+  as one "macOS" row. An exception to "no repeating timers": nothing pushes per-process energy.
+  *~12 ms of CPU a sweep; root's processes (WindowServer, kernel) cannot be read without the helper.*
 - **2026-10-13 12:50** — Released as 0.8.5.2. Since Light Mode's approval: Dark Mode's clearest
   glass is 20 % black, growing to 40 % along the slider; the notch-height pill is solid black on
   Liquid Glass in both Modes (its black fading in while the island closes); each Mode has its own

@@ -436,8 +436,8 @@ struct ElementInspector: View, Equatable {
         let look = widget.chartLook(of: id)
         let element = widget.kind.spec.element(id)
         // A graph of readings (Fan Control's): the same look, in its own words.
-        let graph = id == .tempGraph || id == .rpmGraph
-        let graphText: ElementID? = id == .tempGraph ? .tempGraphText : id == .rpmGraph ? .rpmGraphText : nil
+        let graph = id == .tempGraph
+        let graphText: ElementID? = graph ? .tempGraphText : nil
         HStack(spacing: 10) {
             Image(systemName: element?.symbol ?? "chart.bar")
                 .font(.system(size: 18))
@@ -471,23 +471,34 @@ struct ElementInspector: View, Equatable {
         // A day's use (Daily Usage), or how far the battery had run down (the charge chart).
         let usage = widget.kind == .batteryUsage
         StudioDivider()
-        section(graph ? "Low" : usage ? "Light Use" : "Run Down a Lot",
-                caption: graph ? "The line where the readings are low. Automatic: the graph's own colours, cool to hot."
-                    : usage ? "Days that used under \(PowerState.lowLevel) % of the battery. Automatic: grey, the picked day in its colour."
-                    : "Bars under \(PowerState.lowLevel) %.") {
-            colourChoice(look.lowColor, mixing: .chartLow) { color in updateChart(id) { $0.lowColor = color } }
+        if graph {
+            // The heat's line and the fans' strokes, each in its dial's colour until one is picked.
+            section("Heat", caption: "The chip's temperature: the line, its fill and the dot at the newest reading. Automatic: by the temperature, as the chip's dial — green when cool, yellow, red near 100°.") {
+                colourChoice(look.highColor, mixing: .chartHigh) { color in updateChart(id) { $0.highColor = color } }
+            }
+            StudioDivider()
+            section("Fan", caption: "The fans' strokes under the line: far apart while they turn slowly, close while fast. Automatic: by the speed, as the fan's dial — green slow, yellow, red at their fastest.") {
+                colourChoice(look.lowColor, mixing: .chartLow) { color in updateChart(id) { $0.lowColor = color } }
+            }
+            StudioDivider()
+        } else {
+            section(usage ? "Light Use" : "Run Down a Lot",
+                    caption: usage ? "Days that used under \(PowerState.lowLevel) % of the battery. Automatic: grey, the picked day in its colour."
+                        : "Bars under \(PowerState.lowLevel) %.") {
+                colourChoice(look.lowColor, mixing: .chartLow) { color in updateChart(id) { $0.lowColor = color } }
+            }
+            StudioDivider()
+            section(usage ? "Some Use" : "Run Down Some",
+                    caption: usage ? "Days that used \(PowerState.lowLevel) to \(ChartLook.mediumLevel) %." : "Bars from \(PowerState.lowLevel) to \(ChartLook.mediumLevel) %.") {
+                colourChoice(look.mediumColor, mixing: .chartMedium) { color in updateChart(id) { $0.mediumColor = color } }
+            }
+            StudioDivider()
+            section(usage ? "Heavy Use" : "Run Down Little",
+                    caption: usage ? "Days that used \(ChartLook.mediumLevel) % or more." : "Bars from \(ChartLook.mediumLevel) % up.") {
+                colourChoice(look.highColor, mixing: .chartHigh) { color in updateChart(id) { $0.highColor = color } }
+            }
+            StudioDivider()
         }
-        StudioDivider()
-        section(graph ? "Middle" : usage ? "Some Use" : "Run Down Some",
-                caption: graph ? "The line halfway up its range." : usage ? "Days that used \(PowerState.lowLevel) to \(ChartLook.mediumLevel) %." : "Bars from \(PowerState.lowLevel) to \(ChartLook.mediumLevel) %.") {
-            colourChoice(look.mediumColor, mixing: .chartMedium) { color in updateChart(id) { $0.mediumColor = color } }
-        }
-        StudioDivider()
-        section(graph ? "High" : usage ? "Heavy Use" : "Run Down Little",
-                caption: graph ? "The line where the readings are high." : usage ? "Days that used \(ChartLook.mediumLevel) % or more." : "Bars from \(ChartLook.mediumLevel) % up.") {
-            colourChoice(look.highColor, mixing: .chartHigh) { color in updateChart(id) { $0.highColor = color } }
-        }
-        StudioDivider()
         if !graph {
             section("Percentages", caption: "Beside the chart, each with its line, where it is wide enough; ones too close to the next are left out.") {
                 HStack(spacing: 10) {
@@ -501,16 +512,15 @@ struct ElementInspector: View, Equatable {
                 }
             }
         }
-        // A graph's range: its lowest and highest value, each the graph's own until it is set.
+        // A graph's range: its line's floor and its dotted limit, each the graph's own until set.
         if graph {
-            let own = graphRange(id)
-            let step: Double = id == .tempGraph ? 5 : 100
-            let limits: ClosedRange<Double> = id == .tempGraph ? 0...130 : 0...8000
-            StudioDivider()
+            let own = FanHeatGraph.temperatureRange
+            let step: Double = 5
+            let limits: ClosedRange<Double> = 0...130
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Range").font(.subheadline.weight(.semibold))
-                    Text("The lowest and the highest value drawn; the values written are spread between them.")
+                    Text("The temperature at the bottom of the line's room and at its dotted limit, written over it.")
                         .font(.caption).foregroundStyle(SettingsPalette.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -540,44 +550,17 @@ struct ElementInspector: View, Equatable {
                     if (look.rangeMinimum ?? own.lowerBound) > high - step { look.rangeMinimum = high - step }
                 }
             }
-            // A value every so many degrees (or rpm) from the lowest up: 25, 30, 35… or 25, 40, 55…
-            let ownStep = id == .tempGraph ? SensorGraph.temperatureStep : SensorGraph.speedStep(own)
-            let every = look.valueStep ?? ((ownStep / step).rounded() * step)
-            let low = look.rangeMinimum ?? own.lowerBound
-            StudioDivider()
-            section("Values", caption: "Written beside the graph from the lowest up, each with its line; ones too close to the next are left out. At nothing, none are written.") {
-                HStack(spacing: 10) {
-                    Text("Every").font(.callout)
-                    Slider(value: Binding(get: { min(every, id == .tempGraph ? 50 : 3000) }, set: { new in
-                        let snapped = (new / step).rounded() * step
-                        if snapped != every { updateChart(id) { $0.valueStep = snapped } }
-                    }), in: 0...(id == .tempGraph ? 50 : 3000)) { Text("Every") }
-                    .labelsHidden()
-                    .tint(Color.islandAccent)
-                    ReservedWidthText(every <= 0 ? String(localized: "None")
-                                      : id == .tempGraph ? FanControlWidget.degreeStep(every, locale: .current) : FanControlWidget.rpm(every, locale: .current),
-                                      fitting: [String(localized: "None"), id == .tempGraph ? "90°" : FanControlWidget.rpm(3000, locale: .current)])
-                        .foregroundStyle(SettingsPalette.secondary)
-                        .monospacedDigit()
-                }
-                if every > 0 {
-                    let format: (Double) -> String = { id == .tempGraph ? FanControlWidget.degrees($0, locale: .current) : FanControlWidget.rpm($0, locale: .current) }
-                    Text(verbatim: [low, low + every, low + 2 * every].map(format).joined(separator: " · ") + " …")
-                        .font(.caption)
-                        .foregroundStyle(SettingsPalette.secondary)
-                }
-            }
         }
-        // A graph's texts (its name, the value now, the values beside it): one type and colour.
+        // A graph's texts (its limit, the time and the key under it): one type and colour.
         if let graphText {
             let style = widget.textStyle(of: graphText)
             StudioDivider()
             Text("Texts").font(.subheadline.weight(.semibold))
             // From the size they are drawn at now (the graph's own follows its height): the first
             // touch does not jump.
-            let ownSize = Double(SensorGraph.textPoints(height: editing.parts[id]?.height ?? inner.height))
-            pointSlider("Size", value: min(style.size ?? ownSize, SensorGraph.textSizes.upperBound),
-                        in: SensorGraph.textSizes, help: "The graph's name; the value now and the values beside it follow it") { points in
+            let ownSize = Double(FanHeatGraph.textPoints(height: editing.parts[id]?.height ?? inner.height))
+            pointSlider("Size", value: min(style.size ?? ownSize, FanHeatGraph.textSizes.upperBound),
+                        in: FanHeatGraph.textSizes, help: "The limit over the graph, the time and the key under it") { points in
                 update(graphText) { $0.size = points }
             }
             font(graphText, style, showsSize: false)
@@ -824,12 +807,6 @@ struct ElementInspector: View, Equatable {
             look.sanitize()
             widget.setDayGridLook(look, of: id)
         }
-    }
-
-    /// A graph's own range: the chip's fixed one, the fans' from nothing to their fastest.
-    private func graphRange(_ id: ElementID) -> ClosedRange<Double> {
-        if id == .tempGraph { return TemperatureDial.range }
-        return FanControlWidget.speedRange(model.fans.fans.isEmpty ? FanControlWidget.sample : model.fans.fans)
     }
 
     /// One end of a graph's range, in the graph's own unit (degrees as the Mac writes them, rpm).
@@ -1517,7 +1494,7 @@ struct ElementInspector: View, Equatable {
     private var inner: CGSize {
         // The panel's grid (every board follows it), not the board's own: read from the board, the
         // inspector was gone over again at every change to the widget, whatever it showed of it.
-        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.preferences.panel.grid)
+        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.studioLayout), grid: model.panel(for: model.studio.page).grid)
         let natural = geometry.laidSize(for: widget.frame)
         let padding = WidgetMetrics.padding(for: widget)
         return CGSize(width: max(0, natural.width - 2 * padding), height: max(0, natural.height - 2 * padding))

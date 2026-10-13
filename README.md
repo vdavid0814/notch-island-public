@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.5.2 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.5.3 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,40 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.5.3
+
+Fan Control made anew, a size for each page, and Usage by App:
+
+- **Fan Control: one graph.** The heat as a line and, under it, the fans as a row of strokes — far
+  apart while they turn slowly, close together while they turn fast — so you see the fans answer the
+  heat. A dotted line marks the lowest temperature in view.
+- **Colours by reading.** The dials, the heat line and every stroke are green while low, yellow
+  halfway and red near the top.
+- **How far back the graph goes:** ten seconds to ten minutes. Click the time under the graph (a
+  glass button) and set it on the timer's ruler, minutes or seconds, **Done** at the left — or in
+  Customize ▸ Settings ▸ **History**.
+- **Words on the dials:** Auto, Manual, Resting, At max or Off over the speed; Cool, Warm or Hot over
+  the degrees. Held by hand, click **Manual** to give the fans back to macOS.
+- **Smoother and lighter.** The graph glides at each reading instead of jumping, and the dials'
+  glides run on the window server: the app itself spends about a quarter of the energy on Fan Control
+  it did ([ENERGY-LOG](docs/ENERGY-LOG.md)).
+- **A size for each page.** Settings ▸ Widgets ▸ **Size** sets the page it shows, not all of them;
+  **Apply to All Pages** gives that size to every page.
+- **Usage by App**, a new battery widget: which apps used the most battery today, or on the day picked
+  in Daily Usage; its rows add up to the day's own figure (measured while on battery).
+- **Battery Chart** writes its percentages and the hours (00, 06, 12, 18, 24) at every size.
+- **Fixed:** Battery Chart's 0 and 100 % sat half a line inside the chart; `notchisland://open?page=`
+  opened nothing for a page you added.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.5.3 in place and keeps your permissions. Or download
+**NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 

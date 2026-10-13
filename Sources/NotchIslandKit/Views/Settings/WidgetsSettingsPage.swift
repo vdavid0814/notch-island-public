@@ -481,7 +481,7 @@ private struct StudioUndoKeys: View {
             if mode == .topBar { studio.headerHistory.note(from: old, to: new) }
         }
         // Size mode: the panel or the ready-made size stored (a slider or an edge let go).
-        .onChange(of: SizeKey(panel: model.preferences.panel, scale: model.preferences.scale)) {
+        .onChange(of: SizeKey(panel: model.panel(for: model.studio.page), scale: model.size(of: model.studio.page).scale)) {
             guard mode == .size else { return }
             let now = model.sizeSnapshot()
             if let seen = studio.sizeSeen { studio.sizeHistory.note(from: seen, to: now) }
@@ -580,7 +580,7 @@ private struct StudioStage: View {
     static let badgeRoom: CGFloat = 28
 
     var body: some View {
-        let layout = model.layout
+        let layout = model.studioLayout
         let island = layout.size(for: .expanded(.home))
         let mode = model.studio.mode
         // The picture is as large as the island stored, in every mode. While the panel is sized
@@ -1169,7 +1169,7 @@ private struct StageIsland: View {
     var body: some View {
         let _ = ProcessInfo.processInfo.environment["NI_EXP_LAYOUTLOG"] == "1" ? Self._printChanges() : ()
         let mode = model.studio.mode
-        let base = model.layout
+        let base = model.studioLayout
         // Size mode: as the edge being dragged makes it, before that is stored.
         let layout = mode == .size ? (model.studio.draft.map { base.replacing(panel: $0.panel.layout) } ?? base) : base
         let presentation = IslandPresentation.expanded(.home)
@@ -1440,7 +1440,7 @@ private struct WidgetInspector: View {
         let columns = fitsOneRow ? elements.count : (elements.count + 1) / 2
         let rows = stride(from: 0, to: elements.count, by: columns).map { Array(elements[$0..<min($0 + columns, elements.count)]) }
         // A part with no room at this size is not drawn: its tile is off, and says why.
-        let size = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid).laidSize(for: widget.frame)
+        let size = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.studioLayout), grid: model.editedWidgets.board.grid).laidSize(for: widget.frame)
         return VStack(spacing: Self.spacing) {
             ForEach(rows.indices, id: \.self) { row in
                 HStack(spacing: Self.spacing) {
@@ -2054,7 +2054,7 @@ struct WidgetPreview: View {
     static let fadeIn: TimeInterval = 0.2
 
     var body: some View {
-        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: grid)
+        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.studioLayout), grid: grid)
         let cells = grid.defaultSize(for: kind)
         let rect = GridRect(column: 0, row: 0, width: cells.width, height: cells.height)
         let size = geometry.frame(for: rect).size
@@ -2163,7 +2163,7 @@ private struct BackdropNotice: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Widget backgrounds were changed")
                     .font(.title3.weight(.semibold))
-                Text("To keep your widgets readable on Liquid Glass in \(mode), NotchIsland set their background colour and opacity to a preset. To go back to your saved settings:")
+                Text("To keep your widgets readable on Clear in \(mode), NotchIsland set their background colour and opacity to a preset. To go back to your saved settings:")
                     .font(.body)
                     .foregroundStyle(.white.opacity(0.8))
                     .fixedSize(horizontal: false, vertical: true)

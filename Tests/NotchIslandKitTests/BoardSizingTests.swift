@@ -147,7 +147,7 @@ import Testing
         #expect(!pages.home.board.parked.isEmpty)
         pages.follow(.standard)
         #expect(pages.snapshot() != entry)
-        pages.restore(entry, grid: .standard)
+        pages.restore(entry)
         #expect(pages.snapshot() == entry && pages.home.board == .standard)
         #expect(pages.home.undoStack.isEmpty)
     }

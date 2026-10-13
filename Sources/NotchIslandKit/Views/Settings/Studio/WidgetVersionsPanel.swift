@@ -224,7 +224,7 @@ struct WidgetVersionsPanel: View {
     /// The version as it looks, as large as the panel allows, a little way in from its frame's
     /// corners (concentric with its own).
     private func preview(_ version: WidgetVersion) -> some View {
-        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.layout), grid: model.editedWidgets.board.grid)
+        let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.studioLayout), grid: model.editedWidgets.board.grid)
         let size = geometry.laidSize(for: version.widget.frame)
         let inset = Self.previewInset
         let room = CGSize(width: WidgetVersionsMenu.width - 28 - 2 * inset, height: Self.previewMaxHeight - 2 * inset)

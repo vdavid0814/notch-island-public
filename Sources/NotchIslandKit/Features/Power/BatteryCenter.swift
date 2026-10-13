@@ -21,6 +21,8 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
         /// The details, read again every `powerInterval` while held: the watts flowing change
         /// without any power event (the Power widget, only while it is shown).
         case power
+        /// Which apps used the battery (`AppEnergyRecorder`), kept current while held.
+        case apps
     }
 
     /// Nil until a `.details` lease has been served, and on a desktop Mac.
@@ -33,6 +35,9 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
     /// Nil: today.
     var selectedDay: Date?
     @ObservationIgnored private var usageCache: (version: Int, today: Date, days: [BatteryUsageDay])?
+    /// Nil until an `.apps` lease has been served; then kept (a few KB).
+    private(set) var appLedger: AppEnergyLedger?
+    @ObservationIgnored private var appHolders = 0
 
     static let detailsInterval: TimeInterval = 30
     static let powerInterval: TimeInterval = 5
@@ -40,6 +45,7 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
     @ObservationIgnored private var powerTask: Task<Void, Never>?
 
     @ObservationIgnored let recorder: BatteryRecorder
+    @ObservationIgnored let appEnergy: AppEnergyRecorder
     @ObservationIgnored private let detailsSource: @Sendable (PowerState) -> BatteryDetails?
     @ObservationIgnored private weak var power: PowerMonitor?
     /// `demo/batteryhistory` owns the history and the details: real ones wait until it ends.
@@ -57,9 +63,10 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
     @ObservationIgnored private var building: Set<ChartKey> = []
 
     /// - Parameter detailsSource: the details' read; tests count them. Defaults to IOKit's.
-    init(recorder: BatteryRecorder = BatteryRecorder(),
+    init(recorder: BatteryRecorder = BatteryRecorder(), appEnergy: AppEnergyRecorder = AppEnergyRecorder(),
          detailsSource: @escaping @Sendable (PowerState) -> BatteryDetails? = BatteryDetails.read) {
         self.recorder = recorder
+        self.appEnergy = appEnergy
         self.detailsSource = detailsSource
     }
 
@@ -69,6 +76,7 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
         self.power = power
         power.onRealReading = { [weak self] old, new in
             self?.recorder.powerReading(from: old, to: new)
+            self?.appEnergy.power(onBattery: PowerMonitor.forcedOnBattery ?? new.isOnBattery, level: new.level)
             self?.powerChanged()
         }
         activity.onEdge = { [weak self] edge in self?.recorder.activityEdge(edge) }
@@ -83,6 +91,7 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
         powerTask?.cancel()
         powerTask = nil
         recorder.stop()
+        appEnergy.stop()
     }
 
     func acquire(_ lease: Lease) {
@@ -92,6 +101,13 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
             if detailHolders == 1, detailsAreStale { readDetails() }
         case .history:
             if history == nil { loadHistory() }
+        case .apps:
+            appHolders += 1
+            guard appHolders == 1 else { return }
+            appEnergy.watch { [weak self] ledger in
+                guard let self, self.appHolders > 0, ledger != self.appLedger else { return }
+                self.appLedger = ledger
+            }
         case .power:
             acquire(.details)
             powerHolders += 1
@@ -116,6 +132,9 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
             }
         case .history:
             break   // The history stays loaded (see the type's comment).
+        case .apps:
+            appHolders = max(appHolders - 1, 0)
+            if appHolders == 0 { appEnergy.unwatch() }
         case .power:
             powerHolders = max(powerHolders - 1, 0)
             if powerHolders == 0 {
@@ -228,6 +247,15 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
     }
 
     @ObservationIgnored private var cachedAt = Date.distantPast
+
+    /// The apps that used the battery on `day` (nil: today), the most first, adding up to what
+    /// Daily Usage says the day used (what no app was measured for a row of its own). Needs an
+    /// `.apps` lease, and a `.history` one for the day's use.
+    func appUsage(on day: Date?, calendar: Calendar = .autoupdatingCurrent, now: Date = Date()) -> [AppUsageRow] {
+        let start = day ?? calendar.startOfDay(for: now)
+        let used = usageDays(now: now, calendar: calendar).first { $0.day == start }?.used
+        return appLedger?.rows(on: start, used: used) ?? []
+    }
 
     /// The picked day, if it is one of the eight still in the history; nil for today.
     func pickedDay(calendar: Calendar = .autoupdatingCurrent, now: Date = Date()) -> Date? {

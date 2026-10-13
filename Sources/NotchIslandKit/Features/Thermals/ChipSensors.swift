@@ -59,25 +59,66 @@ nonisolated enum ChipSensors {
 nonisolated struct SensorSample: Sendable, Equatable {
     var date: Date
     var value: Double
+    /// The fans' speed only: how far their strokes had run by this reading (`FanRhythm`), so each
+    /// stroke keeps its moment however the history is cut.
+    var phase: Double = 0
+}
+
+/// The fans' speed as a rhythm (Fan Control's graph): a row of strokes, far apart while they turn
+/// slowly, close together while they turn fast. A stroke is stamped at its moment and slides left
+/// with time; the spacing never reshuffles, as it is counted from the readings themselves.
+nonisolated enum FanRhythm {
+    /// From one stroke to the next, a share of the graph's width: about a thirteenth at a crawl, a
+    /// forty-fifth at the fans' fastest.
+    static func share(_ fraction: Double) -> Double {
+        (48 - 34 * min(max(fraction, 0), 1)) / 636
+    }
+
+    /// Readings further apart than this (the Mac asleep, the history not kept) are a gap: the line
+    /// breaks there and no strokes are drawn across it.
+    static let gap: TimeInterval = 45
+
+    /// How far the strokes run in `seconds` at `rpm`: a graph `window` seconds wide draws one every
+    /// `window` of it.
+    static func advance(rpm: Double, maximum: Double, seconds: TimeInterval) -> Double {
+        guard rpm > 0, seconds > 0, seconds <= gap else { return 0 }
+        return seconds / share(rpm / max(maximum, 1))
+    }
+
+    /// The strokes' moments in a graph `window` seconds wide: wherever the run passes a whole
+    /// `window`, oldest first.
+    static func strokes(_ speeds: [SensorSample], window: TimeInterval, after start: Date) -> [Date] {
+        guard window > 0 else { return [] }
+        var strokes: [Date] = []
+        for (before, after) in zip(speeds, speeds.dropFirst()) where after.date > start && after.phase > before.phase {
+            var next = (before.phase / window).rounded(.down) + 1
+            while next * window <= after.phase {
+                let share = (next * window - before.phase) / (after.phase - before.phase)
+                let date = before.date.addingTimeInterval(after.date.timeIntervalSince(before.date) * share)
+                if date > start { strokes.append(date) }
+                next += 1
+            }
+        }
+        return strokes
+    }
 }
 
 /// The chip's temperature, read every second while a widget shows it (Chip Temperature, Fan
-/// Control); nothing is read otherwise. Fan Control's graphs keep the last thirty seconds of it and
-/// of the fans' speed: every reading while shown, and — once Fan Control is on a board — one every
+/// Control); nothing is read otherwise. Fan Control's graph keeps the last ten minutes of it and of
+/// the fans' speed: every reading while shown, and — once Fan Control is on a board — one every
 /// fifteen seconds while not (`keepHistory`), so the graph has a past when the panel opens.
 @Observable final class ThermalMonitor {
     private(set) var chip: ChipReading?
-    /// The cores' average over the last half minute, oldest first.
+    /// The cores' average over the last ten minutes, oldest first.
     private(set) var temperatures: [SensorSample] = []
-    /// The fans' average speed over the last half minute, oldest first.
+    /// The fans' average speed over the last ten minutes, oldest first, with their strokes' run.
     private(set) var speeds: [SensorSample] = []
 
-    /// While shown: every second, so half a minute's graph has thirty readings.
+    /// While shown: every second, so a minute's graph has sixty readings.
     static let interval: TimeInterval = 1
     static let historyInterval: TimeInterval = 15
-    /// How far back the graphs reach: the last thirty seconds, so that what just happened — a load
-    /// starting, the fans turned up — is seen as it happened, even on a small graph.
-    nonisolated static let window: TimeInterval = 30
+    /// How far back the history reaches: the longest a graph is set to show (`WidgetConfig.secondsRange`).
+    nonisolated static let window: TimeInterval = 600
 
     @ObservationIgnored private var observers = 0
     @ObservationIgnored private var timer: Timer?
@@ -116,9 +157,11 @@ nonisolated struct SensorSample: Sendable, Equatable {
         sampleHistory()
     }
 
-    /// The fans' average speed, as Fan Control read it.
-    func record(speed rpm: Double) {
-        Self.append(SensorSample(date: .now, value: rpm), to: &speeds)
+    /// The fans' average speed, as Fan Control read it, and their fastest (for the strokes' run).
+    func record(speed rpm: Double, maximum: Double) {
+        let now = Date.now
+        let phase = speeds.last.map { $0.phase + FanRhythm.advance(rpm: $0.value, maximum: maximum, seconds: now.timeIntervalSince($0.date)) } ?? 0
+        Self.append(SensorSample(date: now, value: rpm, phase: phase), to: &speeds)
     }
 
     private func sampleHistory() {
@@ -128,7 +171,7 @@ nonisolated struct SensorSample: Sendable, Equatable {
             let (chip, fans) = await Task.detached(priority: .utility) { (ChipSensors.read(), FanSensors.read()) }.value
             isReading = false
             if let chip { Self.append(SensorSample(date: .now, value: chip.average), to: &temperatures) }
-            if !fans.isEmpty { record(speed: fans.map(\.rpm).reduce(0, +) / Double(fans.count)) }
+            if !fans.isEmpty { record(speed: fans.map(\.rpm).reduce(0, +) / Double(fans.count), maximum: fans.map(\.maximum).max() ?? 1) }
         }
     }
 

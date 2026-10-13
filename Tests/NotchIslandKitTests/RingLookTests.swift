@@ -69,14 +69,16 @@ import Testing
         var text = TextStyle()
         text.isBold = true
         widget.progressLooks = [.fanDial: line, .tempDial: line, .value: line]
-        widget.chartLooks = [.tempGraph: chart, .rpmGraph: chart, .fanDial: chart]
+        let speedGraph = ElementID(rawValue: "rpmGraph"), speedGraphText = ElementID(rawValue: "rpmGraph.text")
+        widget.chartLooks = [.tempGraph: chart, speedGraph: chart, .fanDial: chart]
         widget.offsets = [.value: ElementOffset(x: 4, y: 4), .fanDial: ElementOffset(x: 2, y: 0)]
         widget.textStyles = [.fanName: text, .value: text, .tempName: text, .tempValue: text, .tempGraphText: text,
-                             .rpmGraphText: text, .fanDial: text]
+                             speedGraphText: text, .fanDial: text]
         widget.sanitize()
         #expect(Set(widget.progressLooks.keys) == [.fanDial, .tempDial])
-        #expect(Set(widget.chartLooks.keys) == [.tempGraph, .rpmGraph])
-        #expect(Set(widget.textStyles.keys) == [.fanName, .value, .tempName, .tempValue, .tempGraphText, .rpmGraphText])
+        // One graph now: the speed's of before is in it, its looks left out.
+        #expect(Set(widget.chartLooks.keys) == [.tempGraph])
+        #expect(Set(widget.textStyles.keys) == [.fanName, .value, .tempName, .tempValue, .tempGraphText])
         // The speed is the dial's own text now: no longer moved by itself.
         #expect(Set(widget.offsets.keys) == [.fanDial])
     }
@@ -91,24 +93,7 @@ import Testing
         #expect(widget.progressLooks == [.batteryRing: line])
     }
 
-    @Test func aGraphWritesAValueEverySoMany() {
-        // The temperature's own: 25, 50, 75 and 100.
-        #expect(SensorGraph.marks(SensorGraph.temperatureRange, step: SensorGraph.temperatureStep) == [25, 50, 75, 100])
-        // From the lowest up, the highest always: 25, 40, 55, 70, 85 and 100; 30, 50, 70 and 80.
-        #expect(SensorGraph.marks(25...100, step: 15) == [25, 40, 55, 70, 85, 100])
-        #expect(SensorGraph.marks(30...80, step: 20) == [30, 50, 70, 80])
-        // No step: the ends alone (their guides stay; nothing is written).
-        #expect(SensorGraph.marks(25...100, step: 0) == [25, 100])
-        #expect(SensorGraph.speedStep(1200...5800) == 2300)
-        let marks = SensorGraph.marks(25...100, step: 5)
-        #expect(SensorGraph.written(marks, range: 25...100, height: 400, caption: 10) == marks)
-        // Low: the ends always, those between only clear of their neighbours.
-        let low = SensorGraph.written(marks, range: 25...100, height: 44, caption: 10)
-        #expect(low.first == 25 && low.last == 100 && low.count < marks.count)
-        for (lower, upper) in zip(low, low.dropFirst()) {
-            #expect(SensorGraph.captionTop((lower - 25) / 75, height: 44, caption: 10)
-                    - SensorGraph.captionTop((upper - 25) / 75, height: 44, caption: 10) >= 10)
-        }
+    @Test func aGraphsValueStepIsSanitized() {
         var look = ChartLook()
         look.valueStep = -3
         look.sanitize()
@@ -131,24 +116,39 @@ import Testing
     }
 
     @Test func theFansDialNamesItsMode() {
-        // The mode is a text of its own (between the fan and the speed); the dial's name stays "Fan".
+        // The word over the speed; the dial's name stays "Fan".
         #expect(FanControlWidget.modeText(manual: false, access: .ready) == "Auto")
         #expect(FanControlWidget.modeText(manual: true, access: .ready) == "Manual")
         #expect(FanControlWidget.modeText(manual: false, access: .needsApproval) == "Allow in Login Items")
         #expect(FanControlWidget.modeText(manual: false, access: .ready, tooHot: true) == "Too hot")
         #expect(FanControlWidget.modeText(manual: true, access: .ready, tooHot: true) == "Manual")
+        // Standing still, at their fastest, held at none.
+        #expect(FanControlWidget.modeText(manual: false, access: .ready, rpm: 0, maximum: 5800) == "Resting")
+        #expect(FanControlWidget.modeText(manual: false, access: .ready, rpm: 5790, maximum: 5800) == "At max")
+        #expect(FanControlWidget.modeText(manual: false, access: .ready, rpm: 3000, maximum: 5800) == "Auto")
+        #expect(FanControlWidget.modeText(manual: true, access: .ready, rpm: 0, maximum: 5800) == "Off")
+        // Orange only where something is missing (or it was too hot): held by hand is no warning.
         #expect(FanControlWidget.isAlert(manual: false, access: .failed("no")) && !FanControlWidget.isAlert(manual: false, access: .unknown))
-        #expect(FanControlWidget.isAlert(manual: true, access: .ready) && FanControlWidget.isAlert(manual: false, access: .ready, tooHot: true))
+        #expect(!FanControlWidget.isAlert(manual: true, access: .ready) && FanControlWidget.isAlert(manual: false, access: .ready, tooHot: true))
+        #expect(FanControlWidget.warmth(41) == "Cool" && FanControlWidget.warmth(62) == "Warm" && FanControlWidget.warmth(96) == "Hot")
     }
 
     @Test func aGraphsColoursAreItsOwnUntilOneIsPicked() {
         let model = AppModel()
-        let own: [Color] = [.blue, .green, .yellow, .red]
         var look = ChartLook()
-        #expect(SensorGraph.colors(look, automatic: own, model: model) == own)
+        let own = FanHeatGraph.colors(look, model: model)
+        #expect(own.heat == nil && own.fan == nil)
         look.highColor = .custom(.rgb(1, 0, 1))
-        let picked = SensorGraph.colors(look, automatic: own, model: model)
-        #expect(picked.count == 3 && picked[0] == .blue && picked[1] == .yellow && picked[2] == IslandTheme.RGB.rgb(1, 0, 1).color)
+        let picked = FanHeatGraph.colors(look, model: model)
+        #expect(picked.heat == IslandTheme.RGB.rgb(1, 0, 1).color && picked.fan == nil)
+    }
+
+    /// By the reading: green low, yellow halfway, red at the top, smoothly between.
+    @Test func readingsAreColouredGreenToRed() {
+        #expect(FanTint.at(0) == .low && FanTint.at(0.5) == .middle && FanTint.at(1) == .high)
+        #expect(FanTint.at(-1) == .low && FanTint.at(3) == .high)
+        let quarter = FanTint.at(0.25)
+        #expect(quarter.green > FanTint.middle.green && quarter.red > FanTint.low.red && quarter.red < FanTint.middle.red)
     }
 }
 

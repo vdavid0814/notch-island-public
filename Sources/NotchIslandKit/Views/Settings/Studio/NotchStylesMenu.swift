@@ -257,7 +257,7 @@ struct NotchStylesPanel: View {
 
     /// The style's home page as the open island shows it, as large as the panel allows.
     private func preview(_ style: NotchStyle) -> some View {
-        let layout = model.layout.replacing(scale: style.scale).replacing(panel: style.panel.layout)
+        let layout = model.studioLayout.replacing(scale: style.scale).replacing(panel: style.panel.layout)
         let presentation = IslandPresentation.expanded(.home)
         let island = layout.size(for: presentation)
         let boardSize = BoardSizing.board(layout)

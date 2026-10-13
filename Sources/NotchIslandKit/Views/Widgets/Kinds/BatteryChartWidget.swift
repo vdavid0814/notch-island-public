@@ -74,26 +74,38 @@ private struct BatteryChartElement: View {
 
     var body: some View {
         let battery = model.battery
-        // The percentages beside it where it is wide (and set to show any), the hours under it
-        // where it is tall.
-        let showsCaptions = size.width >= 220 && size.height >= 60 && !look.percentages.isEmpty
+        // The percentages beside it and the hours under it at every size (the percentages where set
+        // to show any; the plot gives them room, and only 0 and 100 % are written where it is low).
+        // A chart a row tall writes them smaller, so the hours fit under it too.
+        let compact = size.height < BatteryChartPlot.compactBelow
+        let hoursHeight = BatteryChartPlot.hoursHeight(compact: compact)
+        let showsCaptions = !look.percentages.isEmpty && size.width >= BatteryChartPlot.percentWidth * 2
         let colors = BatteryChartColors(look, model: model)
         let cut = BatteryChartCut(corners: look.corners, mediumLevel: Double(ChartLook.mediumLevel),
                                   lines: look.percentages.isEmpty ? [0, 100] : look.percentages)
-        let showsHours = size.height >= 60
-        let plot = CGSize(width: max(size.width - (showsCaptions ? BatteryChartPlot.percentWidth : 0), 0),
-                          height: max(size.height - (showsHours ? BatteryChartPlot.hoursHeight : 0), 0))
+        let showsHours = size.height >= hoursHeight + BatteryChartPlot.captionHeight(compact: compact) * 2
+        // Each hour is centred on its line, 00 and 24 on the plot's ends: half an hour's text of room
+        // beside them (on the trailing side the percentages' column is room enough).
+        let half = showsHours ? BatteryChartPlot.hourWidth(compact: compact) / 2 : 0
+        // 0 and 100 % centred on their lines too: half a percentage's line of room over the plot, and
+        // under it where no hours are (beside the hours, the 0 % is clear of the 24).
+        let top = showsCaptions ? BatteryChartPlot.captionHeight(compact: compact) / 2 : 0
+        let bottom = showsCaptions && !showsHours ? top : 0
+        let plot = CGSize(width: max(size.width - half - (showsCaptions ? BatteryChartPlot.percentWidth : half), 0),
+                          height: max(size.height - (showsHours ? hoursHeight : 0) - top - bottom, 0))
         Group {
             if picture {
                 BatteryChartPlot(geometry: sample(plot, cut: cut), colors: colors, percentages: look.percentages,
-                                 showsCaptions: showsCaptions, size: plot, showsHours: showsHours)
+                                 showsCaptions: showsCaptions, size: plot, showsHours: showsHours, compact: compact,
+                                     lead: half, top: top)
             } else {
                 let bucket = BatteryChartRange.today.bucketSeconds
                 let start = Date(timeIntervalSinceReferenceDate: (Date().timeIntervalSinceReferenceDate / bucket).rounded(.down) * bucket)
                 PanelTimelineView(.periodic(from: start, by: bucket)) { _ in
                     BatteryChartPlot(geometry: battery.chartGeometry(range: .today, style: .bars, size: plot, cut: cut),
                                      colors: colors, percentages: look.percentages,
-                                     showsCaptions: showsCaptions, size: plot, showsHours: showsHours)
+                                     showsCaptions: showsCaptions, size: plot, showsHours: showsHours, compact: compact,
+                                     lead: half, top: top)
                 }
             }
         }
@@ -148,63 +160,88 @@ struct BatteryChartPlot: View {
     let size: CGSize
     /// The hours under the plot (a short widget leaves them out).
     var showsHours = true
+    /// A chart a row tall: its percentages and hours smaller (`compactBelow`).
+    var compact = false
+    /// Room before the plot, for the first hour centred on its start.
+    var lead: CGFloat = 0
+    /// Room over the plot, for the 100 % centred on its line.
+    var top: CGFloat = 0
 
-    static let hoursHeight: CGFloat = 14
+    /// A chart lower than this (a widget a row tall) writes its percentages and hours smaller.
+    static let compactBelow: CGFloat = 44
+    static func hoursHeight(compact: Bool) -> CGFloat { compact ? 10 : 14 }
+    /// A percentage's line height.
+    static func captionHeight(compact: Bool) -> CGFloat { compact ? 9 : 12 }
+    /// Two digits' room in the hours' font.
+    static func hourWidth(compact: Bool) -> CGFloat { compact ? 10 : 13 }
     /// The percentages beside the plot, where the captions are shown.
     static let percentWidth: CGFloat = 30
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
+                Color.clear.frame(width: lead, height: 1)
                 ZStack(alignment: .topLeading) {
                     if let geometry { shapes(geometry) }
                 }
                 .frame(width: size.width, height: size.height, alignment: .topLeading)
                 if showsCaptions {
                     ZStack(alignment: .topTrailing) {
-                        ForEach(Self.written(percentages, height: size.height), id: \.self) { value in
+                        let line = Self.captionHeight(compact: compact)
+                        ForEach(Self.written(percentages, height: size.height, line: line), id: \.self) { value in
                             Text(verbatim: IslandFormat.percent(Double(value) / 100))
-                                .frame(width: Self.percentWidth, height: Self.captionHeight, alignment: .trailing)
-                                .offset(y: Self.captionTop(value, height: size.height))
+                                .frame(width: Self.percentWidth, height: line, alignment: .trailing)
+                                .offset(y: Self.captionTop(value, height: size.height, line: line))
                         }
                     }
                     .frame(width: Self.percentWidth, height: size.height, alignment: .topTrailing)
                 }
             }
             if showsHours {
+                let height = Self.hoursHeight(compact: compact)
+                // Every six hours, 00 to 24, each centred on its line (the hour its bar starts);
+                // every other one, or the ends alone, where they would run into each other.
                 ZStack(alignment: .topLeading) {
-                    // Each hour just after its line, as the iPhone has them; one too near the end is left out.
-                    ForEach(geometry?.ticks ?? [], id: \.x) { tick in
-                        if tick.x <= size.width - 16 {
-                            Text(tick.date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted))))
-                                .offset(x: tick.x + 2)
-                        }
+                    ForEach(Self.labelled(geometry?.ticks ?? [], width: size.width, digits: Self.hourWidth(compact: compact)),
+                            id: \.x) { tick in
+                        Text(tick.x >= size.width - 0.5 ? "24" : Self.hour(tick.date))
+                            .fixedSize()
+                            .position(x: lead + tick.x, y: height / 2 + 1)
                     }
                 }
-                .frame(width: size.width, height: Self.hoursHeight, alignment: .bottomLeading)
+                .frame(width: lead + size.width, height: height, alignment: .topLeading)
             }
         }
-        .font(.caption2.monospacedDigit())
+        .padding(.top, top)
+        .font(compact ? .system(size: 8).monospacedDigit() : .caption2.monospacedDigit())
         .foregroundStyle(.tertiary)
     }
 
-    /// A percentage's line height.
-    static let captionHeight: CGFloat = 12
+    static func hour(_ date: Date) -> String { date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted))) }
 
-    /// A percentage's top: centred on its line, kept inside the plot at 0 and 100 %.
-    static func captionTop(_ value: Int, height: CGFloat) -> CGFloat {
-        let line = height * (1 - CGFloat(value) / 100)
-        return min(max(line - captionHeight / 2, 0), max(height - captionHeight, 0))
+    /// The ticks written: all of them, every other one, or the first and the last, the most that
+    /// stay `digits` and a gap apart.
+    static func labelled(_ ticks: [BatteryChartGeometry.Tick], width: CGFloat, digits: CGFloat) -> [BatteryChartGeometry.Tick] {
+        guard ticks.count > 2 else { return ticks }
+        let spacing = width / CGFloat(ticks.count - 1)
+        let stride = [1, 2, 4].first { spacing * CGFloat($0) >= digits + 4 } ?? ticks.count - 1
+        return ticks.enumerated().filter { $0.offset % stride == 0 || $0.offset == ticks.count - 1 }.map(\.element)
+    }
+
+    /// A percentage's top: centred on its line, 0 and 100 % too (half of them over and under the
+    /// plot, in the room the chart leaves there).
+    static func captionTop(_ value: Int, height: CGFloat, line captionHeight: CGFloat = captionHeight(compact: false)) -> CGFloat {
+        height * (1 - CGFloat(value) / 100) - captionHeight / 2
     }
 
     /// The percentages that fit, each clear of the last one written: 0 and 100 % always, those
     /// between where there is room (every 10 % on a low chart writes every other one, or fewer).
-    static func written(_ percentages: [Int], height: CGFloat) -> [Int] {
+    static func written(_ percentages: [Int], height: CGFloat, line: CGFloat = captionHeight(compact: false)) -> [Int] {
         guard let first = percentages.first, let last = percentages.last else { return [] }
+        func top(_ value: Int) -> CGFloat { captionTop(value, height: height, line: line) }
         var kept: [Int] = [first]
         for value in percentages.dropFirst() where value != last {
-            if abs(captionTop(value, height: height) - captionTop(kept.last!, height: height)) >= captionHeight,
-               abs(captionTop(value, height: height) - captionTop(last, height: height)) >= captionHeight {
+            if abs(top(value) - top(kept.last!)) >= line, abs(top(value) - top(last)) >= line {
                 kept.append(value)
             }
         }

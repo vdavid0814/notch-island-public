@@ -16,6 +16,8 @@ nonisolated struct NotchStyle: Sendable, Codable, Equatable, Identifiable {
     let boards: [String: WidgetBoard]
     /// The island's own look (General ▸ Appearance); nil in a style saved without it: left as it is.
     var look: Look?
+    /// The pages sized by themselves (`Preferences.pageSizes`); nil in a style saved before.
+    var pageSizes: [String: PageSize]?
 
     nonisolated struct Look: Sendable, Codable, Equatable {
         var glassStyle: IslandGlassStyle
@@ -27,7 +29,7 @@ nonisolated struct NotchStyle: Sendable, Codable, Equatable, Identifiable {
     }
 
     init(name: String, panel: PanelSettings, scale: IslandScale, header: HeaderLayout, boards: [String: WidgetBoard],
-         look: Look? = nil, date: Date = .now, id: UUID = UUID()) {
+         look: Look? = nil, pageSizes: [String: PageSize]? = nil, date: Date = .now, id: UUID = UUID()) {
         self.id = id
         self.name = name
         self.date = date
@@ -36,6 +38,7 @@ nonisolated struct NotchStyle: Sendable, Codable, Equatable, Identifiable {
         self.header = header
         self.boards = boards
         self.look = look
+        self.pageSizes = pageSizes
     }
 
     /// The widgets on its boards, all pages together.

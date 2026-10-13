@@ -67,6 +67,13 @@ nonisolated struct PanelSettings: Sendable, Equatable, Codable {
     }
 }
 
+/// One page's own size (Settings ▸ Widgets ▸ Size, set while the page is shown): its board's cells
+/// and its ready-made size. Apply to All Pages makes it every page's (`AppModel.applySizeToAllPages`).
+nonisolated struct PageSize: Sendable, Equatable, Codable {
+    var panel: PanelSettings
+    var scale: IslandScale
+}
+
 /// The panel's board as `IslandLayout` sizes it (`PanelSettings`).
 nonisolated struct PanelLayout: Sendable, Equatable {
     var cell: CGFloat = 40

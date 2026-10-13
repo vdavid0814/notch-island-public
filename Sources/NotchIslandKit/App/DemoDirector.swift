@@ -88,6 +88,13 @@ import SwiftUI
                     model.studio.switchMode(to: mode)
                 }
             }, forMode: .common)
+        case .addWidget(let kind, let page, let on):
+            let store = model.boards.store(for: page)
+            if on {
+                if store.add(kind) == nil { Log.app.info("demo/addwidget: no room for \(kind.rawValue) on \(page.rawValue)") }
+            } else {
+                store.board.widgets.filter { $0.kind == kind }.forEach { store.remove($0.id) }
+            }
         case .studioPage(let page):
             // From a run-loop timer: at the main thread's own priority, as a click is (an Apple
             // event's turn runs at the sender's, in the background).

@@ -24,5 +24,6 @@ nonisolated struct StudioDraft: Equatable, Sendable {
 struct SizeSnapshot: Equatable {
     var panel: PanelSettings
     var scale: IslandScale
+    var pageSizes: [String: PageSize] = [:]
     var boards: [ExpandedPage: WidgetBoard]
 }
