@@ -131,7 +131,7 @@ import SwiftUI
             // the thread's is — the pages were built on a performance core: Activity Monitor
             // 1370, 1356, 766 and 471 in the four seconds from ten seconds after every launch
             // (measured with `rest.py`).
-            MainThrift.lowPowerTurn { [weak self] in
+            MainThrift.lowPowerTurn(holding: 0.35) { [weak self] in
                 guard let self else { return }
                 guard self.isStarted, preparation == self.preparation else {
                     if preparation == self.preparation { self.isPreparingSettings = false }

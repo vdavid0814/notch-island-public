@@ -19,6 +19,11 @@ import QuartzCore
 final class SettingsWindow: NSPanel {
     private(set) static var current: SettingsWindow?
     static var isPrepared: Bool { current != nil }
+    /// Settings is on screen or coming in (not built or drawn ahead, unseen).
+    static var isSeen: Bool {
+        guard let current else { return false }
+        return current.isVisible && !current.isRehearsing
+    }
 
     let surface: SettingsSurfaceView
     private let model: AppModel

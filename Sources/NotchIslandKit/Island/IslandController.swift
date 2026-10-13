@@ -380,6 +380,7 @@ nonisolated extension BannerKind {
     }
 
     func pointerEntered() {
+        MainThrift.raise()
         trackingInside = true
         // A tracking-area entry is proof enough while the monitor runs, too.
         if monitorInside != nil { monitorInside = true }

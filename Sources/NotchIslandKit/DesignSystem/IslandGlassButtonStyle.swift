@@ -193,13 +193,27 @@ private struct SegmentedControlRemeasure: NSViewRepresentable {
             }
         }
 
+        /// What `spread` last left the bar at: its segments' width for `width`.
+        private var applied: [ObjectIdentifier: (width: CGFloat?, count: Int, each: CGFloat)] = [:]
+
         /// The narrowest a bar is made, of its own width.
         static let squeeze: CGFloat = 0.9
 
         /// The segments spread across `width` (0 each: their own widths again).
+        ///
+        /// Nothing is set again when the bar already has the widths this probe gave it: put back
+        /// into the window (the panel's page picker at every opening of the island), the same
+        /// widths set again had AppKit build the bar's glass layers anew and SwiftUI measure it
+        /// again (~19 ms a opening on a performance core, sampled).
         private func spread(_ control: NSSegmentedControl) {
             let count = control.segmentCount
             guard count > 0 else { return }
+            let id = ObjectIdentifier(control)
+            if let last = applied[id], last.width == width, last.count == count,
+               (0..<count).allSatisfy({ control.width(forSegment: $0) == last.each }) {
+                return
+            }
+            defer { applied[id] = (width, count, control.width(forSegment: 0)) }
             if natural == nil {
                 // Its own width with no widths set: another probe may have spread it already.
                 for index in 0..<count { control.setWidth(0, forSegment: index) }

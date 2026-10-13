@@ -1,4 +1,5 @@
 import Foundation
+import QuartzCore
 
 /// Work that can wait a moment — decoding pictures, drawing icons — run one piece at a time on a
 /// single thread at utility QoS.
@@ -22,6 +23,13 @@ nonisolated enum Thrifty {
         await withCheckedContinuation { continuation in
             backgroundQueue.async { continuation.resume(returning: work()) }
         }
+    }
+
+    /// `run` when someone waits on the result (`seen`), `runInBackground` when not: Settings built
+    /// ahead, unseen, decoded its wallpapers at utility on the performance cores (~140 ms of a
+    /// preparation, the largest part of its worst second).
+    static func run<T: Sendable>(seen: Bool, _ work: @escaping @Sendable () -> T) async -> T {
+        seen ? await run(work) : await runInBackground(work)
     }
 
     static func run<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
@@ -71,6 +79,50 @@ nonisolated enum Thrifty {
     /// timer, not a dispatch job or a task (their end puts the thread's quality of service back);
     /// the frames after the turn run at the thread's own priority again, so the motion is as
     /// smooth as before.
+    /// `lowPowerTurn`, with the thread kept at background quality of service until `hold` seconds
+    /// after the turn: what the turn changed is laid out, drawn and committed by AppKit's display
+    /// cycle in the frames after it, from the display link's source, and those frames ran at the
+    /// thread's own priority on a performance core — Settings' preparation: ~25 frames of 8–56 ms
+    /// after its steps, Activity Monitor 150–600 for seconds after every launch (measured with
+    /// `NI_TRACE`). Anything the user starts meanwhile takes the priority back at once (`raise`).
+    static func lowPowerTurn(holding hold: TimeInterval, _ work: @escaping @MainActor () -> Void) {
+        guard isEnabled else { return work() }
+        let timer = Timer(timeInterval: 0, repeats: false) { _ in
+            let until = CACurrentMediaTime() + hold
+            holdUntil = max(holdUntil, until)
+            pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
+            // Lowered again before every layout and commit until the hold is over (a dispatch job
+            // run meanwhile restores the thread's own), raised after the first one past it.
+            let lower = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.min) { observer, _ in
+                if CACurrentMediaTime() < holdUntil {
+                    pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
+                } else {
+                    CFRunLoopObserverInvalidate(observer)
+                }
+            }
+            let raise = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max) { observer, _ in
+                guard CACurrentMediaTime() >= holdUntil else { return }
+                if MainActor.assumeIsolated({ restore == nil }) { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) }
+                CFRunLoopObserverInvalidate(observer)
+            }
+            CFRunLoopAddObserver(CFRunLoopGetMain(), lower, .commonModes)
+            CFRunLoopAddObserver(CFRunLoopGetMain(), raise, .commonModes)
+            MainActor.assumeIsolated { work() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    /// Until when a `lowPowerTurn(holding:)` keeps the thread at background.
+    /// Read by the run-loop observers on the main thread only.
+    nonisolated(unsafe) private static var holdUntil: CFTimeInterval = 0
+
+    /// The user started something (the pointer came onto the island): any held low priority ends now.
+    static func raise() {
+        guard holdUntil > CACurrentMediaTime() else { return }
+        holdUntil = 0
+        if restore == nil { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) }
+    }
+
     static func lowPowerTurn(_ work: @escaping @MainActor () -> Void) {
         guard isEnabled else { return work() }
         let timer = Timer(timeInterval: 0, repeats: false) { _ in
