@@ -66,7 +66,9 @@ granted that night).
 - **The panel's page picker is ~30 % of every opening** (ablation, `NI_EXP_NOPICKER`, A B A B):
   cold open 104–125 → 83, warm open 67–70 → 44–47, hover spam 83–99 → 63–66 a second
   (performance-core ms 306–349 → 184–191). Its re-measuring probe is not the cost (left out: no
-  change); the system's segmented control itself is, put back into the window at every opening.
+  change); the system's segmented control itself is: open, the island's window holds one
+  (`demo/segments`), closed none — SwiftUI takes it out when the window shrinks to the notch, and
+  makes its glass layers again at every opening.
   The largest lever left for the island; not changed this night (the look must stay).
 
 ### Tried and left out (A B A B)
