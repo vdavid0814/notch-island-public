@@ -52,8 +52,14 @@ nonisolated struct ReleaseNotes: Sendable, Equatable {
     var sections: [Section] { Section.allCases.filter { !items($0).isEmpty } }
 
     static let current = ReleaseNotes(
-        version: "0.8.5.1",
+        version: "0.8.5.1.1",
         new: [
+            Item(title: "No more spikes on the charger",
+                 detail: "Settings now stays ready while you use the Mac on the charger too, so opening it no longer makes a burst of work. It frees its memory when the Mac is locked or asleep, or when macOS needs memory, and gets ready again quietly once you are back.",
+                 isChange: true),
+            Item(title: "Settings ▸ Widgets opens lighter",
+                 detail: "Opening Settings on the Widgets page takes about a third less energy.",
+                 isChange: true),
             Item(title: "Spotlight's quick picks",
                  detail: "The pointer over Spotlight shows Applications, Files, Actions and Clipboard as large icons in a row. System, Windows, Emoji and People & Calendar are still a shortcut (⌘5–⌘8) or ↓ away.",
                  isChange: true),
@@ -70,6 +76,10 @@ nonisolated struct ReleaseNotes: Sendable, Equatable {
                  isChange: true),
         ],
         fixed: [
+            Item(title: "Memory after Settings",
+                 detail: "Closed Settings kept about 250 MB on the charger. It is freed now (about 80 MB)."),
+            Item(title: "Empty widget previews",
+                 detail: "Opened right after the app started, Settings ▸ Widgets could show its gallery's pictures empty."),
             Item(title: "Widgets flying in after Size",
                  detail: "Back from Size to Widgets, the gallery flew in from the top of the page."),
             Item(title: "Spotlight's old list",

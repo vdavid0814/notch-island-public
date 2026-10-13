@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.5.1 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.5.1.1 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,27 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.5.1.1
+
+Lighter and leaner on top of 0.8.5.1 (below):
+
+- **No more spikes on the charger.** Settings now stays ready while you use the Mac on the charger
+  too, so opening it no longer makes a burst of work (Activity Monitor read up to ~3900 for a
+  second). It frees its memory when the Mac is locked or asleep, or when macOS needs memory.
+- **Memory after Settings.** Closed Settings kept about 250 MB on the charger; it is freed now
+  (about 80 MB).
+- **Settings ▸ Widgets opens lighter**: about a third less energy.
+- **Empty widget previews** right after the app started are fixed.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.5.1.1 in place and keeps your permissions. Or
+download **NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 
