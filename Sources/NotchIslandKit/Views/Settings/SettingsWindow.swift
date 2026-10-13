@@ -196,6 +196,8 @@ final class SettingsWindow: NSPanel {
         ignoresMouseEvents = false
         surface.deck.show(model.settingsPane)
         surface.deck.closed()
+        // Every page is built: the graph's table has grown to its size (`AliasTrim`).
+        AliasTrim.soon()
     }
 
     deinit { Log.window.debug("settings window released") }
@@ -371,6 +373,7 @@ final class SettingsWindow: NSPanel {
             self.orderingOut = nil
             SettingsPresence.shared.isShown = false
             self.orderOut(nil)
+            AliasTrim.soon()
         }
         orderingOut = work
         if let fade {

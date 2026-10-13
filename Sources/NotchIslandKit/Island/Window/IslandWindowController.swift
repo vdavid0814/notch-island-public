@@ -528,6 +528,9 @@ import SwiftUI
             guard LeanSpring.frozenTime == nil else { return }
             if !Self.covers(target) { self.panel?.level = IslandPanel.restingLevel }
             self.stageResting(for: target)
+            // At rest again: what the graph's table grew by while the island was open is counted
+            // once (`AliasTrim`), a few seconds on, off this thread.
+            if !target.isOpen { AliasTrim.soon() }
         }
     }
 
