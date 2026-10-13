@@ -333,6 +333,7 @@ private struct PagePicker: View {
     @Environment(AppModel.self) private var model
     @Environment(\.controlSize) private var controlSize
     @Environment(\.headerPicksStudioPage) private var picksStudioPage
+    @Environment(\.islandGlassStyle) private var glassStyle
 
     /// The bar's drawn width per pages and control size. Once it is known, whether it fits is
     /// arithmetic (`HeaderFit`): a `ViewThatFits` measured the system's bar again on every open.
@@ -377,6 +378,14 @@ private struct PagePicker: View {
         .choiceBar()
         .labelsHidden()
         .fixedSize()
+        // Liquid Glass's clear glass in Light Mode: the bar a little lighter where its selection is
+        // not (`IslandGlassStyle.barLift`), white under the system's glass. Kept, clear, elsewhere.
+        .background {
+            let lifted = glassStyle.appearsLight(isDark: SystemAppearance.shared.glassIsDark)
+                && SystemAppearance.shared.glassTint < IslandGlassStyle.frostedFrom
+            Capsule().fill(.white.opacity(lifted ? IslandGlassStyle.barLift : 0))
+                .glassEffect(lifted ? .clear.tint(.white.opacity(IslandGlassStyle.barFrost)) : .identity, in: .capsule)
+        }
         // A symbol in another colour is another picture: the bar draws it only when made anew.
         .id(tints)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in

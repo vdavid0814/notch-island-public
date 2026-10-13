@@ -44,6 +44,9 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     /// Quick while the card is due to come up (and may have to be followed elsewhere), slower
     /// after: the way out is timed from the last change, not from seeing the card go. The window
     /// list is read off the main thread (it was a third of the main thread's work per change).
+    /// The volume card stays this much longer than the island's own volume banner (asked for,
+    /// October 13: a volume set on the AirPods left it too soon).
+    static let volumeLinger: TimeInterval = 0.17
     static let quickPoll: Duration = .milliseconds(25)
     static let slowPoll: Duration = .milliseconds(60)
     static let quickPollTime: TimeInterval = 0.6
@@ -106,6 +109,7 @@ nonisolated enum LiquidCardKind: Equatable, Sendable {
     /// A volume change. True when this card answers it (the island shows nothing then).
     func handleLevel(_ kind: LevelKind, source: LevelChangeSource, duration: TimeInterval, flows: Bool = true) -> Bool {
         guard kind == .volume else { return false }
+        let duration = duration + Self.volumeLinger
         if source == .external || isShown { lastChange = Date() }
         if state.isLeaving {
             // Running back as the volume changes again: back to the card.
@@ -714,13 +718,16 @@ struct LiquidSurfaceLayer: View {
         }
         .frame(width: state.frame.width, height: state.frame.height, alignment: .topLeading)
         .allowsHitTesting(false)
-        .environment(\.colorScheme, .dark)
+        // Light on Liquid Glass in Light Mode, as the island (`IslandGlassStyle.appearsLight`).
+        .environment(\.colorScheme, model.effectiveGlassStyle.appearsLight(isDark: SystemAppearance.shared.glassIsDark) ? .light : .dark)
     }
 }
 
 /// The top layer: what the card shows, over the liquid.
 struct LiquidContentLayer: View {
     let state: LiquidCardState
+
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -735,7 +742,7 @@ struct LiquidContentLayer: View {
             }
         }
         .frame(width: state.frame.width, height: state.frame.height, alignment: .topLeading)
-        .environment(\.colorScheme, .dark)
+        .environment(\.colorScheme, model.effectiveGlassStyle.appearsLight(isDark: SystemAppearance.shared.glassIsDark) ? .light : .dark)
     }
 }
 
@@ -756,6 +763,11 @@ struct LiquidCardSurface: View {
                 .islandSurfaceShade(style, solidDepth: Self.solidDepth, in: shape.inset(by: -IslandGlassStyle.shadeBleed))
                 .islandGlass(in: shape, isEnabled: isShown)
                 .environment(\.islandGlassStyle, style)
+        }
+        // The island's thin black edge, on the card too (`IslandGlassStyle.hasEdge`).
+        .overlay {
+            let edged = style.hasEdge(isDark: SystemAppearance.shared.glassIsDark, tint: SystemAppearance.shared.glassTint)
+            shape.strokeBorder(.black.opacity(edged ? IslandGlassStyle.edgeOpacity : 0), lineWidth: IslandGlassStyle.edgeWidth)
         }
         .clipShape(shape)
     }
@@ -784,6 +796,7 @@ struct LiquidCardContent: View {
 /// its own.
 struct LiquidAirPodsContent: View {
     let info: AirPodsInfo
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Positions in the card (points, from its top left).
     static let iconCenter = CGPoint(x: 30.5, y: 26)
@@ -817,7 +830,7 @@ struct LiquidAirPodsContent: View {
             // The battery ring in both: macOS's noise-control card keeps it (seen).
             if let level {
                 ZStack {
-                    Circle().stroke(Color.white.opacity(0.16), lineWidth: Self.ringWidth)
+                    Circle().stroke(SystemVolumeCardContent.faint(colorScheme).opacity(0.16), lineWidth: Self.ringWidth)
                     // Still, as macOS's ring under it: an animated fill was redrawn on the CPU every
                     // frame (and ran ahead of or behind macOS's).
                     Circle()

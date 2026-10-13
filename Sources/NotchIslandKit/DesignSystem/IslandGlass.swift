@@ -46,42 +46,93 @@ nonisolated enum IslandGlassStyle: String, Sendable, CaseIterable, Identifiable,
 
     /// The island's glass.
     ///
-    /// - Liquid Glass: the clearest there is, with no colour of ours and its own white veil taken
-    ///   back out (`glassVeil`). How see-through it is follows System Settings ▸ Appearance ▸
-    ///   Liquid Glass (`systemTint`, `IslandGlassModifier`).
+    /// - Liquid Glass: follows System Settings ▸ Appearance ▸ Liquid Glass as the system's own
+    ///   glass does (`plainGlass`): perfectly clear at the slider's clear end, frosted further on.
     /// - Fade: under its black, clear glass with a trace of colour (`fadeTint`), as it has always
     ///   been — not to be changed with Liquid Glass's (asked for, October 11).
-    var material: Glass { self == .fade ? .clear.tint(Self.fadeTint) : .clear }
+    func material(isDark: Bool, tint: Double) -> Glass {
+        self == .fade ? .clear.tint(Self.fadeTint) : Self.plainGlass(isDark: isDark, tint: tint).material
+    }
 
     /// A trace of colour in the fade style's otherwise clear glass: the dark warm brown in the
     /// folds of the macOS 27 light wallpaper (its darkest browns averaged), at 25 %.
     static let fadeTint = Color(red: 106 / 255, green: 89 / 255, blue: 75 / 255).opacity(0.25)
 
-    /// Whether the glass is Liquid Glass's plain one: its veil taken out, the system's slider followed.
+    /// Whether the glass is Liquid Glass's plain one, which follows the system's slider.
     var isPlainGlass: Bool { self == .liquidGlass }
-
-    /// Where the system's Liquid Glass slider stands: 0 (clear) … 1 (tinted). The system keeps it
-    /// in the global domain; read each time the glass is made.
-    static var systemTint: Double {
-        min(max(UserDefaults.standard.double(forKey: "NSGlassTintAmount"), 0), 1)
-    }
 
     /// The white veil even the clearest Liquid Glass lays over what is behind it: every pixel
     /// comes out as 81 % of itself plus 19 % of white (measured over the test pattern and the
     /// dark wallpaper, the same in a light and a dark window). A whole island of it read as tinted
-    /// white (asked to be perfectly clear); the island takes it back out over its glass.
+    /// white (asked to be perfectly clear); the island takes it back out over its clear glass.
     static let glassVeil = 0.187
 
-    /// The black under the glass at the slider's tinted end.
-    static let fullTint = 0.5
-    /// Black added under Liquid Glass in Light Mode: a bright wallpaper showed straight through
-    /// the clear glass (asked for: 20 %).
-    static let lightModeTint = 0.2
-
-    /// The black under Liquid Glass: the system slider's share, and in Light Mode a little more.
-    static func plainTint(isDark: Bool) -> Double {
-        min(fullTint * systemTint + (isDark ? 0 : lightModeTint), 1)
+    /// Liquid Glass's glass where the system's slider stands (chosen October 13 from the pictured
+    /// variants, "C4", then made the system's own at the clear end), drawn for the Mac's appearance
+    /// (`appearsLight`). Over most of the slider the system's clear glass, frosting evenly as the
+    /// slider moves (asked for: it was fully frosted before the slider's middle): in Light Mode its
+    /// white goes from `clearFrost` to `lightFrostedWhite`; in Dark Mode its black from `darkClear`
+    /// to `darkTint`. From `frostedFrom` on, the system's frosted glass at
+    /// those same ends. `under`: the colour between the glass and the content.
+    static func plainGlass(isDark: Bool, tint: Double) -> (material: Glass, unveiled: Bool, under: Color) {
+        if tint < frostedFrom {
+            let ramp = tint / frostedFrom
+            if !isDark {
+                return (.clear.tint(.white.opacity(clearFrost + (lightFrostedWhite - clearFrost) * ramp)), false, .clear)
+            }
+            return (.clear.tint(.black.opacity(darkClear + (darkTint - darkClear) * ramp)), false, .clear)
+        }
+        // Light Mode: white glass, never grey (asked for, October 13).
+        if !isDark { return (.regular.tint(.white.opacity(lightFrostedWhite)), false, .clear) }
+        return (.regular.tint(.black.opacity(darkTint)), false, .clear)
     }
+
+    /// The white in the frosted glass in Light Mode, where the clear glass's frost ends up.
+    static let lightFrostedWhite = 0.55
+
+    /// The white frost in the system's clear glass at the slider's clear end (asked for: 30 %).
+    static let clearFrost = 0.3
+
+    /// Where on the slider the clear glass gives way to the system's frosted glass: only at its very
+    /// end, so the frost grows evenly along all of it (0.85 left a jump the user saw, October 13).
+    static let frostedFrom = 1.0
+    /// The black in Dark Mode's glass at the slider's clear end (asked for: 20 %) and its tinted end.
+    static let darkClear = 0.2
+    static let darkTint = 0.4
+
+    /// Whether a pill at the notch's height is solid black, its glass off: Fade (its shade is black
+    /// there) and Liquid Glass, in Dark and Light Mode (asked for, October 13).
+    func blacksNotchPill(isDark: Bool) -> Bool { self == .fade || self == .liquidGlass }
+
+    /// Whether the island's glass and content are drawn in the light appearance: Liquid Glass in
+    /// Light Mode, as the system's own glass is (its content black). Black and Fade stay dark.
+    func appearsLight(isDark: Bool) -> Bool { self == .liquidGlass && !isDark }
+
+    /// Whether the island's outline gets its thin black edge (`edgeOpacity`), so the white island
+    /// is seen against a light desktop: Liquid Glass in Light Mode, clear or frosted (asked for,
+    /// October 13).
+    func hasEdge(isDark: Bool, tint: Double) -> Bool { appearsLight(isDark: isDark) }
+
+    /// The white under the page picker's bar there, and the frost of its own glass (asked for).
+    static let barLift = 0.3
+    static let barFrost = 0.05
+
+    /// The edge's black, and its width inside the outline (half the stroke; the clip takes the rest).
+    static let edgeOpacity = 0.35
+    static let edgeWidth: CGFloat = 0.5
+
+    /// Whether the widgets' grey bars get their faint black edge (`grayEdge`): Liquid Glass in
+    /// Light Mode, where the greys fade into the light glass (asked for, October 13). Drawn on the
+    /// bars' own shapes: an edge round a whole widget made page switches stutter and darkened its
+    /// grey texts.
+    func outlinesText(isDark: Bool) -> Bool { appearsLight(isDark: isDark) }
+
+    /// The grey bars' edge, and its width.
+    static let grayEdgeOpacity = 0.6
+    static let grayEdgeWidth: CGFloat = 0.5
+
+    /// The edge's colour where `outlinesIslandText` is on; clear where it is off.
+    static func grayEdge(_ isOn: Bool) -> Color { .black.opacity(isOn ? grayEdgeOpacity : 0) }
 
     /// The shoulders beside the glass body, which no glass is drawn in: nothing beside plain
     /// glass, black beside the Fade's black band.
@@ -107,7 +158,7 @@ extension EnvironmentValues {
 }
 
 extension View {
-    /// Puts the view on the island's glass, in the style the user chose (`IslandGlassStyle.material`):
+    /// Puts the view on the island's glass, in the style the user chose (`IslandGlassStyle.material(isDark:tint:)`):
     /// perfectly clear glass, which refracts what is behind it instead of frosting it. Like the CAD
     /// app's floating UI, the island's window is pinned to the dark appearance (`IslandPanel`):
     /// Liquid Glass samples the window's appearance, and the island's content is light. `isEnabled: false` keeps the view where it is but draws
@@ -130,13 +181,15 @@ private struct IslandGlassModifier<S: Shape>: ViewModifier {
         // Solid black draws no glass (`.identity`, nothing sampled) and a black fill instead.
         let isSolid = !style.hasGlassSurface
         let veil = IslandGlassStyle.glassVeil
-        let isPlain = style.isPlainGlass
+        let isDark = SystemAppearance.shared.glassIsDark
+        let tint = SystemAppearance.shared.glassTint
+        let plain = IslandGlassStyle.plainGlass(isDark: isDark, tint: tint)
+        let unveils = style.isPlainGlass && plain.unveiled
         content
-            // Under the content, over the glass: black for the solid style. Liquid Glass: nothing
-            // at the clear end of the system's Liquid Glass slider, and an even black, without a
-            // colour, towards its tinted end (`IslandGlassStyle.systemTint`). Fade: nothing.
-            .background(Color.black.opacity(isSolid ? 1 : isPlain ? IslandGlassStyle.plainTint(isDark: SystemAppearance.shared.glassIsDark) : 0), in: shape)
-            // Liquid Glass: the glass's own white veil taken back out (`IslandGlassStyle.glassVeil`):
+            // Under the content, over the glass: black for the solid style, Liquid Glass's own
+            // (`IslandGlassStyle.plainGlass`), nothing for Fade.
+            .background(isSolid ? Color.black : style.isPlainGlass ? plain.under : .clear, in: shape)
+            // Liquid Glass's clear glass: its own white veil taken back out (`IslandGlassStyle.glassVeil`):
             // first the white it added is subtracted, then what is left is brought back to full
             // strength. Black and white come out as they went in (measured over the test pattern:
             // 130 for 128); the tones between come out a little darker than they went in, never
@@ -148,10 +201,10 @@ private struct IslandGlassModifier<S: Shape>: ViewModifier {
                     shape.fill(Color(white: veil)).blendMode(.colorDodge)
                 }
                 // Kept in place for every style (the content's identity must not change with the
-                // style): shown for Liquid Glass alone.
-                .opacity(isEnabled && isPlain ? 1 : 0)
+                // style): shown for Liquid Glass's clear glass alone.
+                .opacity(isEnabled && unveils ? 1 : 0)
             }
-            .glassEffect(isEnabled && !isSolid ? style.material : .identity, in: shape)
+            .glassEffect(isEnabled && !isSolid ? style.material(isDark: isDark, tint: tint) : .identity, in: shape)
     }
 }
 
@@ -404,4 +457,9 @@ private struct FadeShadeMask: View {
         stops.append(Gradient.Stop(color: .black.opacity(opacity((1 - start) / span)), location: 1))
         return stops
     }
+}
+
+extension EnvironmentValues {
+    /// Set where the island's content starts (`IslandGlassStyle.outlinesText`).
+    @Entry var outlinesIslandText = false
 }

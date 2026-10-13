@@ -27,8 +27,9 @@ nonisolated enum LiquidFlow {
     /// The way out, timed to macOS's card, which comes up ~170 ms after the island hears of an
     /// AirPods change and grows from 93 % over 0.3 s (measured): the drop is on it as it comes
     /// up, overshooting a little. The way back, and a move to where the card really came up.
-    /// 0.05 s slower each way than first tuned (asked for).
-    static let out = LiquidCurve(duration: 0.25, overshoot: 0.035)
+    /// 0.05 s slower each way than first tuned (asked for); the way out 0.07 s faster again
+    /// (asked for, October 13).
+    static let out = LiquidCurve(duration: 0.18, overshoot: 0.035)
     static let back = LiquidCurve(duration: 0.35, overshoot: 0)
     static let move = LiquidCurve(duration: 0.22, overshoot: 0.02)
 

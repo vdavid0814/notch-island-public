@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.5.1.1 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.5.2 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,36 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.5.2
+
+Liquid Glass made anew, in Light Mode and Dark Mode alike:
+
+- **Liquid Glass follows its slider.** System Settings ▸ Appearance ▸ **Liquid Glass** sets the island
+  too: clear glass at the Clear end, frosting evenly as you move it, the system's frosted glass at the
+  Tinted end.
+- **White glass in Light Mode.** The island is light glass with black text and symbols, with a thin
+  dark edge so it stands out on a light desktop — the volume and AirPods card too. Sliders, the
+  battery and the grey bars of the charts are drawn darker so they show.
+- **A widget background for each Mode.** With Liquid Glass every widget gets a Colour background as
+  the Mode begins: light grey at 50 % in Light Mode, black at 40 % in Dark Mode. Settings ▸ Widgets
+  says so, with **Revert Changes** to go back to your own; with another style they get theirs back.
+- **A black notch.** With Liquid Glass the island at the notch's height (music, timers) is solid
+  black, as with Fade and Black; closing into it, it turns black as it closes.
+- **The volume card** for the AirPods opens a little quicker and stays a moment longer.
+- **Fixed:** the black strip over the menu bar could stay on the desktop after leaving a full-screen
+  app; on a busy Mac the island could stutter for a while right after launch (Settings now gets ready
+  only once the Mac is calmer); after Undo or a notch style some widgets no longer got the automatic
+  background.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.5.2 in place and keeps your permissions. Or download
+**NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 

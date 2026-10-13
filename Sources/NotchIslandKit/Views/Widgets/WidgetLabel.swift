@@ -40,6 +40,7 @@ struct WidgetLabel<Plain: View>: View {
         content.opacity(inkText == nil || inkText == id ? 1 : 0)
     }
 
+
     @ViewBuilder private var content: some View {
         let style = widget.textStyle(of: id)
         if style == .plain, !isEditing {

@@ -8,6 +8,7 @@ import SwiftUI
 struct SystemVolumeCardContent: View {
     let name: String
 
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(AppModel.self) private var model
 
     static let size = CGSize(width: 293, height: 64)
@@ -19,6 +20,10 @@ struct SystemVolumeCardContent: View {
     static let quietSpeaker = CGPoint(x: 21.25, y: 42)
     static let loudSpeaker = CGPoint(x: 268, y: 42.25)
     static let speakerSize: CGFloat = 13
+    /// The empty part's and the dots' colour: white on the dark card, black on the light one
+    /// (Liquid Glass in Light Mode).
+    static func faint(_ scheme: ColorScheme) -> Color { scheme == .light ? .black : .white }
+
     /// The empty part of the bar and the dots: white this faint over the card (measured grey on grey).
     static let trackOpacity = 0.09
     static let dotOpacity = 0.22
@@ -45,19 +50,20 @@ struct SystemVolumeCardContent: View {
                 .position(Self.loudSpeaker)
                 .accessibilityHidden(true)
             Capsule()
-                .fill(Color.white.opacity(Self.trackOpacity))
+                .fill(Self.faint(colorScheme).opacity(Self.trackOpacity))
                 .frame(width: Self.bar.width, height: Self.bar.height)
                 .offset(x: Self.bar.minX, y: Self.bar.minY)
-            // The level in the theme's colour (white by default, as macOS's).
+            // The level in the theme's colour (white by default, as macOS's; black on the light
+            // island, `SliderPicture.accent`).
             Capsule()
-                .fill(Color.islandAccent)
+                .fill(SliderPicture.accent(colorScheme))
                 .frame(width: max(Self.bar.height, Self.bar.width * level), height: Self.bar.height)
                 .opacity(level > 0 ? 1 : 0)
                 .offset(x: Self.bar.minX, y: Self.bar.minY)
             ForEach(0..<Self.dots.count, id: \.self) { index in
                 let step = (Self.dots.last - Self.dots.first) / Double(Self.dots.count - 1)
                 Circle()
-                    .fill(Color.white.opacity(Self.dotOpacity))
+                    .fill(Self.faint(colorScheme).opacity(Self.dotOpacity))
                     .frame(width: Self.dots.size, height: Self.dots.size)
                     .position(x: Self.dots.first + step * Double(index), y: Self.dots.y)
             }

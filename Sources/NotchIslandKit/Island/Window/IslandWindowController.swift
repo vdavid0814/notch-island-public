@@ -127,6 +127,13 @@ import SwiftUI
                 self.prepareSettings(after: .seconds(3), preparation: preparation)
                 return
             }
+            // Not while the Mac is busy or short of memory (`SystemLoad`): at background quality of
+            // service a step then took seconds, and the island stuttered meanwhile.
+            guard !SystemLoad.isBusy else {
+                Log.window.notice("settings preparation waits: the Mac is busy")
+                self.prepareSettings(after: .seconds(10), preparation: preparation)
+                return
+            }
             // The step in a turn of its own with the thread at background quality of service
             // (`lowPowerTurn`). Run from here — a task's job runs at the task's priority whatever
             // the thread's is — the pages were built on a performance core: Activity Monitor

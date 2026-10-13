@@ -16,8 +16,14 @@ struct BatteryGlyph: View {
     /// Mode it is red and yellow all the same.
     var color: Color?
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         let level = min(max(level, 0), 100)
+        // On the light island (Liquid Glass in Light Mode, clear or frosted): a black edge round the
+        // body, a black nub and the number in black instead of cut out, so the white battery is seen
+        // on the light glass (asked for, October 13).
+        let inked = colorScheme == .light
         let width = (height * 2.2).rounded()
         let radius = height * 0.3
         let own: AnyShapeStyle = tint == .charging ? AnyShapeStyle(.white) : tint.style
@@ -42,14 +48,19 @@ struct BatteryGlyph: View {
                     }
                     .frame(width: width - height * 0.24)
                     .frame(maxWidth: .infinity)
-                    .blendMode(.destinationOut)
+                    .foregroundStyle(inked ? Color.black : .white)
+                    .blendMode(inked ? .normal : .destinationOut)
                 }
             }
             .frame(width: width, height: height)
             .clipShape(.rect(cornerRadius: radius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(.black.opacity(inked ? 1 : 0), lineWidth: Self.edge(height))
+            }
             .compositingGroup()
             UnevenRoundedRectangle(bottomTrailingRadius: height * 0.14, topTrailingRadius: height * 0.14)
-                .fill(level >= 99 ? fill : empty)
+                .fill(inked ? AnyShapeStyle(.black) : level >= 99 ? fill : empty)
                 .frame(width: max(1.5, height * 0.12), height: height * 0.36)
         }
         .animation(Motion.content, value: level)
@@ -57,6 +68,9 @@ struct BatteryGlyph: View {
         .accessibilityLabel(Text("Battery \(IslandFormat.percent(Double(level) / 100))"))
         .accessibilityValue(isCharging ? Text("Charging") : Text(""))
     }
+
+    /// The black edge's width on the light island.
+    static func edge(_ height: CGFloat) -> CGFloat { max(0.75, height * 0.09) }
 
     /// The percentage at its natural size (never truncated), in the menu bar's semibold.
     private func number(_ level: Int, width: Font.Width) -> some View {

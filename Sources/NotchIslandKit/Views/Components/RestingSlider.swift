@@ -20,6 +20,7 @@ struct RestingSlider: View {
     @Environment(\.widgetRenderMode) private var renderMode
     /// A widget style's colour for the filled part (`ResolvedLine`); nil is the accent.
     @Environment(\.sliderFill) private var sliderFill
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isHovered = false
     @State private var isEditing = false
 
@@ -38,7 +39,7 @@ struct RestingSlider: View {
                 // The theme's colour, as the picture's: left untinted, the native control took the
                 // system's accent — the Minimal volume and brightness lines (never a picture) and a
                 // slider under the pointer were blue whatever the theme.
-                .tint(sliderFill ?? Color.islandAccent)
+                .tint(sliderFill ?? SliderPicture.accent(colorScheme))
             } else {
                 SliderPicture(value: value, height: renderMode == .canvas ? SliderPicture.nativeHeight(controlSize) : SliderPicture.height,
                               set: set, onEditingChanged: { editing in
@@ -66,6 +67,7 @@ struct SliderPicture: View {
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.sliderFill) private var sliderFill
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isDragging = false
 
     static let height: CGFloat = 20
@@ -77,6 +79,16 @@ struct SliderPicture: View {
     static let trackColor = Color.white.opacity(0.082)
     static var fillColor: Color { Color.islandAccent.mix(with: .white, by: 0.02) }
 
+    /// On the light island (Liquid Glass in Light Mode, `IslandGlassStyle.appearsLight`) a white
+    /// theme would not be seen: the filled part is black there and the empty track grey (asked for,
+    /// October 13). Other themes keep their colour.
+    static func accent(_ scheme: ColorScheme) -> Color {
+        scheme == .light && IslandTheme.RGB(IslandThemeStore.shared.theme.color).isLight ? .black : .islandAccent
+    }
+    static func fill(_ scheme: ColorScheme) -> Color { scheme == .light ? accent(scheme) : fillColor }
+    static func track(_ scheme: ColorScheme) -> Color { scheme == .light ? lightTrackColor : trackColor }
+    static let lightTrackColor = Color.black.opacity(0.15)
+
     var body: some View {
         GeometryReader { proxy in
             let width = proxy.size.width
@@ -84,9 +96,9 @@ struct SliderPicture: View {
             let fraction = CGFloat(min(max(value, 0), 1))
             let centre = knob.width / 2 + travel * fraction
             ZStack(alignment: .leading) {
-                Capsule().fill(Self.trackColor)
+                Capsule().fill(Self.track(colorScheme))
                     .frame(height: trackHeight)
-                Capsule().fill(sliderFill ?? Self.fillColor)
+                Capsule().fill(sliderFill ?? Self.fill(colorScheme))
                     .frame(width: max(centre, trackHeight), height: trackHeight)
                 Capsule().fill(Self.knobColor)
                     .frame(width: knob.width, height: knob.height)

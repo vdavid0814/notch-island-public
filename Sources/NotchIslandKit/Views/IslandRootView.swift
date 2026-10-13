@@ -72,7 +72,8 @@ struct IslandRootView: View {
             // Over macOS's own cards (volume, AirPods, noise control) the fade's glass as well: their
             // lines lie on macOS's own, so nothing doubles where it clears (asked for).
             let glassStyle = isOpaquePage ? IslandGlassStyle.black : model.effectiveGlassStyle
-            let wantsGlass = glassStyle != .fade || outline.size.height > layout.notch.height + 0.5
+            let wantsGlass = !glassStyle.blacksNotchPill(isDark: SystemAppearance.shared.glassIsDark)
+                || outline.size.height > layout.notch.height + 0.5
             // On battery the content swaps with a plain cross-fade: the blur-replace costs about a
             // seventh of an open's main-thread time (measured). Siri cross-fades always (asked for,
             // Oct 10 2026): blurred on the CPU at every frame across several performance cores, its
@@ -106,7 +107,10 @@ struct IslandRootView: View {
                 // surface follows its outline here (`Motion.surfaceFollowsOutline`).
                 isStill: !reduceMotion,
                 // Held while the render server moves the outline: drawn once, still, at its size.
-                isHeld: hold != nil
+                isHeld: hold != nil,
+                // Closing into a pill at the notch's height (or into the notch): Liquid Glass's black
+                // comes in while it closes, not as it lands (asked for, October 13).
+                landsAsPill: hold != nil && layout.size(for: presentation).height <= layout.notch.height + 1
             )))
             .task(id: wantsGlass) { await glassRetirement(wantsGlass: wantsGlass) }
         }
@@ -357,6 +361,8 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
     var emergence: Double = 1
     /// Drawn still at the hold's outline (`SurfaceHold`): its shade is a picture, as a settled one.
     var isHeld = false
+    /// The outline is on its way into a pill at the notch's height: Liquid Glass's black fades in.
+    var landsAsPill = false
 
     var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<AnimatablePair<CGFloat, CGFloat>, Double>> {
         // Always the real values: a move on the render server changes them only in transactions
@@ -390,10 +396,18 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
         // (`IslandRootView.glassRetirement` waits for the slowest spring), and the rim lit the
         // pill's edge all that time. Per frame, it goes the moment the outline reaches the band
         // on the way down and returns the moment it leaves it on the way up.
-        let glassOn = showsGlass && (glassStyle != .fade || drawn.size.height > notch.size.height + 1)
+        let isPill = drawn.size.height <= notch.size.height + 1
+        let glassOn = showsGlass && (!glassStyle.blacksNotchPill(isDark: SystemAppearance.shared.glassIsDark) || !isPill)
+        // Liquid Glass: a pill at the notch's height is solid black, as Fade's and Black's are, in
+        // Light Mode too (asked for, October 13); Fade's own shade does that for Fade. Closing into
+        // one, the black fades in over the close (`landsAsPill`); opening, it goes at once.
+        let pillScheme = glassStyle == .liquidGlass && isPill
+        let pillBlack = glassStyle == .liquidGlass && (isPill || landsAsPill)
         let parksGlass = isStill
         GlassEffectContainer {
             content
+                // A faint edge round the grey bars on Liquid Glass in Light Mode (`IslandGlassStyle.grayEdge`).
+                .environment(\.outlinesIslandText, glassStyle.outlinesText(isDark: SystemAppearance.shared.glassIsDark))
                 // Under Reduce Motion the island fades in and out as it grows out of the notch and
                 // back into it; otherwise it is always whole (`isStill`).
                 .opacity(reveal)
@@ -405,6 +419,11 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
                                     fadeStretch: fadeStretch,
                                     isSettled: size == settledSize || isHeld,
                                     in: surface.inset(by: -IslandGlassStyle.shadeBleed))
+                .background {
+                    surface.inset(by: -IslandGlassStyle.shadeBleed).fill(.black)
+                        .opacity(pillBlack ? 1 : 0)
+                        .animation(landsAsPill && !isPill ? .easeIn(duration: Motion.defaultDuration * 0.7) : nil, value: pillBlack)
+                }
                 // Off, the glass is parked out of sight rather than taken down (`IslandGlassBody`);
                 // while SwiftUI animates the surface (Reduce Motion) it goes, as a parked glass
                 // would slide along the transaction.
@@ -418,7 +437,19 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
                 .environment(\.islandGlassStyle, glassStyle)
                 .padding(.top, -IslandLayout.overdraw)
         }
+        // The glass and its content in the Mac's appearance where the glass is Liquid Glass
+        // (`IslandGlassStyle.appearsLight`), as the system draws its own.
+        // A black pill at the notch's height keeps the dark appearance (white content on it).
+        .environment(\.colorScheme, glassStyle.appearsLight(isDark: SystemAppearance.shared.glassIsDark) && !pillScheme ? .light : .dark)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .overlay {
+            // Liquid Glass's clear glass in Light Mode: a thin black edge round the island
+            // (`IslandGlassStyle.hasEdge`), on the clip's own outline so the clip keeps its inner
+            // half. Kept in place, clear, where it is off.
+            let edged = glassStyle.hasEdge(isDark: SystemAppearance.shared.glassIsDark, tint: SystemAppearance.shared.glassTint)
+            drawn.stroke(.black.opacity(edged ? IslandGlassStyle.edgeOpacity : 0), lineWidth: IslandGlassStyle.edgeWidth * 2)
+                .allowsHitTesting(false)
+        }
         .clipShape(drawn)
     }
 }

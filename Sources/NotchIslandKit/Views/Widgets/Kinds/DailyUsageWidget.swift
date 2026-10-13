@@ -138,6 +138,7 @@ struct DailyUsageBars: View {
     var look: ChartLook = .plain
     let pick: (Date) -> Void
 
+    @Environment(\.outlinesIslandText) private var edgesGrays
     @Environment(AppModel.self) private var model
 
     /// A day that used less than this is light, from `heavyUse` on heavy (percent of the battery).
@@ -188,9 +189,11 @@ struct DailyUsageBars: View {
                     let isPicked = day.day == picked
                     let height = max(plot * CGFloat(min(day.used / top, 1)), day.hasData ? 2 : 0)
                     let barWidth = max(slot * 0.62, 2)
-                    UnevenRoundedRectangle(topLeadingRadius: look.corners.radius(width: barWidth),
-                                           topTrailingRadius: look.corners.radius(width: barWidth), style: .continuous)
-                        .fill(fill(day, picked: isPicked))
+                    let bar = UnevenRoundedRectangle(topLeadingRadius: look.corners.radius(width: barWidth),
+                                                     topTrailingRadius: look.corners.radius(width: barWidth), style: .continuous)
+                    bar.fill(fill(day, picked: isPicked))
+                        // Light Mode on Liquid Glass: a faint edge round the bar (`IslandGlassStyle.grayEdge`).
+                        .overlay(bar.strokeBorder(IslandGlassStyle.grayEdge(edgesGrays), lineWidth: IslandGlassStyle.grayEdgeWidth))
                         .frame(width: barWidth, height: height)
                         .offset(x: slot * CGFloat(index) + (slot - barWidth) / 2, y: plot - height)
                     Text(day.day.formatted(letter))

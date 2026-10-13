@@ -113,7 +113,18 @@ import Foundation
     func setFrame(_ rect: GridRect, for id: WidgetID) -> Bool { board.setFrame(rect, for: id) }
 
     func update(_ id: WidgetID, _ change: (inout IslandWidget) -> Void) {
+        let before = board.widget(id).map(WidgetLook.init)
         board.update(id, change)
+        if let before, board.widget(id).map(WidgetLook.init) != before { lookEdits.insert(id) }
+    }
+
+    /// Widgets whose background the user changed since `takeLookEdits` was last called
+    /// (`LightGlassBackdrop`). A board put back whole (⌘Z, a notch style, Reset Size) is not one.
+    @ObservationIgnored private var lookEdits: Set<WidgetID> = []
+
+    func takeLookEdits() -> Set<WidgetID> {
+        defer { lookEdits = [] }
+        return lookEdits
     }
 
     /// A change the app makes, not the user (`LightGlassBackdrop`): no step for ⌘Z to take back.

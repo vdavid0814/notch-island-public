@@ -42,7 +42,7 @@ import Observation
     /// Every page's board, home's among them.
     @ObservationIgnored private(set) var boards: WidgetPages!
     /// Widgets on the black in Light Mode with Liquid Glass (`LightGlassBackdrop`).
-    @ObservationIgnored private var lightBackdrop: LightGlassBackdrop!
+    @ObservationIgnored private(set) var lightBackdrop: LightGlassBackdrop!
     let studio = WidgetStudio()
     let fullscreen = FullscreenMonitor()
     let assistant = AssistantModel()

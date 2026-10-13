@@ -139,6 +139,7 @@ struct BatteryChartColors {
 
 /// The shapes, the percentages and the hours, at `size` (the plot's own).
 struct BatteryChartPlot: View {
+    @Environment(\.outlinesIslandText) private var edgesGrays
     let geometry: BatteryChartGeometry?
     let colors: BatteryChartColors
     /// Written beside the plot, low to high.
@@ -222,6 +223,9 @@ struct BatteryChartPlot: View {
         ChartShape(path: geometry.medium).fill(colors.medium)
         ChartShape(path: geometry.charging).fill(colors.charging)
         ChartShape(path: geometry.low).fill(colors.low)
+        // Light Mode on Liquid Glass: a faint edge round the grey bars (`IslandGlassStyle.grayEdge`).
+        ChartShape(path: geometry.level).stroke(IslandGlassStyle.grayEdge(edgesGrays), lineWidth: IslandGlassStyle.grayEdgeWidth)
+        ChartShape(path: geometry.medium).stroke(IslandGlassStyle.grayEdge(edgesGrays), lineWidth: IslandGlassStyle.grayEdgeWidth)
     }
 }
 

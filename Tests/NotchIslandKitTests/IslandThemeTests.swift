@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import NotchIslandKit
 
@@ -33,5 +34,23 @@ import Testing
         preferences.theme.preset = .purple
         #expect(IslandThemeStore.shared.theme.preset == .purple)
         #expect(Preferences(defaults: defaults).theme.preset == .purple)
+    }
+}
+
+@Suite struct PlainGlassTests {
+    /// Liquid Glass frosts evenly along the system's slider (October 13): the clear glass with its
+    /// frost at the clear end, more of it (Light) or black under it (Dark) along the way, the system's
+    /// frosted glass at the tinted end.
+    @Test(arguments: [true, false]) func followsTheSlider(isDark: Bool) {
+        let clear = IslandGlassStyle.plainGlass(isDark: isDark, tint: 0)
+        #expect(clear.material == .clear.tint(isDark ? .black.opacity(IslandGlassStyle.darkClear)
+                                                     : .white.opacity(IslandGlassStyle.clearFrost)) && !clear.unveiled)
+        let middle = IslandGlassStyle.plainGlass(isDark: isDark, tint: IslandGlassStyle.frostedFrom / 2)
+        let halfway = isDark ? Color.black.opacity(IslandGlassStyle.darkClear + (IslandGlassStyle.darkTint - IslandGlassStyle.darkClear) / 2)
+            : .white.opacity(IslandGlassStyle.clearFrost + (IslandGlassStyle.lightFrostedWhite - IslandGlassStyle.clearFrost) / 2)
+        #expect(middle.material == .clear.tint(halfway) && middle.under == .clear)
+        let tinted = IslandGlassStyle.plainGlass(isDark: isDark, tint: 1)
+        #expect(tinted.material == .regular.tint(isDark ? .black.opacity(IslandGlassStyle.darkTint)
+                                                        : .white.opacity(IslandGlassStyle.lightFrostedWhite)))
     }
 }

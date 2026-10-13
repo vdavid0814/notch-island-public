@@ -639,6 +639,15 @@ private struct StudioStage: View {
                         .environment(model)
                         .environment(\.appearsActive, true)
                 }
+                // The widgets' backgrounds were set for Liquid Glass's Mode (`LightGlassBackdrop`):
+                // said here, under the island, with the way back to the user's own.
+                if mode == .widgets, let backdrop = model.lightBackdrop, backdrop.showsNotice {
+                    BackdropNotice(backdrop: backdrop)
+                        .padding(.horizontal, 16)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .padding(.bottom, controlHeight + Self.controlInset * 2 + 12)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         } bar: {
@@ -1224,11 +1233,14 @@ private struct StageIsland: View {
             }
             .frame(width: size.width, height: size.height)
             .controlSize(Metrics.controlSize(forScale: layout.factor))
+            // The grey bars' faint edge, as on the island itself (`IslandGlassStyle.grayEdge`).
+            .environment(\.outlinesIslandText, style.outlinesText(isDark: SystemAppearance.shared.glassIsDark))
             .islandSurfaceShade(style, solidDepth: layout.notch.height, in: shape)
             .islandGlass(in: shape)
         }
         .environment(\.islandGlassStyle, style)
-        .environment(\.colorScheme, .dark)
+        // As on the island (`IslandGlassStyle.appearsLight`).
+        .environment(\.colorScheme, style.appearsLight(isDark: SystemAppearance.shared.glassIsDark) ? .light : .dark)
         .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
         .frame(width: room.width, height: room.height, alignment: .top)
         .overlay {
@@ -2135,3 +2147,52 @@ struct NativeSearchField: NSViewRepresentable {
     }
 }
 
+
+/// The widgets' backgrounds were set to a preset for Liquid Glass's Light or Dark Mode
+/// (`LightGlassBackdrop`): said on glass, large, with Revert Changes back to the user's own and a
+/// cross that keeps the preset.
+private struct BackdropNotice: View {
+    let backdrop: LightGlassBackdrop
+
+    var body: some View {
+        let mode = backdrop.noticeMode == "dark" ? "Dark Mode" : "Light Mode"
+        HStack(alignment: .center, spacing: 20) {
+            Image(systemName: "paintpalette.fill")
+                .font(.system(size: 30, weight: .medium))
+                .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Widget backgrounds were changed")
+                    .font(.title3.weight(.semibold))
+                Text("To keep your widgets readable on Liquid Glass in \(mode), NotchIsland set their background colour and opacity to a preset. To go back to your saved settings:")
+                    .font(.body)
+                    .foregroundStyle(.white.opacity(0.8))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(.white)
+            Spacer(minLength: 12)
+            Button("Revert Changes") {
+                withAnimation(.easeOut(duration: 0.25)) { backdrop.revert() }
+            }
+            .buttonStyle(.glassProminent)
+            .controlSize(.large)
+            Button {
+                withAnimation(.easeOut(duration: 0.25)) { backdrop.dismissNotice() }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 24, height: 24)
+                    .background(.white.opacity(0.16), in: .circle)
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .help("Keep the preset and hide this")
+            .accessibilityLabel("Hide the notice")
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 18)
+        .frame(maxWidth: .infinity)
+        .glassEffect(.regular, in: .rect(cornerRadius: 26))
+        .environment(\.colorScheme, .dark)
+    }
+}

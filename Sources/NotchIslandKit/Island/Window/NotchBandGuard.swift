@@ -73,6 +73,10 @@ import Synchronization
             pointerWatch = nil
             tick.cancel()
             state = BandCoverPolicy.State()
+            // Forgotten too: a move the pointer watch had already passed on arrived after this and
+            // put the strip back up over the desktop's menu bar, with nothing left to take it down
+            // until the next full screen (seen October 13, 3 ms after "guard off").
+            geometry = nil
             setCovered(false, at: NSEvent.mouseLocation, reason: "guard off")
             Log.window.notice("menu-bar guard off")
         }
@@ -136,7 +140,7 @@ import Synchronization
 
     /// Judges the pointer now, and again after the policy's hold time if it asked for one.
     private func update() {
-        guard let geometry else { return }
+        guard isActive, let geometry else { return }
         let pointer = NSEvent.mouseLocation
         let decision = BandCoverPolicy.decide(pointer: pointer, geometry: geometry, islandOpen: isIslandOpen(),
                                               state: &state, now: .now)
