@@ -191,12 +191,12 @@ Settings' window (Tab then loses the keyboard from the search field; the unfold'
 the unseen Top Bar page out of the mode deck (no change). See `ENERGY-LOG.md` for Size mode's unfold
 (2–3 J: the page laid out at every frame) and the branch `wip-unfold-in-place`.
 
-October 13 2026: SwiftUI's key view loop rebuilt once after a batch instead of for every hosting
-view entering the window (`autorecalculatesKeyViewLoop` on meanwhile; then `viewDidMoveToWindow`
-on every or only the top-level hosting views): what Tab reaches changed and the rebuild cost 30–60
-ms; skipped only for the gallery's pictures: Tab identical, nothing saved. Settings' paused
-pictures hidden in place instead of taken out of the window; the panel's page picker left out
-(ablation, −5 %); background turns started a frame later. All equal within noise.
+October 13 2026: SwiftUI's key view loop rebuilt once after a batch, or only when Tab is
+pressed, instead of for every hosting view entering the window: what Tab reaches changed (kept:
+skipping it for pictures only, which Tab cannot reach). Settings' paused pictures hidden in place
+instead of taken out of the window (close worse); background turns started a frame later (no
+change). Check that an `NI_EXP_…` switch really reached the app (`ps eww <pid>`): in zsh,
+`set -- $v` does not split a string.
 
 October 11 2026 (afternoon): a scroll gesture's later events sent straight to the view that took
 its first, past AppKit's own routing (`NSWindow.sendEvent`): a sixth of a swipe saved, but AppKit's

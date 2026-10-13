@@ -56,19 +56,32 @@ granted that night).
   (`GalleryPreviewQueue`).
 - **Kept Settings at rest** (charger, after 8 openings): 208–209 MB, flat; Energy Impact mean 0.02.
 
-### Tried and left out (no effect, A B A B)
-- The key view loop: SwiftUI rebuilds the window's key view loop over the whole window for every
-  hosting view that enters it (`FocusBridge.updateDefaultKeyViewLoop`); with the window's
-  `autorecalculatesKeyViewLoop` on, picks/modes in Settings ▸ Widgets went 424 → 275 and an
-  opening on the Widgets page 564 → 231, but Tab then steps differently. Rebuilding SwiftUI's loop
-  once afterwards (every hosting view's `viewDidMoveToWindow`, or only the top-level ones) changed
-  what Tab reaches (a search field kept the keyboard) and cost 30–60 ms; skipping it only for the
-  gallery's pictures (`PictureHostingView`) kept Tab identical but saved nothing measurable.
-  `tabtest.py` + an Accessibility focus reader compare Tab old against new.
-- Settings' paused pictures hidden in place instead of taken out of the window: no change.
-- The panel's page picker left out entirely (ablation): spam 85 → 80; not worth a second picker.
+- **The gallery's pictures no longer rebuild the key view loop** (`PictureHostingView`): SwiftUI
+  builds the window's loop again, over the whole window, for every hosting view that enters it;
+  the ~55 previews put back as Settings opens on the Widgets page did it ~55 times. Opening
+  Settings on the Widgets page 280–355 → 152–299 (mean 316 → 204, battery, A B A B with
+  `NI_EAGER_LOOP=1` on the same binary); Settings ▸ Widgets clicks 5–10 % lower. Tab reaches the
+  same controls (`tabtest.py`, `tabtest2.py`: picks, page switches and a 16 s lapse).
+- **The panel's page picker is ~30 % of every opening** (ablation, `NI_EXP_NOPICKER`, A B A B):
+  cold open 104–125 → 83, warm open 67–70 → 44–47, hover spam 83–99 → 63–66 a second
+  (performance-core ms 306–349 → 184–191). Its re-measuring probe is not the cost (left out: no
+  change); the system's segmented control itself is, put back into the window at every opening.
+  The largest lever left for the island; not changed this night (the look must stay).
+
+### Tried and left out (A B A B)
+- The key view loop for every hosting view: with the window's `autorecalculatesKeyViewLoop` on,
+  picks and modes in Settings ▸ Widgets went 424 → 275, but Tab steps differently. Built once
+  after a batch (every or only the top-level hosting views' `viewDidMoveToWindow`), or only when
+  Tab is pressed (with or without clearing AppKit's links first): a search field then kept the
+  keyboard on Tab, and the rebuild cost 30–60 ms.
+- Settings' paused pictures hidden in place instead of taken out of the window: the close got
+  worse (150–175 → 230–250).
+- Background turns started a frame later (to let queued higher-priority work drain): no change.
 - The segmented bars' widths no longer set again when unchanged (kept: harmless, no measurable
   change).
+- **Measuring trap**: in zsh, `for v in "a" "b NI_X=1"; do set -- $v` does not split `$v`, so the
+  switch never reached the app; three of the night's first "no effect" results came from that.
+  Pass switches as separate arguments of a function call.
 
 ## 2026-10-11 (afternoon, on the charger): the Timer's ruler as layers, memory on the charger
 
