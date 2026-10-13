@@ -37,7 +37,10 @@ struct ExpandedView: View {
         let left = shownPage.map { $0 == page ? leaving : leaving.union([$0]) } ?? leaving
         // Its own curve: the new page glides into place rather than blinking in (Reduce Motion: a
         // cross-fade).
-        let animation = reduceMotion ? Animation.easeOut(duration: 0.18) : PageSlide.animation
+        let animation = reduceMotion ? Animation.easeOut(duration: PageSlide.reducedDuration) : PageSlide.animation
+        // The render server carries this switch on the items' own layers (`PanelPageMotion`): the
+        // change itself is made at once here.
+        let onLayers = model.island.layerSwitchedPage == page
 
         VStack(spacing: 0) {
             ExpandedHeader(split: split, height: layout.notch.height)
@@ -56,12 +59,13 @@ struct ExpandedView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                         .offset(x: offset)
                         // A hidden page goes to its side at once.
-                        .animation(isShown ? animation : nil, value: offset)
+                        .animation(isShown && !onLayers ? animation : nil, value: offset)
                         // Hidden, it is only transparent: views at opacity 0 take no clicks or hover.
                         .opacity(isShown ? 1 : 0)
-                        .animation(animation, value: isShown)
+                        .animation(onLayers ? nil : animation, value: isShown)
                 }
             }
+            .layerMarks(.pagesBegin, .pagesEnd)
             // Photographed for Settings' pictures: the island alone, nothing on it.
             .opacity(model.isPictureScene && !model.pictureShowsWidgets ? 0 : 1)
             .padding(.top, Metrics.Expanded.pageTopInset)
@@ -77,9 +81,10 @@ struct ExpandedView: View {
             if !built.contains(new) { built.append(new) }
             visibility.show(new)
         }
-        // Once the switch has settled, the pages left wait at their side again.
+        // Once the switch has settled, the pages left wait at their side again (the motion starts
+        // once the shown page has drawn itself, up to 0.15 s in: `PanelPageMotion`).
         .task(id: page) {
-            try? await Task.sleep(for: .seconds(0.3))
+            try? await Task.sleep(for: .seconds(0.45))
             guard !Task.isCancelled, !leaving.isEmpty else { return }
             withoutAnimation { leaving.removeAll() }
         }
@@ -106,7 +111,7 @@ struct ExpandedView: View {
     private func letOthersGo() async {
         try? await Task.sleep(for: .seconds(1))
         guard !Task.isCancelled, built != [page] else { return }
-        MainThrift.lowPowerTurn {
+        MainThrift.lowPowerTurn(unattended: true) {
             guard isPanelHidden else { return }
             withoutAnimation {
                 built = [page]
@@ -158,6 +163,11 @@ enum PageSlide {
     /// How far the new page travels, at the island's scale 1.
     static let distance: CGFloat = 22
     /// Quick out of the start, long and soft into place, about as short as the cross-fade it
-    /// replaces (SwiftUI draws each of its frames on the main thread).
-    static let animation = Animation.timingCurve(0.25, 0.8, 0.25, 1, duration: 0.24)
+    /// replaces. The same curve and time as a SwiftUI animation (where the items' layers cannot be
+    /// found) and for the render server (`PanelPageMotion`).
+    static let curve: (Double, Double, Double, Double) = (0.25, 0.8, 0.25, 1)
+    static let duration: TimeInterval = 0.24
+    static let animation = Animation.timingCurve(curve.0, curve.1, curve.2, curve.3, duration: duration)
+    /// Reduce Motion: a cross-fade, eased out.
+    static let reducedDuration: TimeInterval = 0.18
 }

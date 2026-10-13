@@ -22,13 +22,20 @@
 | `glass-drive-test.swift` | An AppKit glass resized every frame by our own display link along SwiftUI's spring, with SwiftUI content kept still. |
 | `image-diff.swift` | Pixel difference of two screenshots. |
 | `ws/ws_bench.py <label> <app\|none\|keep:app> <scenario …>` | The app, WindowServer and coreaudiod together (coalition energy, CPU, wake-ups), with a real pointer: rest, 10 hover opens, a Settings tour, Settings ▸ General at rest. Build `ws/mouse.swift` and `ws/hideapp.swift` first. |
+| `hang.py [guarded\|unguarded\|nothrift …]` | The island on a busy Mac: all cores taken by `hog` (`LOAD=10:utility`, `default`, `initiated`; `WARM=90` for a load the load average already knows), optionally macOS's memory_pressure beside it (`MEMORY=warn`), then a tour by URL or with the real pointer (`TOUR=pointer`). From `NI_TRACE`'s turns: the longest main-thread turn of each phase, how many were over 100 ms, 250 ms and 1 s, and how often `ThriftWatch` gave the priority back. `unguarded` is the lowering as before the watch (`NI_THRIFT_UNGUARDED=1`). |
+| `abcpu.py <rounds> <label>[:NI_X=1,…] … -- <step> …` | Variants of one build in turn (A B A B) through a list of URL steps: the coalition's energy, CPU ms, performance-core ms and main-thread turns per repeat. For "did the main thread's work go away" (`NI_LAYER_MOTION=0` against the default). |
+| `hog.c`, `thrift_watch.c` | `hog <threads> <seconds> [utility\|default\|initiated]` takes cores at a quality of service; `thrift_watch [rescue]` shows a background thread starving beside it and an override from outside lifting it (what `ThriftWatch` does). `hang.py` builds `hog`; `cc -O1 thrift_watch.c -o thrift_watch` the other. |
 | `night.py cycle\|rest\|only <label> …` | The overnight soak: every animation and opening (panels, hover, Siri and its galleries, level/battery/AirPods/timer/drop banners, a track change, every Settings page, music paused and playing), sampled four times a second, then a rest reported per minute to catch leaks. Rows in `night/` (not committed). |
 
 Switches read by the app (measuring only): `NI_TRACE=1` (long main-thread turns in the log),
 `NI_LAYER_DETAIL=1` (`demo/state` writes every layer's exact frame, corner, colour and gradient),
 `NI_KEEP_SETTINGS=1` or `0` (Settings kept built as on battery, or given up when nobody is at the
 Mac as on the charger, whatever the power source), `NI_POWER=battery|charger` (the whole island as on
-that source), `NI_SETTINGS_UNUSED=<s>` (how long into "nobody at the Mac" Settings goes).
+that source), `NI_SETTINGS_UNUSED=<s>` (how long into "nobody at the Mac" Settings goes),
+`NI_NO_PREPARE=1` (Settings is not built ahead at all: its background steps after a launch and after
+an opening otherwise land in whatever is measured next), `NI_THRIFT_UNGUARDED=1` (the main thread
+lowered whatever the Mac is doing, no watch: what `hang.py` compares against), `NI_LAYER_MOTION=0`
+(the panel's page switch and the content's swap animated by SwiftUI, as before `LeafLayerMotion`).
 Routes: `demo/power?source=battery|charger|real`, `demo/away?on=1|0`, `demo/memorypressure`.
 
 Findings (September 2026, macOS 27, MacBook Air M5):

@@ -237,7 +237,7 @@ nonisolated extension BannerKind {
         // A page asked for by name (a file dragged to the shelf, `open?page=`) is the panel, also
         // while recording; the pointer and a plain open bring the recording card then.
         if page != nil, model.recorder.isRecording || model.updater.notice != nil { wantsPanelWhileRecording = true }
-        if let page, model.island.page != page, model.availablePages.contains(page) || page == .whatsNew { model.island.page = page }
+        if let page, model.island.page != page, model.availablePages.contains(page) || page == .whatsNew { model.island.show(page) }
         if pinned, !model.island.isPinned { model.island.isPinned = true }
         // Opened without a page asked for, on one the user has since hidden from the picker: the
         // first page it offers.
@@ -473,7 +473,7 @@ nonisolated extension BannerKind {
     func turnPage(by step: Int) {
         let pages = model.pickerPages
         guard let index = pages.firstIndex(of: model.panelPage), pages.indices.contains(index + step) else { return }
-        model.island.page = pages[index + step]
+        model.island.show(pages[index + step])
         model.haptics.play(.tick)
     }
 
@@ -618,7 +618,7 @@ nonisolated extension BannerKind {
         if from.isSettings, !to.isSettings {
             Task {
                 try? await Task.sleep(for: .milliseconds(120))
-                MainThrift.lowPower(for: 0.6)
+                MainThrift.lowPower(for: 0.6, unattended: true)
             }
         }
         if to.isOpen, !from.isOpen {

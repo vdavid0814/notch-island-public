@@ -201,6 +201,6 @@ struct ShelfWidget: View {
 
     private func openShelf() {
         guard !isPreview, model.availablePages.contains(.shelf) else { return }
-        model.island.page = .shelf
+        model.island.show(.shelf)
     }
 }

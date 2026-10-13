@@ -5,6 +5,42 @@ anyone can repeat them on their own Mac and compare. It comes with every copy: i
 (`docs/`), inside the app (`NotchIsland.app/Contents/Resources/`) and next to the app in the `.dmg`.
 The detailed before/after tables, and what was changed, are in `ENERGY-LOG.md` next to it.
 
+## The October 13, 2026 run (after v0.8.5.3): a busy Mac, and two animations moved to the render server
+
+**Setup.** The same MacBook Air M5, macOS 27.0.1, on the charger (85–90 %), the battery simulated
+where said (`NI_POWER=battery`). Release builds; v0.8.5.3 (47) and this work as signed test copies
+(`mkapp.sh`) for the old-against-new part. The photo-analysis daemon ran at ~200 % all evening, so
+every comparison is back to back.
+
+**What was run**
+1. **The island with every core taken** (new `hang.py` with `hog`): ten threads at utility, at
+   user-initiated, fourteen at default, begun two seconds before the launch (the load average knows
+   nothing yet) and ninety seconds before it; macOS's `memory_pressure` tool at its warning level
+   beside them; then a tour by URL (the launch and Settings' preparation, the panel and its pages,
+   Settings on three pages, Siri and its gallery) and one with the real pointer (hovering during
+   the preparation, eight hover openings, Settings from the gear three times). Read: the longest
+   main-thread turn of each phase and how many were over 100 ms, 250 ms and 1 s (`NI_TRACE`), old
+   lowering (`NI_THRIFT_UNGUARDED=1`) against the guarded one.
+2. **The same tour on a quiet Mac**: that the guard ends no stretch that is doing fine, and how long
+   the background steps are.
+3. **The panel's page switch and the content's swap**, by SwiftUI (`NI_LAYER_MOTION=0`) and on the
+   items' layers: main-thread turns and energy (new `abcpu.py`, A B A B, three rounds); frame by
+   frame from screen recordings of both (`screencapture -V`, each frame against the one before it).
+4. **A hundred quick transitions** 0.15 s apart (open, close, banners, pages, Siri), then the
+   settled island against a fresh launch's: the picture, the layer count, no animation left over.
+5. **Old build against new by the real pointer** (`stress.py`: one hover, hover every 2.2 s and
+   every second, pages swiped, Settings from the gear) and rest (`rest.py`), battery simulated and
+   on the charger, two rounds each.
+6. **Unit tests** (`Scripts/test.sh`): 930 tests and the widget snapshots.
+
+**Results.** With ten cores taken the old lowering left the main thread standing for the whole
+60 s tour (27.8 s and 8.1 s in the fourteen-thread run); guarded, the longest turn of any run was
+325–390 ms and no turn reached a second. On a quiet Mac nothing was ended early; the first
+preparation step went from 2.5 s to 0.6 s. A page switch: 90–95 → 37 ms of the main thread, twelve
+swiped switches 346–379 → 107–156 mJ (battery simulated; 335–338 → 137–140 on the charger). The
+content's swap: 37 → 18 main-thread turns a cycle, the energy the same. Hover openings, Settings
+and rest cost what they did. The details are in `ENERGY-LOG.md`.
+
 ## The October 11, 2026 run (after v0.8.4.3): what the system billed, real clicks in Settings ▸ Widgets
 
 **Setup.** The same MacBook Air M5, macOS 27.0.1, on the charger (90 %), music playing. Release

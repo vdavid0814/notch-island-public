@@ -7,6 +7,27 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-10-13 22:42** — Released as 0.8.5.4.
+- **2026-10-13 21:40** — Siri's field, list and gallery stay SwiftUI's animation. Tried again on the
+  render server (the outline's mask with the glass body's own layers given the outline's frames):
+  the glass went and the content sat wrong; the fade style's black is drawn for the held outline
+  besides. *Not the same picture, so not shipped (`refs/backup/siri-glass-experiment`).*
+- **2026-10-13 21:30** — The content's swap on the island (pill, banner, panel) is faded by the render
+  server where it is a plain cross-fade (on battery, Low Power Mode, into Siri): SwiftUI swaps at
+  once and keeps what leaves, unseen, until its layers have faded (`IslandModel.contentSwap`,
+  `ContentSwapMotion`). On the charger the blur-replace stays SwiftUI's. *Half the main thread's
+  turns of an opening and closing; the energy about the same (174.8 against 178.0 mJ a cycle).*
+- **2026-10-13 20:40** — The panel's page switch runs on the items' own layers (`PanelPageMotion`):
+  held as they were until the shown page has drawn itself, then all started together, late items
+  joining in step. SwiftUI makes the change at once (`IslandModel.show`). *83–98 → 37 ms of main
+  thread a switch, 187 → 156 mJ for two; SwiftUI's own animation had waited for the page the same way.*
+- **2026-10-13 19:30** — Nothing is moved to background quality of service on a busy Mac
+  (`MainThrift.canLower`: `SystemLoad`), and every lowered stretch is watched from another thread
+  (`ThriftWatch`): starved, blocked, met by the pointer or by a key, the main thread gets its
+  priority back at once. Settings' first preparation step builds the shell and sidebar only; it is
+  not built ahead while memory is tight, and is built at the thread's own priority on a Mac that is
+  only busy. *16 hang reports from one Mac (builds on every core, 150–390 MB free): a lowered turn
+  of 0.1 s took 2 s and more; reproduced with ten cores taken — the main thread stood for 28 s.*
 - **2026-10-13 18:30** — Released as 0.8.5.3.
 - **2026-10-13 18:20** — Settings ▸ Widgets ▸ Size sets the page it shows (`Preferences.pageSizes`: its cells
   and its ready-made size); Apply to All Pages makes it every page's; General's Size when Open is every

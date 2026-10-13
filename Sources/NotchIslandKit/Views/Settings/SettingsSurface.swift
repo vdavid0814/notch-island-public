@@ -124,7 +124,9 @@ final class SettingsSurfaceView: NSView {
     private var customizePresentation: CustomizePresentation?
     private var customizeRemoval: Timer?
 
-    init(model: AppModel, placement: SettingsPlacement) {
+    /// `showsPage` false: built ahead, the surface starts with its sidebar alone and its pages
+    /// follow one a step (`SettingsWindow.prepare`).
+    init(model: AppModel, placement: SettingsPlacement, showsPage: Bool = true) {
         self.model = model
         self.placement = placement
         deck = SettingsPageDeckView(model: model)
@@ -142,7 +144,7 @@ final class SettingsSurfaceView: NSView {
         pagesHost.addSubview(edgeScroller)
         edgeScroller.source = { [weak deck] in deck?.edgeScroll }
         addSubview(pagesHost)
-        deck.show(model.settingsPane)
+        if showsPage { deck.show(model.settingsPane) }
         followScroll()
         observePane()
         observeCustomizing()

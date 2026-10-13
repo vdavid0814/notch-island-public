@@ -7,7 +7,10 @@ import SwiftUI
 /// towards a bigger island, or the first frames would be clipped.
 @Observable final class IslandModel {
     private(set) var presentation: IslandPresentation = .idle
-    var page: ExpandedPage = .home
+    var page: ExpandedPage = .home {
+        // Set any other way than `show`, the switch is SwiftUI's to animate.
+        didSet { if !isShowingPage { layerSwitchedPage = nil } }
+    }
     var isPinned: Bool = false
     private(set) var isHovering: Bool = false
     /// A slider drag or menu inside the island is in progress: never auto-close.
@@ -22,6 +25,32 @@ import SwiftUI
 
     /// Moves the outline on the render server; nil leaves every move to SwiftUI's transaction.
     @ObservationIgnored weak var outlineMover: (any IslandOutlineMover)?
+
+    /// Starts the panel's page switch on its items' own layers (`PanelPageMotion`); false, or nil
+    /// here, leaves the switch to SwiftUI's animation.
+    @ObservationIgnored var startsPageMotion: ((_ from: ExpandedPage, _ to: ExpandedPage) -> Bool)?
+    /// The page whose switch the render server carries: SwiftUI animates nothing for it.
+    @ObservationIgnored private(set) var layerSwitchedPage: ExpandedPage?
+    @ObservationIgnored private var isShowingPage = false
+
+    /// Starts the content's swap on its items' own layers (`ContentSwapMotion`) for a swap of this
+    /// length; false, or nil here, leaves it to SwiftUI's animation.
+    @ObservationIgnored var startsContentSwap: ((_ from: IslandPresentation, _ to: IslandPresentation, _ duration: TimeInterval) -> Bool)?
+    /// While the render server fades a swap: the content that leaves, kept in place until it has
+    /// (`IslandContentStack`). nil otherwise.
+    private(set) var contentSwap: ContentSwap?
+    @ObservationIgnored private var swapEnd = DelayedAction()
+    @ObservationIgnored private var nextSwapID = 0
+
+    /// Switches the open panel to `page`, the motion on the render server where it can be.
+    func show(_ page: ExpandedPage) {
+        guard page != self.page else { return }
+        let onLayers = presentation.isExpanded && startsPageMotion?(self.page, page) == true
+        isShowingPage = true
+        self.page = page
+        isShowingPage = false
+        layerSwitchedPage = onLayers ? page : nil
+    }
 
     /// Called synchronously before `presentation` changes (the window controller grows the stage here).
     @ObservationIgnored var willTransition: ((_ from: IslandPresentation, _ to: IslandPresentation) -> Void)?
@@ -71,12 +100,36 @@ import SwiftUI
             if let live = outlineMover?.handOff(from: from, to: next, spring: spring) {
                 withoutAnimation { surfaceHold = live }
             }
+            if contentSwap != nil { withTransaction(Transaction(animation: nil)) { contentSwap = nil } }
             withAnimation(animation) {
                 surfaceHold = nil
                 presentation = next
             }
         } else if let spring, let hold = outlineMover?.move(from: from, to: next, spring: spring) {
-                withoutAnimation { surfaceHold = hold }
+            withoutAnimation { surfaceHold = hold }
+            if let duration = Motion.contentSwapDuration(from: from, to: next), startsContentSwap?(from, next, duration) == true {
+                // The render server fades the swap (`ContentSwapMotion`): the change itself at
+                // once, what leaves kept until its fade is over.
+                // No animation of the transaction's — but not `withoutAnimation`: what the views
+                // animate on their own in this update (Liquid Glass's black coming in over a
+                // close: `IslandSurface`) goes on.
+                nextSwapID += 1
+                let swap = ContentSwap(id: nextSwapID, leaving: from.showsPanel || from.isIdle ? nil : from)
+                withTransaction(Transaction(animation: nil)) {
+                    contentSwap = swap
+                    presentation = next
+                }
+                swapEnd.schedule(after: duration + ContentSwap.margin) { [weak self] in
+                    guard let self, self.contentSwap == swap else { return }
+                    withTransaction(Transaction(animation: nil)) { self.contentSwap = nil }
+                }
+                Task { @MainActor [weak self] in
+                    withTransaction(Transaction(animation: nil)) { self?.revision &+= 1 }
+                }
+                didTransition?(from, next)
+                return
+            }
+            if contentSwap != nil { withTransaction(Transaction(animation: nil)) { contentSwap = nil } }
             withAnimation(Motion.contentSwap(from: from, to: next)) {
                 presentation = next
             }
@@ -88,6 +141,7 @@ import SwiftUI
                 withAnimation(Motion.contentSwap(from: from, to: next)) { self?.revision &+= 1 }
             }
         } else {
+            if contentSwap != nil { withTransaction(Transaction(animation: nil)) { contentSwap = nil } }
             withAnimation(animation) {
                 presentation = next
             }
@@ -121,6 +175,16 @@ import SwiftUI
         guard hovering != isHovering else { return }
         isHovering = hovering
     }
+}
+
+/// A content swap the render server fades (`ContentSwapMotion`).
+nonisolated struct ContentSwap: Equatable, Sendable {
+    let id: Int
+    /// What was shown before, kept in place until it has faded; nil when that was the panel (kept
+    /// anyway, hidden) or nothing.
+    let leaving: IslandPresentation?
+    /// How long past the fade's end the content that left is taken away.
+    static let margin: TimeInterval = 0.05
 }
 
 /// How the island's surface is drawn while its outline moves on the render server: still, at an

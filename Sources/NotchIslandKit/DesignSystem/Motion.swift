@@ -101,9 +101,15 @@ nonisolated enum Motion {
     /// island grows out of the notch (the growing outline reveals the content); on the way back
     /// the content leaves in a tenth of a second, as it did while the glass shrank.
     static func contentSwap(from: IslandPresentation, to: IslandPresentation) -> Animation? {
+        contentSwapDuration(from: from, to: to).map { .easeOut(duration: $0) }
+    }
+
+    /// `contentSwap`'s length (eased out), nil for none: the render server's fades take as long
+    /// (`ContentSwapMotion`).
+    static func contentSwapDuration(from: IslandPresentation, to: IslandPresentation) -> TimeInterval? {
         if from.isIdle { return nil }
-        if to.isIdle { return .easeOut(duration: 0.1) }
-        return .easeOut(duration: 0.18)
+        if to.isIdle { return 0.1 }
+        return 0.18
     }
 }
 

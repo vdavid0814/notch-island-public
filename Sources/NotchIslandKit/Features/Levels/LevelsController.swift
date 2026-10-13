@@ -87,6 +87,7 @@ import Observation
         volumeLifecycle = Task { [weak self] in
             await previous?.value
             let initial = await service.start { [weak self] snapshot, reason in
+                ThriftWatch.demand()
                 Task { @MainActor in
                     self?.volumeServiceUpdated(snapshot, reason: reason, generation: generation)
                 }

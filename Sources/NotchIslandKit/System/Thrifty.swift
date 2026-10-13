@@ -19,9 +19,12 @@ nonisolated enum Thrifty {
     /// Background quality of service: efficiency cores only, for work nobody is waiting for.
     private static let backgroundQueue = DispatchQueue(label: "com.davidvarga.notchisland.thrifty.background", qos: .background)
 
+    /// On a busy Mac at utility all the same: at background the queue got no time there, and what
+    /// was read ahead (Settings' wallpapers) was still missing when its page was opened.
     static func runInBackground<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
-        await withCheckedContinuation { continuation in
-            backgroundQueue.async { continuation.resume(returning: work()) }
+        let queue = SystemLoad.isBusy ? queue : backgroundQueue
+        return await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: work()) }
         }
     }
 
@@ -45,24 +48,59 @@ nonisolated enum Thrifty {
 /// clock; at background quality of service the same 100 ms burst used ~6× less energy (72 → 12 mJ,
 /// measured) and no performance core. Only for updates nobody is waiting on within the frame: the
 /// work takes about twice as long.
+///
+/// Only on a Mac with room for it. At background quality of service the thread gets what the
+/// efficiency cores have left: with the cores or the memory taken (builds, simulators) a lowered
+/// turn of 0.1 s took seconds, and the island — on the same thread — stood still (hang reports,
+/// October 13). So nothing is lowered while the Mac is busy or short of memory (`SystemLoad`), and
+/// a lowered stretch that stalls all the same is ended from outside (`ThriftWatch`). The work then
+/// runs where it was asked to, in a turn of its own, at the thread's own priority.
 @MainActor enum MainThrift {
     static let isEnabled = ProcessInfo.processInfo.environment["NI_NO_THRIFT"] != "1"
 
+    /// The main thread may be lowered now.
+    static var canLower: Bool {
+        guard isEnabled else { return false }
+        if ThriftWatch.isOff { return true }
+        return !ThriftWatch.isHeldOff && !SystemLoad.isBusy
+    }
+
     private static var restore: Timer?
+
+    /// To background, unless a stall has just ended a stretch (`ThriftWatch`). On the main thread.
+    nonisolated private static func lower(yieldsToPointer: Bool? = nil) {
+        guard ThriftWatch.isOff || !ThriftWatch.isHeldOff else { return }
+        pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
+        ThriftWatch.lowered(yieldsToPointer: yieldsToPointer)
+    }
+
+    /// Back to the thread's own priority. On the main thread.
+    nonisolated private static func raiseThread() {
+        pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)
+        ThriftWatch.raised()
+    }
+
+    /// A stretch was ended from outside (`ThriftWatch`): what was left of it is called off.
+    static func rescued() {
+        holdUntil = 0
+        restore?.invalidate()
+        restore = nil
+    }
 
     /// The main thread at background quality of service for the next `seconds`: for a change whose
     /// work spreads over several turns (an opening: views, then the keyboard and the text field).
     /// Set from a run-loop block, not a dispatch job (a job's end puts the thread's quality of
-    /// service back), and restored by a run-loop timer.
-    static func lowPower(for seconds: TimeInterval) {
-        guard isEnabled else { return }
+    /// service back), and restored by a run-loop timer. `unattended`: nobody is at the island for
+    /// it, so the pointer arriving there ends it.
+    static func lowPower(for seconds: TimeInterval, unattended: Bool = false) {
+        guard canLower else { return }
         CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) {
-            pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
+            lower(yieldsToPointer: unattended)
         }
         CFRunLoopWakeUp(CFRunLoopGetMain())
         restore?.invalidate()
         let timer = Timer(timeInterval: seconds, repeats: false) { _ in
-            pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)
+            raiseThread()
             MainActor.assumeIsolated { restore = nil }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -84,31 +122,34 @@ nonisolated enum Thrifty {
     /// cycle in the frames after it, from the display link's source, and those frames ran at the
     /// thread's own priority on a performance core — Settings' preparation: ~25 frames of 8–56 ms
     /// after its steps, Activity Monitor 150–600 for seconds after every launch (measured with
-    /// `NI_TRACE`). Anything the user starts meanwhile takes the priority back at once (`raise`).
-    static func lowPowerTurn(holding hold: TimeInterval, _ work: @escaping @MainActor () -> Void) {
+    /// `NI_TRACE`). Anything the user starts meanwhile takes the priority back at once (`raise`),
+    /// and with `unattended` so does the pointer arriving at the island during the turn itself.
+    static func lowPowerTurn(holding hold: TimeInterval, unattended: Bool = false, _ work: @escaping @MainActor () -> Void) {
         guard isEnabled else { return work() }
         let timer = Timer(timeInterval: 0, repeats: false) { _ in
+            // A busy Mac: the turn of its own, at the thread's own priority.
+            guard MainActor.assumeIsolated({ canLower }) else { return MainActor.assumeIsolated { work() } }
             // Held until `hold` after the work: a step can itself take longer than that.
             holdUntil = .infinity
-            pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
+            lower(yieldsToPointer: unattended)
             // Lowered again before every layout and commit until the hold is over (a dispatch job
             // run meanwhile restores the thread's own), raised after the first one past it.
             let lower = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.min) { observer, _ in
                 if CACurrentMediaTime() < holdUntil {
-                    pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
+                    lower()
                 } else {
                     CFRunLoopObserverInvalidate(observer)
                 }
             }
             let raise = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max) { observer, _ in
                 guard CACurrentMediaTime() >= holdUntil else { return }
-                if MainActor.assumeIsolated({ restore == nil }) { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) }
+                if MainActor.assumeIsolated({ restore == nil }) { raiseThread() }
                 CFRunLoopObserverInvalidate(observer)
             }
             CFRunLoopAddObserver(CFRunLoopGetMain(), lower, .commonModes)
             CFRunLoopAddObserver(CFRunLoopGetMain(), raise, .commonModes)
             MainActor.assumeIsolated { work() }
-            // Raised meanwhile (`raise`): not held again.
+            // Raised meanwhile (`raise`, or from outside): not held again.
             if holdUntil == .infinity { holdUntil = CACurrentMediaTime() + hold }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -122,22 +163,22 @@ nonisolated enum Thrifty {
     static func raise() {
         guard holdUntil > CACurrentMediaTime() else { return }
         holdUntil = 0
-        if restore == nil { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) }
+        if restore == nil { raiseThread() }
     }
 
-    static func lowPowerTurn(_ work: @escaping @MainActor () -> Void) {
+    static func lowPowerTurn(unattended: Bool = false, _ work: @escaping @MainActor () -> Void) {
         guard isEnabled else { return work() }
         let timer = Timer(timeInterval: 0, repeats: false) { _ in
-            pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
+            // A busy Mac: the turn of its own, at the thread's own priority.
+            guard MainActor.assumeIsolated({ canLower }) else { return MainActor.assumeIsolated { work() } }
+            lower(yieldsToPointer: unattended)
             // Again just before the layout and the commit (a dispatch job run meanwhile restores
             // the thread's own), and back after them — unless a longer stretch was asked for.
             let lower = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, CFIndex.min) { _, _ in
-                pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
+                lower()
             }
             let raise = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, CFIndex.max) { _, _ in
-                MainActor.assumeIsolated {
-                    if restore == nil { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) }
-                }
+                if MainActor.assumeIsolated({ restore == nil }) { raiseThread() }
             }
             CFRunLoopAddObserver(CFRunLoopGetMain(), lower, .commonModes)
             CFRunLoopAddObserver(CFRunLoopGetMain(), raise, .commonModes)

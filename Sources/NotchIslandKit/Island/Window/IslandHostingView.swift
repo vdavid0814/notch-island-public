@@ -75,10 +75,15 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
         super.updateConstraints()
     }
 
+    /// Called after each layout pass: SwiftUI has updated its layers by then, in the same Core
+    /// Animation transaction (`PanelPageMotion.follow`).
+    var afterLayout: (() -> Void)?
+
     override func layout() {
         updatePassDepth += 1
         defer { updatePassDepth -= 1 }
         super.layout()
+        afterLayout?()
     }
 
     // MARK: Hit testing

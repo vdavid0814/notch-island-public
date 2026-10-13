@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.5.3 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.5.4 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -21,6 +21,35 @@ How much energy each animation and the idle state take, measured before and afte
 **[docs/PERFORMANCE-TESTS.md](docs/PERFORMANCE-TESTS.md)** (both also inside the app).
 
 Swift 6, SwiftUI, macOS 27.
+
+---
+
+## What's new in v0.8.5.4
+
+No more freezes on a busy Mac, and lighter page switches:
+
+- **No more freezes on a busy Mac.** With every core or the memory taken — builds, simulators, many
+  apps — the island could stand still for seconds: right after an update, while opening or closing
+  Settings, while switching pages. It now keeps its own priority whenever the Mac is busy, and should
+  it be held up all the same, it has it back within a tenth of a second. With all ten cores of a
+  MacBook taken, the longest stop went from 28 seconds to a third of a second
+  ([ENERGY-LOG](docs/ENERGY-LOG.md)).
+- **It answers at once after a launch.** Settings is made ready in the background a few seconds
+  after NotchIsland starts. A hover, a volume or brightness key or ⌘Space in that moment waited for
+  it, up to two and a half seconds; now they come first.
+- **Page switches are lighter.** The slide from one page of the panel to the next runs on the window
+  server: the app does a third of the work for it, and a switch takes about 60 % less energy.
+- **On battery, the island's content fades without the app.** A pill giving way to the panel or to a
+  banner is faded by the window server too, so it stays smooth while the app is busy.
+- **Kinder to a Mac short of memory.** Settings is no longer made ready ahead while macOS asks for
+  memory; it is built when you open it.
+
+### Updating
+
+Settings ▸ About ▸ **Update Now** installs 0.8.5.4 in place and keeps your permissions. Or download
+**NotchIsland.dmg** below and drag it to Applications.
+
+macOS 27 · MacBook with a notch (Apple silicon).
 
 ---
 

@@ -4,6 +4,167 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-13 (late evening): the island on a busy Mac; the page switch and the content's swap on the render server
+
+Release builds, MacBook Air M5 (4 performance and 6 efficiency cores, 16 GB) on the charger at
+85–90 %, the battery simulated where said (`NI_POWER=battery`). `mediaanalysisd` ran at ~200 % the
+whole evening (load average 2–6), so only numbers taken back to back compare. Energy = the
+coalition's (own + GPU + billed), as Activity Monitor counts it.
+
+### The hang reports, and the island with every core taken (`Scripts/perf/hang.py`)
+
+Sixteen "App Hanging for at least 2000 ms" reports came from one Mac between October 10 and 13 (a
+MacBook Pro 14" M5, 16 GB: six `xcodebuild`s, a simulator, 125–390 MB of memory free at each of
+them). Their stacks stood at arbitrary cheap places (`strcasecmp`, a lock being released) under
+`MainThrift.lowPowerTurn`: Settings being built ahead, the panel's other pages, Settings' close.
+At background quality of service the main thread gets what the efficiency cores have left — on
+that Mac, nothing. Reproduced here with `hog` (threads spinning at a given quality of service) and
+a tour by URL (launch and Settings' preparation, the panel and its pages, Settings, Siri); the
+longest main-thread turn of the tour, from `NI_TRACE`:
+
+| cores taken | as before (`NI_THRIFT_UNGUARDED=1`) | now |
+|---|---|---|
+| 10 at utility, begun 2 s before the launch | **the main thread stood for the whole 60 s tour**: no URL was answered (sampled: `lowPowerTurn` → `SettingsWindow.prepare`, the reports' stack) | 524 ms (the launch's own turn), 67 ms after it; one stretch ended 94 ms in |
+| 14 threads at default, just begun | **27.8 s** in the panel, **8.1 s** in Settings | 352 ms; one stretch ended 64 ms in |
+| 10 at user-initiated, just begun | | 325 ms; one stretch ended 61 ms in |
+| 10 at utility for 90 s before the launch (the load average knows) | | 390 ms (Settings' first opening, built then); nothing lowered |
+| 10 at utility, the real pointer hovering and clicking the gear | | 348 ms |
+| none | preparation steps of 2476, 358, 410, 742, 281 ms at background | 588, 159, 165, 751, 373, 911 ms; no stretch ended in 22 lowered turns (no false alarm) |
+
+Run again on the final build (`busyShare` 0.9, below): ten at utility just begun — as before 2173 ms
+(four turns over a second, Siri's 1116 ms), now 347 ms with two stretches ended 94 and 95 ms in;
+eight at utility for 90 s — 355 ms; ten at utility with macOS's `memory_pressure -l warn` beside
+them — 359 ms; quiet again afterwards (the daemon still at 200 %) — the longest step 565 ms, one
+stretch ended 94 ms in (the efficiency cores were the daemon's just then: the watch doing the
+gate's work at a load the average lets through).
+
+What changed:
+
+- **Nothing is lowered on a busy Mac** (`MainThrift.canLower`): every lowering asks `SystemLoad`
+  (the load average past 90 % of the cores, or macOS's memory warning), not only Settings'
+  preparation as since 0.8.5.2. The work then runs in its own turn at the thread's own priority.
+- **A watch from outside** (`ThriftWatch`): while the main thread is lowered and in a turn, another
+  thread reads its CPU time every 30 ms (`thread_info`); what the thread missed while it wanted to
+  run adds up, fading (`StallMeter`: two readings with nothing, or four with a third of a core),
+  and a quarter of a second blocked counts too. Then the main thread gets an override to
+  user-interactive (`pthread_override_qos_class_start_np`), the stretch is called off, and nothing
+  is lowered for 30 s. `thrift_watch.c` is the same in forty lines: 2 s of work at background beside
+  ten busy cores took 10.2 s, 1.95 s with the override.
+- **The pointer and the keys end unattended work at once**: for stretches nobody is at the Mac for
+  (Settings built ahead, teardowns after a close) the watch also looks where the pointer is, and
+  the volume, brightness and ⌘Space taps and the volume listener call `ThriftWatch.demand()` from
+  their own threads. On a quiet Mac a hover or a volume key during a preparation step waited for
+  the step's end before (up to 2.5 s); now the rest of the step runs on a performance core.
+- **Settings' first preparation step is the shell and the sidebar only** (`showsPage: false`): with
+  Widgets as the page Settings opens on it was one turn of 2.5 s at background on a quiet Mac —
+  itself a "hang" by the reports' measure. The longest step now is ~0.9 s (a whole page; cut short
+  by the pointer or a key).
+- **Settings is not built ahead while memory is tight** (macOS's warning now, or within five
+  minutes: `SettingsWindow.isMemoryTight`), said once in the log instead of every ten seconds; on a
+  Mac that is only busy it is built, at the thread's own priority (waiting for the load to end, a
+  Mac that builds all day never had Settings ready, and its first opening built it under the click).
+- `Thrifty.runInBackground` uses the utility queue on a busy Mac (Settings' wallpapers read ahead).
+- `SystemLoad.busyShare` 0.6 → 0.9: at 0.6 the photo-analysis daemon on two efficiency cores with
+  the usual apps beside it (load average ~6 on ten cores) already counted as busy, and nothing was
+  lowered all evening on a Mac with cores to spare. The watch covers what the average lets through
+  (the "just begun" rows above are that case).
+
+Not solved: a page of Settings is still built in one turn (0.4–0.9 s at background on a quiet Mac);
+Settings' first opening on a Mac too short of memory to build it ahead is ~0.4 s under the click.
+
+### The panel's page switch on the items' own layers (`PanelPageMotion`)
+
+SwiftUI animated the switch frame by frame (the incoming page's slide and fade, the outgoing
+one's fade). Now SwiftUI makes the change at once and each item's layer carries it: an explicit
+animation from where the item was to whatever its layer is then set to, same curve and length.
+Compared frame by frame from screen recordings (`screencapture -V`, AVFoundation, `pixels stats`
+from frame to frame): one smooth curve, the charts in step with their labels.
+
+| | by SwiftUI (`NI_LAYER_MOTION=0`) | on layers |
+|---|---|---|
+| Main thread a switch (URL, `NI_TRACE` turns over 1 ms) | 90–95 ms in ~17 turns | **37 ms in ~3** |
+| Two switches, energy (`abcpu.py`, 3 rounds, medians) | 187.0 mJ, CPU 216 ms | **155.5 mJ, CPU 109 ms** |
+| Twelve switches by a two-finger swipe (`stress.py page-swipe`, old build / new build, battery simulated) | 379, 346 mJ; worst 1 s 72, 68 | **156, 107 mJ; worst 1 s 49, 12** |
+| The same on the charger | 335, 338 mJ; worst 1 s 62, 66 | **137, 140 mJ; worst 1 s 42, 42** |
+
+What it took to look the same (each seen frame by frame first):
+- A page draws part of itself only once shown (the battery's charts: 60–80 ms over two or three
+  updates). SwiftUI's animation, driven by the thread that was busy drawing, stood still meanwhile;
+  the render server did not, and the charts came in three frames late at full strength. So every
+  item is held as it was until the shown page stops getting items (12 ms after the last update that
+  brought any, 0.15 s at most where none comes), then all start together; a later item joins where
+  the others are.
+- An explicit `CATransaction` begun and committed inside SwiftUI's update sent the half-drawn page
+  to the screen at once: none of our own.
+
+### The content's swap on the items' own layers (`ContentSwapMotion`)
+
+Where the swap between a pill, a banner and the panel is a plain cross-fade (on battery, in Low
+Power Mode, into Siri) SwiftUI faded it for 0.1–0.18 s frame by frame. Now it swaps at once, keeps
+what leaves in the tree, unseen, until the fade is over (`IslandModel.contentSwap`), and the items'
+layers fade from how they were drawn to what SwiftUI made of them. On the charger the blur-replace
+is SwiftUI's as before.
+
+| pill → panel → pill, 1.4 s each (`abcpu.py`, battery simulated, 3 rounds, medians) | by SwiftUI | on layers |
+|---|---|---|
+| Energy a cycle | 178.0 mJ | 174.8 mJ |
+| Main-thread turns over 1 ms / their time | 37 / 229 ms | **18 / 182 ms** |
+
+With a banner in the cycle too (pill → panel → pill → the charging banner, three rounds, medians):
+on layers 396.5 mJ in 38 turns, by SwiftUI 382.6 mJ in 70 turns, and the charger's blur-replace
+(SwiftUI's) 421.3 mJ in 73 turns — the blur is ~25 mJ of a 420 mJ cycle, inside the rounds' spread
+(266–457), so moving it to the render server too would save turns, not energy.
+
+The energy is the same within the rounds' spread (the frames SwiftUI drew were short ones on the
+efficiency cores); half the main thread's turns are gone, and the fade no longer waits for that
+thread. `withoutAnimation` for SwiftUI's side looked like a far larger saving (141 against 271
+turns) and was wrong: it also stopped the views' own animations — Liquid Glass's black coming in
+over a close popped in at once. `Transaction(animation: nil)` leaves those alone.
+
+### Old build against new, by the real pointer (`stress.py`, test copies, A B A B)
+
+Energy in mJ, two rounds each (old, old → new, new):
+
+| | battery simulated | on the charger |
+|---|---|---|
+| One hover opening | 111, 106 → 106, 67 | 101, 104 → 107, 99 |
+| Hover every 2.2 s, 8 times | 571, 556 → 536, 556 | 558, 545 → 554, 560 |
+| Hover every second, 12 times | 620, 611 → 624, 602 | 628, 623 → 623, 615 |
+| Pages swiped, 12 switches | 379, 346 → **156, 107** | 335, 338 → **137, 140** |
+| Settings from the gear, closed by a click outside, 3 times | 834, 1025 → 922, 873 | 938, 946 → 879, 787 |
+| Rest, 20 s (Energy Impact, mean) | 1.8, 2.2 → 1.4, 1.3 | 1.8, 1.6 → 1.3, 1.3 |
+
+Opening, closing and Settings cost what they did (their spread is the system's billing: 49–152 mJ
+of a Settings round); the watch's readings show as wake-ups while the thread is lowered (Settings
+from the gear: ~330 → ~470 for three rounds) and not in the energy.
+
+### Tried and left out
+
+- **Siri's field, list and gallery on the render server** (the table's third row): the room changes
+  sent through the outline's mask with the glass body's own layers given the outline's frames
+  (`bounds`, `position` keyframes on the eleven layers of the body's size). Photographed held
+  mid-move over the checkerboard (noise 0.000): in one move the glass was gone altogether and
+  Siri's content sat low; in the fade style the black is drawn for the held, larger outline — an
+  all-black island until it lands (as `Motion.surfaceFollowsOutline` says). One keystroke also sets
+  off three moves (field → 7 rows → 8 rows → the list, as the sources answer). SwiftUI's as before;
+  the experiment is kept as `refs/backup/siri-glass-experiment`.
+- **The panel's other pages built only when switched to** (instead of 0.8 s into every opening,
+  torn down a second after the close): 230 against 261 mJ for an opening of 2.5 s, inside the
+  rounds' spread (162–270). Left.
+- **A `CATransition` for the swap** cross-dissolves the whole layer, the growing glass with it;
+  **a layer of its own for a page** (`clipped()`) moves the legibility halo from each text to the
+  group.
+
+### Measuring traps found
+
+- CPU ms across the two kinds of core mean nothing (the same turn is ~3× the ms at background), and
+  a compile just before a run raised the load average past the gate and turned the comparison
+  round: 254 against 1159 ms for the same variant. Energy, A B A B, from a calm Mac (`CALM`).
+- Settings given up or never built is built again after the panel's next opening: background turns
+  of 0.4–1.7 s in the middle of the next measurement. `NI_NO_PREPARE=1` now stops that too.
+- A URL arriving while such a turn runs waits for its end (it comes in on the main thread); the
+  pointer and the keys do not, now.
+
 ## 2026-10-13 (evening, on the charger): Fan Control's animations on the render server
 
 Release build, MacBook Air M5 on the charger, simulated fans (`NI_DEMO_FANS=1`), the panel opened

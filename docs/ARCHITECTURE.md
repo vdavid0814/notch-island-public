@@ -103,6 +103,27 @@ view appears inside an open never rides its spring (`withoutAnimation`). Setting
 looping animation picture is Core Animation, and the widget studio's live preview has
 a view graph of its own (`IsolatedHosting`), so neither updates all of Settings.
 
+Work nobody waits on within the frame (Settings built ahead, a close's teardown) runs with the main
+thread at background quality of service, on the efficiency cores (`MainThrift`). That is safe only
+on a Mac with room for it: with the cores or the memory taken, a lowered thread gets almost no
+processor, and the island — on the same thread — stands still. So nothing is lowered while the Mac
+is busy or short of memory (`SystemLoad`: the load average past 90 % of the cores, or macOS's memory
+warning), and a thread of its own watches every lowered stretch (`ThriftWatch`): it reads the main
+thread's CPU time every 30 ms and, when the thread is starved or blocked — or, for work nobody is at
+the Mac for, when the pointer reaches the notch or a key the island answers is pressed — gives it an
+override to user-interactive at once and keeps anything from being lowered for a while. The main
+thread cannot do that for itself: whatever would raise it runs on the thread that is not running.
+Settings is not built ahead while macOS is short of memory or was within five minutes
+(`SettingsWindow.isMemoryTight`); on a Mac that is only busy it is, at the thread's own priority.
+
+SwiftUI draws the island's content as one flat list of layers, an item each. Where a change is only
+"these items fade, those glide in" — the panel's page switch, the content's swap between a pill, a
+banner and the panel where it is a plain cross-fade — SwiftUI makes the change at once and the
+items' own layers carry it on the render server, on the same curves (`LeafLayerMotion`: two empty
+marker views bound a piece of content's stretch of the list; `PanelPageMotion`,
+`ContentSwapMotion`). The items, their order and what takes a click stay SwiftUI's. Where the
+layers cannot be found, SwiftUI animates as before.
+
 Settings is built once and kept for as long as the app runs, in a window of its own
 (`SettingsWindow`) that lies over the island's page area and is ordered in only while Settings is
 open: built a few seconds after launch, unseen, on the efficiency cores (sidebar, then one page per

@@ -195,7 +195,7 @@ struct WidgetsSettingsPage: View {
             let reset = Timer(timeInterval: Self.pickResetDelay, repeats: false) { _ in
                 MainActor.assumeIsolated {
                     pendingReset = nil
-                    MainThrift.lowPower(for: 1.5)
+                    MainThrift.lowPower(for: 1.5, unattended: true)
                     forgetPicks()
                 }
             }

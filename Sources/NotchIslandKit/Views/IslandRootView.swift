@@ -165,19 +165,33 @@ private struct IslandContentStack: View {
                 // lazy ruler was rebuilt at every open; switching hit testing or accessibility off
                 // and on re-derived the whole page: ~15 ms per open each, measured.)
                 content(for: .expanded(page))
+                    .layerMarks(.panelBegin, .panelEnd)
                     // The panel's content leaves in a tenth of a second and the glass shrinks alone:
                     // riding the whole close spring, every frame re-rendered the content too.
+                    // (Where the render server fades the swap, it fades this too, as long:
+                    // `ContentSwapMotion.panelFade`.)
                     .opacity(isShown ? 1 : 0)
                     // Into Settings the render server cross-fades the whole content instead
                     // (`IslandWindowController.crossFadeToSettings`).
-                    .animation(isShown || presentation.isSettings ? nil : .easeOut(duration: 0.1), value: isShown)
+                    .animation(isShown || presentation.isSettings || model.island.contentSwap != nil ? nil : .easeOut(duration: 0.1), value: isShown)
                     .environment(\.isIslandPanelHidden, !isShown)
             }
-            if shownPage == nil {
-                content(for: presentation)
-                    .id(presentation.surfaceKey)
-                    .transition(presentation.isSettings ? .identity : .islandContent(reduceMotion: crossFades))
+            // What the island shows in the panel's place — and, while the render server fades a
+            // swap (`ContentSwapMotion`), what it showed before, kept until that has faded out. In
+            // a stack of their own between two marks, so their layers can be told from the panel's.
+            let leaving = model.island.contentSwap?.leaving.flatMap { old in
+                shownPage == nil && old.surfaceKey == presentation.surfaceKey ? nil : old
             }
+            ZStack(alignment: .top) {
+                ForEach((leaving.map { [$0] } ?? []) + (shownPage == nil ? [presentation] : []), id: \.surfaceKey) { shown in
+                    content(for: shown)
+                        // What is leaving is there for its layers' sake only: unseen as SwiftUI has
+                        // it (and so taking no clicks), faded out by the render server.
+                        .opacity(shown == presentation ? 1 : 0)
+                        .transition(shown.isSettings ? .identity : .islandContent(reduceMotion: crossFades))
+                }
+            }
+            .layerMarks(.contentBegin, .contentEnd)
         } }
         .onChange(of: shownPage, initial: true) { _, page in if let page { keptPage = page } }
         .onChange(of: keptPage != nil, initial: true) { _, kept in model.island.isPanelKept = kept }

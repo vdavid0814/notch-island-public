@@ -56,6 +56,7 @@ import os
         let generation = generation
         shared.begin(generation: generation)
         let deliver: @Sendable () -> Void = { [weak self] in
+            ThriftWatch.demand()
             Task { @MainActor in self?.onPress?() }
         }
         let report: @Sendable (Bool) -> Void = { [weak self] installed in

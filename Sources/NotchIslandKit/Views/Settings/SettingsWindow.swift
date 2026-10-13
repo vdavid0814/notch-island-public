@@ -74,6 +74,8 @@ final class SettingsWindow: NSPanel {
     /// `force`: macOS asked for memory — kept or not.
     static func discard(force: Bool = false) {
         discarding = nil
+        // Not built ahead again for a while (`isMemoryTight`), whether or not there was one to give up.
+        if force { lastMemoryPressure = CACurrentMediaTime() }
         guard force || (!isKept && isAway), let window = current else { return }
         // Open (or closing): after it has closed.
         guard !window.isVisible || window.isRehearsing, !window.model.island.presentation.isSettings else {
@@ -107,6 +109,17 @@ final class SettingsWindow: NSPanel {
     }
 
     private static var memoryPressure: (any DispatchSourceMemoryPressure)?
+    private static var lastMemoryPressure = -CFTimeInterval.infinity
+
+    /// How long after macOS asked for memory Settings is not built ahead again: on a Mac that runs
+    /// out every few minutes it was built after every opening of the panel and given up at the
+    /// next warning (one Mac's log, October 13: seven warnings an hour).
+    static let memoryCalm: TimeInterval = 300
+
+    /// macOS is short of memory now, or asked for some within `memoryCalm`.
+    static var isMemoryTight: Bool {
+        SystemLoad.isShortOfMemory || CACurrentMediaTime() - lastMemoryPressure < memoryCalm
+    }
 
     /// The kept window with its surface (as it was left), or a new one, over `frame`.
     static func reused(model: AppModel, placement: SettingsPlacement, frame: CGRect) -> SettingsWindow {
@@ -123,10 +136,13 @@ final class SettingsWindow: NSPanel {
 
     /// Builds Settings unseen ahead of its first opening (after launch, while the island is
     /// closed), at the size and place it will be shown at: the sidebar first, then one page per
-    /// call of `prepareNextPage`, so no single turn holds the main thread long.
+    /// call of `prepareNextPage`, so no single turn holds the main thread long. The page Settings
+    /// opens on is the first of those, not part of this step: with Widgets as that page the one
+    /// turn was 2.5 s at background quality of service on a quiet Mac, the island not answering
+    /// meanwhile (measured with `hang.py`, October 13).
     static func prepare(model: AppModel, frame: CGRect) {
         guard current == nil, frame.width > 0, frame.height > 0 else { return }
-        let window = SettingsWindow(model: model, placement: IslandSettingsView.placement(model.layout), frame: frame)
+        let window = SettingsWindow(model: model, placement: IslandSettingsView.placement(model.layout), frame: frame, showsPage: false)
         current = window
         window.root.layoutSubtreeIfNeeded()
         window.surface.sidebarHost.forcesLayout = true
@@ -184,9 +200,9 @@ final class SettingsWindow: NSPanel {
 
     deinit { Log.window.debug("settings window released") }
 
-    private init(model: AppModel, placement: SettingsPlacement, frame: CGRect) {
+    private init(model: AppModel, placement: SettingsPlacement, frame: CGRect, showsPage: Bool = true) {
         self.model = model
-        surface = SettingsSurfaceView(model: model, placement: placement)
+        surface = SettingsSurfaceView(model: model, placement: placement, showsPage: showsPage)
         super.init(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         // Over the island (its own level), under open menus and Control Center.
         level = NSWindow.Level(rawValue: IslandPanel.restingLevel.rawValue + 1)
@@ -364,7 +380,7 @@ final class SettingsWindow: NSPanel {
             let token = ObjectIdentifier(work)
             let timer = Timer(timeInterval: fade + 0.02, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    MainThrift.lowPowerTurn { [weak self] in
+                    MainThrift.lowPowerTurn(unattended: true) { [weak self] in
                         guard let self, let work = self.orderingOut, ObjectIdentifier(work) == token, !work.isCancelled else { return }
                         work.perform()
                     }

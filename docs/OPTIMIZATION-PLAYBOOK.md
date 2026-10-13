@@ -172,6 +172,38 @@ which did not, and how to keep the look identical. The numbers are in `ENERGY-LO
   `NI_POWER=battery|charger`, `demo/power`, `demo/away`, `demo/memorypressure`. Never lock the
   screen in a night run (it may need a password nobody can type).
 
+- **Background quality of service is a loan, not a gift**: on a Mac with every core or its memory
+  taken, a lowered main thread stops (`hang.py`: turns of 8–28 s with ten cores busy). Lower only
+  through `MainThrift` (it asks `SystemLoad` first and `ThriftWatch` watches the stretch), say
+  `unattended:` for work nobody is at the Mac for, and call `ThriftWatch.demand()` from any thread
+  that takes something the user did (an event tap). Test a new lowered stretch with
+  `LOAD=10:utility hang.py` — and on a quiet Mac too: a 2.5 s turn at background is a 2.5 s island
+  that does not answer.
+- **CPU ms lie across the two kinds of core**: the same work is ~3× the milliseconds on an
+  efficiency core for a fraction of the energy, and a compile just before a run switches the
+  lowering off (the load average) and turns every number round. Compare energy (`abcpu.py`,
+  `stress.py`), A B A B, from a calm Mac (`CALM`), and look at `ps -Ao pcpu,comm -r | head` first.
+- **`NI_NO_PREPARE=1` for anything measured after an opening**: Settings given up or not yet built
+  is built again after the panel next opens, in background turns of 0.4–1.7 s that land in the
+  middle of whatever is measured.
+- **Let the render server carry what SwiftUI only interpolates**: SwiftUI draws content as one flat
+  list of layers, an item each (`demo/state`'s dump). A change that is "these fade, those glide" can
+  be made at once by SwiftUI and animated on the items' own layers: an explicit animation with only
+  a `fromValue` runs from there to whatever the layer is set to (`LeafLayerMotion`). Find the items
+  with two empty marker views around the content (their lowest common layer is the list). Rules
+  learnt: no `CATransaction.begin/commit` of one's own inside SwiftUI's update (it flushed a
+  half-drawn frame); not `withoutAnimation` (it also stops the views' own `.animation(value:)` —
+  Liquid Glass's black over a close popped in): `Transaction(animation: nil)`; what SwiftUI removes
+  is gone at once, so keep what leaves in the tree, unseen, until its fade is over; a page draws
+  part of itself only once shown, over two or three updates — hold every item as it was until the
+  items stop coming, then start all together (SwiftUI's own animation waited the same way, being
+  driven by the busy thread); never leave an animation filled forwards on a layer SwiftUI may use
+  again. Compare frame by frame: `screencapture -V` of both variants, frames with AVFoundation,
+  `pixels stats` from frame to frame (a smooth curve, no step) and side by side.
+- **Frozen frames over the checkerboard compare to the last bit** (`frames/backdrop`, `demo/freeze?t=`,
+  noise 0.000): a glass style for the test goes in as an argument-domain default
+  (`open … --args -ni2.glassStyle smoked`), never through the user's own setting.
+
 ## 5. Tried and dropped (measured equal or worse)
 
 An AppKit `NSScrollView` around a SwiftUI page, responsive scrolling, AppKit hover tracking instead
@@ -207,6 +239,16 @@ skipping it for pictures only, which Tab cannot reach). Settings' paused picture
 instead of taken out of the window (close worse); background turns started a frame later (no
 change). Check that an `NI_EXP_…` switch really reached the app (`ps eww <pid>`): in zsh,
 `set -- $v` does not split a string.
+
+October 13 2026 (evening): Siri's rooms through the outline's mask with the glass body's layers
+keyframed to the outline (`bounds`, `position` on every layer of the body's size): the glass's layers
+do follow such animations, but in one move the glass went altogether and Siri's content sat low,
+and the fade style's black is drawn for the held (larger) outline — an all-black island until it
+lands. Building the panel's other pages only when switched to instead of 0.8 s into every opening:
+230 against 261 mJ a five-second cycle, within the rounds' spread (162–270) — left as it is.
+A `CATransition` for the content's swap: it cross-dissolves the whole layer, the growing glass
+with it. One layer for a page (`clipped()`): the legibility halo then falls on the group, not on
+each text.
 
 October 11 2026 (afternoon): a scroll gesture's later events sent straight to the view that took
 its first, past AppKit's own routing (`NSWindow.sendEvent`): a sixth of a swipe saved, but AppKit's

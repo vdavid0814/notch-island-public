@@ -270,6 +270,11 @@ nonisolated enum IslandPresentation: Sendable, Equatable {
 
     var isSettings: Bool { self == .settings }
 
+    /// The panel with one of its pages (not a notice card shown in its place).
+    var showsPanel: Bool {
+        if case .expanded(let page) = self { !page.isNoticeCard } else { false }
+    }
+
     /// Takes the keyboard while on screen (typing, arrows, Esc): the assistant and Settings.
     var takesKeyboard: Bool { isAssistant || isSettings }
 

@@ -360,7 +360,7 @@ private struct PagePicker: View {
         Picker("Page", selection: Binding {
             picksStudioPage ? model.studio.pendingPage ?? model.studio.page : model.panelPage
         } set: { page in
-            guard picksStudioPage else { return island.page = page }
+            guard picksStudioPage else { return island.show(page) }
             // On Settings' stage: the page shown there, as the stage's own page picker sets it (its
             // glass slides first, the board fades over: `WidgetStudio.switchPage`).
             guard page.isBoard || page == .shelf else { return NSSound.beep() }

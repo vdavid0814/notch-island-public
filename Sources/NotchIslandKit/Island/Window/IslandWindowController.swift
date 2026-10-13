@@ -101,7 +101,8 @@ import SwiftUI
     /// The panel opened: Settings, given up on the charger while unused, is built again ahead of
     /// the gear's next click (once the island has closed again: a step waits while it is open).
     private func prepareSettingsAgain() {
-        guard hasFollowedPowerSource, !SettingsWindow.isPrepared, !isPreparingSettings else { return }
+        guard hasFollowedPowerSource, !SettingsWindow.isPrepared, !isPreparingSettings,
+              ProcessInfo.processInfo.environment["NI_NO_PREPARE"] != "1" else { return }
         preparation += 1
         prepareSettings(after: .seconds(1), preparation: preparation)
     }
@@ -111,9 +112,12 @@ import SwiftUI
     private var preparation = 0
     /// A run of `prepareSettings` is under way (or waiting for the island to close).
     private var isPreparingSettings = false
+    /// It waits for memory (said once in the log, not at every look).
+    private var preparationWaits = false
 
     /// One piece of Settings per step, at background quality of service (efficiency cores), only
-    /// while the island is closed: a step waits while it is open.
+    /// while the island is closed: a step waits while it is open, and the pointer arriving at the
+    /// notch during a step gives the thread its priority back (`ThriftWatch`).
     private func prepareSettings(after delay: Duration, preparation: Int) {
         isPreparingSettings = true
         Task { @MainActor [weak self] in
@@ -127,11 +131,28 @@ import SwiftUI
                 self.prepareSettings(after: .seconds(3), preparation: preparation)
                 return
             }
-            // Not while the Mac is busy or short of memory (`SystemLoad`): at background quality of
-            // service a step then took seconds, and the island stuttered meanwhile.
-            guard !SystemLoad.isBusy else {
-                Log.window.notice("settings preparation waits: the Mac is busy")
-                self.prepareSettings(after: .seconds(10), preparation: preparation)
+            // Not while the Mac is short of memory, or was a moment ago (`SettingsWindow.isMemoryTight`):
+            // built, Settings is ~150 MB that macOS would ask back at its next warning, and the
+            // gear builds it when it is wanted. A Mac that is only busy gets it built all the
+            // same — at the thread's own priority (`MainThrift` lowers nothing then): waiting for
+            // the load to end, a Mac that builds all day never had Settings ready.
+            guard !SettingsWindow.isMemoryTight else {
+                if !self.preparationWaits {
+                    self.preparationWaits = true
+                    Log.window.notice("settings preparation waits: the Mac is short of memory")
+                }
+                self.prepareSettings(after: .seconds(30), preparation: preparation)
+                return
+            }
+            if self.preparationWaits {
+                self.preparationWaits = false
+                Log.window.notice("settings preparation goes on")
+            }
+            // A step has just been ended early (the pointer came, or it stalled: `ThriftWatch`):
+            // the next one after that, lowered again or on a Mac then known to be busy — not now
+            // at the thread's own priority.
+            guard !ThriftWatch.isHeldOff else {
+                self.prepareSettings(after: .seconds(1), preparation: preparation)
                 return
             }
             // The step in a turn of its own with the thread at background quality of service
@@ -139,7 +160,7 @@ import SwiftUI
             // the thread's is — the pages were built on a performance core: Activity Monitor
             // 1370, 1356, 766 and 471 in the four seconds from ten seconds after every launch
             // (measured with `rest.py`).
-            MainThrift.lowPowerTurn(holding: 0.35) { [weak self] in
+            MainThrift.lowPowerTurn(holding: 0.35, unattended: true) { [weak self] in
                 guard let self else { return }
                 guard self.isStarted, preparation == self.preparation else {
                     if preparation == self.preparation { self.isPreparingSettings = false }
@@ -374,6 +395,9 @@ import SwiftUI
         if next != metrics || model.metrics != next {
             metrics = next
             model.updateMetrics(next)
+            if let next {
+                ThriftWatch.setPointerZone(notch: next.notchRect, primaryTop: NSScreen.screens.first?.frame.maxY ?? next.screenFrame.maxY)
+            }
         }
         guard next != nil else {
             panel?.orderOut(nil)
@@ -415,6 +439,36 @@ import SwiftUI
         panel.contentView = stage
         outlineMotion.attach(to: stage)
         model.island.outlineMover = outlineMotion
+        // `NI_LAYER_MOTION=0` (measuring only): the page switch and the content's swap animated by
+        // SwiftUI, as before `LeafLayerMotion`.
+        if ProcessInfo.processInfo.environment["NI_LAYER_MOTION"] != "0" {
+            model.island.startsPageMotion = { [model] from, to in
+                // As `ExpandedView` lays the pages out: the incoming one waits on its side of the
+                // shown one in the picker's order, and under Reduce Motion in its place.
+                if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                    return PanelPageMotion.shared.begin(duration: PageSlide.reducedDuration,
+                                                        timing: CAMediaTimingFunction(name: .easeOut), glide: 0)
+                }
+                let order = model.pickerPages
+                let side: CGFloat = (order.firstIndex(of: to) ?? 0) >= (order.firstIndex(of: from) ?? 0) ? 1 : -1
+                let curve = PageSlide.curve
+                return PanelPageMotion.shared.begin(duration: PageSlide.duration,
+                                                    timing: CAMediaTimingFunction(controlPoints: Float(curve.0), Float(curve.1),
+                                                                                  Float(curve.2), Float(curve.3)),
+                                                    glide: side * PageSlide.distance * model.layout.factor)
+            }
+            // The content's swap, where it is a plain cross-fade (`IslandRootView`'s rule; Settings
+            // has its own: `crossFadeToSettings`).
+            model.island.startsContentSwap = { [model] from, to, duration in
+                guard !from.isSettings, !to.isSettings,
+                      model.activity.prefersReducedWork || model.power.isOnBattery || to.isAssistant else { return false }
+                return ContentSwapMotion.shared.begin(duration: duration)
+            }
+            hosting.afterLayout = {
+                PanelPageMotion.shared.follow()
+                ContentSwapMotion.shared.follow()
+            }
+        }
         self.panel = panel
         hostingView = hosting
         return panel
@@ -636,6 +690,7 @@ enum LayerDump {
     static func describe(_ layer: CALayer, depth: Int = 0) -> String {
         var line = String(repeating: "  ", count: depth) + String(describing: type(of: layer))
         line += " \(layer.frame.integral)"
+        if let name = layer.name, name.hasPrefix("ni.") { line += " “\(name)”" }
         if layer.isHidden { line += " hidden" }
         if layer.opacity < 1 { line += " opacity=\(layer.opacity)" }
         if layer.mask != nil { line += " MASK" }

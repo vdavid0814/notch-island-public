@@ -53,6 +53,7 @@ import os
         shared.begin(generation: generation)
 
         let deliver: @Sendable (MediaKeyEvent) -> Void = { [weak self] event in
+            ThriftWatch.demand()
             Task { @MainActor in self?.onKey?(event) }
         }
         let report: @Sendable (TapReport) -> Void = { [weak self] report in
