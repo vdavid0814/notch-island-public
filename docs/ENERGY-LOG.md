@@ -4,6 +4,65 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-13 (night, on the charger, battery simulated): memory after Settings, the charger's 3900
+
+Release builds, MacBook Air M5 on the charger; battery behaviour simulated with `NI_POWER=battery`
+(the whole island then works as on battery). Old = 0.8.5.1 (44), new = this night's commits, back to
+back from fresh launches. Activity Monitor's 1 s Energy Impact = the coalition's energy (own + GPU +
+billed), read with `meter.py`/`rest.py` (Activity Monitor itself could not be driven: no permission
+granted that night).
+
+| | old | new |
+|---|---|---|
+| Memory after Settings was used and given up (charger) | **253 MB** (Settings never freed) | **78–82 MB** |
+| Settings opened from the gear after it was given up (charger, Widgets page) | **3865** (4.1 J, 929 ms P-core) | does not happen while the Mac is in use (kept); ~450 the first time after a return |
+| Build ahead after each notch opening once given up (charger, every 15 min of non-use) | 150–860 for ~8 s | only after a return to the Mac (lock / sleeping displays): 130–320 for ~8 s |
+| Settings built ahead after launch (total) | ~2.3 J | ~2.1 J (peak second still 500–900) |
+| Memory with Settings built (either source) | 209 MB | 209 MB |
+| Hover open, single (battery / charger) | 95–118 / 91–115 | same (90–114) |
+| Hover spam, 1 open a second | 85–95 | same |
+| Settings from the gear, first after launch / later; close | 550–640 / 190–330; 140–205 | same |
+| Siri ⌘Space open / close / spam | 26–42 / 16–67 / 33–98 | same (noise) |
+| Hover across the open panel / page swipes (battery) | 7–22 / 39–46 | same |
+
+- **The leak.** `GlassSlide.lastPress` kept the window of the last click in a static, strongly:
+  Settings given up after it had been clicked stayed alive with every page (heap: one
+  `SettingsSurfaceView`, 1.6 M nodes, 190 MB). `leaks --traceTree=<address>` named the static. Its
+  wallpaper pictures (`WallpaperLibrary`, ~12 MB, found with `MallocStackLogging=lite` +
+  `malloc_history`) go with it now too.
+- **The charger's 3900.** Given up after 15 minutes unused, Settings was built again in the gear
+  click's own turn when next opened (the Widgets page: SwiftUI layout ~75 %, the key view loop
+  ~16 % of it), or ahead after the next panel opening, at 150–860 a second for ~8 s. On the charger
+  it is now kept while the Mac is in use and given up 2 minutes into a locked session or sleeping
+  displays, built again ahead once someone is back; on either source it goes when macOS reports
+  memory pressure. `demo/power`, `demo/away`, `demo/memorypressure` simulate the three switches.
+- **A step at background priority is followed by AppKit's display cycle at full priority** (the
+  frames after it lay out and draw what it changed): ~25 turns of 8–56 ms per launch preparation.
+  `MainThrift.lowPowerTurn(holding:)` keeps the thread at background until they have run (counted
+  from the end of the step: steps take 350–550 ms), handed back when the pointer comes onto the
+  island. Wallpaper decoding for an unseen Settings goes to the background queue.
+- **Background turns still spend performance-core time**: Settings' close is one 143 ms turn at
+  background with ~50 ms on a performance core (P ms per 0.1 s with `pms.py`-style coalition reads).
+  Starting the turn a frame later (to let queued higher-priority work drain) changed nothing.
+- **Where a hover opening goes**: one 69 ms turn at the click/hover priority, 35 ms of it on a
+  performance core ≈ 85 mJ of the ~100; the hover delay's prewarm and the later page builds run on
+  the efficiency cores. An opening within 10 s of the last close reads 66–73 (page kept), a cold one
+  101–120.
+
+### Tried and left out (no effect, A B A B)
+- The key view loop: SwiftUI rebuilds the window's key view loop over the whole window for every
+  hosting view that enters it (`FocusBridge.updateDefaultKeyViewLoop`); with the window's
+  `autorecalculatesKeyViewLoop` on, picks/modes in Settings ▸ Widgets went 424 → 275 and an
+  opening on the Widgets page 564 → 231, but Tab then steps differently. Rebuilding SwiftUI's loop
+  once afterwards (every hosting view's `viewDidMoveToWindow`, or only the top-level ones) changed
+  what Tab reaches (a search field kept the keyboard) and cost 30–60 ms; skipping it only for the
+  gallery's pictures (`PictureHostingView`) kept Tab identical but saved nothing measurable.
+  `tabtest.py` + an Accessibility focus reader compare Tab old against new.
+- Settings' paused pictures hidden in place instead of taken out of the window: no change.
+- The panel's page picker left out entirely (ablation): spam 85 → 80; not worth a second picker.
+- The segmented bars' widths no longer set again when unchanged (kept: harmless, no measurable
+  change).
+
 ## 2026-10-11 (afternoon, on the charger): the Timer's ruler as layers, memory on the charger
 
 Real trackpad-like swipes and drags (`ruler.py`, `ws/moused`), release builds, music playing, the

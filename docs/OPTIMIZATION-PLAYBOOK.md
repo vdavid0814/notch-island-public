@@ -148,6 +148,20 @@ which did not, and how to keep the look identical. The numbers are in `ENERGY-LO
 - **Another daemon's CPU changes every number** (`mediaanalysisd` at 200 % for an hour): look at
   `ps -Ao pcpu,comm -r | head` before a run and compare only runs made in the same state.
 
+- **Memory that does not come back is usually a strong reference, not the allocator**: `heap <pid>`
+  (count the app's own classes: one `SettingsSurfaceView` after Settings was "given up"), then
+  `leaks <pid> --traceTree=<address of it>` (from `heap <pid> -addresses=<Class>`) — the roots that
+  are statics or our own objects are the leak (`GlassSlide.lastPress`, Oct 13); the many "Swift
+  Metadata" roots are conservative-scan noise. For large blocks without a type, launch with
+  `MallocStackLogging=lite` and read `malloc_history <pid> <address>` (the wallpaper pictures).
+- **A background turn is followed by AppKit's display cycle at full priority**: what the turn
+  changed is laid out and drawn in the next frames, from the display link's source, at the thread's
+  own priority. Keep the thread at background until those have run
+  (`MainThrift.lowPowerTurn(holding:)`), and count the hold from the end of the work.
+- **Simulate the power source and the user's absence** instead of unplugging or locking:
+  `NI_POWER=battery|charger`, `demo/power`, `demo/away`, `demo/memorypressure`. Never lock the
+  screen in a night run (it may need a password nobody can type).
+
 ## 5. Tried and dropped (measured equal or worse)
 
 An AppKit `NSScrollView` around a SwiftUI page, responsive scrolling, AppKit hover tracking instead
@@ -176,6 +190,13 @@ only); Settings' opening and the Widgets stage's mode switch in a low-priority t
 Settings' window (Tab then loses the keyboard from the search field; the unfold's energy the same);
 the unseen Top Bar page out of the mode deck (no change). See `ENERGY-LOG.md` for Size mode's unfold
 (2–3 J: the page laid out at every frame) and the branch `wip-unfold-in-place`.
+
+October 13 2026: SwiftUI's key view loop rebuilt once after a batch instead of for every hosting
+view entering the window (`autorecalculatesKeyViewLoop` on meanwhile; then `viewDidMoveToWindow`
+on every or only the top-level hosting views): what Tab reaches changed and the rebuild cost 30–60
+ms; skipped only for the gallery's pictures: Tab identical, nothing saved. Settings' paused
+pictures hidden in place instead of taken out of the window; the panel's page picker left out
+(ablation, −5 %); background turns started a frame later. All equal within noise.
 
 October 11 2026 (afternoon): a scroll gesture's later events sent straight to the view that took
 its first, past AppKit's own routing (`NSWindow.sendEvent`): a sixth of a swipe saved, but AppKit's

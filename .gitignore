@@ -23,3 +23,4 @@ Scripts/perf/ws/axscroll
 Scripts/perf/apps/
 .sentryclirc
 Scripts/perf/ws/moused
+Scripts/perf/ws/axfocus

@@ -9,6 +9,8 @@
 | `ruler.py [rounds] [fast\|slow\|drag …]` | The Timer's ruler under trackpad-like swipes and mouse drags, the panel hovered open first: each swipe's energy, worst 1 s, CPU and performance-core ms. `RULER`, `OTHER`, `NOTCH` are the points. Wait ~40 s after a launch. |
 | `meter.py` | `run([(name, step), …])`: each step's energy as Activity Monitor counts it, its worst 1 s window, CPU and performance-core ms, and every second's energy; the steps use `stress.py`'s pointer and keys (`move`, `click`, `key`, `send`). |
 | `studio.py [rounds] [picks\|modes\|customize]` | Settings ▸ Widgets by real clicks: a widget picked on the stage and let go, the stage's modes (Top Bar, Size and back), Customize opened and closed. Open the page first (`drive.py settings/widgets 4`); the points (`TIMER`, `SYSTEM`, `SIZE`, …) are for a 1280 × 832 pt screen. |
+| `pms.py <seconds> [step]` | The coalition every `step` seconds (0.25 by default): energy, CPU ms, performance-core ms, billed — to line a burst up with `NI_TRACE`'s turns by wall clock. |
+| `tabtest.py` | Tab and ⇧Tab through Settings ▸ Widgets (search field, a picked widget, a page switch), printing the focused element after each step (`ws/axfocus <pid>`, Accessibility). Run on the old and the new build and `diff`: what Tab reaches must not change. |
 | `serviced.py <seconds> [min mJ]` | Which processes worked for others meanwhile (`proc_pid_rusage`'s serviced energy, polled, so short-lived helpers count): who the coalition's "billed to me" comes from. Root's daemons (`mds`) cannot be read. |
 | `qos_burst.c` | The same burst of work at each quality of service and inside a work interval: wall time, performance-core ms and energy. What a turn costs where (user-interactive ≈ utility ≈ 2.6 mJ/ms on a performance core; background ≈ 0.08 mJ/ms, 3.5× slower). |
 | `phases.py <step>=<seconds> …` | Energy, CPU, performance-core ms and the worst 1 s of each step: a `notchisland://` route, or `move:x,y` / `click:x,y` with the real pointer (`ws/mouse`). A click and a URL run differently (the click's priority carries into its turn): measure the real path. |
@@ -24,8 +26,10 @@
 
 Switches read by the app (measuring only): `NI_TRACE=1` (long main-thread turns in the log),
 `NI_LAYER_DETAIL=1` (`demo/state` writes every layer's exact frame, corner, colour and gradient),
-`NI_KEEP_SETTINGS=1` or `0` (Settings kept built as on battery, or built when opened as on the
-charger, whatever the power source).
+`NI_KEEP_SETTINGS=1` or `0` (Settings kept built as on battery, or given up when nobody is at the
+Mac as on the charger, whatever the power source), `NI_POWER=battery|charger` (the whole island as on
+that source), `NI_SETTINGS_UNUSED=<s>` (how long into "nobody at the Mac" Settings goes).
+Routes: `demo/power?source=battery|charger|real`, `demo/away?on=1|0`, `demo/memorypressure`.
 
 Findings (September 2026, macOS 27, MacBook Air M5):
 - SwiftUI's `.glassEffect(.clear.tint(.black.opacity(0.62)))` and `NSGlassEffectView(.clear, tint)` render identically (0 pixel difference).
