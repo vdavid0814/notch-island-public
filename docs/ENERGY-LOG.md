@@ -49,6 +49,13 @@ granted that night).
   the efficiency cores. An opening within 10 s of the last close reads 66–73 (page kept), a cold one
   101–120.
 
+- **The gallery's previews stayed empty** when Settings ▸ Widgets was opened while Settings was
+  being built (~9 s after a launch, or after a return to the Mac; the old build too): each card
+  slept until a slot taken as it appeared, 120 ms apart while unseen, and kept that pace once
+  Settings was open. One pump now hands out the turns at the pace of the moment
+  (`GalleryPreviewQueue`).
+- **Kept Settings at rest** (charger, after 8 openings): 208–209 MB, flat; Energy Impact mean 0.02.
+
 ### Tried and left out (no effect, A B A B)
 - The key view loop: SwiftUI rebuilds the window's key view loop over the whole window for every
   hosting view that enters it (`FocusBridge.updateDefaultKeyViewLoop`); with the window's
