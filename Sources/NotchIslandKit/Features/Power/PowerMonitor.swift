@@ -119,6 +119,15 @@ import Observation
         if let event { onEvent?(event) }
     }
 
+    /// `demo/power`: the source the island follows, whatever the Mac is on (nil: the real one).
+    @ObservationIgnored private var demoOnBattery: Bool?
+
+    func followSource(demo onBattery: Bool?) {
+        demoOnBattery = onBattery
+        publish(state)
+        Log.power.notice("demo power source: \(onBattery.map { $0 ? "battery" : "charger" } ?? "real", privacy: .public)")
+    }
+
     /// Reads IOKit once and publishes the result. Internal so tests can drive it.
     func refresh() {
         apply(readState())
@@ -163,7 +172,7 @@ import Observation
         // Observation notifies on every assignment; IOKit posts for fields we do not
         // model, so skip no-op writes.
         if state != next { state = next }
-        let onBattery = Self.forcedOnBattery ?? next.isOnBattery
+        let onBattery = demoOnBattery ?? Self.forcedOnBattery ?? next.isOnBattery
         if isOnBattery != onBattery { isOnBattery = onBattery }
         if hasBattery != next.hasBattery { hasBattery = next.hasBattery }
     }

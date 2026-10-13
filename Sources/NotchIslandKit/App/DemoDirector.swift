@@ -52,6 +52,12 @@ import SwiftUI
             reset(model)
         case .hover(let inside):
             model.controller.simulatePointer(inside: inside)
+        case .power(let onBattery):
+            model.power.followSource(demo: onBattery)
+        case .away(let away):
+            model.simulateAway(away)
+        case .memoryPressure:
+            SettingsWindow.discard(force: true)
         case .state:
             model.logIslandState()
         case .segments:

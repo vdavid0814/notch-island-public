@@ -11,6 +11,14 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case media, charging, unplug, low, volume(Double), brightness(Double), timerDone, drop, shelf, reset
     /// Pointer over / away from the island, without moving the real pointer.
     case hover(Bool)
+    /// The power source the island follows (`demo/power?source=battery|charger|real`), for
+    /// measuring a switch without unplugging.
+    case power(Bool?)
+    /// Nobody at the Mac or back (`demo/away?on=1|0`), as a locked session does for Settings, without
+    /// hiding the island.
+    case away(Bool)
+    /// macOS asking for memory (`demo/memorypressure`), as its warning does for Settings.
+    case memoryPressure
     /// Logs presentation, stage and where SwiftUI actually placed the island.
     case state
     /// Logs every segmented control on screen: its frame and the width it wants.
@@ -215,6 +223,15 @@ nonisolated enum AppCommand: Sendable, Equatable {
             default: return nil
             }
         case "demo/state": return .demo(.state)
+        case "demo/power":
+            switch query["source"]?.lowercased() {
+            case "battery": return .demo(.power(true))
+            case "charger": return .demo(.power(false))
+            case "real", nil: return .demo(.power(nil))
+            default: return nil
+            }
+        case "demo/away": return .demo(.away(query["on"] != "0"))
+        case "demo/memorypressure": return .demo(.memoryPressure)
         case "demo/segments": return .demo(.segments)
         case "demo/airpods": return .demo(.airPods)
         case "demo/airpodsmode":

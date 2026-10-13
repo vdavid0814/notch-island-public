@@ -195,6 +195,11 @@ import Observation
 
     @ObservationIgnored private let dragMonitor = DragSessionMonitor()
     @ObservationIgnored private let demo = DemoDirector()
+    /// `demo/away`: Settings told nobody is at the Mac (or that someone is back).
+    func simulateAway(_ away: Bool) {
+        windowController?.userAway(away)
+    }
+
     @ObservationIgnored private var windowController: IslandWindowController?
     @ObservationIgnored private var settingsWindow: SettingsWindowController?
     @ObservationIgnored private var customizeWindow: WidgetEditorWindowController?

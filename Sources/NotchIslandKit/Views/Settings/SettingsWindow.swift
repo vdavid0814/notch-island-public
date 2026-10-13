@@ -34,37 +34,52 @@ final class SettingsWindow: NSPanel {
     private var orderingOut: DispatchWorkItem?
 
     /// Whether Settings is kept built for as long as the app runs: on battery, where an opening of
-    /// the kept window costs a ninth of building it. On the charger it is built ahead too (built
-    /// when opened, the opening cost ~3 J in a second, measured), and given up once it has gone
-    /// unused for `unusedDelay` (~150 MB with every page built). Set by the island's window
-    /// controller as the power source changes (`IslandWindowController.followPowerSource`).
+    /// the kept window costs a ninth of building it. On the charger it is built ahead and kept too
+    /// while someone uses the Mac, and given up once nobody has been at it for `awayDelay` (the
+    /// session locked or the displays asleep: ~130 MB with every page built). Given up on a timer
+    /// while the Mac was in use (15 minutes unused), the next opening built it again in the click's
+    /// own turn — the Widgets page: Activity Monitor ~3900, 4 J in a second on the performance
+    /// cores — and the build ahead after the panel's next opening read 150–860 for ~8 s (measured):
+    /// both are gone. Set by the island's window controller as the power source changes
+    /// (`IslandWindowController.followPowerSource`). Wherever it is, it is given up when macOS asks
+    /// for memory (`watchMemoryPressure`).
     static var isKept = true {
         didSet {
             guard isKept != oldValue else { return }
-            if isKept { discarding?.cancel() } else if current != nil { discardLater() }
+            if isKept { discarding?.cancel() } else if current != nil, isAway { discardLater() }
         }
     }
 
-    /// How long Settings may go unused (closed, after it was built or last open) before it is given
-    /// up where it is not kept.
-    /// `NI_SETTINGS_UNUSED=<seconds>` (measuring) shortens it.
-    static let unusedDelay: TimeInterval = ProcessInfo.processInfo.environment["NI_SETTINGS_UNUSED"].flatMap(TimeInterval.init) ?? 15 * 60
+    /// How long nobody may be at the Mac before Settings is given up where it is not kept.
+    /// `NI_SETTINGS_UNUSED=<seconds>` (measuring) sets it.
+    static let awayDelay: TimeInterval = ProcessInfo.processInfo.environment["NI_SETTINGS_UNUSED"].flatMap(TimeInterval.init) ?? 120
     private static var discarding: DispatchWorkItem?
+    /// Nobody at the Mac: the session locked or the displays asleep (`IslandWindowController.setSuspended`).
+    private(set) static var isAway = false
+
+    static func userAway(_ away: Bool) {
+        isAway = away
+        if away, !isKept, current != nil { discardLater() } else if !away { discarding?.cancel() }
+    }
 
     static func discardLater() {
         discarding?.cancel()
         let work = DispatchWorkItem { discard() }
         discarding = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + unusedDelay, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + awayDelay, execute: work)
     }
 
     /// Settings given up while it is closed: its window, its pages and what they drew. Its next
     /// opening builds it again (as the first one after a launch does where it was not built ahead).
-    static func discard() {
+    /// `force`: macOS asked for memory — kept or not.
+    static func discard(force: Bool = false) {
         discarding = nil
-        guard !isKept, let window = current else { return }
+        guard force || (!isKept && isAway), let window = current else { return }
         // Open (or closing): after it has closed.
-        guard !window.isVisible, !window.model.island.presentation.isSettings else { return discardLater() }
+        guard !window.isVisible || window.isRehearsing, !window.model.island.presentation.isSettings else {
+            if !force { discardLater() }
+            return
+        }
         if window.isRehearsing { window.endRehearsal() }
         window.orderingOut?.cancel()
         current = nil
@@ -72,8 +87,26 @@ final class SettingsWindow: NSPanel {
         window.contentView = nil
         window.close()
         WallpaperLibrary.shared.release()
-        Log.window.notice("settings given up while closed (not kept on the charger)")
+        Log.window.notice("settings given up while closed (\(force ? "memory pressure" : "nobody at the Mac, on the charger", privacy: .public))")
     }
+
+    /// macOS short of memory (its warning or critical level): Settings, closed, goes on either power
+    /// source, and is built again ahead after the panel's next opening
+    /// (`IslandWindowController.prepareSettingsAgain`).
+    static func watchMemoryPressure() {
+        guard memoryPressure == nil else { return }
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        source.setEventHandler {
+            MainActor.assumeIsolated {
+                Log.window.notice("memory pressure \(String(describing: source.data), privacy: .public)")
+                discard(force: true)
+            }
+        }
+        source.resume()
+        memoryPressure = source
+    }
+
+    private static var memoryPressure: (any DispatchSourceMemoryPressure)?
 
     /// The kept window with its surface (as it was left), or a new one, over `frame`.
     static func reused(model: AppModel, placement: SettingsPlacement, frame: CGRect) -> SettingsWindow {
@@ -322,7 +355,6 @@ final class SettingsWindow: NSPanel {
             self.orderingOut = nil
             SettingsPresence.shared.isShown = false
             self.orderOut(nil)
-            if !Self.isKept { Self.discardLater() }
         }
         orderingOut = work
         if let fade {

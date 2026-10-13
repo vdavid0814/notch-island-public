@@ -88,8 +88,8 @@ nonisolated enum Thrifty {
     static func lowPowerTurn(holding hold: TimeInterval, _ work: @escaping @MainActor () -> Void) {
         guard isEnabled else { return work() }
         let timer = Timer(timeInterval: 0, repeats: false) { _ in
-            let until = CACurrentMediaTime() + hold
-            holdUntil = max(holdUntil, until)
+            // Held until `hold` after the work: a step can itself take longer than that.
+            holdUntil = .infinity
             pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0)
             // Lowered again before every layout and commit until the hold is over (a dispatch job
             // run meanwhile restores the thread's own), raised after the first one past it.
@@ -108,6 +108,8 @@ nonisolated enum Thrifty {
             CFRunLoopAddObserver(CFRunLoopGetMain(), lower, .commonModes)
             CFRunLoopAddObserver(CFRunLoopGetMain(), raise, .commonModes)
             MainActor.assumeIsolated { work() }
+            // Raised meanwhile (`raise`): not held again.
+            if holdUntil == .infinity { holdUntil = CACurrentMediaTime() + hold }
         }
         RunLoop.main.add(timer, forMode: .common)
     }

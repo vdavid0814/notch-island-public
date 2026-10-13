@@ -58,6 +58,7 @@ import SwiftUI
         reanchor()
         // `NI_NO_PREPARE=1` (measuring): Settings is built only when first opened.
         followPowerSource()
+        SettingsWindow.watchMemoryPressure()
     }
 
     /// Settings is built once, unseen, a while after launch (`SettingsSurfaceView.prepare`):
@@ -65,12 +66,12 @@ import SwiftUI
     static let settingsPreparationDelay: Duration = .seconds(6)
 
     /// Settings is built ahead, unseen, on the efficiency cores, on battery and on the charger alike:
-    /// built when opened, as the charger had it, its opening cost ~3 J in one second on the
-    /// performance cores (Activity Monitor 1500–2800, measured). On battery it is kept for as long
-    /// as the app runs; on the charger it is given up once it has gone unused a while
-    /// (`SettingsWindow.unusedDelay`), and built again ahead, unseen, after the panel is next opened
-    /// (`prepareSettingsAgain`). A change of power source only changes that rule: nothing is built or
-    /// given up at the switch itself. A Mac without a battery is on the charger.
+    /// built when opened, its opening cost ~3 J in one second on the performance cores (Activity
+    /// Monitor 1500–3900, measured). On battery it is kept for as long as the app runs; on the
+    /// charger it is given up once nobody has been at the Mac a while (`SettingsWindow.isKept`) and
+    /// built again ahead, unseen, when someone is back (`setSuspended`) or after the panel is next
+    /// opened (`prepareSettingsAgain`). A change of power source only changes that rule: nothing is
+    /// built or given up at the switch itself. A Mac without a battery is on the charger.
     /// `NI_KEEP_SETTINGS=1` or `0` (measuring): kept or not, whatever the power.
     private func followPowerSource() {
         let generation = observationGeneration
@@ -91,7 +92,7 @@ import SwiftUI
         SettingsWindow.isKept = keeps
         Log.window.notice("settings \(keeps ? "kept (on battery)" : "given up when unused (on the charger)", privacy: .public)")
         if ProcessInfo.processInfo.environment["NI_NO_PREPARE"] == "1" { return }
-        if isFirst || (keeps && !SettingsWindow.isPrepared) {
+        if isFirst || !SettingsWindow.isPrepared {
             preparation += 1
             prepareSettings(after: Self.settingsPreparationDelay, preparation: preparation)
         }
@@ -118,7 +119,7 @@ import SwiftUI
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay, tolerance: .milliseconds(200))
             guard let self else { return }
-            guard self.isStarted, preparation == self.preparation, let metrics = self.metrics else {
+            guard self.isStarted, preparation == self.preparation, let metrics = self.metrics, !self.isSuspended else {
                 if preparation == self.preparation { self.isPreparingSettings = false }
                 return
             }
@@ -152,8 +153,6 @@ import SwiftUI
                     SettingsWindow.prepare(model: self.model, frame: frame)
                 } else if !SettingsWindow.prepareNextPage(model: self.model) {
                     self.isPreparingSettings = false
-                    // Built: on the charger it waits to be used, and goes if it is not.
-                    if !SettingsWindow.isKept { SettingsWindow.discardLater() }
                     return
                 }
                 self.prepareSettings(after: .milliseconds(400), preparation: preparation)
@@ -183,6 +182,7 @@ import SwiftUI
         guard suspended != isSuspended else { return }
         isSuspended = suspended
         SettingsWindow.current?.setSuspended(suspended)
+        userAway(suspended)
         if suspended {
             giveKeyboardBack()
             panel?.orderOut(nil)
@@ -190,6 +190,17 @@ import SwiftUI
             // Displays may have changed while asleep.
             reanchor()
         }
+    }
+
+    /// Nobody at the Mac (the session locked, the displays asleep), or someone back: on the charger
+    /// Settings goes a while into it, and is built again ahead, unseen, as after a launch, once
+    /// someone is back.
+    func userAway(_ away: Bool) {
+        SettingsWindow.userAway(away)
+        guard !away, hasFollowedPowerSource, !SettingsWindow.isPrepared, !isPreparingSettings,
+              ProcessInfo.processInfo.environment["NI_NO_PREPARE"] != "1" else { return }
+        preparation += 1
+        prepareSettings(after: Self.settingsPreparationDelay, preparation: preparation)
     }
 
     // MARK: Keyboard
