@@ -7,6 +7,13 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-10-14 21:40** — No message to another process waits on the main thread: Siri AI's
+  Accessibility walks (`SiriHandoff`, `@concurrent`, 1 s per read) and the pasteboard's change count
+  (`PasteboardWatch`, a queue of its own) moved off it. Settings is built ahead only after a calm
+  that doubles with each memory warning in six hours (5 min → 1 h). Diagnostics leave out readings
+  taken while the island was in use, and what was said to Siri AI is no app search.
+  *Gergő's Mac (October 13–14): App Hangs in `SiriHandoff.submit` and `ClipboardHistory.check`;
+  Settings built and given up three times (~5 J each); "unusual behaviour" for clicking Settings.*
 - **2026-10-14 17:50** — On Liquid Glass, grey widget texts and own-colour texts low in contrast with
   the glass (WCAG < 4.5) get a 100 % black/white 0.5-pt sharp edge (`ClearTextEdge`), drawn by the
   text itself (`ClearTextEdgeRenderer`: offset glyphs in one layer, the glyphs cut out of it). *Eight

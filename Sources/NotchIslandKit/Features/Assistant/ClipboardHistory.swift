@@ -24,7 +24,7 @@ nonisolated struct ClipboardItem: Hashable, Identifiable, Sendable, Codable {
 ///
 /// The pasteboard has no change notification, so its change count is read once a second — one
 /// integer from the pasteboard server, with a generous timer leeway so the wake-up rides along
-/// with others. Nothing else runs until the count moves. Copies an app marks as concealed or
+/// with others — on a queue of its own (`PasteboardWatch`). Nothing else runs until the count moves. Copies an app marks as concealed or
 /// transient (password managers, per nspasteboard.org) are never kept.
 @Observable final class ClipboardHistory {
     private(set) var items: [ClipboardItem] = []
@@ -39,7 +39,7 @@ nonisolated struct ClipboardItem: Hashable, Identifiable, Sendable, Codable {
 
     @ObservationIgnored private let pasteboard: NSPasteboard
     @ObservationIgnored private let storeURL: URL?
-    @ObservationIgnored private var timer: (any DispatchSourceTimer)?
+    @ObservationIgnored private var watch: PasteboardWatch?
     @ObservationIgnored private var lastChangeCount: Int
 
     init(pasteboard: NSPasteboard = .general, storeURL: URL? = ClipboardHistory.defaultStoreURL) {
@@ -61,42 +61,21 @@ nonisolated struct ClipboardItem: Hashable, Identifiable, Sendable, Codable {
     /// Watches the pasteboard (Settings ▸ Siri ▸ Clipboard on) or stops, keeping what it has.
     func setWatching(_ watching: Bool) {
         if watching {
-            guard timer == nil else { return }
-            lastChangeCount = pasteboard.changeCount
-            let timer = DispatchSource.makeTimerSource(queue: .main)
-            timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(500))
-            timer.setEventHandler { [weak self] in
-                MainActor.assumeIsolated {
-                    self?.check()
-                    self?.pace()
-                }
+            guard watch == nil else { return }
+            watch = PasteboardWatch(pasteboard: pasteboard) { [weak self] count, isFirst in
+                guard let self else { return }
+                // Copies made while nothing watched are not taken in (as before).
+                if isFirst { self.lastChangeCount = count } else { self.check(count) }
             }
-            timer.resume()
-            self.timer = timer
         } else {
-            timer?.cancel()
-            timer = nil
+            watch?.stop()
+            watch = nil
         }
     }
 
-    /// Once a second while the Mac is being used; every five seconds once nothing has been typed
-    /// or clicked for a minute (a copy needs a keystroke or a click, and the first look after one
-    /// is at most five seconds late): at rest the look was the app's only wake-up.
-    private var isRelaxed = false
-
-    private func pace() {
-        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState,
-                                                           eventType: CGEventType(rawValue: ~0) ?? .null)
-        let relaxed = idle > 60
-        guard relaxed != isRelaxed, let timer else { return }
-        isRelaxed = relaxed
-        let interval: DispatchTimeInterval = relaxed ? .seconds(5) : .seconds(1)
-        timer.schedule(deadline: .now() + interval, repeating: interval, leeway: relaxed ? .seconds(2) : .milliseconds(500))
-    }
-
-    /// Reads the pasteboard if it changed since the last look.
-    func check() {
-        let count = pasteboard.changeCount
+    /// Reads the pasteboard if it changed since the last look (`count`: its change count, read).
+    func check(_ count: Int? = nil) {
+        let count = count ?? pasteboard.changeCount
         guard count != lastChangeCount else { return }
         lastChangeCount = count
         let types = Set((pasteboard.types ?? []).map(\.rawValue))
@@ -156,5 +135,51 @@ nonisolated struct ClipboardItem: Hashable, Identifiable, Sendable, Codable {
         up?.flags = .maskCommand
         down?.post(tap: .cghidEventTap)
         up?.post(tap: .cghidEventTap)
+    }
+}
+
+/// The pasteboard's change count, read on a queue of its own: the read is a message to the
+/// pasteboard server that waits for its answer, and on a Mac short of memory it stood the main
+/// thread still for over 2 s (App Hang in `ClipboardHistory.check`, October 13). The main thread
+/// hears only of a change (`onChange`, with the first count read as `isFirst`).
+///
+/// Once a second while the Mac is being used; every five seconds once nothing has been typed or
+/// clicked for a minute (a copy needs a keystroke or a click, and the first look after one is at
+/// most five seconds late): at rest the look was the app's only wake-up.
+nonisolated final class PasteboardWatch: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "com.davidvarga.notchisland.pasteboard", qos: .utility)
+    private let timer: any DispatchSourceTimer
+    // Touched on `queue` only.
+    private let pasteboard: NSPasteboard
+    private var lastCount: Int?
+    private var isRelaxed = false
+
+    init(pasteboard: NSPasteboard, onChange: @escaping @MainActor (_ count: Int, _ isFirst: Bool) -> Void) {
+        self.pasteboard = pasteboard
+        timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now(), repeating: 1, leeway: .milliseconds(500))
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            let count = self.pasteboard.changeCount
+            if count != self.lastCount {
+                let isFirst = self.lastCount == nil
+                self.lastCount = count
+                DispatchQueue.main.async { MainActor.assumeIsolated { onChange(count, isFirst) } }
+            }
+            self.pace()
+        }
+        timer.resume()
+    }
+
+    func stop() { timer.cancel() }
+
+    private func pace() {
+        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState,
+                                                           eventType: CGEventType(rawValue: ~0) ?? .null)
+        let relaxed = idle > 60
+        guard relaxed != isRelaxed else { return }
+        isRelaxed = relaxed
+        let interval: DispatchTimeInterval = relaxed ? .seconds(5) : .seconds(1)
+        timer.schedule(deadline: .now() + interval, repeating: interval, leeway: relaxed ? .seconds(2) : .milliseconds(500))
     }
 }

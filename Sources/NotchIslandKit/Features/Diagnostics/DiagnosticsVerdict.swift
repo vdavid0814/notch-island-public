@@ -357,12 +357,24 @@ nonisolated extension DiagnosticsVerdict {
 
     /// Siri searches in the user's steps that found no app, newest last, at most five (from
     /// `siri: "xcode" in root → 0 apps, 3 files (anywhere)`). Only words of three letters or more:
-    /// "a", "ne" are the start of typing.
+    /// "a", "ne" are the start of typing. Not what was said to Siri AI: a question asked of it
+    /// (`siri: picked ask for "…"`), or anything typed while its answer was up (a reply to it) —
+    /// "how far is the moon" and "send a message to david" were the warning on one Mac (October 14).
     static func searchesWithoutApps(_ report: DiagnosticsReport) -> [String] {
         let flow = report.value("Flow", in: "User flow") ?? ""
         var found: [String] = []
+        var inAnswer = false
         for line in flow.split(separator: "\n") {
-            guard let match = line.firstMatch(of: /siri: "(.+)" in (\w+) → (\d+) apps/), match.3 == "0" else { continue }
+            if let match = line.firstMatch(of: /island .+ → (.+)$/) {
+                inAnswer = match.1.contains("AssistantRoom.answer(")
+                continue
+            }
+            if let match = line.firstMatch(of: /siri: picked ask for "(.+)"/) {
+                let asked = match.1.lowercased()
+                found.removeAll { asked.hasPrefix($0.lowercased()) }
+                continue
+            }
+            guard !inAnswer, let match = line.firstMatch(of: /siri: "(.+)" in (\w+) → (\d+) apps/), match.3 == "0" else { continue }
             let text = String(match.1).trimmingCharacters(in: .whitespaces)
             guard text.count >= 3, !text.contains("?"), text.rangeOfCharacter(from: .letters) != nil else { continue }
             // "xco", "xcod", "xcode": the longest of a typed word stands for it.

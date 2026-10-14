@@ -113,8 +113,9 @@ thread's CPU time every 30 ms and, when the thread is starved or blocked — or,
 the Mac for, when the pointer reaches the notch or a key the island answers is pressed — gives it an
 override to user-interactive at once and keeps anything from being lowered for a while. The main
 thread cannot do that for itself: whatever would raise it runs on the thread that is not running.
-Settings is not built ahead while macOS is short of memory or was within five minutes
-(`SettingsWindow.isMemoryTight`); on a Mac that is only busy it is, at the thread's own priority.
+Settings is not built ahead while macOS is short of memory or was lately — five minutes after one
+warning, doubled for each other one in six hours, an hour at most (`SettingsWindow.isMemoryTight`);
+on a Mac that is only busy it is, at the thread's own priority.
 
 SwiftUI draws the island's content as one flat list of layers, an item each. Where a change is only
 "these items fade, those glide in" — the panel's page switch, the content's swap between a pill, a

@@ -233,6 +233,22 @@ import Testing
         #expect(verdict.mostLikely?.cause.contains("Downloads/Xcode.app") == true)
     }
 
+    /// Gergő's steps, October 14: questions to Siri AI, not app searches.
+    @Test func whatWasSaidToSiriAIIsNoAppSearch() {
+        var report = DiagnosticsReport()
+        report.sections = [.init("User flow", [.init(key: "Flow", value: """
+            15:56:25.788 siri: "how far" in root → 0 apps, 6 files (wordStart)
+            15:56:27.129 siri: "how far is the moon" in root → 0 apps, 0 files (wordStart)
+            15:56:28.970 siri: picked ask for "how far is the moon"
+            15:56:28.989 island assistant(NotchIslandKit.AssistantRoom.search(0)) → assistant(NotchIslandKit.AssistantRoom.answer(48))
+            15:57:05.694 siri: "send a message to david on imessage" in root → 0 apps, 0 files (wordStart)
+            15:58:21.319 island assistant(NotchIslandKit.AssistantRoom.answer(48)) → idle
+            15:58:23.173 island idle → assistant(NotchIslandKit.AssistantRoom.field)
+            15:58:25.000 siri: "xcode" in root → 0 apps, 3 files (wordStart)
+            """)])]
+        #expect(DiagnosticsVerdict.searchesWithoutApps(report) == ["xcode"])
+    }
+
     @Test func aCrashNamesItsFeature() {
         var report = DiagnosticsReport()
         report.sections = [.init("Crash analysis", [.init(key: "NotchIsland.ips", value: """
@@ -411,5 +427,24 @@ import Testing
                 == "/Applications/NotchIsland.app")
         #expect(AppUpdater.installLocation(bundle: URL(fileURLWithPath: "/private/var/folders/x/AppTranslocation/y/d/NotchIsland.app")).path
                 == "/Applications/NotchIsland.app")
+    }
+}
+
+/// A 2-minute reading taken while the island was in use is not "unusual behaviour" (October 14).
+@MainActor struct DiagnosticsInUseTests {
+    private func interval(from start: Date) -> EnergyInterval {
+        let a = EnergySample(date: start, own: .init(energyNJ: 0, cpuNS: 0, wakeups: 0), helpers: .init(), onBattery: false)
+        let b = EnergySample(date: start.addingTimeInterval(120), own: .init(energyNJ: 30_000_000_000, cpuNS: 0, wakeups: 0),
+                             helpers: .init(), onBattery: false)
+        return EnergyInterval(from: a, to: b)!
+    }
+
+    @Test func aChangeDuringTheReadingIsUse() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        let reading = interval(from: start)
+        #expect(DiagnosticsCenter.wasInUse(during: reading, lastChange: start.addingTimeInterval(30), openNow: false))
+        #expect(DiagnosticsCenter.wasInUse(during: reading, lastChange: nil, openNow: true))
+        #expect(!DiagnosticsCenter.wasInUse(during: reading, lastChange: start.addingTimeInterval(-60), openNow: false))
+        #expect(!DiagnosticsCenter.wasInUse(during: reading, lastChange: nil, openNow: false))
     }
 }

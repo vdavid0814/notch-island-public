@@ -179,6 +179,8 @@ import Observation
     @ObservationIgnored private var hasInstalledCounter = false
     /// Consecutive samples past the reference, by metric.
     @ObservationIgnored private var unusualRuns: [DiagnosticsMetric: Int] = [:]
+    /// The island last changed what it shows (opened, closed, Siri, Settings, a banner).
+    @ObservationIgnored private var lastIslandChange: Date?
     /// What set off the anomaly report being sent.
     @ObservationIgnored private var liveTrigger: [String] = []
     @ObservationIgnored private var problemWatch: Task<Void, Never>?
@@ -293,6 +295,7 @@ import Observation
             let kind = DiagnosticsHistory.kind(of: to)
             if kind != DiagnosticsHistory.kind(of: from) { self?.history?.count(kind) }
             DiagnosticsFlow.record("island \(from) → \(to)")
+            self?.lastIslandChange = Date()
         }
     }
 
@@ -351,6 +354,10 @@ import Observation
         // The first minutes measure the launch itself (detailed mode's 2-minute readings judged
         // one alone, and a relaunch read as "unusual behaviour").
         guard interval.start.timeIntervalSince(launchedAt) >= Self.launchSettling else { return }
+        // A reading while the island was in use is the use, not the app misbehaving (October 14:
+        // Settings opened four times in two minutes was an "unusual behaviour" report of 248 mW).
+        guard !Self.wasInUse(during: interval, lastChange: lastIslandChange,
+                             openNow: model.map { !$0.island.presentation.isIdle } ?? false) else { return }
         let values: [DiagnosticsMetric: Double] = [
             .recentPowerMW: interval.ownMW, .wakeupsPerSecond: interval.wakeupsPerSecond, .memoryMB: interval.footprintMB,
         ]
@@ -369,6 +376,11 @@ import Observation
         Log.app.notice("diagnostics: unusual \(triggered.joined(separator: "; "), privacy: .public)")
         liveTrigger = triggered
         Task { await self.sendReport(.anomaly) }
+    }
+
+    /// The island changed what it shows during the reading, or is open at its end.
+    static func wasInUse(during interval: EnergyInterval, lastChange: Date?, openNow: Bool) -> Bool {
+        openNow || lastChange.map { $0 >= interval.start } ?? false
     }
 
     /// Every `problemCheck`: Accessibility taken away, the key interception failed, or the ⌘Space

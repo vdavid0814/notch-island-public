@@ -20,7 +20,7 @@ nonisolated enum DiagnosticsSystemNoise {
              meaning: "CoreAudio looks for an audio plug-in that is not installed the first time the app uses sound (the level keys, the music bars). Every app that plays or measures sound logs it.",
              patterns: ["AddInstanceForFactory: No factory registered"]),
         Kind(id: "connection-closing", title: "Network connection closing",
-             meaning: "The network stack reads the details of a connection that is already closing (HTTP/3 to Discord, after a report was delivered). The request itself succeeded.",
+             meaning: "The network stack reads the details of a connection that is already closing (HTTP/3 to Sentry or Mixpanel, after a report was delivered). The request itself succeeded.",
              patterns: ["on unconnected nw_connection"]),
         Kind(id: "reset-after-close", title: "Server goodbye after closing",
              meaning: "A server's reset packet arriving after the connection had already been closed.",

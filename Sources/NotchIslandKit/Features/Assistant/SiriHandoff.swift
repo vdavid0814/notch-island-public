@@ -65,10 +65,10 @@ nonisolated struct AXRef: @unchecked Sendable {
         }
         let continues = continuing && conversation.map { CFEqual($0, window) } == true
         conversation = window
-        var before = await submit(line, in: window, newConversation: !continues)
+        var before = await submit(line, in: AXRef(window), newConversation: !continues)
         if before == nil {
             // A window just built unseen drops its first question (seen): once more, anew.
-            before = await submit(line, in: window, newConversation: true)
+            before = await submit(line, in: AXRef(window), newConversation: true)
         }
         Log.app.notice("siri handoff: asked \(before != nil, privacy: .public)")
         guard let before else { return false }
@@ -79,7 +79,12 @@ nonisolated struct AXRef: @unchecked Sendable {
     /// The question set into the Ask Siri field (`newConversation`: after New Conversation), read
     /// back, confirmed, and seen in the conversation as the user's prompt: Siri's replies there were
     /// before it. Nil when any of it did not happen.
-    private static func submit(_ line: String, in window: AXUIElement, newConversation: Bool) async -> Int? {
+    ///
+    /// Away from the main thread, like every Accessibility walk of Siri AI here: each read is a
+    /// message to Siri AI that waits for its answer, and on a Mac short of memory a walk of the
+    /// conversation stood the island still for over 2 s (App Hang in `submit`, October 14).
+    @concurrent nonisolated private static func submit(_ line: String, in ref: AXRef, newConversation: Bool) async -> Int? {
+        let window = ref.element
         let old = descendants(of: window, where: { identifier($0) == "promptViewTextField" }).first
         if newConversation, let button = descendants(of: window, where: { identifier($0) == "newChatButton" }).first {
             AXUIElementPerformAction(button, kAXPressAction as CFString)
@@ -92,7 +97,7 @@ nonisolated struct AXRef: @unchecked Sendable {
             }
             try? await Task.sleep(for: .milliseconds(400))
         }
-        guard let field = await promptField(in: window) else { return nil }
+        guard let field = await promptField(in: ref)?.element else { return nil }
         let prompts = descendants(of: window, where: { identifier($0) == "userPrompt" }).count
         let replied = replies(in: window).count
         AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, line as CFString)
@@ -160,7 +165,7 @@ nonisolated struct AXRef: @unchecked Sendable {
         _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
         for _ in 0..<60 {
             if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first,
-               attribute(AXUIElementCreateApplication(app.processIdentifier), kAXMenuBarAttribute) != nil { return app }
+               await hasMenuBar(app.processIdentifier) { return app }
             try? await Task.sleep(for: .milliseconds(50))
         }
         return nil
@@ -171,8 +176,9 @@ nonisolated struct AXRef: @unchecked Sendable {
     /// reopened in the background, the menu item with ⌘N pressed, and it is hidden again as soon as
     /// the window is there (nothing seen on the screen, measured).
     private static func conversationWindow(of app: NSRunningApplication) async -> AXUIElement? {
-        if let conversation, attribute(conversation, kAXRoleAttribute) != nil { return conversation }
-        if let window = standardWindows(of: app).first { return window }
+        let pid = app.processIdentifier
+        if let conversation, await isAlive(AXRef(conversation)) { return conversation }
+        if let window = await standardWindows(of: pid).first { return window.element }
         // Reopened in the background (it has no window to show), not brought forward: hidden, or
         // only shown, it opened none for New Conversation (seen).
         if let url = app.bundleURL {
@@ -181,15 +187,15 @@ nonisolated struct AXRef: @unchecked Sendable {
             _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
             try? await Task.sleep(for: .milliseconds(300))
         }
-        if let window = standardWindows(of: app).first {
+        if let window = await standardWindows(of: pid).first {
             app.hide()
-            return window
+            return window.element
         }
-        guard newConversationFromMenu(of: app) else { return nil }
+        guard await newConversationFromMenu(of: pid) else { return nil }
         for _ in 0..<120 {
-            if let window = standardWindows(of: app).first {
+            if let window = await standardWindows(of: pid).first {
                 app.hide()
-                return window
+                return window.element
             }
             try? await Task.sleep(for: .milliseconds(50))
         }
@@ -197,15 +203,26 @@ nonisolated struct AXRef: @unchecked Sendable {
         return nil
     }
 
-    private static func standardWindows(of app: NSRunningApplication) -> [AXUIElement] {
-        let element = AXUIElementCreateApplication(app.processIdentifier)
+    /// The window still there (Siri AI may have closed it).
+    @concurrent nonisolated private static func isAlive(_ window: AXRef) async -> Bool {
+        attribute(window.element, kAXRoleAttribute) != nil
+    }
+
+    /// Siri AI's menu bar is there: it has finished launching.
+    @concurrent nonisolated private static func hasMenuBar(_ pid: pid_t) async -> Bool {
+        attribute(AXUIElementCreateApplication(pid), kAXMenuBarAttribute) != nil
+    }
+
+    @concurrent nonisolated private static func standardWindows(of pid: pid_t) async -> [AXRef] {
+        let element = AXUIElementCreateApplication(pid)
         return ((attribute(element, kAXWindowsAttribute) as? [AXUIElement]) ?? [])
             .filter { attribute($0, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole as String }
+            .map(AXRef.init)
     }
 
     /// Presses the menu item with ⌘N (New Conversation), whatever the language.
-    private static func newConversationFromMenu(of app: NSRunningApplication) -> Bool {
-        let element = AXUIElementCreateApplication(app.processIdentifier)
+    @concurrent nonisolated private static func newConversationFromMenu(of pid: pid_t) async -> Bool {
+        let element = AXUIElementCreateApplication(pid)
         guard let bar = attribute(element, kAXMenuBarAttribute), CFGetTypeID(bar) == AXUIElementGetTypeID() else { return false }
         for menuTitle in children(of: bar as! AXUIElement) {
             for menu in children(of: menuTitle) {
@@ -220,9 +237,11 @@ nonisolated struct AXRef: @unchecked Sendable {
     }
 
     /// The Ask Siri field (a new conversation builds it anew: waited for).
-    private static func promptField(in window: AXUIElement) async -> AXUIElement? {
+    @concurrent nonisolated private static func promptField(in window: AXRef) async -> AXRef? {
         for _ in 0..<20 {
-            if let field = descendants(of: window, where: { identifier($0) == "promptViewTextField" }).first { return field }
+            if let field = descendants(of: window.element, where: { identifier($0) == "promptViewTextField" }).first {
+                return AXRef(field)
+            }
             try? await Task.sleep(for: .milliseconds(50))
         }
         return nil

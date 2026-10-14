@@ -75,7 +75,7 @@ final class SettingsWindow: NSPanel {
     static func discard(force: Bool = false) {
         discarding = nil
         // Not built ahead again for a while (`isMemoryTight`), whether or not there was one to give up.
-        if force { lastMemoryPressure = CACurrentMediaTime() }
+        if force { noteMemoryPressure(at: CACurrentMediaTime()) }
         guard force || (!isKept && isAway), let window = current else { return }
         // Open (or closing): after it has closed.
         guard !window.isVisible || window.isRehearsing, !window.model.island.presentation.isSettings else {
@@ -109,16 +109,36 @@ final class SettingsWindow: NSPanel {
     }
 
     private static var memoryPressure: (any DispatchSourceMemoryPressure)?
-    private static var lastMemoryPressure = -CFTimeInterval.infinity
+    /// When macOS asked for memory, within the last `memoryWindow`.
+    private static var memoryPressures: [CFTimeInterval] = []
 
     /// How long after macOS asked for memory Settings is not built ahead again: on a Mac that runs
     /// out every few minutes it was built after every opening of the panel and given up at the
-    /// next warning (one Mac's log, October 13: seven warnings an hour).
-    static let memoryCalm: TimeInterval = 300
+    /// next warning (one Mac's log, October 13: seven warnings an hour). Five minutes after one
+    /// warning, doubled for each other one within `memoryWindow`, an hour at most: five minutes
+    /// were not enough on a Mac warned every 10–90 minutes (October 14: built at 18:14, 20:45
+    /// and 09:45, each ~5 J and ~110 MB, given up at the next warning 2–13 minutes later).
+    static func memoryCalm(warnings: Int) -> TimeInterval {
+        guard warnings > 0 else { return 0 }
+        return min(300 * pow(2, Double(min(warnings, 8) - 1)), 3600)
+    }
+
+    /// Long enough to know a Mac that runs out all afternoon from one that ran out once.
+    static let memoryWindow: TimeInterval = 6 * 3600
+
+    static func noteMemoryPressure(at time: CFTimeInterval) {
+        memoryPressures = memoryPressures.filter { time - $0 < memoryWindow } + [time]
+    }
 
     /// macOS is short of memory now, or asked for some within `memoryCalm`.
     static var isMemoryTight: Bool {
-        SystemLoad.isShortOfMemory || CACurrentMediaTime() - lastMemoryPressure < memoryCalm
+        SystemLoad.isShortOfMemory || isCalming(at: CACurrentMediaTime(), after: memoryPressures)
+    }
+
+    static func isCalming(at now: CFTimeInterval, after warnings: [CFTimeInterval]) -> Bool {
+        let recent = warnings.filter { now - $0 < memoryWindow }
+        guard let last = recent.max() else { return false }
+        return now - last < memoryCalm(warnings: recent.count)
     }
 
     /// The kept window with its surface (as it was left), or a new one, over `frame`.

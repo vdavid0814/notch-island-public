@@ -224,3 +224,36 @@ private func largestDifference(_ a: [UInt8], _ b: [UInt8]) -> Int {
         }
     }
 }
+
+/// Settings is not built ahead on a Mac that keeps running out of memory (October 14: built after
+/// five calm minutes, given up at the next warning 2–13 minutes later, ~5 J and ~110 MB each time).
+@MainActor struct SettingsMemoryCalmTests {
+    private func minutes(_ value: Double) -> CFTimeInterval { value * 60 }
+
+    @Test func oneWarningWaitsFiveMinutes() {
+        let warnings = [minutes(0)]
+        #expect(SettingsWindow.isCalming(at: minutes(4), after: warnings))
+        #expect(!SettingsWindow.isCalming(at: minutes(6), after: warnings))
+    }
+
+    @Test func eachFurtherWarningDoublesTheWaitUpToAnHour() {
+        #expect(SettingsWindow.memoryCalm(warnings: 0) == 0)
+        #expect(SettingsWindow.memoryCalm(warnings: 1) == 300)
+        #expect(SettingsWindow.memoryCalm(warnings: 2) == 600)
+        #expect(SettingsWindow.memoryCalm(warnings: 4) == 2400)
+        #expect(SettingsWindow.memoryCalm(warnings: 5) == 3600)
+        #expect(SettingsWindow.memoryCalm(warnings: 40) == 3600)
+    }
+
+    /// Gergő's evening, October 14 (minutes after 18:00): warnings at 18:06, 18:08, 18:27, 18:34,
+    /// 18:40, 18:51 and 20:17; Settings was built ahead at 18:14 and 20:45 and given up each time.
+    @Test func aWarnedEveningBuildsNothingAhead() {
+        let warnings = [6, 8, 27, 34, 40, 51, 137].map { minutes(Double($0)) }
+        #expect(SettingsWindow.isCalming(at: minutes(14), after: warnings.filter { $0 <= minutes(14) }))
+        #expect(SettingsWindow.isCalming(at: minutes(165), after: warnings))
+        // An hour without a warning: built again.
+        #expect(!SettingsWindow.isCalming(at: minutes(137 + 61), after: warnings))
+        // Gergő's morning: 09:12, 09:23, 09:33, 09:39; it was built at 09:44.
+        #expect(SettingsWindow.isCalming(at: minutes(44), after: [12, 23, 33, 39].map { minutes(Double($0)) }))
+    }
+}

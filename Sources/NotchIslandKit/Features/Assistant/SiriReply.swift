@@ -203,7 +203,13 @@ nonisolated enum SiriReplyReader {
 
 /// The Accessibility reads Siri's replies need.
 nonisolated enum AX {
+    /// How long one read waits for Siri AI (macOS's own is 6 s): a walk of the conversation is
+    /// hundreds of reads, and a Siri AI short of memory answered none of them for seconds (one
+    /// Mac's App Hang, October 14). Each element has its own (an app's does not carry over).
+    static let timeout: Float = 1
+
     static func attribute(_ element: AXUIElement, _ name: String) -> AnyObject? {
+        AXUIElementSetMessagingTimeout(element, timeout)
         var value: AnyObject?
         guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
         return value

@@ -33,7 +33,7 @@ nonisolated enum SourceDeadline {
             queue.asyncAfter(deadline: .now() + seconds) {
                 guard once.resume(fallback) else { return }
                 overdue.withLock { _ = $0.insert(source) }
-                Log.app.error("siri source \(source, privacy: .public) did not answer in \(seconds, privacy: .public) s: left out")
+                Log.app.notice("siri source \(source, privacy: .public) did not answer in \(seconds, privacy: .public) s: left out")
                 Task { @MainActor in DiagnosticsFlow.record("siri: \(source) did not answer in \(seconds) s, left out") }
             }
         }
@@ -61,7 +61,7 @@ extension SourceDeadline {
             queue.asyncAfter(deadline: .now() + seconds) {
                 guard once.resume(fallback) else { return }
                 overdue.withLock { _ = $0.insert(key) }
-                Log.app.error("siri source \(source, privacy: .public) did not answer in \(seconds, privacy: .public) s: left out")
+                Log.app.notice("siri source \(source, privacy: .public) did not answer in \(seconds, privacy: .public) s: left out")
                 Task { @MainActor in DiagnosticsFlow.record("siri: \(source) did not answer in \(seconds) s, left out") }
             }
         }
