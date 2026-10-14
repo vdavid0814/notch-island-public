@@ -50,16 +50,14 @@ struct IslandRootView: View {
         // and stays until the outline has landed, also in the notch (`IslandOutlineMotion`).
         let hold = model.island.surfaceHold
         let layout = model.layout
-        if presentation.isIdle && hold == nil {
-            // Alpha > 0 so the window server delivers hover to the notch; see `hitTargetOpacity`.
-            IslandShape(
-                bottomRadius: layout.bottomRadius(for: .idle),
-                shoulderRadius: layout.shoulderRadius(for: .idle)
-            )
-            .fill(Color.primary.opacity(Metrics.hitTargetOpacity))
-            .frame(width: layout.notch.width, height: layout.notch.height)
-            .accessibilityHidden(true)
-            .onAppear { isGlassRetired = nil }
+        // At rest with the panel's last page still kept (`IslandContentStack.keptPage`): the
+        // content stack stays, unseen, under the rest's own hit target. Taken away at rest, it took
+        // the kept page with it: every opening from an empty notch built the whole panel again,
+        // the system's page picker too (open 47–53 mJ, eight hover openings in eight seconds
+        // 440–480 mJ, where a kept panel measured 31–40 and ~280: October 14).
+        let restsKept = presentation.isIdle && hold == nil && model.island.isPanelKept
+        if presentation.isIdle && hold == nil && !restsKept {
+            restTarget(layout)
         } else {
             let surfaceOf = hold?.presentation ?? presentation
             let outline = hold?.outline ?? layout.outline(for: presentation)
@@ -112,8 +110,26 @@ struct IslandRootView: View {
                 // comes in while it closes, not as it lands (asked for, October 13).
                 landsAsPill: hold != nil && layout.size(for: presentation).height <= layout.notch.height + 1
             )))
+            // Kept at rest, nothing of it is drawn: the rest looks as it does without it.
+            .opacity(restsKept ? 0 : 1)
+            .animation(nil, value: restsKept)
+            .overlay(alignment: .top) {
+                if restsKept { restTarget(layout) }
+            }
             .task(id: wantsGlass) { await glassRetirement(wantsGlass: wantsGlass) }
         }
+    }
+
+    /// The notch at rest: alpha > 0 so the window server delivers hover to it; see `hitTargetOpacity`.
+    private func restTarget(_ layout: IslandLayout) -> some View {
+        IslandShape(
+            bottomRadius: layout.bottomRadius(for: .idle),
+            shoulderRadius: layout.shoulderRadius(for: .idle)
+        )
+        .fill(Color.primary.opacity(Metrics.hitTargetOpacity))
+        .frame(width: layout.notch.width, height: layout.notch.height)
+        .accessibilityHidden(true)
+        .onAppear { isGlassRetired = nil }
     }
 
     /// Glass comes back at once when the island grows past the notch (under the black band, so the
