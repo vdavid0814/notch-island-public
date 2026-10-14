@@ -7,6 +7,18 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-10-14 14:00** — Memory macOS counts twice is counted once (`AliasTrim`: a place wholly
+  covered by another kept mapping of the same memory is mapped onto itself); memory mapped once
+  is never touched that way. *The same call takes singly mapped memory out of Activity Monitor's
+  number while it stays in RAM: a number that lies.*
+- **2026-10-14 14:00** — The closed panel is kept at rest too, for ten minutes (the content stack
+  stays, unseen). *Taken away at rest, every opening from an empty notch built the panel and its
+  page picker again: 50 → 15 mJ an opening; a banner costs ~4 mJ more, ~6 MB.*
+- **2026-10-14 14:00** — Siri's file search is stoppable: gathered in steps and stopped when the
+  user types on. *A synchronous Spotlight query for one letter ran ~460 ms in Spotlight's daemons,
+  ~1 J billed to the app, for rows nobody saw.*
+- **2026-10-14 14:00** — Openings' energy (own + billed) is part of every diagnostics report.
+  *The user judges the app by Activity Monitor's spikes at an opening, not by its average.*
 - **2026-10-13 22:42** — Released as 0.8.5.4.
 - **2026-10-13 21:40** — Siri's field, list and gallery stay SwiftUI's animation. Tried again on the
   render server (the outline's mask with the glass body's own layers given the outline's frames):

@@ -124,6 +124,16 @@ marker views bound a piece of content's stretch of the list; `PanelPageMotion`,
 `ContentSwapMotion`). The items, their order and what takes a click stay SwiftUI's. Where the
 layers cannot be found, SwiftUI animates as before.
 
+The panel's last page is kept for ten minutes after a close (`IslandContentStack.keptPage`), also at
+rest: there the content stack stays in the tree, unseen (opacity 0, the rest's own hit target over
+it), so an opening from an empty notch only shows the page (system page picker included) instead of
+building it.
+
+Memory macOS counts twice is counted once (`AliasTrim`, at rest, off the main thread): SwiftUI's
+graph table leaves its old places mapped as it grows, and a page touched through two mappings is
+charged twice. Such a place, wholly covered by another mapping of the same memory, is mapped onto
+itself (the same memory, no page touched through it yet); memory mapped once is never touched.
+
 Settings is built once and kept for as long as the app runs, in a window of its own
 (`SettingsWindow`) that lies over the island's page area and is ordered in only while Settings is
 open: built a few seconds after launch, unseen, on the efficiency cores (sidebar, then one page per
@@ -169,6 +179,10 @@ frames, banner changes, feature start/stop and permission changes log at
   power assertions), `DiagnosticsAppState` (the island, screens, features, preferences, copies,
   running apps), `DiagnosticsHistory` (launches, versions, runs that did not end with a quit,
   presentations since launch).
+* **Openings.** `OpeningMeter` reads the app's energy plus what the system billed to it around every
+  opening (panel kept or built, Siri, Settings, closing) and every Siri search: count, median, worst
+  tenth in the report, and metrics against the reference. `DiagnosticsMemory`: the heap against what
+  the allocator holds, what `AliasTrim` corrected, the footprint floor's growth an hour (a leak).
 * **Energy.** `EnergyMeter` reads `proc_pid_rusage` (energy in nJ, CPU, wakeups, footprint) for the
   app and its helper processes every 10 minutes while diagnostics are on; the report has averages
   since launch, the last hour, on battery and on the charger, the worst 10 minutes and a timeline.

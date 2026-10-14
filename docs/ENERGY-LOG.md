@@ -4,6 +4,130 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-14: memory counted once, the kept panel at rest, Siri's first search, openings measured
+
+Release builds, MacBook Air M5 (16 GB). Energy = the coalition's (own + GPU + billed), as Activity
+Monitor counts it, by the real pointer and keys (`ws/moused`: hover, ⌘Space with its modifier event,
+typed letters), fresh launch each, 40 s to settle. Memory = the footprint (Activity Monitor's Memory
+column). On the charger unless "battery simulated" (`NI_POWER=battery`).
+
+### Memory
+
+| | before | after |
+|---|---|---|
+| At rest, Settings built ahead | 210–218 MB | **188–192 MB** |
+| At rest after a use soak (openings, Siri, gallery, Settings ▸ Widgets, 8 rounds) | — | 196 MB, flat from round 2 (no leak) |
+| The user's own copy after 19 minutes of use | 239 MB (peak 248) | — |
+| Peaks while used (Siri typing, the gallery) | 210–216 MB | 205–211 MB |
+| macOS's memory warning (`demo/memorypressure`) | — | Settings let go: 205 → 88 MB; built again when opened |
+
+- **Counted twice** (`AliasTrim`). SwiftUI's attribute graph grows its node table by mapping the
+  same memory again at a larger place and leaves the old place mapped (`vmmap`: "AttributeGraph
+  Data (old mapping)"); macOS charges a page once for every place it was touched through. A test
+  program: 64 MB touched read 65 MB, 129 MB once read through a second mapping (`mach_vm_remap`)
+  or a copy-on-write copy (`mach_vm_copy`), 65 MB again after the extra place was mapped onto itself
+  (overwrite, shared). With Settings built six old places held 19–21 MB; mapped onto themselves at
+  rest they stay at 0 KB (nothing reads them again). Only a place wholly covered by another kept
+  mapping of the same memory is touched: the same call on memory mapped once took 64 MB out of the
+  count while it stayed in memory — a number that says less than the truth, never used.
+- **Siri's icons** were read from their cache file into the heap and their pixels copied again
+  (~6.4 MB for ~400 icons, `malloc_history`); the file is mapped now and the picture points into
+  it (clean pages, not the footprint): soak at rest 201 → 196 MB.
+- Where the rest goes (`malloc_history`, `heap`, ablations): Settings' kept pages ~90 MB of heap
+  (Widgets ~104 MB of footprint: gallery 51 — 56 cards 29, live previews 22 —, stage 21, Top Bar
+  11.5, Size 3.4); the wallpapers 11 MB (held by the kept pages' layers); the kept panel at rest
+  ~6 MB. The allocator holds ~36 MB of freed heap at times; `malloc_zone_pressure_relief` gives
+  back 0 KB on macOS 27.0.1 (tried at rest after openings and after Siri).
+- Tried and left out: the gallery cards' icons as pictures drawn once (the 6 MB they cost is the
+  SF Symbols' own caches, loaded either way: 104 → 103–105 MB); the file search over the home
+  folder or the whole Mac with a client-side filter (4.7–5.3 J for one letter, worse).
+
+### The panel kept at rest
+
+At rest with nothing to show, the island took its content stack away — and the panel's kept page
+with it (`IslandContentStack.keptPage`, "kept for 10 s"): every opening from an empty notch built the
+whole panel again, the system's page picker too (found by logging the picker's `viewWillMove`, then
+the views' `onAppear`/`onDisappear`: the stack left 0.5 s after each close). Now the stack stays,
+unseen (opacity 0 under the rest's own hit target), for as long as the page is kept — ten minutes
+instead of ten seconds.
+
+| By the real pointer | before | after |
+|---|---|---|
+| Opening, warm (charger) | 47–53 mJ, P-core 20–28 ms | **14–15 mJ**, 0 ms |
+| Opening 35 s after the last close | 50 mJ | **16 mJ** |
+| Eight hover openings in eight seconds | 437–479 mJ, worst 1 s 66–73 | **179–206 mJ**, worst 1 s 30–38 |
+| The same, battery simulated | — | 152 mJ, worst 1 s 26 |
+| First opening after a launch | 88–92 mJ | 89–91 mJ (unchanged) |
+| Close | 10–19 mJ | 12–20 mJ |
+| Five volume banners with the panel kept | 42 mJ | 64 mJ (~4 mJ a banner: it goes over the hidden page) |
+| Memory at rest with the panel kept | — | +5.7 MB |
+
+The page picker alone is ~35 % of an opening that builds the panel (ablation, `NI_EXP_NOPICKER`,
+A B A B: warm 50 → 33 mJ, eight openings 440 → 300): kept, it is no longer rebuilt. Checked
+against the old path: the rest and the open panel the same pixels (screenshots, max 1/255), the
+growth the same curve (screen recordings over a still backdrop: the island's area and height
+per frame).
+
+### Siri
+
+| By real keys | before | after |
+|---|---|---|
+| First search after a launch ("saf") | 1770–1884 mJ (billed 1435–1492), Activity Monitor ~1800 | **650–940 mJ** (billed 400–640) |
+| First search "dik" (files found) | 553 mJ | 387 mJ — the same six files, in the same order |
+| One letter, then a pause | ~1.3 J (billed ~1.1 J) | the same (see below) |
+| Siri open / close / ⌘Space spam ×6 | 31 / 40–50 / 204 mJ | the same |
+| App gallery in / back out (⌘1, Esc) | 172 / 146 mJ | the same |
+
+- Where a first search goes (ablations, one source left out at a time): the file search is all of
+  it — without it 215 mJ (billed 37); Spotlight's app query, the dictionary, the language
+  recogniser, the icons, the switches' states and the lists 0–150 mJ each. Spotlight's file query
+  `kMDItemDisplayName == "s*"cdw` over Desktop, Documents and Downloads takes ~460 ms in its daemons
+  (`mds`, `tccd` ~160 mJ), billed to the app; scoped wider it is worse (1.1–2.4 s).
+- The query was synchronous: the next letter could not stop it, and every keystroke's query ran to
+  its end. Gathered in steps now (`MDQueryExecute` without `kMDQuerySynchronous`, its run loop
+  turned in 10 ms slices) and stopped (`MDQueryStop`) once the user has typed on; the rows shown
+  are the next query's, as before. A single letter typed and left still costs Spotlight its ~1 J:
+  starting the file search later for one letter would delay every row, so it was left.
+- The gallery's transitions are SwiftUI's own frames (~7 ms of the main thread each for ~25
+  frames, `LazyVGrid`'s placement redone as the outline's clip moves): not changed.
+
+### Settings from the gear (real clicks)
+
+General: open 120–140 mJ, close 61–65. Widgets: open 235–312, close 107–122 — its live pictures
+(the gallery's previews, the stage's island) are put back in the window at each opening and taken
+out at the close (`pausesWithSettings`), as decided before. Ordering the window in lays the shown
+page out (`_setUpFirstResponderBeforeBecomingVisible`: ~57 ms a time). Not changed.
+
+### A busy Mac (`hang.py`, guarded, one round)
+
+| | longest main-thread turn |
+|---|---|
+| Ten cores at utility | 356 ms (Settings' first opening), no turn over 1 s |
+| The same with macOS's memory warning | 356 ms |
+| No load | 951 ms (a preparation step at background, ended by the watch when needed) |
+
+### Diagnostics
+
+`OpeningMeter` reads the app's energy plus what was billed to it around every opening (panel with
+the page kept or built, Siri, Settings, closing) and every Siri search: the report lists each kind's
+count, median and worst tenth, and sets the panel's, Siri's and Settings' openings and Siri's costliest
+searches against the reference (`openingMJ`, `siriOpeningMJ`, `settingsOpeningMJ`, `siriSearchMJ`).
+Memory: the heap in use against what the allocator holds, what `AliasTrim` counted once again, and
+the footprint floor's growth an hour at rest (`memoryGrowthMBPerHour`, from the 10-minute samples'
+hourly lowest; 8 MB/h is a leak whatever the reference). `demo/state` logs them. Read live on this
+Mac: kept openings median 8 mJ, built 85, closing 17, Siri's three searches of "saf" median 303 mJ,
+worst 658.
+
+### Measuring traps found
+
+- ⌘Space by a posted key needs the modifier's own event first (`flags cmd`, the key, `flags`):
+  the tap only listens for keys while the modifier is held. A ⌘-combination posted while Siri was
+  not open went to the frontmost app.
+- A second Esc after leaving the gallery only folds the suggestions away: Siri stays open, and the
+  next ⌘Space closes it.
+- `screencapture -V` writes 60 frames a second whether anything changed or not; compare frames by
+  time from the hover, over a still backdrop (`frames/backdrop`), not by change.
+
 ## 2026-10-13 (late evening): the island on a busy Mac; the page switch and the content's swap on the render server
 
 Release builds, MacBook Air M5 (4 performance and 6 efficiency cores, 16 GB) on the charger at
