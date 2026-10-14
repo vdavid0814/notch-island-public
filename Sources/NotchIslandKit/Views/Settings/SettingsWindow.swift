@@ -358,7 +358,12 @@ final class SettingsWindow: NSPanel {
     /// Settings has grown and its pages should be in: whether they can be seen. Settings now and
     /// then grew empty until the app was restarted (Oct 2026, not reproduced): what the window and
     /// its pages were then goes to the log, and the window is shown again.
-    static func verifyShown(model: AppModel) {
+    ///
+    /// The window server tells a window it is on screen a moment after it is ordered in: every
+    /// report since October 10 read `on screen false` with everything else as it should be (on the
+    /// active Space, alpha 1, pages in), at launches and new versions on two Macs. Shown again at
+    /// once, but called a fault only if it is still not on screen half a second later (`recheck`).
+    static func verifyShown(model: AppModel, recheck: Bool = true) {
         guard model.island.presentation.isSettings else { return }
         let islands = NSApp.windows.compactMap { $0 as? IslandPanel }.filter(\.isVisible)
             .map { "island level \($0.level.rawValue) \($0.frame)" }.joined(separator: ", ")
@@ -376,6 +381,16 @@ final class SettingsWindow: NSPanel {
             + "\(current.surface.visibilityDescription); \(islands)"
         guard !seen else {
             Log.window.notice("settings shown: \(state, privacy: .public)")
+            return
+        }
+        let onlyNotYetOnScreen = current.isVisible && current.isOnActiveSpace && current.alphaValue > 0
+            && current.surface.alphaValue > 0 && !current.surface.pagesView.isHidden
+        if recheck, onlyNotYetOnScreen {
+            Log.window.notice("settings not on screen yet, looked at again in 0.5 s: \(state, privacy: .public)")
+            current.show()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                MainActor.assumeIsolated { verifyShown(model: model, recheck: false) }
+            }
             return
         }
         Log.window.fault("settings grew but its pages cannot be seen: \(state, privacy: .public)")

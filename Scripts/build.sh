@@ -43,9 +43,15 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 # Scripts/discord-setup.py, routes each kind to its channel; otherwise DIAGNOSTICS_WEBHOOK or the
 # first line of Support/diagnostics-webhook.txt sends everything to one channel. Both files are
 # git-ignored because the repository is public.
+# `NO_REPORTS=1`: neither (measuring builds: the perf tools kill the app, and every relaunch after
+# that sent a "Crash" report to Sentry).
 CONFIG_JSON="$ROOT/Support/diagnostics-webhooks.json"
+TELEMETRY_JSON="$ROOT/Support/telemetry.json"
+if [[ "${NO_REPORTS:-}" == 1 ]]; then
+  CONFIG_JSON=/nonexistent; TELEMETRY_JSON=/nonexistent; DIAGNOSTICS_WEBHOOK=""
+fi
 WEBHOOK="${DIAGNOSTICS_WEBHOOK:-}"
-if [[ -z "$WEBHOOK" && -f "$ROOT/Support/diagnostics-webhook.txt" ]]; then
+if [[ "${NO_REPORTS:-}" != 1 && -z "$WEBHOOK" && -f "$ROOT/Support/diagnostics-webhook.txt" ]]; then
   WEBHOOK="$(head -n 1 "$ROOT/Support/diagnostics-webhook.txt" | tr -d '[:space:]')"
 fi
 if [[ -f "$CONFIG_JSON" ]]; then
@@ -59,7 +65,6 @@ else
 fi
 # Sentry and Mixpanel (crashes, errors, the health numbers; EU): Support/telemetry.json, git-ignored
 # (Support/telemetry.example.json shows its keys). Without it the build sends no reports.
-TELEMETRY_JSON="$ROOT/Support/telemetry.json"
 if [[ -f "$TELEMETRY_JSON" ]]; then
   /usr/libexec/PlistBuddy -c "Add :NITelemetry dict" "$APP/Contents/Info.plist"
   for key in sentryDSN mixpanelToken mixpanelHost; do
