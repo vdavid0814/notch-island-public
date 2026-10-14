@@ -57,7 +57,9 @@ nonisolated struct IconDiskCache: Sendable {
     func image(forApp app: String, variant: String, style: String, writes: Bool = true, draw: () -> CGImage?) -> CGImage? {
         guard let folder, let modified = Self.modified(app) else { return draw() }
         let file = folder.appendingPathComponent(Self.name(app: app, variant: variant, style: style))
-        if let data = try? Data(contentsOf: file), let (header, image) = Self.decode(data),
+        // Mapped, not read: the pixels stay the file's pages (clean, given back and read again by
+        // macOS as it needs), not a copy on the app's heap (~6 MB for Siri's icons, measured).
+        if let data = try? Data(contentsOf: file, options: .alwaysMapped), let (header, image) = Self.decode(data),
            header.app == app, header.variant == variant, header.style == style, header.modified == modified {
             // Used now: `purge` removes the least recently used first.
             if writes { try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path) }
@@ -135,17 +137,31 @@ nonisolated struct IconDiskCache: Sendable {
 
     static func decode(_ data: Data) -> (Header, CGImage)? {
         guard let (header, start) = decodeHeader(data) else { return nil }
-        let pixels = data.subdata(in: data.startIndex + start..<data.endIndex)
-        guard pixels.count == header.height * header.bytesPerRow,
+        let length = header.height * header.bytesPerRow
+        guard data.count - start == length,
               let space = header.colorSpace.flatMap({ CGColorSpace(name: $0 as CFString) })
                 ?? header.iccProfile.flatMap({ CGColorSpace(iccData: $0 as CFData) }),
-              let provider = CGDataProvider(data: pixels as CFData),
+              let provider = pixelProvider(data, from: start, length: length),
               let intent = CGColorRenderingIntent(rawValue: header.intent),
               let image = CGImage(width: header.width, height: header.height, bitsPerComponent: header.bitsPerComponent,
                                   bitsPerPixel: header.bitsPerPixel, bytesPerRow: header.bytesPerRow, space: space,
                                   bitmapInfo: CGBitmapInfo(rawValue: header.bitmapInfo), provider: provider,
                                   decode: nil, shouldInterpolate: header.interpolates, intent: intent) else { return nil }
         return (header, image)
+    }
+
+    /// The entry's pixels where they lie, not copied: the provider keeps the entry's bytes (for a
+    /// mapped file, its pages) for as long as the picture lives.
+    private static func pixelProvider(_ data: Data, from start: Int, length: Int) -> CGDataProvider? {
+        let storage = data as NSData
+        guard storage.length >= start + length else { return nil }
+        let info = Unmanaged.passRetained(storage)
+        let provider = CGDataProvider(dataInfo: info.toOpaque(), data: storage.bytes.advanced(by: start), size: length) { info, _, _ in
+            guard let info else { return }
+            Unmanaged<NSData>.fromOpaque(info).release()
+        }
+        if provider == nil { info.release() }
+        return provider
     }
 
     private static func decodeHeader(_ data: Data) -> (Header, Int)? {
