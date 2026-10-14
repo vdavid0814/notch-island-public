@@ -164,8 +164,11 @@ private struct IslandContentStack: View {
     /// the panel again only shows it, instead of building every view of the page (~25–40 ms in
     /// one burst, the largest part of an open's energy, measured).
     @State private var keptPage: ExpandedPage?
-    /// How long a closed panel is kept for the next open.
-    static let keepDuration: Duration = .seconds(10)
+    /// How long a closed panel is kept for the next open. Ten minutes: an opening 35 s after the
+    /// last close cost 50 mJ with the page let go after 10 s, 16 mJ with it kept; kept, a volume
+    /// banner costs ~4 mJ more (its update goes over the hidden page too) and the rest nothing
+    /// (measured, October 14) — one opening pays for seven banners.
+    static let keepDuration: Duration = .seconds(600)
 
     var body: some View {
         // The recording card is no page of the panel: it swaps in as the pill and the banners do.
@@ -219,8 +222,8 @@ private struct IslandContentStack: View {
                 withoutAnimation { keptPage = page }
             }
         }
-        // Kept only for a while: hidden, it is part of every other update the island makes (a
-        // volume banner cost twice as much with it, measured). Quick re-opens are where it pays.
+        // Kept for a while (`keepDuration`): hidden, it is part of every other update the island
+        // makes (a volume banner ~4 mJ more, measured), and ~6 MB.
         .task(id: shownPage == nil ? keptPage : nil) {
             guard shownPage == nil, keptPage != nil else { return }
             try? await Task.sleep(for: Self.keepDuration, tolerance: .seconds(1))
