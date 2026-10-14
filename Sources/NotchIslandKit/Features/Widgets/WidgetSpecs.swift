@@ -432,18 +432,27 @@ nonisolated enum WidgetSpecs {
             innerTexts: [.elapsedTime, .remainingTime],
             images: [.artwork]
         ),
+        // Two or three loads as lines (a row) or rings (two rows); from two rows and four columns,
+        // a graph of them as Fan Control's — as far back as its ruler (or Settings) sets it, its
+        // percentages as the battery chart's — and, switched on, the loads as Fan Control's dials
+        // beside it (memory in gigabytes).
         .systemStats: WidgetKindSpec(
-            title: "System", summary: "Processor and memory load, read only while shown.", symbol: "cpu.fill",
-            iconColors: [.rgb(0.36, 0.85, 0.62), .rgb(0.1, 0.62, 0.45)], category: .system,
+            title: "System", summary: "Processor, graphics and memory load, read only while shown; larger, a graph of them.",
+            symbol: "cpu.fill", iconColors: [.rgb(0.36, 0.85, 0.62), .rgb(0.1, 0.62, 0.45)], category: .system,
             minimumSize: GridSize(width: 2, height: 1), defaultSize: GridSize(width: 3, height: 1),
-            maximumSize: GridSize(width: 6, height: 3),
+            maximumSize: GridSize(width: 12, height: 3),
             elements: [
                 ElementSpec(.cpuLoad, "Processor", symbol: "cpu"),
+                ElementSpec(.gpuLoad, "Graphics", symbol: "display", defaultVisible: false),
                 ElementSpec(.memoryLoad, "Memory", symbol: "memorychip"),
+                ElementSpec(.statsGraph, "Graph", symbol: "chart.xyaxis.line"),
+                ElementSpec(.statsDials, "Dials", symbol: "gauge.with.dots.needle.67percent", defaultVisible: false),
             ],
-            movable: [.cpuLoad, .memoryLoad],
-            progressBars: [.cpuLoad, .memoryLoad],
-            innerTexts: [.cpuTitle, .cpuValue, .memoryTitle, .memoryValue]
+            movable: [.cpuLoad, .gpuLoad, .memoryLoad, .statsGraph],
+            progressBars: [.cpuLoad, .gpuLoad, .memoryLoad],
+            innerTexts: [.cpuTitle, .cpuValue, .gpuTitle, .gpuValue, .memoryTitle, .memoryValue, .statsGraphText],
+            charts: [.statsGraph],
+            settings: [.history]
         ),
     ]
 }

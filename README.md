@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.5.4 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.6 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -23,6 +23,25 @@ How much energy each animation and the idle state take, measured before and afte
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.8.6
+
+Siri AI in the island, the System widget's graph, and text you can read on clear glass:
+
+- **Use Siri AI in the island.** Spotlight's Use Siri AI asks the system's Siri AI out of sight and
+  shows its answer in the island, laid out as Siri lays it out: paragraphs and links, sources, file
+  and app cards, photos, its buttons (pressed in Siri AI).
+- **Two fingers back and forward.** Swipe sideways with two fingers: in Siri between suggestions, in
+  Settings between the pages and Customize you have been to.
+- **System grows into a graph and dials.** Given room, the System widget draws its loads as a graph
+  over 10 seconds to 10 minutes (Fan Control's), and as dials if you like; the GPU's load is among them.
+- **Grey text you can read on clear glass.** On Liquid Glass, grey texts and texts in a light colour of
+  their own (a title in its cover's colour) get a thin sharp edge: black in Light Mode, white in Dark Mode.
+- **A touch more frost.** Liquid Glass at its clearest: 40 % white in Light Mode, 35 % black in Dark Mode.
+- **Lighter openings.** The closed panel is kept ten minutes and stays at rest; opening it from an
+  empty notch only shows it. Memory macOS counted twice is counted once.
+- **Fixed:** a page given another symbol kept the old one in the top bar; Settings' previews were
+  blurred where macOS's wallpaper video is not downloaded (the default wallpaper now ships with the app).
 
 ## What's new in v0.8.5.4
 

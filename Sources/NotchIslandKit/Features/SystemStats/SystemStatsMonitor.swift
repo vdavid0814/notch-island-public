@@ -1,14 +1,19 @@
 import Darwin
 import Foundation
 
-/// Processor and memory load for the System and Memory widgets.
+/// Processor, graphics and memory load for the System and Memory widgets, and — for System's
+/// graph — the last ten minutes of each.
 ///
 /// Energy: nothing runs unless a System widget is on screen (`startObserving` / `stopObserving`
-/// count them); then one Mach call each every two seconds, with a generous timer tolerance so the
-/// wake-ups coalesce with the system's.
+/// count them); then one Mach call each every two seconds (every second while a graph is shown, as
+/// Fan Control's is), with a generous timer tolerance so the wake-ups coalesce with the system's.
+/// The graphics processor is read only while a widget shows it. Once a graph has been shown, one
+/// reading every fifteen seconds keeps its past while nothing is on screen (`keepHistory`).
 @Observable final class SystemStatsMonitor {
     /// 0…1 of all cores since the previous sample.
     private(set) var cpu: Double = 0
+    /// 0…1 of the graphics processor's time (nil until read, or where the Mac does not say).
+    private(set) var gpu: Double?
     /// 0…1 of physical memory in use (app, wired and compressed pages, as Activity Monitor's
     /// "Memory Used").
     private(set) var memory: Double = 0
@@ -16,45 +21,111 @@ import Foundation
     private(set) var memoryBytes: UInt64?
     let physicalMemory = ProcessInfo.processInfo.physicalMemory
 
+    /// Each load (0…1) over the last ten minutes, oldest first: what System's graph draws.
+    private(set) var cpuHistory: [SensorSample] = []
+    private(set) var gpuHistory: [SensorSample] = []
+    private(set) var memoryHistory: [SensorSample] = []
+
     static let interval: TimeInterval = 2
+    /// While a graph is shown: every second, so a minute's graph has sixty readings.
+    static let graphInterval: TimeInterval = 1
+    static let historyInterval: TimeInterval = 15
+    /// How far back the history reaches: the longest a graph is set to show (`WidgetConfig.secondsRange`).
+    nonisolated static let window: TimeInterval = 600
 
-    @ObservationIgnored private var observers = 0
-    @ObservationIgnored private var timer: Timer?
-    @ObservationIgnored private var previousTicks: (busy: UInt64, total: UInt64)?
-
-    func startObserving() {
-        observers += 1
-        guard timer == nil else { return }
-        sample()
-        let timer = Timer(timeInterval: Self.interval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sample() }
-        }
-        timer.tolerance = Self.interval / 2
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+    /// What a widget on screen needs besides the processor and memory.
+    struct Needs: OptionSet, Hashable, Sendable {
+        let rawValue: Int
+        /// The graphics processor's load.
+        static let gpu = Needs(rawValue: 1)
+        /// A reading every second, kept in the history.
+        static let graph = Needs(rawValue: 2)
     }
 
-    func stopObserving() {
+    @ObservationIgnored private var observers = 0
+    @ObservationIgnored private var gpuObservers = 0
+    @ObservationIgnored private var graphObservers = 0
+    @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var historyTimer: Timer?
+    /// The history keeps the graphics processor's load too (a graph showing it was on screen).
+    @ObservationIgnored private var historyNeedsGPU = false
+    @ObservationIgnored private var previousTicks: (busy: UInt64, total: UInt64)?
+
+    func startObserving(_ needs: Needs = []) {
+        observers += 1
+        if needs.contains(.gpu) { gpuObservers += 1 }
+        if needs.contains(.graph) { graphObservers += 1 }
+        schedule()
+    }
+
+    func stopObserving(_ needs: Needs = []) {
         observers = max(0, observers - 1)
-        guard observers == 0 else { return }
+        if needs.contains(.gpu) { gpuObservers = max(0, gpuObservers - 1) }
+        if needs.contains(.graph) { graphObservers = max(0, graphObservers - 1) }
+        guard observers == 0 else {
+            schedule()
+            return
+        }
         timer?.invalidate()
         timer = nil
         previousTicks = nil
     }
 
-    private func sample() {
+    /// Keeps the graph's past from now on: a reading of each load every fifteen seconds (skipped
+    /// while a widget reads them more often); the graphics processor's too where `gpu`.
+    func keepHistory(gpu: Bool) {
+        if gpu { historyNeedsGPU = true }
+        guard historyTimer == nil else { return }
+        let timer = Timer(timeInterval: Self.historyInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.timer == nil else { return }
+                self.sample(history: true, gpu: self.historyNeedsGPU)
+            }
+        }
+        timer.tolerance = 5
+        RunLoop.main.add(timer, forMode: .common)
+        historyTimer = timer
+    }
+
+    /// The timer at the pace the widgets on screen need; a first reading at once.
+    private func schedule() {
+        let interval = graphObservers > 0 ? Self.graphInterval : Self.interval
+        if let timer, timer.timeInterval == interval { return }
+        let isFirst = timer == nil
+        timer?.invalidate()
+        if isFirst { sampleNow() }
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sampleNow() }
+        }
+        timer.tolerance = interval / (graphObservers > 0 ? 4 : 2)
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    private func sampleNow() {
+        sample(history: graphObservers > 0 || historyTimer != nil, gpu: gpuObservers > 0 || (historyTimer != nil && historyNeedsGPU))
+    }
+
+    private func sample(history: Bool, gpu readsGPU: Bool) {
+        let now = Date.now
         if let ticks = Self.cpuTicks() {
             if let previous = previousTicks, ticks.total > previous.total {
-                let value = Double(ticks.busy - previous.busy) / Double(ticks.total - previous.total)
-                if abs(value - cpu) > 0.005 { cpu = min(max(value, 0), 1) }
+                let value = min(max(Double(ticks.busy - previous.busy) / Double(ticks.total - previous.total), 0), 1)
+                if abs(value - cpu) > 0.005 { cpu = value }
+                if history { SensorSample.append(SensorSample(date: now, value: value), to: &cpuHistory, window: Self.window) }
             }
             previousTicks = ticks
+        }
+        if readsGPU, let value = GPUStats.utilization() {
+            if gpu.map({ abs(value - $0) > 0.005 }) ?? true { gpu = value }
+            if history { SensorSample.append(SensorSample(date: now, value: value), to: &gpuHistory, window: Self.window) }
         }
         if let bytes = Self.memoryUsedBytes() {
             if memoryBytes.map({ max($0, bytes) - min($0, bytes) >= Self.memoryStep }) ?? true { memoryBytes = bytes }
             if physicalMemory > 0 {
                 let used = min(max(Double(bytes) / Double(physicalMemory), 0), 1)
                 if abs(used - memory) > 0.005 { memory = used }
+                if history { SensorSample.append(SensorSample(date: now, value: used), to: &memoryHistory, window: Self.window) }
             }
         }
     }

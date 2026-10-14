@@ -61,9 +61,9 @@ struct PlaybackScrubber: View {
                     if elapsedStyle == nil, remainingStyle == nil, look.elapsedOffset == .zero, look.remainingOffset == .zero,
                        !reportsParts {
                         HStack {
-                            elapsed
+                            elapsed.clearTextEdge()
                             Spacer(minLength: Metrics.Spacing.small)
-                            remaining
+                            remaining.clearTextEdge()
                         }
                     } else {
                         // Each at its end of the line, in its style, where it was moved to.
@@ -83,7 +83,7 @@ struct PlaybackScrubber: View {
         } else {
             Label("Live", systemImage: "dot.radiowaves.left.and.right")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .clearTextEdge().foregroundStyle(.secondary)
         }
     }
 
@@ -100,7 +100,7 @@ struct PlaybackScrubber: View {
                     .strikethrough(style.isStruckThrough)
                     .foregroundStyle(color(style.color))
             } else {
-                time
+                time.clearTextEdge()
             }
         }
         .fixedSize()

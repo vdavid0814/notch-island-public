@@ -172,7 +172,8 @@ final class SettingsSurfaceView: NSView {
     func hide(fade: TimeInterval?) {
         deck.closed()
         // Customize goes with Settings (the pages stay faded until Settings shows them again).
-        if model.studio.customizing != nil { model.studio.customizing = nil }
+        // Not a step of the user's: a swipe back after Settings opens again does not reopen it.
+        if model.studio.customizing != nil { model.settingsHistory.withoutRecording { model.studio.customizing = nil } }
         tearDownCustomize(restoresPages: false)
         guard let fade, let layer, alphaValue > 0 else {
             layer?.removeAnimation(forKey: Self.hideKey)

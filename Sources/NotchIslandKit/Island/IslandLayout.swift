@@ -228,6 +228,27 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         assistantTopInset + assistantFieldHeight + assistantPicksGap + assistantPicksHeight + assistantPicksGap
     }
 
+    /// Between a query's last row and the tiles under it (`AssistantRoom.search`).
+    static let assistantTilesGap: CGFloat = 4
+
+    /// A query's rows above its tiles (`AssistantRoom.search`): as tall as `count` rows, at most the
+    /// list's room under the field (past that they scroll).
+    func assistantSearchRowsHeight(_ count: Int) -> CGFloat {
+        guard count > 0 else { return 0 }
+        let rows = CGFloat(count)
+        let list = max((Self.assistantPageHeight * factor * CGFloat(siri.listRows) / 7).rounded(),
+                       Self.assistantSuggestionsPageHeight)
+        return min(rows * Self.assistantRowHeight + (rows - 1) * Self.assistantRowSpacing,
+                   list - Self.assistantFieldPageHeight - Self.assistantTopInset)
+    }
+
+    /// The most an answer takes under the field: more than a list (pictures, cards), never past
+    /// half the screen; past it, it scrolls.
+    func assistantAnswerMaximum(list: CGFloat, screen: CGSize) -> CGFloat {
+        let fieldPart = Self.assistantTopInset * 2 + Self.assistantFieldHeight + Metrics.Expanded.pageBottomInset
+        return max(list - fieldPart, min(screen.height * 0.55 - notch.height - fieldPart, 520))
+    }
+
     /// The field and `count` rows under it.
     static func assistantRowsPageHeight(_ count: Int) -> CGFloat {
         let rows = CGFloat(max(count, 1))
@@ -345,6 +366,15 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             case .rows(let count): min(Self.assistantRowsPageHeight(count) - Self.assistantBottomInset + assistantRowInset,
                                        max(list, Self.assistantSuggestionsPageHeight))
             case .list: max(list, Self.assistantSuggestionsPageHeight)
+            // The rows, then the tiles 2 pt from the panel's sides and bottom, as the quick picks are
+            // (right under the field when there are no rows).
+            case .answer(let height):
+                Self.assistantTopInset * 2 + Self.assistantFieldHeight + Metrics.Expanded.pageBottomInset
+                    + min(CGFloat(height > 0 ? height : 72), assistantAnswerMaximum(list: max(list, Self.assistantSuggestionsPageHeight), screen: screen))
+            case .search(let count):
+                Self.assistantTopInset + Self.assistantFieldHeight
+                    + (count > 0 ? Self.assistantTopInset + assistantSearchRowsHeight(count) + Self.assistantTilesGap : Self.assistantPicksGap)
+                    + Self.assistantPicksHeight + Self.assistantPicksGap
             case .gallery: Self.galleryPageHeight(rows: siri.galleryRows, icon: siri.galleryIcon)
             case .galleryRows(let count): Self.galleryPageHeight(rows: min(count, siri.galleryRows), icon: siri.galleryIcon)
             }

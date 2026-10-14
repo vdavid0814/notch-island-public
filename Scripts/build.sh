@@ -81,6 +81,9 @@ cp "$ROOT/Support/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cp "$ROOT/docs/ENERGY-LOG.md" "$ROOT/docs/PERFORMANCE-TESTS.md" "$APP/Contents/Resources/"
 # The island photographed in each style and size, for Settings ▸ General (Scripts/settings-pictures.sh).
 cp -R "$ROOT/Support/SettingsPictures" "$APP/Contents/Resources/SettingsPictures"
+# The macOS default wallpaper's resting frame, dark and light: the previews' desktop on a Mac that
+# has not downloaded its video (WallpaperSource.systemDefault).
+cp -R "$ROOT/Support/Wallpapers" "$APP/Contents/Resources/Wallpapers"
 
 if [[ -d "$VENDOR" ]]; then
   REVISION="$(head -n 1 "$VENDOR/REVISION" 2>/dev/null || echo 'unknown revision')"

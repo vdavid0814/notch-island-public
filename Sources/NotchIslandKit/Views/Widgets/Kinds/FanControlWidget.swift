@@ -456,6 +456,13 @@ struct FanHistorySetter: View {
 nonisolated enum FanDialGeometry {
     static let start: Double = 135
     static let sweep: Double = 270
+
+    /// The dials' and graphs' own texts and lines: white on the dark island, black where its content
+    /// is drawn light (Light Mode on Liquid Glass, `IslandGlassStyle.appearsLight`).
+    static func ink(_ scheme: ColorScheme) -> Color { scheme == .light ? .black : .white }
+
+    /// The arc under the fill: faint, a little stronger on a light island.
+    static func track(_ scheme: ColorScheme) -> Color { scheme == .light ? .black.opacity(0.12) : .white.opacity(0.08) }
 }
 
 /// The fan's dial, made as the chip's is: its arc, in the colour of the speed, with a bead at the fill's end, the fans' word
@@ -490,6 +497,7 @@ struct FanDial: View {
     var onInteraction: (Bool) -> Void = { _ in }
 
     @State private var dragged: Double?
+    @Environment(\.colorScheme) private var scheme
 
     static var start: Double { FanDialGeometry.start }
     static var sweep: Double { FanDialGeometry.sweep }
@@ -539,13 +547,13 @@ struct FanDial: View {
                 if isLive, RingLayers.supports(look) {
                     // Live: the glides on the render server (`RingLayers`).
                     RingLayers(fraction: running, diameter: diameter, line: line, look: look, start: Self.start, sweep: Self.sweep,
-                               automaticTrack: .white.opacity(0.08), minimumFill: stopped ? 0 : 0.004,
+                               automaticTrack: FanDialGeometry.track(scheme), minimumFill: stopped ? 0 : 0.004,
                                automaticFill: FanTint.at(running).color, knobAt: knob, forcesKnob: isManual || dragged != nil,
                                animatesKnob: dragged == nil, bead: FanTint.at(running).color)
                 } else {
                     ProgressRing(fraction: running, diameter: diameter, line: line, look: look, start: Self.start, sweep: Self.sweep,
                                  // Standing still: no fill at all (a round end's dot read as turning).
-                                 automaticTrack: .white.opacity(0.08), minimumFill: stopped ? 0 : 0.004,
+                                 automaticTrack: FanDialGeometry.track(scheme), minimumFill: stopped ? 0 : 0.004,
                                  automaticFill: AnyShapeStyle(FanTint.at(running).color),
                                  knobAt: knob, forcesKnob: isManual || dragged != nil, animatesKnob: dragged == nil,
                                  bead: FanTint.at(running).color, animation: isLive ? .easeOut(duration: 0.6) : nil, reportsFrame: reportsFrame)
@@ -594,7 +602,7 @@ struct FanDial: View {
     @ViewBuilder private func word(_ text: String, points: CGFloat, opacity: Double) -> some View {
         let label = Text(text)
             .font(modeFont(points))
-            .foregroundStyle(modeIsAlert ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.white.opacity(opacity)))
+            .foregroundStyle(modeIsAlert ? AnyShapeStyle(Color.orange) : AnyShapeStyle(FanDialGeometry.ink(scheme).opacity(opacity)))
             .lineLimit(1)
             .minimumScaleFactor(0.5)
             .transaction { $0.animation = nil }
@@ -623,7 +631,7 @@ struct FanDial: View {
     private func speed(_ number: String, points: CGFloat) -> Text {
         guard let valueStyle = RingText.capped(valueStyle) else {
             return Text(number)
-                + Text(" " + unit).font(.system(size: points * 0.45, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.5))
+                + Text(" " + unit).font(.system(size: points * 0.45, weight: .medium, design: .rounded)).foregroundStyle(FanDialGeometry.ink(scheme).opacity(0.5))
         }
         var small = valueStyle
         small.size = (valueStyle.size ?? Double(points)) * 0.45
@@ -648,9 +656,9 @@ struct FanDial: View {
     }
 }
 
-/// The chip's temperature as a dial like the fan's: its arc, in the colour of the warmth, filled from 25 to 100 °C with a
-/// bead at the end, its word (Cool, Warm, Hot) over the degrees with their unit, and "Chip" in its
-/// opening.
+/// The chip's temperature as a dial like the fan's (`ReadingDial`): its arc, in the colour of the
+/// warmth, filled from 25 to 100 °C with a bead at the end, its word (Cool, Warm, Hot) over the
+/// degrees with their unit, and "Chip" in its opening.
 struct TemperatureDial: View {
     let celsius: Double?
     let diameter: CGFloat
@@ -674,38 +682,74 @@ struct TemperatureDial: View {
     }
 
     var body: some View {
+        ReadingDial(fraction: celsius.map(Self.fraction), diameter: diameter, number: number, unit: unit,
+                    word: celsius.map(FanControlWidget.warmth), name: String(localized: "Chip"), look: look, nameStyle: nameStyle,
+                    valueStyle: valueStyle, reportsFrame: reportsFrame, isLive: isLive,
+                    accessibilityLabel: String(localized: "Chip temperature \(number ?? "—") \(unit)"))
+    }
+}
+
+/// A reading as a dial, made as the fan's is — the chip's temperature, System's loads: its arc open
+/// at the bottom, filled as far as the reading in its colour (`FanTint`: green, yellow, red) with a
+/// bead at the fill's end, its word over the value, the value with its unit smaller and dimmer, and
+/// its name in the arc's opening. Too small for texts (under 56 pt), the arc alone.
+struct ReadingDial: View {
+    /// 0…1 along the arc; nil before the first reading (nothing filled).
+    let fraction: Double?
+    let diameter: CGFloat
+    /// "52"; nil before the first reading.
+    let number: String?
+    /// "°C", " GB": after the number, `unitScale` as large.
+    let unit: String
+    var unitScale: CGFloat = 0.5
+    /// "Warm": over the value; nil: none.
+    let word: String?
+    /// "Chip": in the arc's opening.
+    let name: String
+    /// How the arc is drawn and where its name and value are (`ProgressLook`, as a line's).
+    var look: ProgressLook = .plain
+    var nameStyle: TextStyle?
+    var valueStyle: TextStyle?
+    var reportsFrame = false
+    /// On the island (not a picture): the arc's glides on the render server.
+    var isLive = false
+    let accessibilityLabel: String
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
         let line = FanDial.line(diameter: diameter)
-        let fraction = celsius.map(Self.fraction) ?? 0
+        let filled = fraction ?? 0
         let texts = FanDial.showsTexts(diameter: diameter)
         ZStack {
             if isLive, RingLayers.supports(look) {
-                RingLayers(fraction: fraction, diameter: diameter, line: line, look: look, start: FanDialGeometry.start,
-                           sweep: FanDialGeometry.sweep, automaticTrack: .white.opacity(0.08), minimumFill: celsius == nil ? 0 : 0.004,
-                           automaticFill: FanTint.at(fraction).color, bead: FanTint.at(fraction).color)
+                RingLayers(fraction: filled, diameter: diameter, line: line, look: look, start: FanDialGeometry.start,
+                           sweep: FanDialGeometry.sweep, automaticTrack: FanDialGeometry.track(scheme), minimumFill: fraction == nil ? 0 : 0.004,
+                           automaticFill: FanTint.at(filled).color, bead: FanTint.at(filled).color)
             } else {
-                ProgressRing(fraction: fraction, diameter: diameter, line: line, look: look, start: FanDialGeometry.start,
-                             sweep: FanDialGeometry.sweep, automaticTrack: .white.opacity(0.08), minimumFill: celsius == nil ? 0 : 0.004,
-                             automaticFill: AnyShapeStyle(FanTint.at(fraction).color), bead: FanTint.at(fraction).color,
+                ProgressRing(fraction: filled, diameter: diameter, line: line, look: look, start: FanDialGeometry.start,
+                             sweep: FanDialGeometry.sweep, automaticTrack: FanDialGeometry.track(scheme), minimumFill: fraction == nil ? 0 : 0.004,
+                             automaticFill: AnyShapeStyle(FanTint.at(filled).color), bead: FanTint.at(filled).color,
                              animation: isLive ? .easeOut(duration: 0.6) : nil, reportsFrame: reportsFrame)
             }
             if texts {
                 let points = WidgetMetrics.points(diameter, ratio: 0.2, min: 8, max: 26)
-                if let celsius {
-                    Text(FanControlWidget.warmth(celsius))
+                if let word {
+                    Text(word)
                         .font(wordFont(FanDial.modePoints(diameter: diameter)))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(FanDialGeometry.ink(scheme).opacity(0.5))
                         .frame(maxWidth: diameter * 0.6)
                         .minimumScaleFactor(0.5)
                         .offset(y: FanDial.modeCenter(diameter: diameter))
                         .transaction { $0.animation = nil }
                         .besideProgressParts()
                 }
-                RingText(text: degrees(points: points), style: valueStyle, size: points, weight: .semibold, design: .rounded,
+                RingText(text: value(points: points), style: valueStyle, size: points, weight: .semibold, design: .rounded,
                          automatic: AnyShapeStyle(.primary), part: .remaining, look: look, reportsFrame: reportsFrame,
                          limit: RingText.valueLimit(diameter: diameter, line: line))
                     .offset(y: diameter * 0.02)
                     .transaction { $0.animation = nil }
-                RingText(text: Text("Chip"), style: nameStyle, size: WidgetMetrics.points(diameter, ratio: 0.095, min: 7, max: 12),
+                RingText(text: Text(name), style: nameStyle, size: WidgetMetrics.points(diameter, ratio: 0.095, min: 7, max: 12),
                          weight: .semibold, part: .elapsed, look: look, reportsFrame: reportsFrame,
                          limit: RingText.nameLimit(diameter: diameter))
                     .offset(y: diameter * 0.39)
@@ -714,7 +758,7 @@ struct TemperatureDial: View {
         .lineLimit(1)
         .frame(width: diameter, height: diameter)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("Chip temperature \(number ?? "—") \(unit)"))
+        .accessibilityLabel(Text(accessibilityLabel))
     }
 
     /// The word's type: the name's where Customize set one (at the word's own size), else the dial's.
@@ -724,16 +768,16 @@ struct TemperatureDial: View {
         return Font(style.font(size: points, weight: .medium))
     }
 
-    /// "52°C": the degrees with their unit half as large and dimmer — in the style's type where it
-    /// has one (its colour then the unit's too).
-    private func degrees(points: CGFloat) -> Text {
+    /// "52°C": the value with its unit smaller and dimmer — in the style's type where it has one
+    /// (its colour then the unit's too).
+    private func value(points: CGFloat) -> Text {
         guard let valueStyle = RingText.capped(valueStyle) else {
             return Text(number ?? "—")
-                + Text(unit).font(.system(size: points * 0.5, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.5))
+                + Text(unit).font(.system(size: points * unitScale, weight: .medium, design: .rounded)).foregroundStyle(FanDialGeometry.ink(scheme).opacity(0.5))
         }
-        var half = valueStyle
-        half.size = (valueStyle.size ?? Double(points)) * 0.5
-        return Text(number ?? "—") + Text(unit).font(Font(half.font(size: points * 0.5, weight: .semibold)))
+        var small = valueStyle
+        small.size = (valueStyle.size ?? Double(points)) * Double(unitScale)
+        return Text(number ?? "—") + Text(unit).font(Font(small.font(size: points * unitScale, weight: .semibold)))
     }
 }
 
@@ -820,6 +864,7 @@ struct FanHeatGraph: View {
     var setHistory: (() -> Void)?
 
     @Environment(AppModel.self) private var model
+    @Environment(\.colorScheme) private var scheme
 
     /// The line's own range: a floor of 30° up to the 100° limit.
     static let temperatureRange = 30.0...100.0
@@ -907,12 +952,12 @@ struct FanHeatGraph: View {
                 .allowsHitTesting(false)
             } else {
                 FanGraphLayers(drawing: drawing, newest: newest, window: window, fadesIn: fadesIn,
-                               dot: shown.last.map { FanGraphLayers.Dot(y: y($0.value, layout: layout), tint: drawing.heatTint(at: y($0.value, layout: layout))) },
+                               dots: shown.last.map { [FanGraphLayers.Dot(y: y($0.value, layout: layout), tint: drawing.heatTint(at: y($0.value, layout: layout)))] } ?? [],
                                lowest: lowest.map { celsius in
                                    FanGraphLayers.Lowest(y: y(celsius, layout: layout),
                                                          text: layout.showsTexts ? FanControlWidget.degrees(celsius, locale: locale) : nil,
                                                          font: Self.nsFont(points, weight: .medium, style: textStyle, digits: true),
-                                                         ink: FanTint(ink), width: size.width)
+                                                         ink: FanTint(ink), line: FanTint(FanDialGeometry.ink(scheme)), width: size.width)
                                })
                     .frame(width: size.width, height: size.height)
             }
@@ -1008,7 +1053,7 @@ struct FanHeatGraph: View {
     /// The limit, dotted, at the top of the line's room, its value over its left end.
     @ViewBuilder private func limitLine(layout: Layout, points: CGFloat, caption: CGFloat, ink: Color) -> some View {
         FanDottedLine()
-            .stroke(Color.white.opacity(0.22), style: StrokeStyle(lineWidth: 0.75, dash: [1.5, 3.5]))
+            .stroke(FanDialGeometry.ink(scheme).opacity(0.22), style: StrokeStyle(lineWidth: 0.75, dash: [1.5, 3.5]))
             .frame(width: size.width, height: 1)
             .offset(y: layout.limit - 0.5)
         if layout.showsTexts {
@@ -1032,7 +1077,7 @@ struct FanHeatGraph: View {
                     .fixedSize()
             }
             FanDottedLine()
-                .stroke(Color.white.opacity(0.22), style: StrokeStyle(lineWidth: 0.75, dash: [1.5, 3.5]))
+                .stroke(FanDialGeometry.ink(scheme).opacity(0.22), style: StrokeStyle(lineWidth: 0.75, dash: [1.5, 3.5]))
                 .frame(height: 1)
         }
         .frame(width: size.width, height: caption)
@@ -1093,7 +1138,7 @@ struct FanHeatGraph: View {
     /// The texts' colour at full strength: the style's, else white.
     private var inkColor: Color {
         switch textStyle?.color ?? .automatic {
-        case .automatic: .white
+        case .automatic: FanDialGeometry.ink(scheme)
         case .custom(let rgb): rgb.color
         case .artwork: model.media.artworkColor.map { Color($0) } ?? .islandAccent
         }
@@ -1101,7 +1146,7 @@ struct FanHeatGraph: View {
 }
 
 /// A line across its rectangle's middle, to be dotted.
-nonisolated private struct FanDottedLine: Shape {
+nonisolated struct FanDottedLine: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.move(to: CGPoint(x: rect.minX, y: rect.midY))
@@ -1110,10 +1155,28 @@ nonisolated private struct FanDottedLine: Shape {
     }
 }
 
+/// A graph's drawing in Core Graphics that the live graph slides (`FanGraphLayers`): Fan Control's
+/// heat and fans, System's loads. `size` is the room up to the newest reading's x (`right`), `lead`
+/// of it left of the graph's edge.
+nonisolated protocol SlidingGraphDrawing: Equatable, Sendable {
+    var size: CGSize { get }
+    var lead: CGFloat { get }
+    /// The newest reading's x: where the dots are.
+    var right: CGFloat { get }
+    /// The lines' width (the dots are sized by it).
+    var line: CGFloat { get }
+    var corners: ChartLook.Corners { get }
+    func draw(in cg: CGContext, fade: Bool, dot: Bool)
+}
+
+extension SlidingGraphDrawing {
+    func isSame(as other: (any SlidingGraphDrawing)?) -> Bool { (other as? Self) == self }
+}
+
 /// The graph's drawing in Core Graphics — the strokes, the line over its fill, the newest dot — so
 /// that the live graph's layer and a picture's Canvas draw the same pixels. `size` is the room up to
 /// the newest reading's x.
-nonisolated struct FanGraphDrawing: Equatable, Sendable {
+nonisolated struct FanGraphDrawing: SlidingGraphDrawing {
     struct Stop: Equatable, Sendable {
         var y: CGFloat
         var tint: FanTint
@@ -1130,6 +1193,9 @@ nonisolated struct FanGraphDrawing: Equatable, Sendable {
     /// The line's colour by its height, from the floor up.
     var heatStops: [Stop]
     var corners: ChartLook.Corners
+
+    var right: CGFloat { layout.right }
+    var line: CGFloat { layout.line }
 
     /// The line's colour at a height.
     func heatTint(at y: CGFloat) -> FanTint {
@@ -1301,8 +1367,8 @@ private struct FanGraphKey: View {
 }
 
 /// The live graph's drawing as layers: drawn once a reading, then slid left by Core Animation in a
-/// short soft glide to where it now stands, the newest dot gliding up or down at the right edge
-/// with it, the lowest's dotted line gliding to a new lowest — on the render server, nothing done
+/// short soft glide to where it now stands, the newest dots (one a line) gliding up or down at the
+/// right edge with it, the lowest's dotted line gliding to a new lowest — on the render server, nothing done
 /// on the main thread between readings (the lowest's glide as SwiftUI animation was 300 ms of the
 /// main thread in 0.8 s, measured). A step under two points (a long graph) is not slid: it is too
 /// small to be seen as a jump.
@@ -1312,12 +1378,12 @@ struct FanGraphLayers: NSViewRepresentable {
         var tint: FanTint
     }
 
-    let drawing: FanGraphDrawing
+    let drawing: any SlidingGraphDrawing
     let newest: Date
     let window: TimeInterval
     let fadesIn: Bool
-    let dot: Dot?
-    let lowest: Lowest?
+    let dots: [Dot]
+    var lowest: Lowest?
 
     /// The lowest temperature's dotted line: its height, its value (nil: none written) in the
     /// graph's type and colour, across `width`.
@@ -1326,13 +1392,15 @@ struct FanGraphLayers: NSViewRepresentable {
         var text: String?
         var font: NSFont
         var ink: FanTint
+        /// The dotted line's colour (at its own faintness).
+        var line = FanTint(red: 1, green: 1, blue: 1)
         var width: CGFloat
     }
 
     func makeNSView(context: Context) -> FanGraphLayerView { FanGraphLayerView() }
 
     func updateNSView(_ view: FanGraphLayerView, context: Context) {
-        view.show(drawing, newest: newest, window: window, fadesIn: fadesIn, dot: dot)
+        view.show(drawing, newest: newest, window: window, fadesIn: fadesIn, dots: dots)
         view.showLowest(lowest)
     }
 }
@@ -1341,8 +1409,9 @@ final class FanGraphLayerView: NSView {
     private let clip = CALayer()
     private let content = CALayer()
     private let fade = CAGradientLayer()
-    private let ring = CAShapeLayer()
-    private let fill = CAShapeLayer()
+    /// Each newest dot's dark ring and its fill, made as the lines need them.
+    private var rings: [CAShapeLayer] = []
+    private var fills: [CAShapeLayer] = []
 
     /// A reading's glide: how long, and its curve (soft at both ends).
     static let glide: TimeInterval = 0.35
@@ -1353,10 +1422,15 @@ final class FanGraphLayerView: NSView {
     private let lowestText = CATextLayer()
     private var lowestShown: (text: String?, width: CGFloat, fontSize: CGFloat)?
 
-    private var drawing: FanGraphDrawing?
+    private var drawing: (any SlidingGraphDrawing)?
     private var drawnScale: CGFloat = 0
     private var newest: Date?
-    private var dotY: CGFloat?
+    private var dotYs: [CGFloat] = []
+
+    private static let still: [String: any CAAction] = [
+        "position": NSNull(), "bounds": NSNull(), "frame": NSNull(), "contents": NSNull(), "path": NSNull(), "fillColor": NSNull(),
+        "transform": NSNull(), "hidden": NSNull(), "mask": NSNull(),
+    ]
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -1367,7 +1441,6 @@ final class FanGraphLayerView: NSView {
         fade.colors = [CGColor(gray: 0, alpha: 0), CGColor(gray: 0, alpha: 1)]
         fade.startPoint = CGPoint(x: 0, y: 0.5)
         fade.endPoint = CGPoint(x: 0.12, y: 0.5)
-        ring.fillColor = CGColor(gray: 0, alpha: 0.85)
         lowestLine.strokeColor = CGColor(gray: 1, alpha: 0.22)
         lowestLine.fillColor = nil
         lowestLine.lineWidth = 0.75
@@ -1375,14 +1448,26 @@ final class FanGraphLayerView: NSView {
         lowest.addSublayer(lowestLine)
         lowest.addSublayer(lowestText)
         lowest.isHidden = true
-        for sublayer in [clip, content, fade, ring, fill, lowest, lowestLine, lowestText] as [CALayer] {
-            sublayer.actions = ["position": NSNull(), "bounds": NSNull(), "frame": NSNull(), "contents": NSNull(),
-                                "path": NSNull(), "fillColor": NSNull(), "transform": NSNull(), "hidden": NSNull(), "mask": NSNull()]
+        for sublayer in [clip, content, fade, lowest, lowestLine, lowestText] as [CALayer] {
+            sublayer.actions = Self.still
         }
         layer?.addSublayer(lowest)
         layer?.addSublayer(clip)
-        layer?.addSublayer(ring)
-        layer?.addSublayer(fill)
+    }
+
+    /// At least `count` dots' layers, over the drawing, each line's over the one before.
+    private func makeDots(_ count: Int) {
+        while rings.count < count {
+            let ring = CAShapeLayer(), fill = CAShapeLayer()
+            ring.fillColor = CGColor(gray: 0, alpha: 0.85)
+            for dot in [ring, fill] {
+                dot.actions = Self.still
+                dot.isHidden = true
+                layer?.addSublayer(dot)
+            }
+            rings.append(ring)
+            fills.append(fill)
+        }
     }
 
     required init?(coder: NSCoder) { nil }
@@ -1411,6 +1496,7 @@ final class FanGraphLayerView: NSView {
             return
         }
         let height = ceil(new.font.ascender - new.font.descender + new.font.leading)
+        lowestLine.strokeColor = new.line.cgColor(0.22)
         if lowestShown.map({ $0.text != new.text || $0.width != new.width || $0.fontSize != new.font.pointSize }) ?? true {
             lowestShown = (new.text, new.width, new.font.pointSize)
             var start: CGFloat = 0
@@ -1450,7 +1536,7 @@ final class FanGraphLayerView: NSView {
         }
     }
 
-    func show(_ drawing: FanGraphDrawing, newest: Date, window: TimeInterval, fadesIn: Bool, dot: FanGraphLayers.Dot?) {
+    func show(_ drawing: any SlidingGraphDrawing, newest: Date, window: TimeInterval, fadesIn: Bool, dots: [FanGraphLayers.Dot]) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
@@ -1461,14 +1547,14 @@ final class FanGraphLayerView: NSView {
         content.frame = CGRect(x: -drawing.lead, y: 0, width: drawing.size.width, height: drawing.size.height)
         fade.frame = clip.bounds
         clip.mask = fadesIn ? fade : nil
-        if drawing != self.drawing { render(drawing) }
+        if !drawing.isSame(as: self.drawing) { render(drawing) }
 
         // Slid from where the last drawing stood (a slide under way, too) to rest, in a short glide
         // that starts and settles softly, then still until the next reading: the window server
         // draws a third of the time it did for a slide as long as the readings are apart (that one
         // was ~160 mW of it for a short graph, measured).
         let step = self.newest.map { newest.timeIntervalSince($0) } ?? 0
-        let shift = drawing.layout.right * CGFloat(step / max(window, 1))
+        let shift = drawing.right * CGFloat(step / max(window, 1))
         let slides = !resized && step > 0 && step <= 3 && shift >= 2
         let under = (content.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? 0
         // The same reading again (another part of the widget changed): the slide under way goes on.
@@ -1484,34 +1570,36 @@ final class FanGraphLayerView: NSView {
         }
         if step > 0 || self.newest == nil { self.newest = newest }
 
-        // The newest dot at the right edge, on the line there.
-        if let dot, !drawing.points.isEmpty {
-            let center = CGPoint(x: drawing.layout.right, y: dot.y)
-            ring.path = FanGraphDrawing.dotPath(center, radius: drawing.layout.line * 3, corners: drawing.corners)
-            fill.path = FanGraphDrawing.dotPath(center, radius: drawing.layout.line * 2, corners: drawing.corners)
+        // The newest dots at the right edge, each on its line there.
+        makeDots(dots.count)
+        for (index, dot) in dots.enumerated() {
+            let ring = rings[index], fill = fills[index]
+            let center = CGPoint(x: drawing.right, y: dot.y)
+            ring.path = FanGraphDrawing.dotPath(center, radius: drawing.line * 3, corners: drawing.corners)
+            fill.path = FanGraphDrawing.dotPath(center, radius: drawing.line * 2, corners: drawing.corners)
             fill.fillColor = dot.tint.cgColor()
             ring.isHidden = false
             fill.isHidden = false
             let was = (fill.presentation()?.value(forKeyPath: "transform.translation.y") as? CGFloat) ?? 0
             if isNew { for layer in [ring, fill] { layer.removeAnimation(forKey: "glide") } }
-            if slides, let dotY {
+            if slides, index < dotYs.count {
                 let glide = CABasicAnimation(keyPath: "transform.translation.y")
-                glide.fromValue = dotY + was - dot.y
+                glide.fromValue = dotYs[index] + was - dot.y
                 glide.toValue = 0
                 glide.duration = min(Self.glide, step)
                 glide.timingFunction = Self.easing
                 for layer in [ring, fill] { layer.add(glide, forKey: "glide") }
             }
-            dotY = dot.y
-        } else {
-            ring.isHidden = true
-            fill.isHidden = true
-            dotY = nil
         }
+        for index in dots.count..<rings.count {
+            rings[index].isHidden = true
+            fills[index].isHidden = true
+        }
+        dotYs = dots.map(\.y)
     }
 
     /// The drawing as the content layer's picture, at the screen's pixels.
-    private func render(_ drawing: FanGraphDrawing) {
+    private func render(_ drawing: any SlidingGraphDrawing) {
         self.drawing = drawing
         let scale = window?.backingScaleFactor ?? 2
         let width = Int((drawing.size.width * scale).rounded(.up)), height = Int((drawing.size.height * scale).rounded(.up))

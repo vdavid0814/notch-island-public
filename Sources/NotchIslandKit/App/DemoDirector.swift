@@ -88,10 +88,18 @@ import SwiftUI
                     model.studio.switchMode(to: mode)
                 }
             }, forMode: .common)
-        case .addWidget(let kind, let page, let on):
+        case .addWidget(let kind, let page, let on, let size, let options):
             let store = model.boards.store(for: page)
             if on {
-                if store.add(kind) == nil { Log.app.info("demo/addwidget: no room for \(kind.rawValue) on \(page.rawValue)") }
+                guard let id = store.add(kind) else {
+                    Log.app.info("demo/addwidget: no room for \(kind.rawValue) on \(page.rawValue)")
+                    return
+                }
+                if let options { store.update(id) { $0.options = options.intersection(kind.options) } }
+                if let size, let anchor = store.board.widget(id)?.frame,
+                   let frame = store.board.placement(for: kind, size: size, near: anchor, excluding: id) {
+                    store.setFrame(frame, for: id)
+                }
             } else {
                 store.board.widgets.filter { $0.kind == kind }.forEach { store.remove($0.id) }
             }
@@ -114,6 +122,9 @@ import SwiftUI
         case .siriClipboard:
             model.controller.openAssistant()
             model.assistant.open(.clipboard)
+        case .siriSample:
+            model.controller.openAssistant()
+            model.assistant.showSample(SiriReply.sample)
         case .siriType(let text):
             model.controller.openAssistant()
             Task { @MainActor in

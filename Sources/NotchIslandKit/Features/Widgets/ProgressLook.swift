@@ -54,6 +54,8 @@ nonisolated struct ProgressLook: Sendable, Codable, Hashable {
             case (.cpuLoad, .remaining): .cpuValue
             case (.memoryLoad, .elapsed): .memoryTitle
             case (.memoryLoad, .remaining): .memoryValue
+            case (.gpuLoad, .elapsed): .gpuTitle
+            case (.gpuLoad, .remaining): .gpuValue
             case (.fanDial, .elapsed): .fanName
             case (.fanDial, .remaining): .value
             case (.tempDial, .elapsed): .tempName
@@ -68,8 +70,9 @@ nonisolated struct ProgressLook: Sendable, Codable, Hashable {
         func title(in line: ElementID, isRing: Bool = false) -> String {
             switch (line, self) {
             case (_, .bar): isRing ? "Ring" : title
-            case (.cpuLoad, .elapsed), (.memoryLoad, .elapsed), (.fanDial, .elapsed), (.tempDial, .elapsed): "Name"
-            case (.cpuLoad, .remaining), (.memoryLoad, .remaining), (.tempDial, .remaining), (.fanDial, .remaining): "Value"
+            case (.cpuLoad, .elapsed), (.gpuLoad, .elapsed), (.memoryLoad, .elapsed), (.fanDial, .elapsed), (.tempDial, .elapsed): "Name"
+            case (.cpuLoad, .remaining), (.gpuLoad, .remaining), (.memoryLoad, .remaining), (.tempDial, .remaining), (.fanDial, .remaining):
+                "Value"
             default: title
             }
         }

@@ -194,6 +194,12 @@ nonisolated enum AssistantRoom: Sendable, Hashable, Comparable {
     case picks
     /// The field and this many rows under it.
     case rows(Int)
+    /// A query's: the field, this many of its rows (none: only the tiles) and under them Ask Apple
+    /// Intelligence, Search the Web and Ask ChatGPT as large tiles, like the quick picks.
+    case search(Int)
+    /// An answer (Apple Intelligence's, Siri's): the field and the answer under it, this many
+    /// points tall as laid out (0: not measured yet), up to the room's most.
+    case answer(Int)
     case list
     case gallery
     /// The gallery with only this many rows of apps (a search in it that found a few): not a
@@ -220,6 +226,8 @@ nonisolated enum AssistantRoom: Sendable, Hashable, Comparable {
         case .field: 0
         case .picks: 0.5
         case .rows(let count): 1 + Double(min(max(count, 0), 999)) / 1000
+        case .search(let count): 1.5 + Double(min(max(count, 0), 99)) / 1000
+        case .answer(let height): 1.8 + Double(min(max(height, 0), 9999)) / 100_000
         case .list: 2
         case .galleryRows(let count): 2.5 + Double(min(max(count, 0), 99)) / 1000
         case .gallery: 3

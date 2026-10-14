@@ -25,7 +25,11 @@ import SwiftUI
 
     var mode: Mode = .widgets
     /// The widget open in Customize, over all of Settings (`WidgetCustomizeView`); nil: none.
-    var customizing: WidgetID?
+    var customizing: WidgetID? {
+        didSet { if customizing != oldValue { onCustomizingChange?(oldValue) } }
+    }
+    /// Customize opened or closed (the widget it had open before): Settings' history records it.
+    @ObservationIgnored var onCustomizingChange: ((WidgetID?) -> Void)?
     /// The page whose board the stage shows and edits (`AppModel.editedWidgets`).
     var page: ExpandedPage = .home
     /// The panel as an edge or a slider dragged in Size mode makes it, until the drag ends and it

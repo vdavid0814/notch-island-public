@@ -27,7 +27,8 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case studioPage(ExpandedPage)
     /// A widget of `kind` added to a page's board, as the gallery adds one
     /// (`demo/addwidget?kind=appUsage&page=battery`); `on=0` removes the page's widgets of that kind.
-    case addWidget(IslandWidgetKind, ExpandedPage, Bool)
+    /// `w` and `h` give it a size, `options` (comma-separated) its switched-on elements.
+    case addWidget(IslandWidgetKind, ExpandedPage, Bool, size: GridSize? = nil, options: Set<ElementID>? = nil)
     /// What Settings ▸ Widgets' stage edits, switched as its mode bar does (`demo/studiomode?mode=size`).
     case studioMode(String)
     /// Logs the widget studio's page switch state (`demo/studiostate`), for stress tests.
@@ -55,6 +56,8 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case siriClipboard
     /// Types `text` into Siri a letter every 120 ms, as a person would (for measuring a search).
     case siriType(String)
+    /// A Siri answer of every kind of part (text, sources, files, photos, a message card), to see.
+    case siriSample
     /// Switches the island's surface style, as the Settings cards do (animated).
     case surface(IslandGlassStyle)
     /// Holds every island spring this long after its start (nil: runs them again), so single frames
@@ -244,6 +247,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
             return modes[query["mode"]?.lowercased() ?? "anc"].map { .demo(.airPodsMode($0)) }
         case "demo/siriapps": return .demo(.siriApps)
         case "demo/siriclipboard": return .demo(.siriClipboard)
+        case "demo/sirisample": return .demo(.siriSample)
         case "demo/siritype": return .demo(.siriType(query["text"] ?? "notch"))
         case "demo/surface":
             return query["style"].flatMap { IslandGlassStyle(rawValue: $0.lowercased()) }.map { .demo(.surface($0)) }
@@ -262,7 +266,10 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "demo/studiopage": return query["page"].flatMap(ExpandedPage.init(rawValue:)).map { .demo(.studioPage($0)) }
         case "demo/addwidget":
             guard let kind = query["kind"].flatMap(IslandWidgetKind.init(rawValue:)) else { return nil }
-            return .demo(.addWidget(kind, query["page"].flatMap(ExpandedPage.init(rawValue:)) ?? .home, query["on"] != "0"))
+            let size = query["w"].flatMap(Int.init).flatMap { w in query["h"].flatMap(Int.init).map { GridSize(width: w, height: $0) } }
+            let options = query["options"].map { Set($0.split(separator: ",").map { ElementID(rawValue: String($0)) }) }
+            return .demo(.addWidget(kind, query["page"].flatMap(ExpandedPage.init(rawValue:)) ?? .home, query["on"] != "0",
+                                    size: size, options: options))
         case "demo/picturewidgets": return .demo(.pictureWidgets(query["on"] != "0"))
         case "demo/picture":
             if query["on"] == "0" { return .demo(.pictureEnd) }

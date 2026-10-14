@@ -7,6 +7,40 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-10-14 17:50** — On Liquid Glass, grey widget texts and own-colour texts low in contrast with
+  the glass (WCAG < 4.5) get a 100 % black/white 0.5-pt sharp edge (`ClearTextEdge`), drawn by the
+  text itself (`ClearTextEdgeRenderer`: offset glyphs in one layer, the glyphs cut out of it). *Eight
+  view copies per text made the island lag, and showed through see-through grey (heavy black letters).*
+  The page picker is made anew when a page's symbol changes (`PickerLook`), as when its colour does.
+- **2026-10-14 17:20** — The macOS default wallpaper's resting frame ships with the app
+  (`Support/Wallpapers`, 1800 px, dark and light) and is the previews' desktop where the video is not
+  downloaded (`WallpaperSource.systemDefault`; `NI_WALLPAPER=bundled` to see it). *The system's own
+  preview, the fallback before, is 214 × 130 px: blurred and pixelated on the widget studio's stage
+  (a tester's M5 MacBook Pro).*
+- **2026-10-14 17:10** — System grows into Fan Control's graph and dials (asked for): from two rows and
+  150 pt of room (timer size) its loads are a graph made on Fan Control's code (`LoadGraph` on
+  `FanGraphLayers`, reach 10 s–10 min on the timer's ruler, percentages as the battery chart's) and,
+  switched on, `ReadingDial`s (memory in GB, two decimals); GPU is IOKit's "Device Utilization %",
+  read only while shown. Dial/graph texts and lines follow the colour scheme (black in Light Mode).
+  *One graph code for both widgets; widgets saved before (version < 5) get the graph switched on.*
+- **2026-10-14 16:20** — Siri's answer is shown as Siri lays it out (`SiriReplyReader` → `SiriBlock`s →
+  `SiriAnswerView`): paragraphs with its semibold runs and links (tapped: pressed in Siri AI), source
+  chips, file/app cards with Siri's own icons (opened by name through the file search), a photo grid,
+  a message card, its buttons. The answer room is as tall as the answer (measured, 8-pt steps) up to
+  55 % of the screen. *Siri AI hands over no pictures but icons through Accessibility: a picture of a
+  thing is Wikipedia's for its title (only the title is sent), a photo is found in the library by the
+  minute Siri reads out (Photos permission asked from the answer).*
+- **2026-10-14 15:35** — "Use Siri AI" asks the system's Siri AI unseen and shows its answer in the
+  island (`SiriHandoff`): all through Accessibility with Siri AI hidden and never in front — its
+  window's New Conversation button, the question set into the Ask Siri field and read back,
+  `AXConfirm`, the prompt seen in the conversation (else once more), the reply read as it comes;
+  Siri's buttons mirrored in the island and pressed in Siri AI. *Dropped on the way: `siri://` and
+  `spotlight://` carry no question; the Spotlight bar takes no synthetic keys; typing into Siri AI's
+  window needed it in front — AppKit then pulled its window on screen however far it was moved, and
+  handed the front to another app. Reopens NotchIsland gets during a handoff are ignored.*
+- **2026-10-14 14:05** — Two fingers sideways are back/forward: in Siri out of a suggestion and into
+  the last one (`swipeBack`/`swipeForward`), in Settings a browser-like history of page + Customize
+  (`SettingsHistory`); not where something under the fingers scrolls sideways. *Asked for.*
 - **2026-10-14 14:00** — Memory macOS counts twice is counted once (`AliasTrim`: a place wholly
   covered by another kept mapping of the same memory is mapped onto itself); memory mapped once
   is never touched that way. *The same call takes singly mapped memory out of Activity Monitor's

@@ -69,6 +69,14 @@ nonisolated enum AssistantRow: Hashable, Identifiable, Sendable {
     case searchWeb
     case askChatGPT
 
+    /// Shown as a tile under a query's rows (`AssistantModel.showsSearchTiles`).
+    var isSearchTile: Bool {
+        switch self {
+        case .askIntelligence, .searchWeb, .askChatGPT: true
+        default: false
+        }
+    }
+
     var id: String {
         switch self {
         case .category(let category): "category:\(category.rawValue)"
@@ -168,6 +176,9 @@ nonisolated struct AssistantAnswer: Sendable, Equatable {
     var failure: String?
     /// A dictionary's entry rather than Apple Intelligence's answer: the word it defines.
     var definedWord: String?
+    /// Siri AI's answer (`SiriHandoff`), as Siri shows it.
+    var fromSiri = false
+    var siri = SiriReply()
 }
 
 /// Where the assistant's lists come from. Tests use fixed lists: the live ones read Spotlight, which
@@ -450,17 +461,26 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// Something to list: a query, an open suggestion or an answer (the island then shows the list).
     var needsList: Bool { !query.isEmpty || category != nil || answer != nil }
 
+    /// A query from the root: Use Siri AI, Search the Web and Ask ChatGPT show as large
+    /// tiles under its rows (`AssistantRoom.search`), not as rows (asked for).
+    var showsSearchTiles: Bool { category == nil && answer == nil && !trimmedQuery.isEmpty }
+
     /// How much of the island the assistant needs: the field alone until the pointer is over it or
     /// ↓ is pressed, the suggestions' height for up to three rows, the full list beyond that (and
     /// for the gallery and answers, which scroll).
     var room: AssistantRoom {
-        if answer != nil { return .list }
+        // As tall as the answer (`answerHeight`, measured), up to its room's most.
+        if answer != nil { return .answer(Int(answerHeight)) }
         if category == .applications {
             // A search in the gallery: as many rows as its apps fill, up to the gallery's own.
             guard !trimmedQuery.isEmpty else { return .gallery }
             let columns = max(1, settings().galleryColumns)
             let needed = max(1, (rows.count + columns - 1) / columns)
             return needed < settings().galleryRows ? .galleryRows(needed) : .gallery
+        }
+        if showsSearchTiles {
+            // The query's rows (up to the list's), the tiles under them.
+            return .search(min(rows.count { !$0.isSearchTile }, settings().listRows))
         }
         if needsList {
             // Exactly the rows there are (a query's hits, an open suggestion's items), not a list's
@@ -971,11 +991,34 @@ nonisolated struct FileScope: Sendable, Equatable {
             return
         }
         revealsSuggestions = true
-        let count = rows.count
-        guard count > 0 else { return }
-        let next = min(max(selection + delta, 0), count - 1)
-        if next != selection { cancelConfirmation() }
-        selection = next
+        let order = navigationOrder
+        guard !order.isEmpty else { return }
+        let at = order.firstIndex(of: selection) ?? 0
+        mark(order[min(max(at + delta, 0), order.count - 1)])
+    }
+
+    /// ←/→ on a tile under a query's rows the keys moved to: the tile beside it. False elsewhere,
+    /// so the key goes on to the field (its caret).
+    func moveAmongTiles(by delta: Int) -> Bool {
+        guard showsSearchTiles, marksSelection else { return false }
+        let rows = rows
+        let tiles = rows.indices.filter { rows[$0].isSearchTile }
+        guard let at = tiles.firstIndex(of: selection) else { return false }
+        mark(tiles[min(max(at + delta, 0), tiles.count - 1)])
+        return true
+    }
+
+    /// The rows in the order ↑/↓ go through them: as shown, so under a query the tiles come after
+    /// the rows (Use Siri AI is first in `rows` for a question, so Return asks it).
+    private var navigationOrder: [Int] {
+        let rows = rows
+        guard showsSearchTiles else { return Array(rows.indices) }
+        return rows.indices.filter { !rows[$0].isSearchTile } + rows.indices.filter { rows[$0].isSearchTile }
+    }
+
+    private func mark(_ index: Int) {
+        if index != selection { cancelConfirmation() }
+        selection = index
         selectionIsUsers = true
         selectionFollowsPointer = false
         marksSelection = true
@@ -996,7 +1039,10 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// and Return at once turned Bluetooth off, the row above the apps until they landed.
     func activateSelection() {
         if let answer {
-            if !trimmedQuery.isEmpty, trimmedQuery != answer.question { ask() }
+            // A reply typed over Siri's answer goes on in its conversation.
+            if answer.fromSiri, !answer.isResponding, !trimmedQuery.isEmpty, trimmedQuery != answer.question {
+                askSiri(trimmedQuery, continuing: true)
+            } else if !answer.fromSiri, !trimmedQuery.isEmpty, trimmedQuery != answer.question { ask() }
             return
         }
         guard rowsAreShowing else { return }
@@ -1063,6 +1109,35 @@ nonisolated struct FileScope: Sendable, Equatable {
         return true
     }
 
+    /// The suggestion last left (by Esc, a swipe, a click on the field…): two fingers to the left
+    /// at the search open it again (`swipeForward`). Kept from one opening to the next.
+    @ObservationIgnored private(set) var lastCategory: AssistantCategory?
+
+    /// Two fingers to the right on the trackpad: from an answer, an opened contact or a suggestion
+    /// back towards the search, as Esc steps (asked for). False with nowhere to go back to.
+    @discardableResult func swipeBack() -> Bool {
+        if answer != nil {
+            askTask?.cancel()
+            answer = nil
+        } else if openedContact != nil {
+            openedContact = nil
+            selection = 0
+        } else if category != nil {
+            open(nil)
+        } else {
+            return false
+        }
+        return true
+    }
+
+    /// Two fingers to the left at the search: into the suggestion last left (asked for). False when
+    /// none was, or it has been switched off since.
+    @discardableResult func swipeForward() -> Bool {
+        guard answer == nil, category == nil, let lastCategory, settings().categories.contains(lastCategory) else { return false }
+        open(lastCategory)
+        return true
+    }
+
     /// ⌘1, ⌘2, ⌘3, or a suggestion row; nil goes back to the root. The query stays, so a search
     /// can be narrowed to one kind.
     func open(_ category: AssistantCategory?) {
@@ -1079,6 +1154,7 @@ nonisolated struct FileScope: Sendable, Equatable {
             answer = nil
         }
         guard category != self.category else { return }
+        if let left = self.category { lastCategory = left }
         self.category = category
         openedContact = nil
         // ⌘8 reads the calendar while it is open (nothing is, until the user allowed it).
@@ -1195,7 +1271,10 @@ nonisolated struct FileScope: Sendable, Equatable {
             // The rates are fetched now (the query is not sent), and the answer replaces the row.
             search(now: true)
         case .askIntelligence:
-            ask()
+            // Use Siri AI: the system's Spotlight answers, its features working; without
+            // Accessibility to type the question there, Apple Intelligence answers here as before.
+            guard SiriHandoff.isAvailable else { return ask() }
+            askSiri(text)
         case .searchWeb:
             guard let url = AssistantActions.webSearchURL(for: text, engine: settings().searchEngine) else { return }
             onClose?()
@@ -1250,6 +1329,124 @@ nonisolated struct FileScope: Sendable, Equatable {
         }
     }
 
+    /// A question is with Siri AI (`SiriHandoff`).
+    private(set) var isHandingToSiri = false
+
+    /// Use Siri AI: asked unseen, its answer streamed into `answer` (`continuing`: a reply in the
+    /// same conversation, typed into the field over Siri's answer).
+    private func askSiri(_ text: String, continuing: Bool = false) {
+        guard !text.isEmpty else { return }
+        isHandingToSiri = true
+        // The answer being followed stops: this question replaces it.
+        askTask?.cancel()
+        answerHeight = 0
+        answer = AssistantAnswer(question: text, fromSiri: true)
+        askTask = Task { [weak self] in
+            guard let self, !Task.isCancelled else { return }
+            let sent = await SiriHandoff.ask(text, continuing: continuing, onReply: { [weak self] reply in
+                guard let self, self.answer?.question == text, self.answer?.fromSiri == true else { return }
+                self.answer?.siri = reply
+                self.answer?.text = reply.text
+            })
+            guard self.answer?.question == text, self.answer?.fromSiri == true else { return }
+            self.isHandingToSiri = false
+            self.answer?.isResponding = false
+            if !sent {
+                self.answer?.failure = String(localized: "Siri AI did not take the question. Try again, or open Siri AI.")
+            } else if self.answer?.siri.isEmpty == true {
+                self.answer?.failure = String(localized: "Siri AI did not answer in time.")
+            }
+        }
+    }
+
+    /// Something done to Siri's answer from the island — a button (Show More, Cancel, a source),
+    /// a link in its text — done in Siri AI, and what Siri says to it followed.
+    func performSiri(_ action: SiriAction) {
+        guard let current = answer, current.fromSiri, !current.isResponding else { return }
+        let question = current.question
+        answer?.isResponding = true
+        Task { [weak self] in
+            let done = await SiriHandoff.perform(action, after: current.siri) { [weak self] reply in
+                guard let self, self.answer?.question == question else { return }
+                self.answer?.siri = reply
+                self.answer?.text = reply.text
+            }
+            guard let self, self.answer?.question == question else { return }
+            self.answer?.isResponding = false
+            // A link Siri AI gives no press to: asked about, as its own tap does.
+            if !done, case .link(let title) = action {
+                self.query = String(localized: "Tell me more about \(title)")
+                self.askSiri(self.trimmedQuery, continuing: true)
+            }
+        }
+    }
+
+    /// The message card's text, then its button (Send): the text set in Siri AI first.
+    func sendSiriMessage(_ text: String, with action: String) {
+        guard let current = answer, current.fromSiri, !current.isResponding else { return }
+        answer?.isResponding = true
+        Task { [weak self] in
+            _ = await SiriHandoff.perform(.composerText(text), after: current.siri) { _ in }
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let self else { return }
+            self.answer?.isResponding = false
+            self.performSiri(.button(action))
+        }
+    }
+
+    /// A file or an app Siri found, opened: looked up by its name (Siri gives no path).
+    func openSiriCard(_ card: SiriCard) {
+        let name = card.title
+        Task { [weak self] in
+            guard let self else { return }
+            let apps = self.allApps.isEmpty ? await self.sources.allApps() : self.allApps
+            if let app = apps.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame || $0.url.deletingPathExtension().lastPathComponent == name }) {
+                self.onClose?()
+                NSWorkspace.shared.open(app.url)
+                return
+            }
+            // Siri shortens a long name in its middle ("Életmód és minde...i-korszakban.pdf"): found
+            // by its start, matched by its start and end.
+            let parts = name.components(separatedBy: name.contains("…") ? "…" : "...")
+            let head = parts.first?.trimmingCharacters(in: .whitespaces) ?? name
+            let tail = parts.count > 1 ? (parts.last ?? "") : ""
+            let hits = await self.sources.files(head, 20, FileScope(anywhere: true))
+            let matches: (AssistantHit) -> Bool = { hit in
+                let file = hit.url.lastPathComponent
+                return parts.count > 1 ? file.hasPrefix(head) && file.hasSuffix(tail) : (file == name || hit.name == name)
+            }
+            if let file = hits.first(where: matches) ?? hits.first(where: { $0.url.lastPathComponent.hasPrefix(head) }) {
+                self.onClose?()
+                NSWorkspace.shared.open(file.url)
+            } else {
+                // Not found here (outside the folders searched): Siri AI shows it.
+                self.showInSiri()
+            }
+        }
+    }
+
+    /// The answer's own height as laid out (`AnswerPane`): the island is as tall as that, not a
+    /// list's worth (asked for).
+    private(set) var answerHeight: CGFloat = 0
+    func setAnswerHeight(_ height: CGFloat) {
+        // In steps of 8 pt: a reply that streams in grows the island a few times, not at each word.
+        let stepped = (height / 8).rounded(.up) * 8
+        if stepped != answerHeight { answerHeight = stepped }
+    }
+
+    /// A Siri answer to look at (`demo/sirisample`).
+    func showSample(_ reply: SiriReply) {
+        query = "show me what you can do"
+        answerHeight = 0
+        answer = AssistantAnswer(question: query, text: reply.text, isResponding: false, fromSiri: true, siri: reply)
+    }
+
+    /// The conversation in Siri AI itself.
+    func showInSiri() {
+        onClose?()
+        SiriHandoff.reveal()
+    }
+
     /// Asks Apple Intelligence, streaming the answer into `answer`. A new session per question:
     /// a reused one carries context over (measured: after a question about France, the capital of
     /// Hungary came back as "Paris").
@@ -1258,6 +1455,7 @@ nonisolated struct FileScope: Sendable, Equatable {
         guard answersWithIntelligence, !question.isEmpty else { return }
         let length = settings().answerLength
         askTask?.cancel()
+        answerHeight = 0
         answer = AssistantAnswer(question: question)
         askTask = Task { [weak self] in
             let session = LanguageModelSession(instructions: length.instructions)
@@ -1326,7 +1524,9 @@ nonisolated struct FileScope: Sendable, Equatable {
         selectionIsUsers = false
         selectionFollowsPointer = false
         marksSelection = false
-        if answer != nil, answer?.isResponding == false { answer = nil }
+        // Siri's answer stays while a reply is typed over it (Return sends it on in its
+        // conversation; Esc goes back to the search).
+        if let answer, !answer.isResponding, !answer.fromSiri { self.answer = nil }
         // Until the new search lands only the hits that still match stay, so Return never runs a
         // hit from an earlier, shorter query.
         let text = trimmedQuery

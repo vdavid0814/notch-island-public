@@ -19,7 +19,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.8.5.4</string>
+	<string>0.8.6</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -34,7 +34,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>48</string>
+	<string>49</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSEnvironment</key>
@@ -66,6 +66,8 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 David Varga</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>When Siri finds photos for you in Spotlight, NotchIsland shows them in the island. They are read on this Mac only and never leave it.</string>
 	<key>NSPrefersDisplaySafeAreaCompatibilityMode</key>
 	<false/>
 	<key>NSSupportsAutomaticTermination</key>

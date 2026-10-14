@@ -437,7 +437,9 @@ struct ElementInspector: View, Equatable {
         let element = widget.kind.spec.element(id)
         // A graph of readings (Fan Control's): the same look, in its own words.
         let graph = id == .tempGraph
-        let graphText: ElementID? = graph ? .tempGraphText : nil
+        // System's graph of loads: a line each, the percentages as the battery chart's.
+        let loads = id == .statsGraph
+        let graphText: ElementID? = graph ? .tempGraphText : loads ? .statsGraphText : nil
         HStack(spacing: 10) {
             Image(systemName: element?.symbol ?? "chart.bar")
                 .font(.system(size: 18))
@@ -446,7 +448,7 @@ struct ElementInspector: View, Equatable {
                 .background(.white.opacity(0.06), in: .rect(cornerRadius: 8, style: .continuous))
             VStack(alignment: .leading, spacing: 1) {
                 Text(element?.title ?? "Chart").font(.headline)
-                Text(graph ? "Graph" : "Chart").font(.caption).foregroundStyle(SettingsPalette.secondary)
+                Text(graph || loads ? "Graph" : "Chart").font(.caption).foregroundStyle(SettingsPalette.secondary)
             }
             Spacer(minLength: 8)
             if look != .plain || graphText.map({ widget.textStyles[$0] != nil }) == true {
@@ -460,7 +462,8 @@ struct ElementInspector: View, Equatable {
             }
         }
         StudioDivider()
-        section("Corners", caption: graph ? "The line's joins and the mark at the newest reading." : "The bars' tops.") {
+        section("Corners", caption: graph ? "The line's joins and the mark at the newest reading."
+                    : loads ? "The lines' joins and the dots at the newest readings." : "The bars' tops.") {
             Picker("Corners", selection: Binding(get: { look.corners }, set: { corners in updateChart(id) { $0.corners = corners } })) {
                 ForEach(ChartLook.Corners.allCases) { Text($0.title).tag($0) }
             }
@@ -479,6 +482,20 @@ struct ElementInspector: View, Equatable {
             StudioDivider()
             section("Fan", caption: "The fans' strokes under the line: far apart while they turn slowly, close while fast. Automatic: by the speed, as the fan's dial — green slow, yellow, red at their fastest.") {
                 colourChoice(look.lowColor, mixing: .chartLow) { color in updateChart(id) { $0.lowColor = color } }
+            }
+            StudioDivider()
+        } else if loads {
+            // Each load's line in a colour of its own until one is picked.
+            section("Processor", caption: "The processor's line and its dot. Automatic: blue.") {
+                colourChoice(look.lowColor, mixing: .chartLow) { color in updateChart(id) { $0.lowColor = color } }
+            }
+            StudioDivider()
+            section("Graphics", caption: "The graphics processor's line, where Graphics is switched on. Automatic: violet.") {
+                colourChoice(look.mediumColor, mixing: .chartMedium) { color in updateChart(id) { $0.mediumColor = color } }
+            }
+            StudioDivider()
+            section("Memory", caption: "Memory's line. Automatic: orange.") {
+                colourChoice(look.highColor, mixing: .chartHigh) { color in updateChart(id) { $0.highColor = color } }
             }
             StudioDivider()
         } else {
@@ -500,7 +517,8 @@ struct ElementInspector: View, Equatable {
             StudioDivider()
         }
         if !graph {
-            section("Percentages", caption: "Beside the chart, each with its line, where it is wide enough; ones too close to the next are left out.") {
+            section("Percentages", caption: loads ? "Dotted across the graph and written at its left; ones too close to the next are left out."
+                        : "Beside the chart, each with its line, where it is wide enough; ones too close to the next are left out.") {
                 HStack(spacing: 10) {
                     Text("Write").font(.callout)
                     Picker("Percentages", selection: Binding(get: { look.percentStep }, set: { step in updateChart(id) { $0.percentStep = step } })) {
@@ -560,7 +578,8 @@ struct ElementInspector: View, Equatable {
             // touch does not jump.
             let ownSize = Double(FanHeatGraph.textPoints(height: editing.parts[id]?.height ?? inner.height))
             pointSlider("Size", value: min(style.size ?? ownSize, FanHeatGraph.textSizes.upperBound),
-                        in: FanHeatGraph.textSizes, help: "The limit over the graph, the time and the key under it") { points in
+                        in: FanHeatGraph.textSizes,
+                        help: loads ? "The percentages beside the graph, the time and the key under it" : "The limit over the graph, the time and the key under it") { points in
                 update(graphText) { $0.size = points }
             }
             font(graphText, style, showsSize: false)

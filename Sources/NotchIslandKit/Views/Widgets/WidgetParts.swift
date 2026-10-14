@@ -86,7 +86,7 @@ import SwiftUI
             default: ReadingWidget.captionPoints(inner: inner)
             }
         case .usageDay: DailyUsageWidget.dayPoints(inner: inner)
-        case .tempGraphText: FanHeatGraph.textPoints(height: inner.height)
+        case .tempGraphText, .statsGraphText: FanHeatGraph.textPoints(height: inner.height)
         case .rulerUnit: RulerUnitName.points(markerSize: TimerWidget.rulerSpace(inner: inner) < 30 ? 6 : 9)
         case .monthDays: MonthCalendarWidget.dayPoints(widget, inner: inner)
         case .shelfCount: ShelfWidget.countPoints(inner: inner)

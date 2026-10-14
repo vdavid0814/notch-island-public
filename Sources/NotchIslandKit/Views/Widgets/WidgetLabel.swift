@@ -34,6 +34,7 @@ struct WidgetLabel<Plain: View>: View {
     @Environment(\.inkText) private var inkText
     @Environment(\.linePreview) private var linePreview
     @Environment(\.widgetShape) private var widgetShape
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -83,6 +84,7 @@ struct WidgetLabel<Plain: View>: View {
             ? LabelFit.fitted(text, style: style, size: size, weight: weight)
             : (style.font(size: size, weight: weight), style.lineCount(lineHeight: style.font(size: size, weight: weight).lineHeight)))
         let strongDots = preview != nil
+        let edge = edge(style)
         return Group {
             if style.alignment == .justified {
                 JustifiedLayout(spacing: font.spaceWidth, maxLines: grows ? .max : lines, words: Self.words(in: text).count) {
@@ -91,6 +93,7 @@ struct WidgetLabel<Plain: View>: View {
                     }
                     decorate(Text("…"), style, font: font, isFiller: false)
                 }
+                .modifier(LabelEdge(edge: edge))
                 .clipped()
             } else {
                 let text = decorate(segmented(style), style, font: font, isFiller: false)
@@ -98,6 +101,7 @@ struct WidgetLabel<Plain: View>: View {
                     .minimumScaleFactor(shrinks ? style.effectiveMinimumScale : 1)
                     .truncationMode(.tail)
                     .multilineTextAlignment(style.alignment.textAlignment)
+                    .modifier(LabelEdge(edge: edge))
                 if isEditing, !grows {
                     // The room left, as dots: under the text, after an unseen copy of it at its own
                     // size (where the text fills its lines, or is shrunk, there is none). Centred or
@@ -121,6 +125,22 @@ struct WidgetLabel<Plain: View>: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: style.box == nil || grows ? nil : .infinity, alignment: style.alignment.frameAlignment)
+    }
+
+    /// The edge round the styled text on Liquid Glass (`ClearTextEdge`): its own grey always, as the
+    /// widgets' grey texts; a colour of its own where it fades into the glass. None over a
+    /// background of its own, where the text is set against that.
+    private func edge(_ style: TextStyle) -> (shows: Bool, ink: Color?) {
+        guard style.background == nil else { return (false, nil) }
+        let isLight = colorScheme == .light
+        let own: Color? = switch style.color {
+        case .automatic: automaticColor
+        case .custom(let rgb): rgb.color
+        case .artwork: model.media.artworkColor.map { Color($0) } ?? .islandAccent
+        }
+        guard let own else { return (isSecondary, nil) }
+        let ink = ClearTextEdge.color(for: own, isLight: isLight)
+        return (ink != nil, ink)
     }
 
     /// The words, set one by one when justified, and in the editor the dots as short words after them.
@@ -302,6 +322,15 @@ struct WidgetLabel<Plain: View>: View {
         let height = (text as NSString).boundingRect(with: CGSize(width: width, height: .greatestFiniteMagnitude),
                                                      options: [.usesLineFragmentOrigin], attributes: [.font: font]).height
         return Int((height / font.lineHeight).rounded())
+    }
+}
+
+/// `WidgetLabel.edge` on its styled text.
+private struct LabelEdge: ViewModifier {
+    let edge: (shows: Bool, ink: Color?)
+
+    func body(content: Content) -> some View {
+        if edge.shows { content.clearTextEdge(edge.ink) } else { content }
     }
 }
 

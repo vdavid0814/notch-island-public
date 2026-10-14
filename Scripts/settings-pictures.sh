@@ -38,15 +38,24 @@ trap 'open -a "$APP" "notchisland://demo/picture?on=0"; rm -rf "$WORK"' EXIT
 
 # ONLY=<activity> retakes that live activity's pictures alone.
 ONLY="${ONLY:-}"
-[[ -n "$ONLY" ]] || rm -f "$OUT"/*.jpg "$OUT/geometry.json" "$GEOMETRY"
+# STYLE=<style> retakes that surface style's pictures alone (smoked: Clear), the others kept.
+STYLE="${STYLE:-}"
+STYLES="${STYLE:-smoked black fade}"
+if [[ -n "$STYLE" ]]; then
+  [[ -n "$ONLY" ]] || rm -f "$OUT"/island-*-"$STYLE"-*.jpg "$OUT"/activity-*-"$STYLE"-*.jpg
+elif [[ -z "$ONLY" ]]; then
+  rm -f "$OUT"/*.jpg "$OUT/geometry.json" "$GEOMETRY"
+fi
 for desktop in system systemLight checkerboard; do
   [[ -z "$ONLY" ]] || continue
+  if [[ -z "$STYLE" ]]; then
   open -a "$APP" "notchisland://demo/picture?desktop=$desktop&style=black&activity=idle"
   sleep 2.2
   screencapture -x -R "$X,0,$WIDTH,$HEIGHT" "$WORK/shot.png"
   sips -s format jpeg -s formatOptions 82 --resampleWidth "$STORED" "$WORK/shot.png" --out "$OUT/idle-$desktop.jpg" >/dev/null
   echo "==> idle-$desktop.jpg"
-  for style in smoked black fade; do
+  fi
+  for style in $STYLES; do
     for size in extraSmall small compact standard large; do
       open -a "$APP" "notchisland://demo/picture?desktop=$desktop&style=$style&size=$size"
       # The island at its new size, and its glass over the desktop under it.
@@ -68,7 +77,7 @@ for desktop in system systemLight checkerboard; do
 done
 if [[ -n "$ONLY" ]]; then
   for desktop in system systemLight checkerboard; do
-    for style in smoked black fade; do
+    for style in $STYLES; do
       open -a "$APP" "notchisland://demo/picture?desktop=$desktop&style=$style&activity=$ONLY"
       sleep 2.2
       screencapture -x -R "$ACTIVITY_X,0,$ACTIVITY_WIDTH,$ACTIVITY_HEIGHT" "$WORK/shot.png"
@@ -79,4 +88,4 @@ if [[ -n "$ONLY" ]]; then
   done
   exit 0
 fi
-cp "$GEOMETRY" "$OUT/geometry.json"
+[[ -n "$STYLE" ]] || cp "$GEOMETRY" "$OUT/geometry.json"

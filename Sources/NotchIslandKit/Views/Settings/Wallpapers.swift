@@ -347,11 +347,23 @@ nonisolated enum WallpaperSource: Sendable, Equatable {
     static func aerialThumbnail(_ id: String) -> URL { aerialsDirectory.appendingPathComponent("thumbnails/\(id).png") }
 
     /// The macOS default wallpaper: the landscape video of the system's own dynamic wallpaper in
-    /// the asked appearance.
+    /// the asked appearance, or — where the video has not been downloaded (it is only once someone
+    /// picks that wallpaper) — its resting frame from the app's bundle. The system's own preview of
+    /// it is 214 × 130 px: stretched over the widget studio's stage it came out blurred and
+    /// pixelated (a tester's M5 MacBook Pro, October 14).
     static func systemDefault(light: Bool) -> WallpaperSource {
-        let entries = AerialEntries.load()
-        guard let asset = entries.defaultAsset(light: light) else { return .none }
-        return .aerial(asset)
+        let asset = AerialEntries.load().defaultAsset(light: light)
+        // NI_WALLPAPER=bundled: as on a Mac without the video, to see the bundled frame.
+        let bundledOnly = ProcessInfo.processInfo.environment["NI_WALLPAPER"] == "bundled"
+        if let asset, !bundledOnly, FileManager.default.fileExists(atPath: aerialVideo(asset).path)
+            || FileManager.default.fileExists(atPath: cacheDirectory.appendingPathComponent("\(asset).jpg").path) {
+            return .aerial(asset)
+        }
+        if let bundled = Bundle.main.url(forResource: light ? "macos-light" : "macos-dark", withExtension: "jpg",
+                                         subdirectory: "Wallpapers") {
+            return .image(bundled)
+        }
+        return asset.map(WallpaperSource.aerial) ?? .none
     }
 
     /// What is on the main screen's desktop now.

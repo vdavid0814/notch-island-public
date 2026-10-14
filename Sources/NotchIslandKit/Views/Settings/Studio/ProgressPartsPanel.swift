@@ -132,7 +132,7 @@ struct ProgressPartsPanel: View {
     static func isRing(_ id: ElementID, inner: CGSize) -> Bool {
         switch id {
         case .fanDial, .tempDial: true
-        case .cpuLoad, .memoryLoad: inner.height >= 56
+        case .cpuLoad, .gpuLoad, .memoryLoad: inner.height >= SystemStatsWidget.Layout.tallHeight
         case .levelSlider: LevelWidget.isRing(inner)
         default: false
         }
@@ -520,13 +520,16 @@ struct ProgressPartsPanel: View {
         return switch (id, part) {
         case (.tempDial, .remaining), (.fanDial, .remaining): WidgetMetrics.points(side, ratio: 0.2, min: 8, max: 26)
         case (.fanDial, _), (.tempDial, _): WidgetMetrics.points(side, ratio: 0.095, min: 7, max: 12)
+        // System's loads drawn as Fan Control's dials.
+        case (_, .remaining) where SystemStatsWidget.drawsDials(id, in: widget): WidgetMetrics.points(side, ratio: 0.2, min: 8, max: 26)
+        case (_, _) where SystemStatsWidget.drawsDials(id, in: widget): WidgetMetrics.points(side, ratio: 0.095, min: 7, max: 12)
         case (_, .remaining): StatRing.valuePoints(diameter: side)
         default: StatRing.titlePoints(diameter: side)
         }
     }
 
     private var basePoints: CGFloat {
-        if id == .cpuLoad || id == .memoryLoad {
+        if SystemStatsWidget.loads.contains(id) {
             let geometry = WidgetBoardGeometry(size: WidgetsSettingsPage.boardSize(model.studioLayout), grid: model.panel(for: model.studio.page).grid)
             let natural = geometry.laidSize(for: widget.frame), padding = WidgetMetrics.padding(for: widget)
             return SystemStatsWidget.barTextSize(widget, inner: CGSize(width: natural.width - 2 * padding, height: natural.height - 2 * padding))
@@ -664,12 +667,12 @@ private struct PartsPicture: View, Equatable {
                 PlaybackScrubber(clock: ProgressPartsPanel.stoppedClock, duration: ProgressPartsPanel.duration,
                                  isPlaying: false, look: look,
                                  elapsedStyle: widget.textStyles[.elapsedTime], remainingStyle: widget.textStyles[.remainingTime])
-            } else if id == .cpuLoad || id == .memoryLoad {
+            } else if SystemStatsWidget.loads.contains(id) {
                 // The system's line with its name and value, as the widget draws it.
-                StatBar(line: id, title: id == .cpuLoad ? "CPU" : "RAM", value: id == .cpuLoad ? 0.23 : 0.61,
+                StatBar(line: id, title: SystemStatsWidget.title(id), value: SystemStatsWidget.sample(id),
                         textSize: basePoints, titleWidth: 0, look: look, reportsFrame: true,
-                        titleStyle: widget.textStyles[id == .cpuLoad ? .cpuTitle : .memoryTitle],
-                        valueStyle: widget.textStyles[id == .cpuLoad ? .cpuValue : .memoryValue])
+                        titleStyle: widget.textStyles[SystemStatsWidget.titleID(id)],
+                        valueStyle: widget.textStyles[SystemStatsWidget.valueID(id)])
             } else {
                 // A line without times (the volume's): the line alone, a third full.
                 ScrubTrack(position: 1, duration: 3, look: look, reportsFrame: true) { _ in } commit: {}
@@ -713,10 +716,16 @@ private struct PartsPicture: View, Equatable {
             TemperatureDial(celsius: 46, diameter: side, number: FanControlWidget.degreeNumber(46, locale: .current),
                             unit: FanControlWidget.degreeUnit(locale: .current), look: look,
                             nameStyle: widget.textStyles[.tempName], valueStyle: widget.textStyles[.tempValue], reportsFrame: true)
-        case .cpuLoad, .memoryLoad:
-            StatRing(title: id == .cpuLoad ? "CPU" : "RAM", value: id == .cpuLoad ? 0.23 : 0.61, diameter: side, look: look,
-                     reportsFrame: true, titleStyle: widget.textStyles[id == .cpuLoad ? .cpuTitle : .memoryTitle],
-                     valueStyle: widget.textStyles[id == .cpuLoad ? .cpuValue : .memoryValue])
+        case _ where SystemStatsWidget.drawsDials(id, in: widget):
+            // Drawn as Fan Control's dials, two rows tall.
+            LoadDial(load: id, fraction: SystemStatsWidget.sample(id),
+                     bytes: UInt64(Double(ProcessInfo.processInfo.physicalMemory) * SystemStatsWidget.sample(id)), diameter: side, look: look,
+                     nameStyle: widget.textStyles[SystemStatsWidget.titleID(id)], valueStyle: widget.textStyles[SystemStatsWidget.valueID(id)],
+                     reportsFrame: true)
+        case .cpuLoad, .gpuLoad, .memoryLoad:
+            StatRing(title: SystemStatsWidget.title(id), value: SystemStatsWidget.sample(id), diameter: side, look: look,
+                     reportsFrame: true, titleStyle: widget.textStyles[SystemStatsWidget.titleID(id)],
+                     valueStyle: widget.textStyles[SystemStatsWidget.valueID(id)])
         default:
             // A level's ring, a third full; its symbol and value are the button and the text they are.
             LevelRing(value: 1.0 / 3, symbol: WidgetParts.buttonSymbol(of: .levelIcon, in: widget, model: model),

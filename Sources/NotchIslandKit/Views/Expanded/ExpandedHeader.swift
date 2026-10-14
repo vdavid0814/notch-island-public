@@ -13,7 +13,6 @@ struct ExpandedHeader: View {
     @Environment(\.isIslandPanelHidden) private var isHidden
     @Environment(\.isHeaderPicture) private var isPicture
     @Environment(\.headerPicksStudioPage) private var picksStudioPage
-
     var body: some View {
         // Settings' picture of the header follows the banners only while Settings is on screen:
         // kept closed, it swapped in the level's capsule (blurred in and out) at every volume or
@@ -334,6 +333,7 @@ private struct PagePicker: View {
     @Environment(\.controlSize) private var controlSize
     @Environment(\.headerPicksStudioPage) private var picksStudioPage
     @Environment(\.islandGlassStyle) private var glassStyle
+    @Environment(\.headerOnNotchBand) private var onNotchBand
 
     /// The bar's drawn width per pages and control size. Once it is known, whether it fits is
     /// arithmetic (`HeaderFit`): a `ViewThatFits` measured the system's bar again on every open.
@@ -355,6 +355,8 @@ private struct PagePicker: View {
         let island = model.island
         let key = WidthKey(pages: pages, size: controlSize)
         let tints = model.preferences.header.pageTints
+        // The pages' symbols as shown: a page of the user's given another symbol is redrawn too.
+        let symbols = model.preferences.header.customPages.map(\.symbol)
         // A page shown without its segment (the battery's, left out where it would reach under the
         // notch, or a page the user hid): no segment is selected.
         Picker("Page", selection: Binding {
@@ -381,18 +383,25 @@ private struct PagePicker: View {
         // Liquid Glass's clear glass in Light Mode: the bar a little lighter where its selection is
         // not (`IslandGlassStyle.barLift`), white under the system's glass. Kept, clear, elsewhere.
         .background {
-            let lifted = glassStyle.appearsLight(isDark: SystemAppearance.shared.glassIsDark)
+            let lifted = glassStyle.appearsLight(isDark: SystemAppearance.shared.glassIsDark) && !onNotchBand
                 && SystemAppearance.shared.glassTint < IslandGlassStyle.frostedFrom
             Capsule().fill(.white.opacity(lifted ? IslandGlassStyle.barLift : 0))
                 .glassEffect(lifted ? .clear.tint(.white.opacity(IslandGlassStyle.barFrost)) : .identity, in: .capsule)
         }
-        // A symbol in another colour is another picture: the bar draws it only when made anew.
-        .id(tints)
+        // A symbol in another colour, or another symbol, is another picture: the bar draws it only
+        // when made anew (a page's new symbol stayed the old one in the bar, October 14).
+        .id(PickerLook(tints: tints, symbols: symbols))
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
             // Written only when it changes: every reader lays out again.
             if Self.widths.values[key] != width { Self.widths.values[key] = width }
         }
     }
+}
+
+/// What the page picker draws its segments' pictures from (`PagePicker`'s identity).
+private struct PickerLook: Hashable {
+    let tints: [ExpandedPage: IslandTheme.RGB]
+    let symbols: [String]
 }
 
 /// The battery with its percentage inside, like the Mac's menu bar: white (also while charging),

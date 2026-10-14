@@ -469,7 +469,9 @@ final class SettingsWindow: NSPanel {
         // through SwiftUI first (~a third of a scroll's main-thread time, measured).
         if event.type == .scrollWheel {
             ScrollActivity.mark()
-            if let target = scrollTarget(for: event) {
+            let target = scrollTarget(for: event)
+            swiped(event, over: target)
+            if let target {
                 if coalescer.scroll(target, with: event) { return }
                 target.scrollWheel(with: event)
                 return
@@ -481,6 +483,21 @@ final class SettingsWindow: NSPanel {
     }
 
     private let coalescer = ScrollCoalescer()
+    private var swipe = SwipeTracker()
+
+    /// Two fingers sideways on the trackpad: back and forward where the user was in Settings
+    /// (`SettingsHistory`), as in Siri. Not where something under the fingers scrolls sideways
+    /// (`target`, found for a sideways scroll): that row scrolls instead.
+    private func swiped(_ event: NSEvent, over target: NSScrollView?) {
+        guard event.hasPreciseScrollingDeltas, event.momentumPhase.isEmpty else { return }
+        // The deltas follow the content; with natural scrolling that is the fingers' way.
+        let flip: CGFloat = event.isDirectionInvertedFromDevice ? 1 : -1
+        let sideways = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+        let dx = sideways && target != nil ? 0 : event.scrollingDeltaX * flip
+        if let step = swipe.feed(phase: event.phase, dx: dx, dy: event.scrollingDeltaY * flip) {
+            model.swipeSettings(back: step == .right)
+        }
+    }
 
     /// The innermost scroll view under the event that can scroll its way; nil leaves it to AppKit.
     private func scrollTarget(for event: NSEvent) -> NSScrollView? {

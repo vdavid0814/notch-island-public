@@ -46,7 +46,8 @@ nonisolated struct WidgetID: RawRepresentable, Hashable, Codable, Sendable, Cust
 
 nonisolated struct IslandWidget: Sendable, Codable, Hashable, Identifiable {
     /// 1: elements only. 2: element sizes, layouts and backgrounds. 3: ids, style and settings.
-    static let version = 4
+    /// 4: the calendar's parts switchable. 5: System's graph.
+    static let version = 5
 
     var id: WidgetID
     var kind: IslandWidgetKind
@@ -316,6 +317,7 @@ nonisolated struct IslandWidget: Sendable, Codable, Hashable, Identifiable {
         options = Set((try? container.decode([String].self, forKey: .options))?.map(ElementID.init) ?? [])
         if version < 2 { options.formUnion(WidgetMigration.elementsAddedInVersion2(kind)) }
         if version < 4 { options.formUnion(WidgetMigration.elementsSwitchableInVersion4(kind)) }
+        if version < 5 { options.formUnion(WidgetMigration.elementsAddedInVersion5(kind)) }
         if let background = try? container.decodeIfPresent(WidgetBackground.self, forKey: .background) {
             self.background = background
         } else {

@@ -62,6 +62,15 @@ nonisolated struct SensorSample: Sendable, Equatable {
     /// The fans' speed only: how far their strokes had run by this reading (`FanRhythm`), so each
     /// stroke keeps its moment however the history is cut.
     var phase: Double = 0
+
+    /// `sample` at the end of `series`: at most one a second (a timer's a little early still
+    /// counts); those older than `window` dropped.
+    static func append(_ sample: SensorSample, to series: inout [SensorSample], window: TimeInterval) {
+        if let last = series.last, sample.date.timeIntervalSince(last.date) < 0.6 { return }
+        let cut = sample.date.addingTimeInterval(-window - 5)
+        if let first = series.first, first.date < cut { series.removeAll { $0.date < cut } }
+        series.append(sample)
+    }
 }
 
 /// The fans' speed as a rhythm (Fan Control's graph): a row of strokes, far apart while they turn
@@ -189,12 +198,7 @@ nonisolated enum FanRhythm {
         }
     }
 
-    /// At most one sample a second (a timer's a little early still counts); older than the window,
-    /// dropped.
     private static func append(_ sample: SensorSample, to series: inout [SensorSample]) {
-        if let last = series.last, sample.date.timeIntervalSince(last.date) < 0.6 { return }
-        let cut = sample.date.addingTimeInterval(-window - 5)
-        if let first = series.first, first.date < cut { series.removeAll { $0.date < cut } }
-        series.append(sample)
+        SensorSample.append(sample, to: &series, window: window)
     }
 }

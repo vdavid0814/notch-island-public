@@ -166,19 +166,66 @@ import Testing
         #expect(model.room == .field)
         model.moveSelection(by: 1)
         #expect(model.room == .quickPicks)
-        // A query is exactly as tall as its rows, up to the full list.
+        // A query is exactly as tall as its rows, up to the full list, with Ask / Web / ChatGPT as
+        // tiles under them.
         model.query = "zzqx"
         await model.settle()
-        #expect(model.room == .rows(model.rows.count))
+        #expect(model.showsSearchTiles && model.room == .search(model.rows.count { !$0.isSearchTile }))
         model.query = "saf"
         await model.settle()
-        #expect(model.rows.count > 3 && model.room == .rows(model.rows.count))
+        let listed = model.rows.count { !$0.isSearchTile }
+        #expect(listed >= 3 && model.room == .search(listed))
         let layout = IslandLayout(notch: CGSize(width: 156, height: 28), scale: .standard)
-        #expect(layout.size(for: .assistant(model.room)).height < layout.size(for: .assistant(.list)).height)
+        #expect(layout.size(for: .assistant(.search(0))).height == layout.size(for: .assistant(.picks)).height)
+        #expect(layout.size(for: .assistant(model.room)).height < layout.size(for: .assistant(.search(layout.siri.listRows))).height)
+        #expect(layout.size(for: .assistant(.search(40))).height == layout.size(for: .assistant(.search(layout.siri.listRows))).height)
         #expect(layout.size(for: .assistant(.rows(40))).height == layout.size(for: .assistant(.list)).height)
         model.query = ""
         model.open(.applications)
         #expect(model.room == .gallery)
+    }
+
+    @Test func theKeysReachTheTilesAfterTheRows() async {
+        let model = model(stubSources(apps: ["Mail"]))
+        model.query = "mai"
+        await model.settle()
+        let rows = model.rows
+        let tiles = rows.indices.filter { rows[$0].isSearchTile }
+        #expect(!tiles.isEmpty && rows.first == .hit(model.apps[0]))
+        // ←/→ stay with the field's caret until the keys are on a tile.
+        #expect(!model.moveAmongTiles(by: 1))
+        model.moveSelection(by: 0)
+        model.moveSelection(by: 1)
+        #expect(model.selection == tiles[0])
+        #expect(model.moveAmongTiles(by: 1) && model.selection == tiles[1])
+        #expect(model.moveAmongTiles(by: -5) && model.selection == tiles[0])
+        model.moveSelection(by: -1)
+        #expect(model.selection == 0 && !model.moveAmongTiles(by: 1))
+    }
+
+    @Test func twoFingersStepOutOfASuggestionAndBackIn() {
+        let model = model()
+        #expect(!model.swipeForward() && !model.swipeBack())
+        model.open(.clipboard)
+        #expect(model.swipeBack() && model.category == nil)
+        #expect(model.swipeForward() && model.category == .clipboard)
+        // Esc out of it counts as leaving it too.
+        model.escape()
+        #expect(model.category == nil && model.swipeForward() && model.category == .clipboard)
+    }
+
+    @Test func aSwipeIsSidewaysFarEnoughOncePerGesture() {
+        var tracker = SwipeTracker()
+        #expect(tracker.feed(phase: .began, dx: 0, dy: 0) == nil)
+        #expect(tracker.feed(phase: .changed, dx: 25, dy: 2) == nil)
+        #expect(tracker.feed(phase: .changed, dx: 25, dy: 2) == .right)
+        #expect(tracker.feed(phase: .changed, dx: 60, dy: 0) == nil)
+        #expect(tracker.feed(phase: .ended, dx: 0, dy: 0) == nil)
+        // Mostly up and down: a scroll, not a swipe.
+        #expect(tracker.feed(phase: .began, dx: 0, dy: 0) == nil)
+        #expect(tracker.feed(phase: .changed, dx: -50, dy: 40) == nil)
+        #expect(tracker.feed(phase: .changed, dx: -30, dy: 0) == nil)
+        #expect(tracker.feed(phase: .began, dx: -45, dy: 0) == .left)
     }
 
     @Test func galleryIsTheLargestRoom() {

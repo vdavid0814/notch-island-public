@@ -94,6 +94,8 @@ struct IslandRootView: View {
                 bottomRadius: outline.bottomRadius,
                 shoulderRadius: outline.shoulderRadius,
                 shoulderDrop: outline.shoulderDrop,
+                // Behind every presentation on Clear glass (asked for, October 14).
+                wearsNotchBand: !surfaceOf.isSettings,
                 notch: IslandOutline(size: layout.notch, bottomRadius: layout.bottomRadius(for: .idle),
                                      shoulderRadius: layout.shoulderRadius(for: .idle)),
                 glassStyle: glassStyle,
@@ -379,6 +381,9 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
     var bottomRadius: CGFloat
     var shoulderRadius: CGFloat
     let shoulderDrop: CGFloat
+    /// On Liquid Glass the notch's black runs out beside it (`IslandNotchBand`): every presentation
+    /// but Settings (black anyway) and a pill at the notch's height (all black).
+    let wearsNotchBand: Bool
     /// The idle outline, where an emerging island starts.
     let notch: IslandOutline
     let glassStyle: IslandGlassStyle
@@ -437,10 +442,12 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
         let pillScheme = glassStyle == .liquidGlass && isPill
         let pillBlack = glassStyle == .liquidGlass && (isPill || landsAsPill)
         let parksGlass = isStill
+        let showsBand = glassStyle == .liquidGlass && wearsNotchBand && !isPill
         GlassEffectContainer {
             content
                 // A faint edge round the grey bars on Liquid Glass in Light Mode (`IslandGlassStyle.grayEdge`).
                 .environment(\.outlinesIslandText, glassStyle.outlinesText(isDark: SystemAppearance.shared.glassIsDark))
+                .environment(\.headerOnNotchBand, showsBand)
                 // Under Reduce Motion the island fades in and out as it grows out of the notch and
                 // back into it; otherwise it is always whole (`isStill`).
                 .opacity(reveal)
@@ -452,6 +459,11 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
                                     fadeStretch: fadeStretch,
                                     isSettled: size == settledSize || isHeld,
                                     in: surface.inset(by: -IslandGlassStyle.shadeBleed))
+                .background(alignment: .top) {
+                    IslandNotchBand(width: size.width + 2 * IslandGlassStyle.shadeBleed, notchWidth: notch.size.width,
+                                    depth: IslandLayout.overdraw + notch.size.height, notchHeight: notch.size.height)
+                        .opacity(showsBand ? 1 : 0)
+                }
                 .background {
                     surface.inset(by: -IslandGlassStyle.shadeBleed).fill(.black)
                         .opacity(pillBlack ? 1 : 0)

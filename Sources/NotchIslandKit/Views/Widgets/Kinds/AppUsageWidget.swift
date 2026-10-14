@@ -96,7 +96,7 @@ struct AppUsageWidget: View {
         return WidgetLabel(id: .label, text: Self.title, widget: widget, size: points, weight: .semibold, isSecondary: true) {
             Text(Self.title)
                 .font(.system(size: points, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .clearTextEdge().foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
@@ -109,7 +109,7 @@ struct AppUsageWidget: View {
         return WidgetLabel(id: .usageDay, text: text, widget: widget, size: points, weight: .medium, isSecondary: true) {
             Text(text)
                 .font(.system(size: points, weight: .medium))
-                .foregroundStyle(.secondary)
+                .clearTextEdge().foregroundStyle(.secondary)
                 .lineLimit(1)
         }
         .fixedSize()
@@ -138,10 +138,10 @@ struct AppUsageList: View {
                     VStack(spacing: 3) {
                         Text(empty.title)
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                            .clearTextEdge().foregroundStyle(.secondary)
                         Text(empty.detail)
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.tertiary)
+                            .clearTextEdge().foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .multilineTextAlignment(.center)
@@ -166,7 +166,7 @@ struct AppUsageList: View {
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                     Text(AppUsageWidget.pointsText(row.points))
                                         .font(.system(size: points, weight: .semibold, design: .rounded).monospacedDigit())
-                                        .foregroundStyle(.secondary)
+                                        .clearTextEdge().foregroundStyle(.secondary)
                                         .lineLimit(1)
                                         .fixedSize()
                                 }

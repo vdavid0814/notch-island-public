@@ -183,12 +183,12 @@ struct MonthGridView: View {
 
     @ViewBuilder private func weekday(_ name: String, points: CGFloat) -> some View {
         if dayStyle == .plain {
-            Text(name).font(.system(size: points, weight: .semibold)).foregroundStyle(.tertiary)
+            Text(name).font(.system(size: points, weight: .semibold)).clearTextEdge().foregroundStyle(.tertiary)
                 .opacity(layerPass == .underlay ? 0 : 1)
         } else {
             var style = dayStyle
             let _ = style.size = Double(points)
-            Text(name).font(Font(style.font(size: points, weight: .semibold))).foregroundStyle(.tertiary)
+            Text(name).font(Font(style.font(size: points, weight: .semibold))).clearTextEdge().foregroundStyle(.tertiary)
                 .opacity(layerPass == .underlay ? 0 : 1)
         }
     }

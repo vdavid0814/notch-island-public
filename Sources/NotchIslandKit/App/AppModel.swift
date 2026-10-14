@@ -298,6 +298,9 @@ import Observation
         boards.sync(preferences.header.orderedPages)
         haptics = Haptics(preferences: preferences)
         controller = IslandController(model: self)
+        studio.onCustomizingChange = { [unowned self] old in
+            settingsHistory.moved(from: SettingsPlace(pane: settingsPane, customizing: old), to: settingsPlace)
+        }
         assistant.onClose = { [weak self] in self?.controller.closeAssistant() }
         recorder.onStop = { [weak self] in self?.controller.recordingStopped() }
         recorder.onStart = { [weak self] in self?.recordingThumbnail.dismiss(animated: false) }
@@ -593,7 +596,25 @@ import Observation
     var settingsPane: IslandSettingsPane = IslandSettingsPane.named(
         UserDefaults.standard.string(forKey: IslandSettingsPane.key) ?? ""
     ) ?? .general {
-        didSet { UserDefaults.standard.set(settingsPane.rawValue, forKey: IslandSettingsPane.key) }
+        didSet {
+            UserDefaults.standard.set(settingsPane.rawValue, forKey: IslandSettingsPane.key)
+            settingsHistory.moved(from: SettingsPlace(pane: oldValue, customizing: studio.customizing), to: settingsPlace)
+        }
+    }
+
+    /// Settings' steps back and forward (two fingers sideways, `swipeSettings`).
+    @ObservationIgnored let settingsHistory = SettingsHistory()
+
+    /// Where Settings is now.
+    var settingsPlace: SettingsPlace { SettingsPlace(pane: settingsPane, customizing: studio.customizing) }
+
+    /// Two fingers sideways in Settings: to the right back where the user was, to the left forward
+    /// again. A widget removed since is not opened in Customize again.
+    func swipeSettings(back: Bool) {
+        _ = settingsHistory.step(back ? .back : .forward, from: settingsPlace) { place in
+            settingsPane = place.pane
+            studio.customizing = place.customizing.flatMap { boards.page(containing: $0) != nil ? $0 : nil }
+        }
     }
 
     /// A widget whose editor Settings ▸ Widgets should open (from the island's context menu).

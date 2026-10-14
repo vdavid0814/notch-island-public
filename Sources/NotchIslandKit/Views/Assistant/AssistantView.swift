@@ -16,6 +16,7 @@ import SwiftUI
 struct AssistantView: View {
     @Environment(AppModel.self) private var model
     @FocusState private var isFieldFocused: Bool
+    @State private var swipe = AssistantSwipe()
 
     var body: some View {
         let layout = model.layout
@@ -23,8 +24,11 @@ struct AssistantView: View {
         // Its room's kind (`AssistantModel.room`) without reading the room: that reads the rows, and
         // every keystroke and landing search would build this whole view again, not only the list.
         let isGallery = assistant.category == .applications && assistant.answer == nil
-        // Laid out at the largest size of the current kind: the list, or the gallery's window.
-        let fullRoom: AssistantRoom = isGallery ? .gallery : .list
+        let showsTiles = assistant.showsSearchTiles
+        // Laid out at the largest size of the current kind: the list (a query's with its tiles), or
+        // the gallery's window.
+        let fullRoom: AssistantRoom = isGallery ? .gallery : showsTiles ? .search(layout.siri.listRows)
+            : assistant.answer != nil ? .answer(9999) : .list
         let split = NotchSplit(
             layout: layout,
             presentation: .assistant(fullRoom),
@@ -38,7 +42,8 @@ struct AssistantView: View {
             layout: layout, presentation: .assistant(.gallery),
             outerInset: Metrics.Expanded.horizontalInset, clearance: Metrics.notchClearance
         ).contentInset
-        let below: BelowField = assistant.answer != nil ? .answer : isGallery ? .gallery : !assistant.needsList ? .picks : .rows
+        let below: BelowField = assistant.answer != nil ? .answer : isGallery ? .gallery : !assistant.needsList ? .picks
+            : showsTiles ? .search : .rows
         // Below the field nothing shows while the island is only the field (the rows would peek
         // out under it); they fade in with the island's growth.
         let showsBelowField: Bool = if case .assistant(.field) = model.island.presentation { false } else { true }
@@ -66,11 +71,23 @@ struct AssistantView: View {
                             // Out to 2 pt from the panel's sides, past the page's inset (its body starts
                             // `outerInset` outside the content; the shoulders are beyond).
                             .padding(.horizontal, IslandLayout.assistantPicksGap - split.outerInset)
+                    } else if below == .search {
+                        SearchResults(assistant: assistant, layout: layout,
+                                      extraInset: layout.assistantRowInset - Metrics.Expanded.horizontalInset,
+                                      tileRadius: layout.bottomRadius(for: .assistant(.picks)) - IslandLayout.assistantPicksGap,
+                                      tileOutset: IslandLayout.assistantPicksGap - split.outerInset)
                     } else {
                         RowsList(assistant: assistant,
                                  extraInset: layout.assistantRowInset - Metrics.Expanded.horizontalInset)
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                // Into a suggestion the page slides in from the right and the search out to the
+                // left; back, the other way (asked for). Each side always leaves and comes back
+                // the same way, so no direction has to be remembered.
+                .id(assistant.category)
+                .transition(assistant.category == nil ? Self.searchSlide : Self.suggestionSlide)
+                .animation(Self.slide, value: assistant.category)
                 // Their own short cross-fade: the island's spring does not reach in here (the
                 // content changes size at once, `IslandContentStack`).
                 .animation(Self.swap, value: below)
@@ -92,12 +109,12 @@ struct AssistantView: View {
             return .handled
         }
         .onKeyPress(.leftArrow) {
-            guard isGallery else { return .ignored }
+            guard isGallery else { return assistant.moveAmongTiles(by: -1) ? .handled : .ignored }
             assistant.moveSelection(by: -1)
             return .handled
         }
         .onKeyPress(.rightArrow) {
-            guard isGallery else { return .ignored }
+            guard isGallery else { return assistant.moveAmongTiles(by: 1) ? .handled : .ignored }
             assistant.moveSelection(by: 1)
             return .handled
         }
@@ -147,9 +164,18 @@ struct AssistantView: View {
         .onExitCommand { assistant.escape() }
         // Focus is asked for once the panel is key (the field editor does not take first responder
         // in a window that is not key yet), a turn later, and again whenever the panel becomes key.
-        .onAppear { focusField() }
+        .onAppear {
+            focusField()
+            // Two fingers to the right: back to the search; to the left: into the last suggestion.
+            swipe.start { back in
+                withAnimation(Self.slide) { _ = back ? assistant.swipeBack() : assistant.swipeForward() }
+            }
+        }
         // Its lists, icons and the answer pane go with it: give their memory back.
-        .onDisappear { MemoryRelief.afterLargeSurfaceClosed() }
+        .onDisappear {
+            swipe.stop()
+            MemoryRelief.afterLargeSurfaceClosed()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             guard note.object is IslandPanel else { return }
             focusField()
@@ -157,10 +183,15 @@ struct AssistantView: View {
     }
 
     /// What shows under the field.
-    private enum BelowField { case rows, gallery, answer, picks }
+    private enum BelowField { case rows, gallery, answer, picks, search }
 
     /// The swap under the field: as short as the content's swap while the island moves.
     static let swap: Animation = .easeOut(duration: 0.18)
+
+    /// Into a suggestion and back out of it.
+    static let slide: Animation = .smooth(duration: 0.3)
+    static let searchSlide: AnyTransition = .move(edge: .leading).combined(with: .opacity)
+    static let suggestionSlide: AnyTransition = .move(edge: .trailing).combined(with: .opacity)
 
     private func focusField() {
         isFieldFocused = false
@@ -172,7 +203,7 @@ struct AssistantView: View {
 
     private func field(_ assistant: AssistantModel) -> some View {
         @Bindable var assistant = assistant
-        let isResponding = assistant.answer?.isResponding == true
+        let isResponding = assistant.answer?.isResponding == true || assistant.isHandingToSiri
         return HStack(spacing: Metrics.Spacing.medium) {
             Group {
                 if let category = assistant.category {
@@ -290,12 +321,22 @@ extension AssistantCategory {
 /// picks, `side`).
 struct AssistantTile: View {
     let symbol: String
-    let color: Color
+    let fill: AnyShapeStyle
     var side: CGFloat = 22
+
+    init(symbol: String, color: Color, side: CGFloat = 22) {
+        self.init(symbol: symbol, fill: AnyShapeStyle(color.gradient), side: side)
+    }
+
+    init(symbol: String, fill: AnyShapeStyle, side: CGFloat = 22) {
+        self.symbol = symbol
+        self.fill = fill
+        self.side = side
+    }
 
     var body: some View {
         RoundedRectangle(cornerRadius: side * 0.27, style: .continuous)
-            .fill(color.gradient)
+            .fill(fill)
             .frame(width: side, height: side)
             .overlay {
                 Image(systemName: symbol)
@@ -333,16 +374,113 @@ private struct QuickPick: View {
     /// Chosen with ↑/↓: shown as under the pointer.
     var isMarked = false
     let open: () -> Void
+
+    var body: some View {
+        PickBox(title: category.title, radius: radius, isMarked: isMarked, action: open) {
+            category.tile(side: PickBox<EmptyView>.iconSide)
+        }
+    }
+}
+
+/// A query's Ask Apple Intelligence, Search the Web and Ask ChatGPT as large tiles in a row under
+/// its rows, in boxes like the quick picks' (asked for: not as rows).
+private struct SearchTiles: View {
+    let assistant: AssistantModel
+    let radius: CGFloat
+
+    var body: some View {
+        let rows = assistant.rows
+        let tiles = rows.indices.filter { rows[$0].isSearchTile }
+        HStack(spacing: QuickPicks.spacing) {
+            ForEach(tiles, id: \.self) { index in
+                let row = rows[index]
+                PickBox(title: Self.title(row), radius: radius,
+                        isMarked: assistant.marksSelection && assistant.selection == index) { assistant.perform(row) } icon: {
+                    Self.icon(row)
+                }
+            }
+        }
+        .frame(height: IslandLayout.assistantPicksHeight)
+    }
+
+    /// Siri AI's own icon, the new Siri's (the Siri app's before it), as the
+    /// system draws it (asked for: not a symbol). Read once.
+    private static let intelligenceIcon: NSImage? = {
+        let paths = ["/System/Applications/Siri AI.app", "/System/Applications/Siri.app", "/System/Library/CoreServices/Siri.app"]
+        return paths.first { FileManager.default.fileExists(atPath: $0) }.map { NSWorkspace.shared.icon(forFile: $0) }
+    }()
+
+    private static func title(_ row: AssistantRow) -> String {
+        switch row {
+        case .askIntelligence: String(localized: "Use Siri AI")
+        case .searchWeb: String(localized: "Search the Web")
+        default: String(localized: "Ask ChatGPT")
+        }
+    }
+
+    @ViewBuilder private static func icon(_ row: AssistantRow) -> some View {
+        let side = PickBox<EmptyView>.iconSide
+        switch row {
+        case .askIntelligence:
+            if let icon = intelligenceIcon {
+                // An app icon has a margin round its body (a tenth on each side): drawn larger, its
+                // body is as large as the other tiles.
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: side * 1.25, height: side * 1.25)
+                    .frame(width: side, height: side)
+            } else {
+                AssistantTile(symbol: "apple.intelligence", fill: AnyShapeStyle(AssistantGlow.gradient), side: side)
+            }
+        case .searchWeb: AssistantTile(symbol: "safari.fill", color: .blue, side: side)
+        default: AssistantTile(symbol: "bubble.left.and.text.bubble.right.fill", color: .green, side: side)
+        }
+    }
+}
+
+/// A query's rows with its tiles under them; the rows scroll past the list's height, the tiles
+/// stay (`AssistantRoom.search`).
+private struct SearchResults: View {
+    let assistant: AssistantModel
+    let layout: IslandLayout
+    let extraInset: CGFloat
+    let tileRadius: CGFloat
+    /// Out to 2 pt from the panel's sides, past the page's inset, as the quick picks.
+    let tileOutset: CGFloat
+
+    var body: some View {
+        let listed = assistant.rows.count { !$0.isSearchTile }
+        VStack(spacing: IslandLayout.assistantTilesGap) {
+            if listed > 0 {
+                RowsList(assistant: assistant, extraInset: extraInset, excludesTiles: true)
+                    .frame(height: layout.assistantSearchRowsHeight(min(listed, layout.siri.listRows)))
+            }
+            SearchTiles(assistant: assistant, radius: tileRadius)
+                // With no rows, right under the field, as the quick picks.
+                .padding(.top, listed > 0 ? 0 : IslandLayout.assistantPicksGap - IslandLayout.assistantTopInset)
+                .padding(.horizontal, tileOutset)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+/// A large icon over its caption in a box, grey under the pointer or when ↑/↓ chose it.
+private struct PickBox<Icon: View>: View {
+    let title: String
+    let radius: CGFloat
+    var isMarked = false
+    let action: () -> Void
+    @ViewBuilder let icon: () -> Icon
     @State private var isHovered = false
 
     /// The icon as large as the box leaves it beside its caption.
-    static let icon: CGFloat = 60
+    static var iconSide: CGFloat { 60 }
 
     var body: some View {
-        Button(action: open) {
+        Button(action: action) {
             VStack(spacing: 2) {
-                category.tile(side: Self.icon)
-                Text(category.title)
+                icon()
+                Text(title)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(isHovered || isMarked ? 1 : 0.8))
                     .lineLimit(1)
@@ -357,7 +495,7 @@ private struct QuickPick: View {
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovered)
-        .accessibilityLabel(category.title)
+        .accessibilityLabel(title)
     }
 }
 
@@ -368,14 +506,17 @@ private struct RowsList: View {
     /// The rows further in than the field, so their capsules are concentric with the panel's
     /// corners (`IslandLayout.assistantRowInset`).
     let extraInset: CGFloat
+    /// A query's Ask / Web / ChatGPT are tiles under the list (`SearchTiles`), not rows in it.
+    var excludesTiles = false
 
     var body: some View {
         let rows = assistant.rows
         let count = rows.count
+        let listed = Array(rows.enumerated()).filter { !excludesTiles || !$0.element.isSearchTile }
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: IslandLayout.assistantRowSpacing) {
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    ForEach(listed, id: \.element.id) { index, row in
                         RowView(row: row, isMarked: assistant.marksSelection && index == assistant.selection,
                                 state: Self.state(of: row, in: assistant), isConfirming: assistant.confirming == row.id,
                                 leadingInset: max(Metrics.Spacing.small, Metrics.Spacing.large - extraInset))
@@ -385,7 +526,12 @@ private struct RowsList: View {
                     }
                 }
                 .padding(.horizontal, extraInset)
-                .background { SelectionScroller(assistant: assistant, count: count) { proxy.scrollTo(rows[$0].id) } }
+                .background {
+                    SelectionScroller(assistant: assistant, count: count) {
+                        // A tile is not in the list: nothing to scroll to.
+                        if !excludesTiles || !rows[$0].isSearchTile { proxy.scrollTo(rows[$0].id) }
+                    }
+                }
             }
             .scrollIndicators(.never)
             // Fewer rows than fit: nothing to scroll, so no rubber-band either.
@@ -638,7 +784,7 @@ struct RowView: View {
         case .bookmark(let bookmark): bookmark.title
         case .permission(let permission): permission.title
         case .openURL(let url): String(localized: "Open \(AssistantURL.display(url))")
-        case .askIntelligence: String(localized: "Ask Apple Intelligence")
+        case .askIntelligence: String(localized: "Use Siri AI")
         case .searchWeb: String(localized: "Search the Web")
         case .askChatGPT: String(localized: "Ask ChatGPT")
         }
@@ -658,9 +804,11 @@ extension RowView {
     }
 }
 
-/// Apple Intelligence's answer as it streams in, with Copy and ChatGPT as icons. Plain text on
-/// purpose: a selectable text would take the keyboard when clicked, and Esc and typing would stop
-/// working.
+/// An answer as it streams in — Apple Intelligence's text, or Siri AI's answer as Siri lays it
+/// out (`SiriAnswerView`) — with Copy and the next step as icons under it. As tall as it is
+/// (measured, `AssistantModel.answerHeight`), up to the island's most; past that it scrolls. Plain
+/// text on purpose: a selectable text would take the keyboard when clicked, and Esc and typing
+/// would stop working.
 private struct AnswerPane: View {
     let answer: AssistantAnswer
 
@@ -668,52 +816,77 @@ private struct AnswerPane: View {
 
     var body: some View {
         let assistant = model.assistant
-        VStack(alignment: .leading, spacing: Metrics.Spacing.medium) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Metrics.Spacing.small) {
-                    Text(answer.question)
-                        .font(.caption.weight(.semibold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(answer.question)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                if let failure = answer.failure {
+                    Text(failure)
+                        .font(.system(size: 15))
                         .foregroundStyle(.secondary)
-                    Text(answer.failure ?? answer.text)
-                        .foregroundStyle(answer.failure == nil ? .primary : .secondary)
+                } else if answer.fromSiri {
+                    SiriAnswerView(reply: answer.siri, isResponding: answer.isResponding)
+                } else {
+                    Text(answer.text)
+                        .font(.system(size: 15))
+                        .lineSpacing(2.5)
                         .contentTransition(.opacity)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                if !answer.isResponding {
+                    actions(assistant)
+                        .padding(.top, 2)
+                }
             }
-            .scrollIndicators(.never)
-            // Fewer rows than fit: nothing to scroll, so no rubber-band either.
-            .scrollBounceBehavior(.basedOnSize)
-            if !answer.isResponding {
-                HStack(spacing: Metrics.Spacing.small) {
-                    Spacer(minLength: 0)
-                    Button {
-                        assistant.copyAnswer()
-                    } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
-                    }
-                    .help("Copy")
-                    .disabled(answer.text.isEmpty)
-                    if let word = answer.definedWord {
-                        // A dictionary's entry: the whole of it in Dictionary.
-                        Button {
-                            assistant.openInDictionary(word)
-                        } label: {
-                            Label("Open in Dictionary", systemImage: "character.book.closed")
-                        }
-                        .help("Open in Dictionary")
-                    } else {
-                        Button {
-                            assistant.perform(.askChatGPT)
-                        } label: {
-                            Label("Ask ChatGPT", systemImage: "bubble.left.and.text.bubble.right")
-                        }
-                        .help("Ask ChatGPT")
-                    }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { assistant.setAnswerHeight($0) }
+        }
+        .scrollIndicators(.never)
+        // Shorter than its room: nothing to scroll, so no rubber-band either.
+        .scrollBounceBehavior(.basedOnSize)
+        // From its start, also while it grows (it opened at its end, the question out of sight).
+        .defaultScrollAnchor(.top)
+        .defaultScrollAnchor(.top, for: .sizeChanges)
+    }
+
+    private func actions(_ assistant: AssistantModel) -> some View {
+        HStack(spacing: Metrics.Spacing.small) {
+            Spacer(minLength: 0)
+            Button {
+                assistant.copyAnswer()
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+            .help("Copy")
+            .disabled(answer.text.isEmpty)
+            if answer.fromSiri {
+                Button {
+                    assistant.showInSiri()
+                } label: {
+                    Label("Show in Siri AI", systemImage: "arrow.up.forward.app")
                 }
-                .islandButton(.circle)
-                .controlSize(.small)
+                .help("Show in Siri AI")
+            } else if let word = answer.definedWord {
+                // A dictionary's entry: the whole of it in Dictionary.
+                Button {
+                    assistant.openInDictionary(word)
+                } label: {
+                    Label("Open in Dictionary", systemImage: "character.book.closed")
+                }
+                .help("Open in Dictionary")
+            } else {
+                Button {
+                    assistant.perform(.askChatGPT)
+                } label: {
+                    Label("Ask ChatGPT", systemImage: "bubble.left.and.text.bubble.right")
+                }
+                .help("Ask ChatGPT")
             }
         }
+        .islandButton(.circle)
+        .controlSize(.small)
     }
 }
 

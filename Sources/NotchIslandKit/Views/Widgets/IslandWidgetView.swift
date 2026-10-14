@@ -124,7 +124,7 @@ struct IslandWidgetView: View {
         case .nowPlaying: return inner.height < WidgetMetrics.singleRowHeight ? 0 : 1
         case .battery: return BatteryWidget.isRing(inner) ? 0 : BatteryWidget.isTall(inner) ? 1 : 2
         case .dateTime: return DateTimeWidget.isTall(inner) ? 0 : 1
-        case .systemStats: return inner.height >= 56 ? 0 : inner.width >= 200 ? 1 : 2
+        case .systemStats: return SystemStatsWidget.layoutIndex(widget, inner: inner)
         case .timer: return TimerWidget.showsRuler(widget, inner: inner) ? 0 : 1
         case .shelf: return ShelfWidget.hasPreviewRoom(inner: inner) ? 0 : 1
         case .analogClock:
@@ -170,6 +170,7 @@ struct IslandWidgetView: View {
             shown.options.insert(.label)
             return MonthCalendarWidget.showsTitle(shown, inner: inner)
         case .fanControl: return FanControlWidget.hasRoom(for: element, in: widget, inner: inner)
+        case .systemStats: return SystemStatsWidget.hasRoom(for: element, in: widget, inner: inner)
         default:
             if widget.kind.control != nil { return ControlWidget.hasRoom(for: element, in: widget, inner: inner) }
             if widget.kind.level != nil { return LevelWidget.hasRoom(for: element, inner: inner) }

@@ -56,7 +56,7 @@ struct ClipboardWidget: View {
                 Label(model.preferences.siri.showsClipboard ? "Nothing copied yet" : "Clipboard is off in Settings ▸ Spotlight",
                       systemImage: "doc.on.clipboard")
                     .font(.system(size: min(12, max(size.height / 1.2, 8)), weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .clearTextEdge().foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .frame(width: size.width, height: size.height, alignment: .leading)

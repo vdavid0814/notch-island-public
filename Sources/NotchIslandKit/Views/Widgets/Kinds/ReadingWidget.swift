@@ -65,7 +65,7 @@ struct ReadingWidget: View {
                                   isSecondary: true) {
             Text(reading.caption)
                 .font(.system(size: captionPoints, weight: .medium))
-                .foregroundStyle(.secondary)
+                .clearTextEdge().foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }

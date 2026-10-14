@@ -36,8 +36,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Opening the app again from Finder, Spotlight or Launchpad shows Settings. With the menu bar
     /// icon hidden this is the way back in.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Siri AI sends one too, when "Use Siri AI" opens it and when its window is closed
+        // (`SiriHandoff`): that is not the user coming back to NotchIsland.
+        let sender = Self.appleEventSender
+        Log.app.notice("reopen from \(sender ?? "unknown", privacy: .public)")
+        guard sender != SiriHandoff.bundleIdentifier, !SiriHandoff.isSettling else { return false }
         AppModel.shared.showSettings()
         return false
+    }
+
+    /// The app that sent the Apple event being handled (a reopen: the Dock, Finder, Siri AI…).
+    private static var appleEventSender: String? {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent,
+              let pid = event.attributeDescriptor(forKeyword: keySenderPIDAttr)?.int32Value else { return nil }
+        return NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
     }
 
     /// The app lives in the notch; closing Settings must not quit it.

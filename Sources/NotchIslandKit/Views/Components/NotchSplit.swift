@@ -62,6 +62,9 @@ struct NotchSplitBand<Leading: View, Trailing: View>: View {
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
 
+    @Environment(\.headerOnNotchBand) private var onNotchBand
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         HStack(spacing: 0) {
             Color.clear
@@ -75,5 +78,7 @@ struct NotchSplitBand<Leading: View, Trailing: View>: View {
         }
         .padding(.horizontal, split.contentInset)
         .frame(width: split.islandWidth, height: height)
+        // On the notch's black (`IslandNotchBand`) the band's content is drawn as on a dark surface.
+        .environment(\.colorScheme, onNotchBand ? .dark : colorScheme)
     }
 }

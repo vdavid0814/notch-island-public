@@ -77,7 +77,7 @@ struct LevelWidget: View {
             } else {
                 Label("No keyboard backlight", systemImage: "light.max")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .clearTextEdge().foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .frame(width: size.width, height: size.height)

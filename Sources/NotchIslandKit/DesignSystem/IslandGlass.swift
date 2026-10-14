@@ -90,14 +90,14 @@ nonisolated enum IslandGlassStyle: String, Sendable, CaseIterable, Identifiable,
     /// The white in the frosted glass in Light Mode, where the clear glass's frost ends up.
     static let lightFrostedWhite = 0.55
 
-    /// The white frost in the system's clear glass at the slider's clear end (asked for: 30 %).
-    static let clearFrost = 0.3
+    /// The white frost in the system's clear glass at the slider's clear end (asked for: 30 %, then 35 %, then 40 %).
+    static let clearFrost = 0.4
 
     /// Where on the slider the clear glass gives way to the system's frosted glass: only at its very
     /// end, so the frost grows evenly along all of it (0.85 left a jump the user saw, October 13).
     static let frostedFrom = 1.0
-    /// The black in Dark Mode's glass at the slider's clear end (asked for: 20 %) and its tinted end.
-    static let darkClear = 0.2
+    /// The black in Dark Mode's glass at the slider's clear end (asked for: 20 %, then 30 %, then 35 %) and its tinted end.
+    static let darkClear = 0.35
     static let darkTint = 0.4
 
     /// Whether a pill at the notch's height is solid black, its glass off: Fade (its shade is black
@@ -459,7 +459,225 @@ private struct FadeShadeMask: View {
     }
 }
 
+/// Clear glass's black beside the notch on the open panel: the notch's black carried out to both
+/// sides through the header band. Its lower edge is one even circular arc — level beside the notch's
+/// corner, a little below the notch's bottom, rising evenly to the island's side — and eases
+/// into the clear glass around it, the middle of the ease on the arc (asked for, October 14, from
+/// the user's drawings).
+///
+/// The ease is drawn as layers of falling opacity rather than a blur: plain shape layers, no filter
+/// for the window server to run in every frame the island moves.
+nonisolated struct IslandNotchBand: View {
+    /// The island's width (the band is cut to its outline).
+    let width: CGFloat
+    let notchWidth: CGFloat
+    /// From the top of the overdraw to the notch's bottom.
+    let depth: CGFloat
+    /// The notch's own height: the arc's levels are shares of it.
+    let notchHeight: CGFloat
+
+    /// Where the arc meets the island's side, as a share of the notch's height from the top.
+    static let endLevel: CGFloat = 0.495
+    /// The whole arc reaches this much further down than the notch's height (and `endLevel`) put
+    /// it: past the notch's bottom.
+    static let reach: CGFloat = 1.297
+    /// The ease into the clear glass, in points, its middle on the arc: `fadeAtNotch` at the notch,
+    /// growing to `fade` by `fadeGrown` of the way out to the side.
+    static let fade: CGFloat = 33.26
+    static let fadeAtNotch: CGFloat = 9.24
+    static let fadeGrown: CGFloat = 0.5
+    /// Steps the ease is drawn in: about one per pixel of its full length. With 16 over 30 points,
+    /// each step was 2 points and the ease showed as stripes.
+    static let steps = 64
+
+    var body: some View {
+        let profile = NotchBandProfile(notchWidth: notchWidth, depth: depth, notchHeight: notchHeight)
+        ZStack(alignment: .top) {
+            NotchBandStrip(profile: profile, at: 0)
+                .fill(.black)
+            // Each step covers everything above it too, so no step's edge lies against another's
+            // (side by side, their antialiased edges left faint light seams along the arc).
+            ForEach(0..<Self.steps, id: \.self) { step in
+                NotchBandStrip(profile: profile, at: CGFloat(step + 1) / CGFloat(Self.steps))
+                    .fill(.black.opacity(Self.layerOpacity(step)))
+            }
+        }
+        .frame(width: max(width, 1), height: depth + notchHeight * (Self.reach - 1) + Self.fade, alignment: .top)
+        .allowsHitTesting(false)
+    }
+
+    /// The black of the ease's `step`-th band (smoothstep at its middle).
+    static func target(_ step: Int) -> Double {
+        guard step < steps else { return 0 }
+        let t = (CGFloat(step) + 0.5) / CGFloat(steps)
+        return Double(1 - t * t * (3 - 2 * t))
+    }
+
+    /// The opacity of the layer down to the `step`-th band's lower edge: stacked over the deeper
+    /// layers below it, the band comes out at `target(step)`.
+    static func layerOpacity(_ step: Int) -> Double {
+        1 - (1 - target(step)) / (1 - target(step + 1))
+    }
+}
+
+/// Where the band's arc lies across the island, and how long its ease is there (`IslandNotchBand`).
+nonisolated private struct NotchBandProfile: Equatable {
+    let notchWidth: CGFloat
+    let depth: CGFloat
+    let notchHeight: CGFloat
+
+    /// How far out from the notch's edge `x` is, in points (0 under the notch), and the stretch from
+    /// the notch to the island's side.
+    private func distance(_ x: CGFloat, in rect: CGRect) -> (points: CGFloat, ear: CGFloat) {
+        let half = min(notchWidth / 2, rect.width / 2)
+        return (max(abs(x - rect.midX) - half, 0), max(rect.width / 2 - half, 1))
+    }
+
+    /// The arc's height at `x` in `rect`, from the rect's top: a circle level at the notch's corner,
+    /// `reach` times the notch's height down, through the island's side at `endLevel` (times `reach`).
+    func y(at x: CGFloat, in rect: CGRect) -> CGFloat {
+        let (d, ear) = distance(x, in: rect)
+        let low = notchHeight * IslandNotchBand.reach
+        let rise = max(low * (1 - IslandNotchBand.endLevel), 0.01)
+        let radius = (ear * ear + rise * rise) / (2 * rise)
+        let d2 = min(d, ear)
+        return depth - notchHeight + low - (radius - (radius * radius - d2 * d2).squareRoot())
+    }
+
+    /// The ease's length at `x`: short at the notch, growing evenly to its full length.
+    func fade(at x: CGFloat, in rect: CGRect) -> CGFloat {
+        let (d, ear) = distance(x, in: rect)
+        let t = min(d / (ear * IslandNotchBand.fadeGrown), 1)
+        return IslandNotchBand.fadeAtNotch + (IslandNotchBand.fade - IslandNotchBand.fadeAtNotch) * t * (2 - t)
+    }
+}
+
+/// `IslandNotchBand` from the top down to `at` of the way through its ease (0: where the black is
+/// whole, 1: where it is clear).
+nonisolated private struct NotchBandStrip: Shape {
+    let profile: NotchBandProfile
+    let at: CGFloat
+
+    /// Points along the arc, this far apart (it is a circle: straight pieces of this length don't show).
+    private static let step: CGFloat = 3
+
+    func path(in rect: CGRect) -> Path {
+        let count = max(Int((rect.width / Self.step).rounded(.up)), 1)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        for index in (0...count).reversed() {
+            let x = rect.minX + rect.width * CGFloat(index) / CGFloat(count)
+            let y = profile.y(at: x, in: rect) + profile.fade(at: x, in: rect) * (at - 0.5)
+            path.addLine(to: CGPoint(x: x, y: rect.minY + y))
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// The thin sharp edge round a widget text whose own colour (the cover's, one picked) fades into
+/// Liquid Glass (asked for, October 14: the cover's light grey title was lost on the light glass):
+/// fully black in Light Mode, fully white in Dark Mode, half a point wide, no blur, the letters
+/// their own size (`WidgetLabel`).
+@MainActor enum ClearTextEdge {
+    static let width: CGFloat = 0.5
+
+    /// Where its copies lie round the text: eight ways, `width` out.
+    static let offsets: [CGSize] = (0..<8).map { step in
+        let angle = Double(step) * .pi / 4
+        return CGSize(width: width * cos(angle), height: width * sin(angle))
+    }
+
+    /// The glass behind a widget's text, as luminance (linear): Light Mode's frosted white over the
+    /// widgets' grey, and Dark Mode's dark glass.
+    static let lightGlass = 0.6
+    static let darkGlass = 0.03
+    /// Under this contrast with the glass (WCAG's for text) the text gets its edge.
+    static let contrast = 4.5
+
+    /// The glass's ink: the edge's colour.
+    static func ink(isLight: Bool) -> Color { isLight ? .black : .white }
+
+    /// The edge for a text in `color`: nil where it stands out from the glass well enough.
+    static func color(for color: Color, isLight: Bool) -> Color? {
+        let resolved = color.resolve(in: EnvironmentValues())
+        let glass = isLight ? lightGlass : darkGlass
+        let own = 0.2126 * Double(resolved.linearRed) + 0.7152 * Double(resolved.linearGreen) + 0.0722 * Double(resolved.linearBlue)
+        let alpha = Double(resolved.opacity)
+        let seen = own * alpha + glass * (1 - alpha)
+        let ratio = (max(seen, glass) + 0.05) / (min(seen, glass) + 0.05)
+        guard ratio < contrast else { return nil }
+        return ink(isLight: isLight)
+    }
+}
+
+/// The widgets' grey texts (secondary, tertiary) on Liquid Glass get `ClearTextEdge` (asked for,
+/// October 14), drawn by the text itself (`ClearTextEdgeRenderer`).
+private struct ClearTextEdgeModifier: ViewModifier {
+    /// The edge's colour; nil: the glass's ink.
+    var ink: Color?
+    @Environment(\.islandGlassStyle) private var glassStyle
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content.textRenderer(ClearTextEdgeRenderer(
+            ink: glassStyle == .liquidGlass ? (ink ?? ClearTextEdge.ink(isLight: colorScheme == .light)) : nil))
+    }
+}
+
+/// The edge drawn with the text, in one pass: its glyphs in the ink, moved by the edge's width all
+/// round, their own shapes cut out of that (a grey text is see-through: copies of it under it made
+/// its letters black and heavy), then the text over it. Copies as views of their own made the
+/// island lag (October 14).
+struct ClearTextEdgeRenderer: TextRenderer {
+    let ink: Color?
+
+    var displayPadding: EdgeInsets {
+        ink == nil ? EdgeInsets() : EdgeInsets(top: ClearTextEdge.width, leading: ClearTextEdge.width,
+                                               bottom: ClearTextEdge.width, trailing: ClearTextEdge.width)
+    }
+
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        if let ink {
+            let resolved = ink.resolve(in: EnvironmentValues())
+            context.drawLayer { edge in
+                // Every glyph in the ink, its own alpha kept.
+                edge.addFilter(.colorMatrix(Self.matrix(red: resolved.red, green: resolved.green, blue: resolved.blue, alpha: 1)))
+                for offset in ClearTextEdge.offsets {
+                    var copy = edge
+                    copy.translateBy(x: offset.width, y: offset.height)
+                    for line in layout { copy.draw(line) }
+                }
+                // The letters' own shapes out of the edge, a grey's too (its alpha raised: the
+                // secondary grey is about half, the tertiary a quarter).
+                edge.blendMode = .destinationOut
+                edge.addFilter(.colorMatrix(Self.matrix(red: 0, green: 0, blue: 0, alpha: 3)))
+                for line in layout { edge.draw(line) }
+            }
+        }
+        for line in layout { context.draw(line) }
+    }
+
+    /// Every pixel in one colour, its alpha times `alpha`.
+    private static func matrix(red: Float, green: Float, blue: Float, alpha: Float) -> ColorMatrix {
+        var matrix = ColorMatrix()
+        matrix.r1 = 0; matrix.r5 = red
+        matrix.g2 = 0; matrix.g5 = green
+        matrix.b3 = 0; matrix.b5 = blue
+        matrix.a4 = alpha
+        return matrix
+    }
+}
+
+extension View {
+    /// `ClearTextEdgeModifier`: the glass's ink, or `ink` (nil: the glass's).
+    func clearTextEdge(_ ink: Color? = nil) -> some View { modifier(ClearTextEdgeModifier(ink: ink)) }
+}
+
 extension EnvironmentValues {
     /// Set where the island's content starts (`IslandGlassStyle.outlinesText`).
     @Entry var outlinesIslandText = false
+    /// The header band lies on black (`IslandNotchBand`): its controls are drawn for a dark surface.
+    @Entry var headerOnNotchBand = false
 }

@@ -57,6 +57,16 @@ nonisolated struct ElementID: RawRepresentable, Hashable, Codable, Sendable, Ide
     static let cpuValue = ElementID(rawValue: "cpuValue")
     static let memoryTitle = ElementID(rawValue: "memoryTitle")
     static let memoryValue = ElementID(rawValue: "memoryValue")
+    /// The graphics processor's load, and its line's texts (switched on by hand).
+    static let gpuLoad = ElementID(rawValue: "gpuLoad")
+    static let gpuTitle = ElementID(rawValue: "gpuTitle")
+    static let gpuValue = ElementID(rawValue: "gpuValue")
+    /// From two rows tall and wide enough: the loads' graph (as Fan Control's) and the switch that
+    /// draws the loads as dials (as Fan Control's) beside it.
+    static let statsGraph = ElementID(rawValue: "statsGraph")
+    static let statsDials = ElementID(rawValue: "statsDials")
+    /// The graph's texts (its percentages, the time and the key under it): one style for them all.
+    static let statsGraphText = ElementID(rawValue: "statsGraph.text")
     // A readout (World Clock and its kin): the value, its caption and its symbol.
     static let value = ElementID(rawValue: "value")
     static let label = ElementID(rawValue: "label")

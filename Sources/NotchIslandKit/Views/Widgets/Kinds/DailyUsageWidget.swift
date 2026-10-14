@@ -90,7 +90,7 @@ struct DailyUsageWidget: View {
         return WidgetLabel(id: .label, text: Self.title, widget: widget, size: points, weight: .semibold, isSecondary: true) {
             Text(Self.title)
                 .font(.system(size: points, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .clearTextEdge().foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
@@ -117,7 +117,7 @@ struct DailyUsageWidget: View {
         return WidgetLabel(id: .usageDay, text: text, widget: widget, size: points, weight: .medium, isSecondary: true) {
             Text(text)
                 .font(.system(size: points, weight: .medium))
-                .foregroundStyle(.secondary)
+                .clearTextEdge().foregroundStyle(.secondary)
                 .lineLimit(1)
         }
         .fixedSize()
@@ -178,7 +178,7 @@ struct DailyUsageBars: View {
                     .stroke(.white.opacity(0.16), style: StrokeStyle(lineWidth: 0.5, dash: [1.5, 2.5]))
                     Text(verbatim: IslandFormat.percent(value / 100))
                         .font(.system(size: min(8, max(plot / 5, 6))).monospacedDigit())
-                        .foregroundStyle(.tertiary)
+                        .clearTextEdge().foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .fixedSize()
                         .frame(width: percentWidth, alignment: .trailing)

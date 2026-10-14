@@ -114,6 +114,7 @@ final class SettingsPageDeckView: NSView {
         page.visit.count += 1
         page.visit.isShown = true
         shown = pane
+        let step = model.settingsHistory.takeStep()
         guard let old, let leaving, window?.isVisible == true, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
               let incoming = page.host.layer, let outgoing = old.host.layer else {
             old?.host.isHidden = true
@@ -125,9 +126,12 @@ final class SettingsPageDeckView: NSView {
         let fadeIn = CABasicAnimation(keyPath: "opacity")
         fadeIn.fromValue = 0
         fadeIn.toValue = 1
-        let rise = CABasicAnimation(keyPath: "transform.translation.y")
+        // A swipe's step slides sideways, as Siri's suggestions do: forward the page comes in from
+        // the right and the old one leaves to the left; back the other way. Otherwise it rises.
+        let slide = step.map { $0 == .forward ? bounds.width * Self.slide : -bounds.width * Self.slide }
+        let rise = CABasicAnimation(keyPath: slide == nil ? "transform.translation.y" : "transform.translation.x")
         // The deck is flipped: its layers' y grows downwards.
-        rise.fromValue = Self.rise
+        rise.fromValue = slide ?? Self.rise
         rise.toValue = 0
         let entrance = CAAnimationGroup()
         entrance.animations = [fadeIn, rise]
@@ -143,6 +147,22 @@ final class SettingsPageDeckView: NSView {
         // Stays as it ends until it is hidden (the model layer is still opaque).
         fadeOut.fillMode = .forwards
         fadeOut.isRemovedOnCompletion = false
+        let exit: CAAnimation
+        if let slide {
+            let away = CABasicAnimation(keyPath: "transform.translation.x")
+            away.fromValue = 0
+            away.toValue = -slide
+            let group = CAAnimationGroup()
+            group.animations = [fadeOut, away]
+            group.duration = Self.transitionDuration
+            group.timingFunction = timing
+            group.fillMode = .forwards
+            group.isRemovedOnCompletion = false
+            fadeOut.duration = Self.transitionDuration * 0.7
+            exit = group
+        } else {
+            exit = fadeOut
+        }
         CATransaction.begin()
         CATransaction.setCompletionBlock { [weak self] in
             MainActor.assumeIsolated {
@@ -152,7 +172,7 @@ final class SettingsPageDeckView: NSView {
                 outgoing.removeAnimation(forKey: Self.transitionKey)
             }
         }
-        outgoing.add(fadeOut, forKey: Self.transitionKey)
+        outgoing.add(exit, forKey: Self.transitionKey)
         CATransaction.commit()
     }
 
@@ -160,6 +180,8 @@ final class SettingsPageDeckView: NSView {
     private static let transitionDuration: CFTimeInterval = 0.26
     /// How far below its place a page starts.
     private static let rise: CGFloat = 14
+    /// How far beside its place a page a swipe brings starts, as a share of the room's width.
+    private static let slide: CGFloat = 0.3
 
     /// Settings has closed: the shown page stands still too.
     func closed() {

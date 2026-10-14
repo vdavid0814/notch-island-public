@@ -160,7 +160,7 @@ struct BatteryWidget: View {
                 Text(short ?? text).lineLimit(1).minimumScaleFactor(0.8)
             }
             .font(.system(size: points))
-            .foregroundStyle(.secondary)
+            .clearTextEdge().foregroundStyle(.secondary)
         }
         .movableElement(.timeRemaining, of: widget)
     }

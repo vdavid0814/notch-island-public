@@ -143,7 +143,7 @@ struct NowPlayingWidget: View {
         let showsTitle = widget.shows(.trackInfo), showsArtist = widget.shows(.artist)
         let titleSize = Self.titleSize(room: room), artistSize = Self.artistSize(room: room)
         let title = Text(Self.title(item)).font(.system(size: titleSize, weight: .semibold))
-        let artist = Text(Self.subtitle(item)).font(.system(size: artistSize)).foregroundStyle(.secondary)
+        let artist = Text(Self.subtitle(item)).font(.system(size: artistSize)).clearTextEdge().foregroundStyle(.secondary)
         if oneLine {
             ViewThatFits(in: .horizontal) {
                 if showsTitle, showsArtist {
