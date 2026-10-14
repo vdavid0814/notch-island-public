@@ -31,6 +31,14 @@ The 54 pictures in the gallery's own graph instead (`NI_GALLERY_SHARED=1`, no fa
 | Widgets opened, built on opening (`abcpu.py`, 5 rounds) | 6726 mJ | 5964 mJ |
 | Widgets reopened, kept (4 rounds × 3, noisy: the Mac was busy) | 468 mJ | 340 mJ |
 
+- Without the pictures' content (`Color.clear` in their hosts, measuring only): the Widgets page
+  open 106–107 MB against 135, closed 102 against 120–121: the 54 pictures' own content is ~28 MB
+  open, ~19 MB kept. The rest of Settings' ~175 MB is what a SwiftUI form costs on macOS 27: a
+  test app with one grouped `Form` of N rows (`formcost`, scratch) took ~300 KB a row of plain text
+  and ~700 KB a row with a native switch (80 switches: +11 MB of IOSurfaces, one per switch), so
+  Settings' ~200 rows are most of it. Nothing of the app's own to cut there without dropping
+  native controls or not keeping pages built. `MADV_FREE`d heap ("Reclaimable") is not in the
+  footprint (test: 64 MB freed in one piece left 16 MB counted), so it is not that either.
 - One graph is cheaper to build and reopen but holds more at rest (a hosting view of its own is
   taken out of the window with Settings closed: its layers go; the gallery's graph keeps them).
   Not the memory lever: the pictures' own content is. Kept as A; the switch stays for measuring.
