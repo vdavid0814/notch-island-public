@@ -26,3 +26,4 @@ Scripts/perf/ws/moused
 Scripts/perf/ws/axfocus
 Scripts/perf/hog
 Scripts/perf/thrift_watch
+Scripts/perf/frames/wins

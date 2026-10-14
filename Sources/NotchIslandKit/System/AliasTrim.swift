@@ -137,6 +137,10 @@ nonisolated enum AliasTrim {
         VM_MEMORY_LAYERKIT, VM_MEMORY_STACK, VM_MEMORY_GUARD,
     ]
 
+    private struct Done: Hashable { var address: UInt64; var size: UInt64; var object: UInt32 }
+    /// The places already mapped again (on `queue`, or a test's thread).
+    nonisolated(unsafe) private static var done: Set<Done> = []
+
     struct Outcome: Equatable, Sendable {
         var regions = 0
         /// What stood in the footprint a second time.
@@ -153,6 +157,12 @@ nonisolated enum AliasTrim {
             // Still the same place of the same memory (looked at again just before the call).
             guard let (now, _) = region(from: extra.address), now.address == extra.address, now.size == extra.size,
                   now.object == extra.object, now.isCandidate, now.residentPages > 0 else { continue }
+            // Once is enough: nothing reads the table's old places again (they stayed at 0 KB in
+            // memory through a whole tour, measured), and a place mapped again is a new one for
+            // the kernel's count, not for the memory behind it.
+            let key = Done(address: extra.address, size: extra.size, object: extra.object)
+            guard !done.contains(key) else { continue }
+            done.insert(key)
             var target = extra.address
             var current: vm_prot_t = 0, maximum: vm_prot_t = 0
             // (No tag among the flags: the call refuses one. `vmmap` goes on naming the table's.)
