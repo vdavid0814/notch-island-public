@@ -2059,20 +2059,33 @@ struct WidgetPreview: View {
         let rect = GridRect(column: 0, row: 0, width: cells.width, height: cells.height)
         let size = geometry.frame(for: rect).size
         let scale = min(1, maxSize.width / size.width, maxSize.height / size.height)
-        IsolatedFillHosting(input: PreviewInput(kind: kind, rect: rect, size: size, scale: scale), fadeIn: Self.fadeIn, isPicture: true,
-                            pausesWithSettings: true) {
-            IslandWidgetView(widget: IslandWidget(kind: kind, frame: rect, options: kind.defaultOptions), size: size)
-                .environment(\.isWidgetPreview, true)
-                .environment(\.colorScheme, .dark)
-                .allowsHitTesting(false)
-                .frame(width: size.width, height: size.height)
-                .scaleEffect(scale)
-                .frame(width: size.width * scale, height: size.height * scale)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .modifier(GalleryPreviewStyle())
-                .environment(model)
+        if Self.sharesGraph {
+            picture(rect: rect, size: size, scale: scale)
+                .accessibilityHidden(true)
+        } else {
+            IsolatedFillHosting(input: PreviewInput(kind: kind, rect: rect, size: size, scale: scale), fadeIn: Self.fadeIn, isPicture: true,
+                                pausesWithSettings: true) {
+                picture(rect: rect, size: size, scale: scale)
+            }
+            .accessibilityHidden(true)
         }
-        .accessibilityHidden(true)
+    }
+
+    /// Measuring only (`NI_GALLERY_SHARED=1`): every picture in the gallery's own graph instead of
+    /// one of its own each, without the fade — what the 54 graphs cost in memory and energy.
+    static let sharesGraph = ProcessInfo.processInfo.environment["NI_GALLERY_SHARED"] == "1"
+
+    private func picture(rect: GridRect, size: CGSize, scale: CGFloat) -> some View {
+        IslandWidgetView(widget: IslandWidget(kind: kind, frame: rect, options: kind.defaultOptions), size: size)
+            .environment(\.isWidgetPreview, true)
+            .environment(\.colorScheme, .dark)
+            .allowsHitTesting(false)
+            .frame(width: size.width, height: size.height)
+            .scaleEffect(scale)
+            .frame(width: size.width * scale, height: size.height * scale)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .modifier(GalleryPreviewStyle())
+            .environment(model)
     }
 
     /// All the nested graph takes from here.

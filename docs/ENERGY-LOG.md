@@ -4,6 +4,37 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-14 (night): where Settings' memory is; the gallery's pictures in one graph (measured, not kept)
+
+Release build 0.8.6+, MacBook Pro M5, on the charger. Memory = footprint (`top`'s MEM), fresh launch each.
+
+| Memory | |
+|---|---|
+| The island alone (`NI_NO_PREPARE=1`, 90 s) | 23 MB |
+| + General / + Live Activities / + About | +23 / +19 / +11 MB |
+| + Widgets | **+100 MB** |
+| + Spotlight | +28 MB |
+
+`MallocStackLogging=lite` and `malloc_history -allBySize` (only malloc and `mach_vm_allocate` leaves:
+`mmap` is clean file memory): 88 MB of the allocations under the gallery cards' own hosting views
+(`WidgetPreview`, 54 graphs of their own), the 1800 px wallpaper ~11 MB (its window-server copy
+counted once by `AliasTrim`), LaunchServices' store 13 MB after `FileManager.displayName` in
+`AssistantSearch.diskApps`.
+
+The 54 pictures in the gallery's own graph instead (`NI_GALLERY_SHARED=1`, no fade-in), A = as shipped:
+
+| | A | B (one graph) |
+|---|---|---|
+| Widgets page open (only page) | 134–137 MB | 126–127 MB |
+| Settings closed, kept (only Widgets built) | 119–121 MB | 122 MB |
+| At rest, Settings built ahead (3 rounds, 2 min each) | 188–189 MB | 196–197 MB |
+| Widgets opened, built on opening (`abcpu.py`, 5 rounds) | 6726 mJ | 5964 mJ |
+| Widgets reopened, kept (4 rounds × 3, noisy: the Mac was busy) | 468 mJ | 340 mJ |
+
+- One graph is cheaper to build and reopen but holds more at rest (a hosting view of its own is
+  taken out of the window with Settings closed: its layers go; the gallery's graph keeps them).
+  Not the memory lever: the pictures' own content is. Kept as A; the switch stays for measuring.
+
 ## 2026-10-14: memory counted once, the kept panel at rest, Siri's first search, openings measured
 
 Release builds, MacBook Air M5 (16 GB). Energy = the coalition's (own + GPU + billed), as Activity
