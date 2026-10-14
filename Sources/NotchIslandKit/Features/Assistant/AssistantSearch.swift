@@ -218,7 +218,11 @@ nonisolated enum AssistantSearch {
         let name = "kMDItemDisplayName == \(pattern)"
         let match = scope.contents && query.count >= 3 ? "(\(name) || kMDItemTextContent == \"\(term)*\"cdw)" : name
         let predicate = "\(match) && \(notApps)"
-        let hits = await run(predicate, scopes: scope.paths, fetch: max(40, limit * 3), kind: .file)
+        // Stopped once the user has typed on: its rows would not be shown.
+        let typed = typing.withLock { $0 }
+        let hits = await run(predicate, scopes: scope.paths, fetch: max(40, limit * 3), kind: .file) {
+            typing.withLock { $0 } != typed
+        }
         // By name first: a file that only says the word comes after the ones called it.
         let named = hits.filter { AssistantMatch.matches($0.name, query, scope.anywhere ? .anywhere : .wordStart) }
         return Array((rank(named, for: query) + rank(hits.filter { !named.contains($0) }, for: query)).prefix(limit))
@@ -328,17 +332,45 @@ nonisolated enum AssistantSearch {
 
     /// Spotlight's answer, waited for at most `limit` (`SourceDeadline`); none after it.
     private static func run(_ predicate: String, scopes: [String], fetch: Int, kind: AssistantHit.Kind,
-                            within limit: Duration = SourceDeadline.standard) async -> [AssistantHit] {
+                            within limit: Duration = SourceDeadline.standard,
+                            isStale: (@Sendable () -> Bool)? = nil) async -> [AssistantHit] {
         await SourceDeadline.value("Spotlight", within: limit, fallback: []) {
-            query(predicate, scopes: scopes, fetch: fetch, kind: kind)
+            query(predicate, scopes: scopes, fetch: fetch, kind: kind, isStale: isStale)
         }
     }
 
-    private static func query(_ predicate: String, scopes: [String], fetch: Int, kind: AssistantHit.Kind) -> [AssistantHit] {
+    /// Each keystroke in Siri's field (`AssistantModel.search`): a file search begun before the
+    /// latest one is no longer wanted.
+    static let typing = Mutex(0)
+
+    static func typedOn() {
+        typing.withLock { $0 &+= 1 }
+    }
+
+    private static func query(_ predicate: String, scopes: [String], fetch: Int, kind: AssistantHit.Kind,
+                              isStale: (@Sendable () -> Bool)? = nil) -> [AssistantHit] {
         guard let query = MDQueryCreate(kCFAllocatorDefault, predicate as CFString, nil, nil) else { return [] }
         MDQuerySetSearchScope(query, scopes as CFArray, 0)
         MDQuerySetMaxCount(query, fetch)
-        guard MDQueryExecute(query, CFOptionFlags(kMDQuerySynchronous.rawValue)) else { return [] }
+        if let isStale {
+            // Gathered in steps, so it can be stopped: a word's first letter ("s") had Spotlight's
+            // daemons look through every name with a word starting with it — ~460 ms of their
+            // work, ~1.1 J billed to the app (Activity Monitor 1300–1900 at Siri's first keystroke,
+            // measured October 14) — and the next letter, typed meanwhile, made all of it useless.
+            // Stopped then, Spotlight ends the search; the rows shown are the next query's, as before.
+            guard MDQueryExecute(query, 0) else { return [] }
+            let deadline = DispatchTime.now().uptimeNanoseconds + 5_000_000_000
+            while !MDQueryIsGatheringComplete(query) {
+                if isStale() || DispatchTime.now().uptimeNanoseconds > deadline {
+                    MDQueryStop(query)
+                    return []
+                }
+                CFRunLoopRunInMode(.defaultMode, 0.01, true)
+            }
+            MDQueryStop(query)
+        } else {
+            guard MDQueryExecute(query, CFOptionFlags(kMDQuerySynchronous.rawValue)) else { return [] }
+        }
         var hits: [AssistantHit] = []
         var seen = Set<String>()
         for index in 0..<MDQueryGetResultCount(query) {

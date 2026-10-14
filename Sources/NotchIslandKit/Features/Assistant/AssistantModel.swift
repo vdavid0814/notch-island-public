@@ -1342,6 +1342,7 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// and Files) the query's hits after a short pause.
     private func search(now: Bool) {
         generation &+= 1
+        AssistantSearch.typedOn()
         let generation = generation
         let text = trimmedQuery
         let category = category
