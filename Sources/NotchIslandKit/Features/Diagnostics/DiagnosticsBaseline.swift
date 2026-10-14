@@ -5,7 +5,8 @@ import Foundation
 nonisolated enum DiagnosticsMetric: String, Sendable, Codable, CaseIterable {
     case powerMW, powerOnBatteryMW, recentPowerMW, worstPowerMW, helpersPowerMW
     case cpuPercent, wakeupsPerSecond
-    case memoryMB, peakMemoryMB
+    case memoryMB, peakMemoryMB, memoryGrowthMBPerHour
+    case openingMJ, siriOpeningMJ, settingsOpeningMJ, siriSearchMJ
     case spotlightMissingPercent, gallerySeconds, appSearchSeconds
     case logErrorsPerHour, crashes, uncleanExits
 
@@ -20,6 +21,11 @@ nonisolated enum DiagnosticsMetric: String, Sendable, Codable, CaseIterable {
         case .wakeupsPerSecond: "Wakeups"
         case .memoryMB: "Memory"
         case .peakMemoryMB: "Peak memory"
+        case .memoryGrowthMBPerHour: "Memory growth at rest"
+        case .openingMJ: "Panel opening's energy"
+        case .siriOpeningMJ: "Siri opening's energy"
+        case .settingsOpeningMJ: "Settings opening's energy"
+        case .siriSearchMJ: "Siri's costliest searches"
         case .spotlightMissingPercent: "Apps missing from Spotlight"
         case .gallerySeconds: "Siri's app list read"
         case .appSearchSeconds: "Slowest app search"
@@ -35,6 +41,8 @@ nonisolated enum DiagnosticsMetric: String, Sendable, Codable, CaseIterable {
         case .cpuPercent: String(format: "%.2f%%", value)
         case .wakeupsPerSecond: String(format: "%.1f/s", value)
         case .memoryMB, .peakMemoryMB: String(format: "%.0f MB", value)
+        case .memoryGrowthMBPerHour: String(format: "%+.1f MB/h", value)
+        case .openingMJ, .siriOpeningMJ, .settingsOpeningMJ, .siriSearchMJ: String(format: "%.0f mJ", value)
         case .spotlightMissingPercent: String(format: "%.0f%%", value)
         case .gallerySeconds, .appSearchSeconds: DiagnosticsFormat.duration(value)
         case .logErrorsPerHour: String(format: "%.1f/h", value)
@@ -58,6 +66,16 @@ nonisolated enum DiagnosticsMetric: String, Sendable, Codable, CaseIterable {
         case .wakeupsPerSecond: Rule(factor: 3, minimum: 20)
         case .memoryMB: Rule(factor: 2, minimum: 250)
         case .peakMemoryMB: Rule(factor: 2, minimum: 400)
+        // A floor that rises 8 MB an hour is ~200 MB a day: a leak, whatever the reference.
+        case .memoryGrowthMBPerHour: Rule(factor: 3, minimum: 8)
+        // Openings as Activity Monitor counts them (own + billed): a panel ~15–90 mJ, Siri ~30–700
+        // (its first search), Settings ~120–300 on the reference Mac (October 14).
+        case .openingMJ: Rule(factor: 3, minimum: 120)
+        case .siriOpeningMJ: Rule(factor: 3, minimum: 400)
+        case .settingsOpeningMJ: Rule(factor: 3, minimum: 600)
+        // The worst tenth of the searches: a first keystroke over many files was ~1.8 J before
+        // Spotlight's useless searches were stopped (October 14).
+        case .siriSearchMJ: Rule(factor: 3, minimum: 1500)
         case .spotlightMissingPercent: Rule(factor: 2, minimum: 10)
         case .gallerySeconds, .appSearchSeconds: Rule(factor: 4, minimum: 1)
         case .logErrorsPerHour: Rule(factor: 4, minimum: 5)

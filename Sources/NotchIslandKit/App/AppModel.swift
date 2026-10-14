@@ -685,6 +685,12 @@ import Observation
             return
         }
         windowController.logState()
+        for (kind, summary) in OpeningMeter.shared.summaries().sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            Log.window.notice("state: \(kind.title, privacy: .public): \(summary.line, privacy: .public)")
+        }
+        for (title, line) in DiagnosticsMemory.lines() {
+            Log.window.notice("state: \(title, privacy: .public): \(line, privacy: .public)")
+        }
     }
 
     /// A feature that is on cannot work for want of Accessibility or Input Monitoring.

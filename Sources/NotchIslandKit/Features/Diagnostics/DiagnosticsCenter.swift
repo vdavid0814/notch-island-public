@@ -894,6 +894,14 @@ import Observation
         metrics[.memoryMB] = Double(now.own.footprint) / 1_048_576
         metrics[.peakMemoryMB] = Double(now.own.peakFootprint) / 1_048_576
         section.add("Memory", "\(DiagnosticsFormat.bytes(now.own.footprint)), peak \(DiagnosticsFormat.bytes(now.own.peakFootprint)); helpers \(DiagnosticsFormat.bytes(now.helpers.footprint))")
+        for (title, line) in DiagnosticsMemory.lines() { section.add(title, line) }
+        if let growth = DiagnosticsMemory.growthPerHour(energy.intervals.map { ($0.end, $0.footprintMB) }) {
+            section.add("Memory growth at rest", String(format: "%+.1f MB an hour (the lowest reading of each hour)", growth))
+            metrics[.memoryGrowthMBPerHour] = growth
+        }
+        let openings = DiagnosticsMemory.openings(OpeningMeter.shared.summaries())
+        for (title, line) in openings.lines { section.add(title, line) }
+        metrics.merge(openings.metrics) { $1 }
         section.add("Disk written", DiagnosticsFormat.bytes(now.own.diskWritten))
         let intervals = energy.intervals
         if let hour = EnergySummary(intervals.filter { $0.end > now.date.addingTimeInterval(-3600) }) {

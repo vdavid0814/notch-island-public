@@ -477,6 +477,9 @@ import SwiftUI
     // MARK: Staging
 
     private func willTransition(from: IslandPresentation, to: IslandPresentation) {
+        if let kind = OpeningMeter.Kind.of(from: from, to: to, panelKept: model.island.isPanelKept) {
+            OpeningMeter.shared.begin(kind)
+        }
         // Covering macOS's AirPods card: raised while ours grows, is shown and shrinks.
         if Self.covers(to) || Self.covers(from) { panel?.level = IslandPanel.coveringLevel }
         guard let metrics else { return }

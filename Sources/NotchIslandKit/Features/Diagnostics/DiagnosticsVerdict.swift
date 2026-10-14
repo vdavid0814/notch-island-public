@@ -289,13 +289,19 @@ nonisolated extension DiagnosticsVerdict {
     static func energy(_ comparisons: [DiagnosticsComparison], metrics: [DiagnosticsMetric: Double]) -> [Check] {
         var checks = comparisons.filter { $0.isUnusual && $0.metric != .crashes && $0.metric != .uncleanExits }.map { comparison in
             let memory = comparison.metric == .memoryMB || comparison.metric == .peakMemoryMB
+                || comparison.metric == .memoryGrowthMBPerHour
+            let opening = comparison.metric == .openingMJ || comparison.metric == .settingsOpeningMJ
             let siri = comparison.metric == .spotlightMissingPercent || comparison.metric == .gallerySeconds
                 || comparison.metric == .appSearchSeconds
             let errors = comparison.metric == .logErrorsPerHour
             return Check(id: "metric.\(comparison.metric.rawValue)", severity: .warning,
-                         feature: memory ? Feature.memory : siri ? Feature.siri : errors ? Feature.app : Feature.energy,
+                         feature: memory ? Feature.memory : siri || comparison.metric == .siriOpeningMJ || comparison.metric == .siriSearchMJ ? Feature.siri
+                             : opening ? Feature.island : errors ? Feature.app : Feature.energy,
                          title: comparison.metric.title + " past the reference", cause: comparison.line,
-                         action: memory ? "Compare Windows and Island internals with the reference; a surface left open holds memory"
+                         action: comparison.metric == .memoryGrowthMBPerHour ? "A leak: the footprint's floor rises every hour; compare Heap with the footprint, and the Timeline"
+                             : memory ? "Compare Windows and Island internals with the reference; a surface left open holds memory"
+                             : comparison.metric == .siriOpeningMJ || comparison.metric == .siriSearchMJ ? "See Openings: a search over many files (one letter) is Spotlight's work billed to the app; Siri's folders and file contents set how much"
+                             : opening ? "See Openings: page built far more often than kept means the panel is let go too soon"
                              : errors ? "See Errors by source: mostly the system's, unless NotchIsland's own are listed"
                              : "See the Energy timeline and Top energy users: a browser tab reporting playback is the usual cause",
                          // The log's rate is mostly the system's noise: last among the warnings.

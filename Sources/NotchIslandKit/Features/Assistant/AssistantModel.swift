@@ -1343,6 +1343,7 @@ nonisolated struct FileScope: Sendable, Equatable {
     private func search(now: Bool) {
         generation &+= 1
         AssistantSearch.typedOn()
+        if !trimmedQuery.isEmpty { OpeningMeter.shared.begin(.siriSearch) }
         let generation = generation
         let text = trimmedQuery
         let category = category

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 
 /// Memory macOS counts twice, counted once again — with nothing taken out of memory.
 ///
@@ -206,6 +207,7 @@ nonisolated enum AliasTrim {
             let outcome = trim()
             lastFootprint = footprint()
             guard outcome.regions > 0, before > lastFootprint else { return }
+            corrections.withLock { $0.bytes += before - lastFootprint; $0.places += outcome.regions }
             let ms = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6
             Log.system.notice("memory counted twice: \(outcome.regions, privacy: .public) places mapped again, footprint \(before >> 20, privacy: .public) → \(lastFootprint >> 20, privacy: .public) MB (\(ms, format: .fixed(precision: 1), privacy: .public) ms)")
         }
@@ -216,7 +218,15 @@ nonisolated enum AliasTrim {
         queue.asyncAfter(deadline: .now() + seconds, execute: work)
     }
 
-    /// What Activity Monitor's Memory column shows for the app.
+    /// What the trims took out of the count since launch, for the diagnostics report.
+    nonisolated struct Corrections: Sendable, Equatable {
+        var bytes: UInt64 = 0
+        var places = 0
+    }
+
+    static let corrections = OSAllocatedUnfairLock(initialState: Corrections())
+
+        /// What Activity Monitor's Memory column shows for the app.
     static func footprint() -> UInt64 {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
