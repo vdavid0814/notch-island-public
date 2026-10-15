@@ -303,6 +303,12 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// `shortcuts list` process, the panes' table, the emoji index; Energy Impact ~350, measured).
     /// They are a few megabytes; read ahead after launch (`prewarm`) and kept half an hour.
     static let listsKeepDuration: Duration = .seconds(30 * 60)
+    /// The app list, the gallery's icons and the read lists are kept after a close (the lists for
+    /// `listsKeepDuration`, the rest until the app quits) while NotchIsland's Spotlight replaces
+    /// macOS's. Off, it is seldom opened, and all of it goes `keepDuration` after a close and is not
+    /// read ahead after launch (asked for, October 15: ~11 MB kept, 23 → 34 MB with the gallery).
+    @ObservationIgnored var keepsLists: () -> Bool = { true }
+
     /// Times `keepDuration` (a test moves its own).
     @ObservationIgnored var clock: any Clock<Duration> = ContinuousClock()
     /// Frees the kept lists `keepDuration` after a close; nil while Siri is open or once they are gone.
@@ -966,16 +972,35 @@ nonisolated struct FileScope: Sendable, Equatable {
         // when Siri opens first.
         AssistantIcons.tidyDisk()
         releaseTask?.cancel()
+        let keeps = keepsLists()
         releaseTask = Task { [weak self, clock] in
-            try? await clock.sleep(for: Self.listsKeepDuration, tolerance: .seconds(1))
+            try? await clock.sleep(for: keeps ? Self.listsKeepDuration : Self.keepDuration, tolerance: .seconds(1))
             guard !Task.isCancelled, let self else { return }
             self.releaseTask = nil
-            self.shortcuts = nil
-            self.settingsPanes = nil
-            self.emoji = nil
-            self.bookmarks = nil
-            AssistantMatch.forget()
+            self.releaseLists(all: !keeps)
         }
+    }
+
+    /// The read lists go; with `all`, the app list and every icon kept in memory too (the ones on
+    /// disk stay, for the next opening).
+    private func releaseLists(all: Bool) {
+        shortcuts = nil
+        settingsPanes = nil
+        emoji = nil
+        bookmarks = nil
+        AssistantMatch.forget()
+        guard all else { return }
+        allApps = []
+        allAppsRead = nil
+        AssistantIcons.purgeAll()
+    }
+
+    /// Everything kept, released now: NotchIsland's Spotlight no longer replaces macOS's
+    /// (`keepsLists`) and Siri is closed.
+    func releaseKept() {
+        releaseTask?.cancel()
+        releaseTask = nil
+        releaseLists(all: true)
     }
 
     // MARK: Keys
@@ -2135,6 +2160,14 @@ nonisolated enum AssistantMatch {
     /// icons again at an opening.
     static func purge() {
         icons = [:]
+    }
+
+    /// Every icon kept in memory, the gallery's too (`AssistantModel.keepsLists` off).
+    static func purgeAll() {
+        purgeTask?.cancel()
+        purgeTask = nil
+        icons = [:]
+        thumbnails = [:]
     }
 
     private static var purgeTask: Task<Void, Never>?

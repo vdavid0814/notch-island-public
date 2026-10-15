@@ -7,6 +7,10 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-10-15 18:40** — With "Replace macOS Spotlight" off, nothing of Siri is read ahead or kept:
+  the app list, the gallery's icons and the lists go 10 s after Siri closes, and at once when the
+  setting is turned off. *Asked for: Siri is not opened then (34 → 26 MB after a use, 23 → 18 MB
+  after launch); an opening costs more (~0.4–0.5 J).*
 - **2026-10-15 17:05** — About, Spotlight and Live Activities are built only when the user goes to
   them in Settings, and let go once Settings has closed; General and Widgets are built ahead and
   kept (`IslandSettingsPane.isKept`). *Asked for, to get under 150 MB at rest (186 → 136–141 MB);

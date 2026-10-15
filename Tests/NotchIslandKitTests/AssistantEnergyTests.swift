@@ -136,6 +136,39 @@ final class ManualClock: Clock {
         model.end()
     }
 
+    /// NotchIsland's Spotlight not replacing macOS's: nothing of Siri is kept after a close beyond
+    /// `keepDuration`, the app list included (October 15).
+    @Test func withoutReplacingSpotlightEverythingGoesSoonAfterAClose() async {
+        let clock = ManualClock()
+        var sources = stubSources()
+        sources.allApps = { [AssistantHit(kind: .app, url: URL(fileURLWithPath: "/Applications/Safari.app"), name: "Safari",
+                                          contentType: "com.apple.application-bundle", lastUsed: nil)] }
+        sources.shortcuts = { ["Wiki"] }
+        let model = AssistantModel(defaults: UserDefaults(suiteName: "AssistantKeepTests.\(UUID().uuidString)")!, sources: sources)
+        model.clock = clock
+        model.keepsLists = { false }
+        model.begin()
+        model.query = "wi"
+        await model.settle()
+        await settle { !model.allApps.isEmpty }
+        #expect(!model.allApps.isEmpty && model.shortcuts != nil)
+        model.end()
+        await settle { clock.sleeperCount == 1 }
+        clock.advance(by: AssistantModel.keepDuration)
+        await settle { model.allApps.isEmpty }
+        #expect(model.allApps.isEmpty && model.shortcuts == nil)
+
+        // Turned off with lists kept: released at once.
+        model.keepsLists = { true }
+        model.begin()
+        model.query = "wi"
+        await model.settle()
+        await settle { !model.allApps.isEmpty }
+        model.end()
+        model.releaseKept()
+        #expect(model.allApps.isEmpty && model.shortcuts == nil && clock.sleeperCount == 0)
+    }
+
     @Test func emojiIndexRanksExactlyAsTheWholeTable() async {
         let table = await EmojiTable.build()
         let index = EmojiIndex(table)

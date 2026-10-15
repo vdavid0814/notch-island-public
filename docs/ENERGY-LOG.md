@@ -4,6 +4,23 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-15 (evening): nothing of Siri kept while macOS's Spotlight is the one ⌘Space opens
+
+Asked for: with "Replace macOS Spotlight" off, Siri's app list, the gallery's icons and the read
+lists are not read ahead after launch and go 10 s after Siri closes (`AssistantModel.keepsLists`).
+Release builds without reports, `NI_NO_PREPARE=1` (Siri alone), the setting off, 2 rounds each.
+
+| | before | after |
+|---|---|---|
+| 60 s after launch | 23 MB | **18 MB** |
+| 15 s after the gallery closed | 34–35 MB | **26 MB** |
+| The gallery opened again 15 s after a close (median) | 369 mJ | 797 mJ |
+| Siri opened again 15 s after a close (median) | 45 mJ | 570 mJ |
+
+- What stays after a use (+4.8 MB of heap, 2 min later): Swift metadata, ICU's Unicode sets,
+  Objective-C method caches, SF Symbols' paths — the runtime's and the system's own, read once.
+- An opening costs more with the setting off; it is the setting for someone who does not open it.
+
 ## 2026-10-15 (afternoon): About, Spotlight and Live Activities built only when gone to
 
 Asked for: the three seldom visited Settings pages are not built ahead or kept; each is built when

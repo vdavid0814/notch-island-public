@@ -325,6 +325,7 @@ import Observation
         assistant.settings = { [weak preferences] in preferences?.siri ?? SiriSettings() }
         assistant.enableCurrencies = { [weak preferences] in preferences?.siri.convertsCurrency = true }
         assistant.clipboard = { [weak self] in self?.clipboard.itemsForList() ?? [] }
+        assistant.keepsLists = { [weak self] in self?.preferences.commandSpaceOpensSiri ?? true }
         assistant.system = .live(controls: controls, isPinned: { [weak self] in self?.island.isPinned ?? false })
         assistant.timerIsActive = { [weak self] in self?.timers.isCountdownActive ?? false }
         // People & Calendar (⌘8): the events the Up Next widget reads, leased while it is open.
@@ -476,7 +477,10 @@ import Observation
             // At background priority: what it reads off the main thread runs on the efficiency cores.
             Task(priority: .background) { [weak self] in
                 try? await Task.sleep(for: .seconds(12), tolerance: .seconds(3))
-                guard let self, self.isRunning, !self.island.presentation.isAssistant else { return }
+                // Not while macOS's Spotlight is the one ⌘Space opens: NotchIsland's is seldom
+                // opened then, and nothing of it is kept (`AssistantModel.keepsLists`).
+                guard let self, self.isRunning, !self.island.presentation.isAssistant,
+                      self.preferences.commandSpaceOpensSiri else { return }
                 await self.assistant.prewarm()
                 guard self.isRunning, !self.island.presentation.isOpen else { return }
                 AssistantRehearsal.run(model: self)
@@ -485,6 +489,8 @@ import Observation
     }
 
     @ObservationIgnored private var hasPrewarmed = false
+    /// NotchIsland's Spotlight replaced macOS's at the last look (`observeFeatures`).
+    @ObservationIgnored private var keptSiriLists = true
 
     /// Stops every service and removes every observer. Idempotent.
     func stop() {
@@ -925,6 +931,9 @@ import Observation
             }
         }
         clipboard.setWatching(watchesClipboard)
+        // Turned off with Siri closed: what it kept goes now (`AssistantModel.keepsLists`).
+        if !preferences.commandSpaceOpensSiri, keptSiriLists, !island.presentation.isAssistant { assistant.releaseKept() }
+        keptSiriLists = preferences.commandSpaceOpensSiri
         let actions = FeatureState.actions(from: appliedFeatures, to: state)
         appliedFeatures = state
         guard !actions.isEmpty else { return }
