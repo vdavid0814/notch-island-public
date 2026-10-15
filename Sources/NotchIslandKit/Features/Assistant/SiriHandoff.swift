@@ -1,4 +1,5 @@
 import AppKit
+import os
 
 /// An Accessibility element handed to a background read (the AX calls are safe from any thread;
 /// the type is not marked so).
@@ -85,20 +86,22 @@ nonisolated struct AXRef: @unchecked Sendable {
     /// conversation stood the island still for over 2 s (App Hang in `submit`, October 14).
     @concurrent nonisolated private static func submit(_ line: String, in ref: AXRef, newConversation: Bool) async -> Int? {
         let window = ref.element
-        let old = descendants(of: window, where: { identifier($0) == "promptViewTextField" }).first
-        if newConversation, let button = descendants(of: window, where: { identifier($0) == "newChatButton" }).first {
+        let old = descendants(of: chat(in: window), where: { identifier($0) == "promptViewTextField" }).first
+        if newConversation, let button = AX.first(in: window, where: { identifier($0) == "newChatButton" }) {
             AXUIElementPerformAction(button, kAXPressAction as CFString)
+            // Looked for anew: the conversation's view may be built again with it.
+            chatScope.withLock { $0 = nil }
             // The new conversation builds its field anew: the old one, still there a moment, took
             // the question and dropped it (seen). Waited for the new one, then a little longer.
             for _ in 0..<16 {
                 try? await Task.sleep(for: .milliseconds(50))
-                if let now = descendants(of: window, where: { identifier($0) == "promptViewTextField" }).first,
+                if let now = descendants(of: chat(in: window), where: { identifier($0) == "promptViewTextField" }).first,
                    old.map({ !CFEqual($0, now) }) ?? true { break }
             }
             try? await Task.sleep(for: .milliseconds(400))
         }
         guard let field = await promptField(in: ref)?.element else { return nil }
-        let prompts = descendants(of: window, where: { identifier($0) == "userPrompt" }).count
+        let prompts = descendants(of: chat(in: window), where: { identifier($0) == "userPrompt" }).count
         let replied = replies(in: window).count
         AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, line as CFString)
         var held = false
@@ -112,7 +115,7 @@ nonisolated struct AXRef: @unchecked Sendable {
         guard AXUIElementPerformAction(field, kAXConfirmAction as CFString) == .success else { return nil }
         for _ in 0..<20 {
             try? await Task.sleep(for: .milliseconds(100))
-            if descendants(of: window, where: { identifier($0) == "userPrompt" }).count > prompts { return replied }
+            if descendants(of: chat(in: window), where: { identifier($0) == "userPrompt" }).count > prompts { return replied }
         }
         return nil
     }
@@ -239,7 +242,7 @@ nonisolated struct AXRef: @unchecked Sendable {
     /// The Ask Siri field (a new conversation builds it anew: waited for).
     @concurrent nonisolated private static func promptField(in window: AXRef) async -> AXRef? {
         for _ in 0..<20 {
-            if let field = descendants(of: window.element, where: { identifier($0) == "promptViewTextField" }).first {
+            if let field = descendants(of: chat(in: window.element), where: { identifier($0) == "promptViewTextField" }).first {
                 return AXRef(field)
             }
             try? await Task.sleep(for: .milliseconds(50))
@@ -281,8 +284,33 @@ nonisolated struct AXRef: @unchecked Sendable {
 
     /// Siri's replies in the conversation, oldest first.
     nonisolated private static func replies(in window: AXUIElement) -> [AXUIElement] {
-        AX.descendants(of: window, where: { AX.identifier($0) == "modelResponse" })
+        AX.descendants(of: chat(in: window), where: { AX.identifier($0) == "modelResponse" })
     }
+
+    /// Where Siri AI keeps the conversation: the Ask Siri field, the questions and the replies — 17
+    /// of the window's ~470 elements (the sidebar and the toolbar are the rest, October 14). Every
+    /// read looks only in here: a walk of the whole window was ~900 Accessibility calls and
+    /// 210–270 ms, and an answer was followed with one every 300 ms, Siri AI answering each call.
+    /// Found once (a walk of the window), kept while it still answers to its identifier; the
+    /// window itself where it is not there.
+    nonisolated private static func chat(in window: AXUIElement) -> AXUIElement {
+        if let kept = chatScope.withLock({ $0 }), CFEqual(kept.window, window), identifier(kept.chat) == chatIdentifier {
+            return kept.chat
+        }
+        let found = AX.first(in: window, where: { identifier($0) == chatIdentifier })
+        let scope = found.map { ChatScope(window: window, chat: $0) }
+        chatScope.withLock { $0 = scope }
+        return found ?? window
+    }
+
+    nonisolated private static let chatIdentifier = "innerChatSessionView"
+
+    nonisolated private struct ChatScope: @unchecked Sendable {
+        let window: AXUIElement
+        let chat: AXUIElement
+    }
+
+    nonisolated private static let chatScope = OSAllocatedUnfairLock<ChatScope?>(initialState: nil)
 
     nonisolated private static func descendants(of element: AXUIElement, where matches: (AXUIElement) -> Bool) -> [AXUIElement] {
         AX.descendants(of: element, where: matches)

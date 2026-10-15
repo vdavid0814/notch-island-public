@@ -226,6 +226,16 @@ nonisolated enum AX {
         return found
     }
 
+    /// The first element (depth first) that `matches`: the walk ends there.
+    static func first(in element: AXUIElement, where matches: (AXUIElement) -> Bool, depth: Int = 0) -> AXUIElement? {
+        if matches(element) { return element }
+        guard depth < 30 else { return nil }
+        for child in children(of: element) {
+            if let found = first(in: child, where: matches, depth: depth + 1) { return found }
+        }
+        return nil
+    }
+
     static func role(_ element: AXUIElement) -> String? { attribute(element, kAXRoleAttribute) as? String }
     static func identifier(_ element: AXUIElement) -> String? { attribute(element, kAXIdentifierAttribute) as? String }
     static func description(_ element: AXUIElement) -> String? { attribute(element, kAXDescriptionAttribute) as? String }

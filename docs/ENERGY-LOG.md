@@ -4,6 +4,34 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-15 (night): the clipboard's look at rest; Siri AI's conversation read in its own part
+
+Release builds without reports (`NO_REPORTS=1`), MacBook Pro M5, on the charger, nobody at the Mac.
+Energy = the coalition's (own + GPU + billed), two builds in turn ABBA (`abbuild.py`, scratch):
+"old" = 0.8.6 as released, "new" = this night's.
+
+| | old (0.8.6) | new |
+|---|---|---|
+| At rest, 5 min, launched with `NI_NO_PREPARE=1` (6 rounds, median) | 173.5 mJ | **143.4 mJ** (−17 %) |
+| Panel opened and closed (`open?page=home`, 6 rounds × 5) | 72.9 mJ | 72.6 mJ |
+| Hover open and close (6 rounds × 5) | 73.8 mJ | 73.6 mJ |
+| Memory at rest after two soak cycles (2 rounds) | 200–201 MB | 200–201 MB |
+
+- **The clipboard's look** (`PasteboardWatch`): the change count is read on a queue of its own at
+  background quality of service (an App Hang on a Mac short of memory had it on the main thread),
+  every second while the Mac is used, every five after a minute without input, every thirty after
+  ten; the Clipboard list looks again as it is shown. With only the queue moved (still every five
+  seconds) the rest was 11.5 against 10.7 mJ per 90 s (8 rounds): the thirty-second pace is what
+  made it less than before.
+- **Siri AI's conversation** (`SiriHandoff`): every read of Siri AI's window walked all of it
+  (~470 elements: the sidebar, the toolbar) — 919 Accessibility calls and 217 ms each time, one
+  every 300 ms while an answer came, Siri AI answering each call. Now only its conversation view
+  (`innerChatSessionView`, 17 elements): 35 calls, 1.4 ms (measured on Siri AI's live window).
+- Tried and dropped: skipping a file search when a shorter query of the same scope had found
+  nothing. Typing a sentence at 350 ms a letter cost the same with and without it (464 / 458 mJ;
+  a nonsense sentence 210 / 215 mJ): searches that find nothing are cheap, and the costly first
+  letters are already stopped by the next keystroke.
+
 ## 2026-10-14 (night): where Settings' memory is; the gallery's pictures in one graph (measured, not kept)
 
 Release build 0.8.6+, MacBook Pro M5, on the charger. Memory = footprint (`top`'s MEM), fresh launch each.

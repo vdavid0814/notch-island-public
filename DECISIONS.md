@@ -7,6 +7,12 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-10-15 03:30** — Siri AI is read only inside its conversation view (`innerChatSessionView`,
+  found once, kept while it answers to its identifier), and the clipboard is looked at every thirty
+  seconds once nobody has typed or clicked for ten minutes (the list looks again as it shows).
+  *A whole-window walk was ~900 Accessibility calls every 300 ms during an answer; at rest the look
+  was the app's only wake-up (rest −17 % against 0.8.6). Skipping file searches narrower than an
+  empty one was measured and dropped: no difference.*
 - **2026-10-14 21:40** — No message to another process waits on the main thread: Siri AI's
   Accessibility walks (`SiriHandoff`, `@concurrent`, 1 s per read) and the pasteboard's change count
   (`PasteboardWatch`, a queue of its own) moved off it. Settings is built ahead only after a calm
