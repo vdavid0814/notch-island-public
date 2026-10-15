@@ -324,7 +324,7 @@ import Observation
         assistant.onFileAccessSettled = { [weak self] in self?.windowController?.assistantNeedsKeyboard() }
         assistant.settings = { [weak preferences] in preferences?.siri ?? SiriSettings() }
         assistant.enableCurrencies = { [weak preferences] in preferences?.siri.convertsCurrency = true }
-        assistant.clipboard = { [weak self] in self?.clipboard.items ?? [] }
+        assistant.clipboard = { [weak self] in self?.clipboard.itemsForList() ?? [] }
         assistant.system = .live(controls: controls, isPinned: { [weak self] in self?.island.isPinned ?? false })
         assistant.timerIsActive = { [weak self] in self?.timers.isCountdownActive ?? false }
         // People & Calendar (⌘8): the events the Up Next widget reads, leased while it is open.

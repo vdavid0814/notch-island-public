@@ -73,6 +73,19 @@ nonisolated struct ClipboardItem: Hashable, Identifiable, Sendable, Codable {
         }
     }
 
+    /// The items for the clipboard list: the pasteboard looked at again first (at most every two
+    /// seconds), as nobody at the Mac it is looked at only every thirty (`PasteboardWatch`).
+    func itemsForList() -> [ClipboardItem] {
+        let now = CACurrentMediaTime()
+        if now - lastLookRequest > 2 {
+            lastLookRequest = now
+            watch?.lookNow()
+        }
+        return items
+    }
+
+    @ObservationIgnored private var lastLookRequest: CFTimeInterval = 0
+
     /// Reads the pasteboard if it changed since the last look (`count`: its change count, read).
     func check(_ count: Int? = nil) {
         let count = count ?? pasteboard.changeCount
@@ -143,43 +156,81 @@ nonisolated struct ClipboardItem: Hashable, Identifiable, Sendable, Codable {
 /// thread still for over 2 s (App Hang in `ClipboardHistory.check`, October 13). The main thread
 /// hears only of a change (`onChange`, with the first count read as `isFirst`).
 ///
+/// At background quality of service: the look runs on the efficiency cores (on the main thread it
+/// ran on a performance core), and a copy seen a moment later changes nothing.
+///
 /// Once a second while the Mac is being used; every five seconds once nothing has been typed or
-/// clicked for a minute (a copy needs a keystroke or a click, and the first look after one is at
-/// most five seconds late): at rest the look was the app's only wake-up.
+/// clicked for a minute; every thirty once nothing has for ten (nobody at the Mac: at rest the look
+/// was the app's only wake-up). A copy needs a keystroke or a click, and the clipboard list looks
+/// again as it is shown (`lookNow`), so a late look is never seen.
 nonisolated final class PasteboardWatch: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.davidvarga.notchisland.pasteboard", qos: .utility)
+    private let queue = DispatchQueue(label: "com.davidvarga.notchisland.pasteboard", qos: .background)
     private let timer: any DispatchSourceTimer
+    private let onChange: @MainActor (_ count: Int, _ isFirst: Bool) -> Void
     // Touched on `queue` only.
     private let pasteboard: NSPasteboard
     private var lastCount: Int?
-    private var isRelaxed = false
+    private var pace = Pace.used
+
+    enum Pace: Equatable {
+        case used, idle, away
+
+        /// How long nothing has been typed or clicked: `idle` past a minute, `away` past ten.
+        static func after(idleSeconds: TimeInterval) -> Pace {
+            idleSeconds > 600 ? .away : idleSeconds > 60 ? .idle : .used
+        }
+
+        var interval: DispatchTimeInterval {
+            switch self {
+            case .used: .seconds(1)
+            case .idle: .seconds(5)
+            case .away: .seconds(30)
+            }
+        }
+
+        var leeway: DispatchTimeInterval {
+            switch self {
+            case .used: .milliseconds(500)
+            case .idle: .seconds(2)
+            case .away: .seconds(10)
+            }
+        }
+    }
 
     init(pasteboard: NSPasteboard, onChange: @escaping @MainActor (_ count: Int, _ isFirst: Bool) -> Void) {
         self.pasteboard = pasteboard
+        self.onChange = onChange
         timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now(), repeating: 1, leeway: .milliseconds(500))
+        timer.schedule(deadline: .now(), repeating: pace.interval, leeway: pace.leeway)
         timer.setEventHandler { [weak self] in
-            guard let self else { return }
-            let count = self.pasteboard.changeCount
-            if count != self.lastCount {
-                let isFirst = self.lastCount == nil
-                self.lastCount = count
-                DispatchQueue.main.async { MainActor.assumeIsolated { onChange(count, isFirst) } }
-            }
-            self.pace()
+            self?.look()
+            self?.setPace()
         }
         timer.resume()
     }
 
     func stop() { timer.cancel() }
 
-    private func pace() {
+    /// A look now, between the timer's (the clipboard list is being shown).
+    func lookNow() {
+        queue.async { [weak self] in self?.look() }
+    }
+
+    private func look() {
+        let count = pasteboard.changeCount
+        guard count != lastCount else { return }
+        let isFirst = lastCount == nil
+        lastCount = count
+        let onChange = onChange
+        DispatchQueue.main.async { MainActor.assumeIsolated { onChange(count, isFirst) } }
+    }
+
+    private func setPace() {
         let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState,
                                                            eventType: CGEventType(rawValue: ~0) ?? .null)
-        let relaxed = idle > 60
-        guard relaxed != isRelaxed else { return }
-        isRelaxed = relaxed
-        let interval: DispatchTimeInterval = relaxed ? .seconds(5) : .seconds(1)
-        timer.schedule(deadline: .now() + interval, repeating: interval, leeway: relaxed ? .seconds(2) : .milliseconds(500))
+        let next = Pace.after(idleSeconds: idle)
+        guard next != pace else { return }
+        pace = next
+        timer.schedule(deadline: .now() + next.interval, repeating: next.interval, leeway: next.leeway)
     }
 }

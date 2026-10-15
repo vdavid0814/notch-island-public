@@ -819,3 +819,24 @@ final class ManualClock: Clock {
         #expect(view.layer?.sublayers?.contains { $0.animation(forKey: "flow") != nil } != true)
     }
 }
+
+/// The pasteboard looked at less often the longer nobody types or clicks (October 15: at rest the
+/// look was the app's only wake-up).
+struct PasteboardPaceTests {
+    @Test func slowsDownWithIdleTime() {
+        #expect(PasteboardWatch.Pace.after(idleSeconds: 5) == .used)
+        #expect(PasteboardWatch.Pace.after(idleSeconds: 61) == .idle)
+        #expect(PasteboardWatch.Pace.after(idleSeconds: 599) == .idle)
+        #expect(PasteboardWatch.Pace.after(idleSeconds: 601) == .away)
+        #expect(PasteboardWatch.Pace.away.interval == .seconds(30))
+    }
+
+    @MainActor @Test func theListLooksAgainAtMostEveryTwoSeconds() {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        let history = ClipboardHistory(pasteboard: board, storeURL: nil)
+        #expect(history.itemsForList().isEmpty)
+        #expect(history.itemsForList().isEmpty)
+    }
+}
+
