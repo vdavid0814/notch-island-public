@@ -33,6 +33,32 @@ final class SettingsWindow: NSPanel {
     /// Ordering out after the fade.
     private var orderingOut: DispatchWorkItem?
 
+    /// How long the pages that are not kept (`IslandSettingsPane.isKept`) stay after Settings has
+    /// closed: closed to look at the island and opened again meanwhile, they are there at once
+    /// (asked for, October 15). macOS short of memory gives all of Settings up anyway (`discard`).
+    static let unkeptPagesLinger: TimeInterval = 30
+    private var releasingPages: Timer?
+
+    /// The pages that are not kept, let go `unkeptPagesLinger` after Settings closed, unless it
+    /// opened again meanwhile; in a turn on the efficiency cores, as the ordering out is.
+    private func releaseUnkeptPagesLater() {
+        releasingPages?.invalidate()
+        let timer = Timer(timeInterval: Self.unkeptPagesLinger, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.releasingPages = nil
+                MainThrift.lowPowerTurn(unattended: true) { [weak self] in
+                    guard let self, !self.isVisible, self.releasingPages == nil else { return }
+                    self.surface.deck.releasePages { $0.isKept }
+                    AliasTrim.soon()
+                }
+            }
+        }
+        timer.tolerance = 5
+        RunLoop.main.add(timer, forMode: .common)
+        releasingPages = timer
+    }
+
     /// Whether Settings is kept built for as long as the app runs: on battery, where an opening of
     /// the kept window costs a ninth of building it. On the charger it is built ahead and kept too
     /// while someone uses the Mac, and given up once nobody has been at it for `awayDelay` (the
@@ -333,6 +359,9 @@ final class SettingsWindow: NSPanel {
     /// Settings has grown: the pages fade in over the island.
     func show() {
         SettingsPresence.shared.isShown = true
+        // Opened again within `unkeptPagesLinger`: the pages that are not kept stay.
+        releasingPages?.invalidate()
+        releasingPages = nil
         if alphaValue != 1 || ignoresMouseEvents, !isPrestaged, !isRehearsing {
             Log.window.error("settings window shown from alpha \(self.alphaValue, privacy: .public), ignoring clicks \(self.ignoresMouseEvents, privacy: .public), neither prestaged nor rehearsing")
         }
@@ -410,8 +439,9 @@ final class SettingsWindow: NSPanel {
             self.orderingOut = nil
             SettingsPresence.shared.isShown = false
             self.orderOut(nil)
-            // Out of sight: the pages that are not kept go (built again when the user goes to one).
-            self.surface.deck.releasePages { $0.isKept }
+            // Out of sight: the pages that are not kept go a while later (built again when the user
+            // goes to one).
+            self.releaseUnkeptPagesLater()
             AliasTrim.soon()
         }
         orderingOut = work

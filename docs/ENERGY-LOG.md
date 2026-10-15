@@ -19,6 +19,8 @@ Release builds without reports, MacBook Pro M5, on the charger, two builds in tu
 
 - The last row is the price asked for: the three pages are built in the turn they are gone to
   (~1 J for all three). Everything else costs the same or less (preparation −35 % CPU).
+- Kept 30 s after Settings closes (asked for): About opened again within 10 s of closing, 85 → 67 mJ
+  (median, 2 rounds × 2), CPU 308 → 157 ms. The memory stays up for those 30 s, then goes as before.
 - Rounds the user touched the island in (14:41–14:46) were measured again; each round is checked
   for island changes in the log.
 
