@@ -174,7 +174,8 @@ final class SettingsWindow: NSPanel {
     /// then draws each page once, unseen; false when all is done (or Settings is open).
     static func prepareNextPage(model: AppModel) -> Bool {
         guard let current, !current.isVisible || current.isRehearsing else { return false }
-        let order = [model.settingsPane] + IslandSettingsPane.allCases.filter { $0 != model.settingsPane }
+        // Only the kept pages (`IslandSettingsPane.isKept`): the others wait for the user to go to them.
+        let order = ([model.settingsPane] + IslandSettingsPane.allCases.filter { $0 != model.settingsPane }).filter(\.isKept)
         if let pane = order.first(where: { !current.surface.deck.isBuilt($0) }) {
             current.surface.deck.prepare(pane)
             return true
@@ -214,7 +215,8 @@ final class SettingsWindow: NSPanel {
         orderOut(nil)
         alphaValue = 1
         ignoresMouseEvents = false
-        surface.deck.show(model.settingsPane)
+        // A page that is not kept is built when Settings opens on it, not here.
+        if model.settingsPane.isKept { surface.deck.show(model.settingsPane) }
         surface.deck.closed()
         // Every page is built: the graph's table has grown to its size (`AliasTrim`).
         AliasTrim.soon()
@@ -408,6 +410,8 @@ final class SettingsWindow: NSPanel {
             self.orderingOut = nil
             SettingsPresence.shared.isShown = false
             self.orderOut(nil)
+            // Out of sight: the pages that are not kept go (built again when the user goes to one).
+            self.surface.deck.releasePages { $0.isKept }
             AliasTrim.soon()
         }
         orderingOut = work

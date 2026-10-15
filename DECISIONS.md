@@ -7,6 +7,10 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-10-15 17:05** — About, Spotlight and Live Activities are built only when the user goes to
+  them in Settings, and let go once Settings has closed; General and Widgets are built ahead and
+  kept (`IslandSettingsPane.isKept`). *Asked for, to get under 150 MB at rest (186 → 136–141 MB);
+  going to those pages costs ~1 J more than when they were kept.*
 - **2026-10-15 04:20** — The report's energy, CPU and wakeups set against the reference (and sent
   as `metric_powerMW`, `metric_recentPowerMW`, `metric_cpuPercent`, `metric_wakeupsPerSecond`) are
   the stretches at rest: no change of the island in them, no report collected. The report still

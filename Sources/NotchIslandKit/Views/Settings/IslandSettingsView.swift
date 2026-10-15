@@ -9,6 +9,12 @@ nonisolated enum IslandSettingsPane: String, CaseIterable, Identifiable, Sendabl
 
     var id: String { rawValue }
 
+    /// Built ahead and kept while Settings is closed: the pages Settings is opened for. About,
+    /// Spotlight and Live Activities are set once and seldom visited: built only when the user
+    /// goes to one, and let go when Settings closes (asked for, October 15: ~58 MB of the ~200
+    /// kept at rest).
+    var isKept: Bool { self == .general || self == .widgets }
+
     /// A pane by name, including the names of pages that were merged into others (Appearance is
     /// part of General, Permissions of About), so old links and the remembered pane still work.
     static func named(_ name: String) -> IslandSettingsPane? {

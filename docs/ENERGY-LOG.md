@@ -4,6 +4,24 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-15 (afternoon): About, Spotlight and Live Activities built only when gone to
+
+Asked for: the three seldom visited Settings pages are not built ahead or kept; each is built when
+the user goes to it and let go once Settings has closed. General and Widgets stay built ahead.
+Release builds without reports, MacBook Pro M5, on the charger, two builds in turn.
+
+| | before | after |
+|---|---|---|
+| At rest, Settings built ahead, 4 min after launch (4 rounds, no use of the island) | 186–187 MB | **136–141 MB** |
+| After going to About and Spotlight and closing Settings (one run) | — | 147 MB |
+| Launch and preparation, first 240 s (4 rounds, median; noisy) | 3171 mJ | 2910 mJ |
+| Going to General, About, Spotlight, Live Activities and closing (3 rounds × 2, median) | 168 mJ | **1124 mJ** |
+
+- The last row is the price asked for: the three pages are built in the turn they are gone to
+  (~1 J for all three). Everything else costs the same or less (preparation −35 % CPU).
+- Rounds the user touched the island in (14:41–14:46) were measured again; each round is checked
+  for island changes in the log.
+
 ## 2026-10-15 (night): the clipboard's look at rest; Siri AI's conversation read in its own part
 
 Release builds without reports (`NO_REPORTS=1`), MacBook Pro M5, on the charger, nobody at the Mac.

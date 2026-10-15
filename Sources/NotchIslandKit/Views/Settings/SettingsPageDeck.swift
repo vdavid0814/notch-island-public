@@ -205,6 +205,17 @@ final class SettingsPageDeckView: NSView {
 
     func isBuilt(_ pane: IslandSettingsPane) -> Bool { pages[pane] != nil }
 
+    /// The pages `keeping` does not keep, let go (Settings closed and out of sight); the one shown
+    /// among them is built again when Settings opens on it.
+    func releasePages(keeping: (IslandSettingsPane) -> Bool) {
+        for pane in Array(pages.keys) where !keeping(pane) {
+            guard let page = pages.removeValue(forKey: pane) else { continue }
+            page.visit.isShown = false
+            page.host.removeFromSuperview()
+            if shown == pane { shown = nil }
+        }
+    }
+
     /// `pane` built and laid out unseen at the deck's size (`SettingsSurfaceView.prepareNextPage`).
     func prepare(_ pane: IslandSettingsPane) {
         guard pages[pane] == nil else { return }
