@@ -17,24 +17,39 @@ import SwiftUI
 ///
 /// Only with Screen Recording (asked for the first time a window is anchored); without it the real
 /// window alone, under the menu bar. The stream runs only while the stage is up; frames arrive only
-/// when the window changes, at most 30 a second while its app is in front, 15 behind, 8 in Low Power
-/// Mode or under 30 % of battery. macOS shows its screen-sharing indicator meanwhile.
+/// when the window changes, as often as the notch screen shows them (60 a second, 120 on a ProMotion
+/// screen; 60 in Low Power Mode), whichever app is in front: a copy that drops frames reads as a
+/// stuttering window. macOS shows its screen-sharing indicator meanwhile.
+///
+/// The stage is on every space, full-screen ones too: in a full-screen app the copy stays over it,
+/// though the real window stays on its own space (another app's window cannot be put on one). Its
+/// app is not brought forward there (that would switch to the window's space): hovering and scrolls
+/// reach the window as they are, a click only where the app takes the first click on an inactive
+/// window, and the keyboard stays with the full-screen app.
 @Observable final class AnchorMirror {
     /// Screen Recording is given to the app.
     private(set) var isAllowed = CGPreflightScreenCaptureAccess()
     /// The stage is on screen.
     private(set) var isShowing = false
 
-    static let activeFrameRate = 30
-    static let frameRate = 15
-    static let reducedFrameRate = 8
+    /// The least, whatever the screen or the power mode.
+    static let minimumFrameRate = 60
+    /// `NI_ANCHOR_FPS=<n>` (measuring only): the stream capped at n frames a second instead.
+    static let forcedRate = ProcessInfo.processInfo.environment["NI_ANCHOR_FPS"].flatMap(Int.init).map { max(1, $0) }
+    /// Over a full-screen app, while only unchanged frames come (the stream sends a window on
+    /// another space at its full rate, changed or not): this many a second, and the full rate again
+    /// at the first change. `NI_ANCHOR_QUIET_FPS=<n>` (measuring only; 0: never lowered).
+    static let quietRate = ProcessInfo.processInfo.environment["NI_ANCHOR_QUIET_FPS"].flatMap(Int.init).map { max(0, $0) } ?? 10
 
     /// "Release" on the stage's bar.
     @ObservationIgnored var onRelease: (() -> Void)?
 
     @ObservationIgnored private var isEnabled = false
     @ObservationIgnored private var isPaused = false
-    @ObservationIgnored private var isReduced = false
+    /// The real window is not on the space in front (a full-screen app is).
+    @ObservationIgnored private var isAway = false
+    /// Only unchanged frames have come for a while.
+    @ObservationIgnored private var isQuiet = false
     @ObservationIgnored private var bar: AnchorBarPlacement = .belowWindow
     /// How far the island reaches out beside the notch on each side right now (its compact ears,
     /// with what is playing): the name and Release move out past it.
@@ -57,6 +72,7 @@ import SwiftUI
     @ObservationIgnored private var declined: CGWindowID?
     @ObservationIgnored private var stopWatch: StopWatch?
     @ObservationIgnored private var activation: (any NSObjectProtocol)?
+    @ObservationIgnored private var powerState: (any NSObjectProtocol)?
 
     init() {}
 
@@ -82,6 +98,13 @@ import SwiftUI
         reconcile()
     }
 
+    /// A full-screen app in front: the real window is on another space.
+    func setAway(_ away: Bool) {
+        guard away != isAway else { return }
+        isAway = away
+        updateRate()
+    }
+
     func setPaused(_ paused: Bool) {
         isPaused = paused
         reconcile()
@@ -99,13 +122,6 @@ import SwiftUI
         guard reach != islandReach else { return }
         islandReach = reach
         if isShowing, bar == .menuBar { reconcile() }
-    }
-
-    /// Low Power Mode or a low battery: fewer frames.
-    func setReduced(_ reduced: Bool) {
-        guard reduced != isReduced else { return }
-        isReduced = reduced
-        updateRate()
     }
 
     /// The anchored window (nil: none) on the notch screen.
@@ -127,8 +143,10 @@ import SwiftUI
         let generation = overlayGeneration
         let pid = held.window.pid, own = held.window.windowID
         Task.detached(priority: .userInitiated) {
-            // Its other windows in front of it (a sheet, a dialog): the list is front to back.
-            let front = AXWorker.serverWindows().prefix { $0.id != own }
+            // Its other windows in front of it (a sheet, a dialog): the list is front to back. Not on
+            // this space (a full-screen app in front), nothing of the app lies over it here.
+            let windows = AXWorker.serverWindows()
+            let front = windows.contains { $0.id == own } ? windows.prefix { $0.id != own } : []
             let overlaid = front.contains { $0.pid == pid && layout.isOverlaid(by: $0.frame) }
             await MainActor.run { [weak self] in
                 guard let self, self.overlayGeneration == generation, overlaid != self.isOverlaid else { return }
@@ -157,10 +175,18 @@ import SwiftUI
 
     // MARK: The stream
 
+    /// The stream's cap, in frames a second: what the copy shows is the notch screen's refresh rate
+    /// (60 at least; 60 in Low Power Mode). Asked for exactly that, a frame that comes a hair early
+    /// is dropped (57–58 of a window's 60 were shown); twice the screen's rate lets every one
+    /// through, as the window cannot change faster than the screen. Below the screen's rate (Low
+    /// Power Mode on a 120 Hz screen) a fifth more.
     private var rate: Int {
-        if isReduced || ProcessInfo.processInfo.isLowPowerModeEnabled { return Self.reducedFrameRate }
-        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        return front == held?.window.pid ? Self.activeFrameRate : Self.frameRate
+        if let forced = Self.forcedRate { return forced }
+        if isAway, isQuiet, Self.quietRate > 0 { return Self.quietRate }
+        let notch = NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main
+        let screen = max(Self.minimumFrameRate, notch?.maximumFramesPerSecond ?? 0)
+        let shown = ProcessInfo.processInfo.isLowPowerModeEnabled ? Self.minimumFrameRate : screen
+        return shown < screen ? shown * 6 / 5 : screen * 2
     }
 
     private static func configuration(size: CGSize, rate: Int) -> SCStreamConfiguration {
@@ -195,7 +221,10 @@ import SwiftUI
         streamedSize = held.rest.size
         let panel = panel ?? StagePanel()
         self.panel = panel
-        let output = MirrorOutput(layer: panel.stage.surface)
+        isQuiet = false
+        let output = MirrorOutput(layer: panel.stage.surface) { [weak self] quiet in
+            Task { @MainActor in self?.quietChanged(quiet, generation: generation) }
+        }
         self.output = output
         streamedRate = rate
         let configuration = Self.configuration(size: held.rest.size, rate: streamedRate)
@@ -224,16 +253,25 @@ import SwiftUI
                 self.refreshAccess()
             }
         }
-        // The frame rate follows whether the app is in front.
         if activation == nil {
             activation = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
                                                                            object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.updateRate()
-                    self?.appWindowsChanged()
-                }
+                MainActor.assumeIsolated { self?.appWindowsChanged() }
             }
         }
+        // The frame rate follows Low Power Mode.
+        if powerState == nil {
+            powerState = NotificationCenter.default.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateRate() }
+            }
+        }
+    }
+
+    /// Unchanged frames only for a while, or the first change after them.
+    private func quietChanged(_ quiet: Bool, generation: Int) {
+        guard generation == self.generation, quiet != isQuiet else { return }
+        isQuiet = quiet
+        updateRate()
     }
 
     /// macOS ended the stream: its sharing was stopped from the window's indicator (or the window
@@ -305,6 +343,8 @@ import SwiftUI
         }
         if let activation { NSWorkspace.shared.notificationCenter.removeObserver(activation) }
         activation = nil
+        if let powerState { NotificationCenter.default.removeObserver(powerState) }
+        powerState = nil
         panel = nil
     }
 }
@@ -324,16 +364,42 @@ nonisolated final class StopWatch: NSObject, SCStreamDelegate, @unchecked Sendab
 }
 
 /// Takes the stream's frames on its own queue and hands each surface to the layer there.
+///
+/// A frame that is the same, pixel for pixel, as the one on screen is not put in:
+/// the copy lies over the real window, so the window server counts every frame the copy shows as a
+/// change of the window under it, and the stream would send it back as a new frame, a loop at the
+/// stream's full rate (60 a second of an unchanged window: twice the energy of the copy at rest).
 nonisolated final class MirrorOutput: NSObject, SCStreamOutput, @unchecked Sendable {
     static let queue = DispatchQueue(label: "notchisland.anchor.mirror", qos: .userInitiated)
 
+    /// `NI_TRACE=1`: frames put in and frames left out as unchanged, logged every two seconds while they come.
+    static let counts = ProcessInfo.processInfo.environment["NI_TRACE"] == "1"
+    /// `NI_ANCHOR_COMPARE=0` (measuring only): every frame put in, unchanged or not.
+    static let compares = ProcessInfo.processInfo.environment["NI_ANCHOR_COMPARE"] != "0"
+
+    /// Unchanged frames only for this long: quiet.
+    static let quietAfter: CFTimeInterval = 0.5
+
     private let layer: CALayer
-    /// Both only touched on `queue`.
+    /// Called on `queue`: only unchanged frames for `quietAfter` (true), the first change after them (false).
+    private let onQuiet: @Sendable (Bool) -> Void
+    /// All only touched on `queue`.
     private var hasFrame = false
     private var waiting: [@MainActor @Sendable () -> Void] = []
+    /// The frame in the layer, kept so the stream does not reuse its surface while it is shown.
+    private var shown: CVPixelBuffer?
+    /// Where the last frame differed from the one before: looked at first.
+    private var hint = 0
+    private var unchangedSince: CFTimeInterval?
+    private var isQuiet = false
+    /// `NI_TRACE`: the first change after a quiet spell, until the frames come at full rate again.
+    private var wake: (start: CFTimeInterval, last: CFTimeInterval, frames: Int)?
+    private var counted = (shown: 0, same: 0)
+    private var countStart: CFTimeInterval = 0
 
-    init(layer: CALayer) {
+    init(layer: CALayer, onQuiet: @escaping @Sendable (Bool) -> Void = { _ in }) {
         self.layer = layer
+        self.onQuiet = onQuiet
     }
 
     /// Runs on the main actor once a frame is in the layer (at once if one already is).
@@ -346,17 +412,108 @@ nonisolated final class MirrorOutput: NSObject, SCStreamOutput, @unchecked Senda
     func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen, buffer.isValid,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(buffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
-              let raw = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: raw) == .complete,
+              let info = attachments.first, let raw = info[.status] as? Int, SCFrameStatus(rawValue: raw) == .complete,
               let pixels = CMSampleBufferGetImageBuffer(buffer), let surface = CVPixelBufferGetIOSurface(pixels)?.takeUnretainedValue() else { return }
+        if Self.compares, let shown {
+            let dirty = (info[.dirtyRects] as? [NSDictionary] ?? []).compactMap { CGRect(dictionaryRepresentation: $0) }
+            let row = Self.difference(pixels, shown, hint: hint, rects: dirty)
+            guard let row else {
+                if Self.counts { count(same: true) }
+                unchanged()
+                return
+            }
+            hint = row
+        }
+        changed()
+        shown = pixels
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.contents = surface
         CATransaction.commit()
+        if Self.counts { count(same: false) }
         guard !hasFrame else { return }
         hasFrame = true
         let waiting = waiting
         self.waiting = []
         Task { @MainActor in waiting.forEach { $0() } }
+    }
+
+    private func unchanged() {
+        let now = CACurrentMediaTime()
+        guard let since = unchangedSince else {
+            unchangedSince = now
+            return
+        }
+        guard !isQuiet, now - since >= Self.quietAfter else { return }
+        isQuiet = true
+        onQuiet(true)
+    }
+
+    private func changed() {
+        unchangedSince = nil
+        let now = CACurrentMediaTime()
+        if isQuiet {
+            isQuiet = false
+            onQuiet(false)
+            if Self.counts {
+                wake = (now, now, 1)
+                Log.anchor.notice("mirror: changed after quiet at \(now, privacy: .public)")
+            }
+        } else if Self.counts, let wake {
+            // Full rate again: two frames less than 25 ms apart.
+            if now - wake.last < 0.025 {
+                Log.anchor.notice("mirror: full rate \(Int((now - wake.start) * 1000), privacy: .public) ms after the first change, \(wake.frames + 1, privacy: .public) frames")
+                self.wake = nil
+            } else {
+                self.wake = (wake.start, now, wake.frames + 1)
+            }
+        }
+    }
+
+    /// The first row (pixels, from the top) where the two frames differ; nil: none, the frames are
+    /// the same. Every row counts: the stream's changed rectangles leave out what an app draws in a
+    /// layer of its own (Safari's video and scrolling), so they only say where to look first —
+    /// after `hint` (where the last frame differed). A frame that changed costs a row or two of
+    /// comparing; an unchanged one the whole frame, once (left out, it ends the loop).
+    static func difference(_ new: CVPixelBuffer, _ old: CVPixelBuffer, hint: Int = 0, rects: [CGRect] = []) -> Int? {
+        let width = CVPixelBufferGetWidth(new), height = CVPixelBufferGetHeight(new)
+        guard width == CVPixelBufferGetWidth(old), height == CVPixelBufferGetHeight(old), height > 0,
+              CVPixelBufferGetPixelFormatType(new) == kCVPixelFormatType_32BGRA,
+              CVPixelBufferGetPixelFormatType(old) == kCVPixelFormatType_32BGRA else { return 0 }
+        CVPixelBufferLockBaseAddress(new, .readOnly)
+        CVPixelBufferLockBaseAddress(old, .readOnly)
+        defer {
+            CVPixelBufferUnlockBaseAddress(new, .readOnly)
+            CVPixelBufferUnlockBaseAddress(old, .readOnly)
+        }
+        guard let a = CVPixelBufferGetBaseAddress(new), let b = CVPixelBufferGetBaseAddress(old) else { return 0 }
+        let rowA = CVPixelBufferGetBytesPerRow(new), rowB = CVPixelBufferGetBytesPerRow(old), length = width * 4
+        func differs(_ y: Int) -> Bool { memcmp(a + y * rowA, b + y * rowB, length) != 0 }
+        if hint >= 0, hint < height, differs(hint) { return hint }
+        let bounds = CGRect(x: 0, y: 0, width: width, height: height)
+        for rect in rects {
+            let area = rect.integral.intersection(bounds)
+            guard !area.isNull, area.height > 0 else { continue }
+            if let y = (Int(area.minY)..<Int(area.maxY)).first(where: differs) { return y }
+        }
+        return (0..<height).first(where: differs)
+    }
+
+    private func count(same: Bool) {
+        let now = CACurrentMediaTime()
+        if same { counted.same += 1 } else { counted.shown += 1 }
+        if countStart == 0 || now - countStart > 4 {
+            // After a pause (nothing came): a new count, not an average with the pause in it.
+            countStart = now
+            counted = same ? (0, 1) : (1, 0)
+            return
+        }
+        let elapsed = now - countStart
+        guard elapsed >= 2 else { return }
+        let shown = Int((Double(counted.shown) / elapsed).rounded()), left = Int((Double(counted.same) / elapsed).rounded())
+        Log.anchor.notice("mirror: \(shown, privacy: .public) frames/s shown, \(left, privacy: .public) unchanged left out")
+        countStart = now
+        counted = (0, 0)
     }
 }
 
@@ -380,7 +537,9 @@ final class StagePanel: NSPanel {
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
         acceptsMouseMovedEvents = true
-        collectionBehavior = [.transient, .ignoresCycle]
+        // On every space and over full-screen apps, like the island (the level alone does not put
+        // it there); stationary keeps Mission Control from moving it.
+        collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         contentView = stage
         setAccessibilityLabel(String(localized: "Anchored window, live copy"))
     }
@@ -556,6 +715,9 @@ final class StageView: NSView {
         guard onPicture(event), let target else { return }
         isForwarding = true
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier != target.pid else { return forward(event) }
+        // The real window on another space (a full-screen app in front): bringing its app forward
+        // would switch to that space. The click goes to it where it is, and the user stays here.
+        guard Self.isOnActiveSpace(target.windowID) else { return forward(event) }
         // Its app in front first: an inactive window takes a click only as a way to come forward,
         // and the keyboard then types into it. The press and what follows wait (a few frames).
         queued = []
@@ -568,6 +730,12 @@ final class StageView: NSView {
             }
             self?.flush()
         }
+    }
+
+    /// The window is on the space in front (one look at the window list, per press).
+    private static func isOnActiveSpace(_ window: CGWindowID) -> Bool {
+        let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow], window) as? [[String: Any]])?.first
+        return info?[kCGWindowIsOnscreen as String] as? Bool ?? false
     }
 
     private func release(_ event: NSEvent) {

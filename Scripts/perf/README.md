@@ -35,7 +35,10 @@ that source), `NI_SETTINGS_UNUSED=<s>` (how long into "nobody at the Mac" Settin
 `NI_NO_PREPARE=1` (Settings is not built ahead at all: its background steps after a launch and after
 an opening otherwise land in whatever is measured next), `NI_THRIFT_UNGUARDED=1` (the main thread
 lowered whatever the Mac is doing, no watch: what `hang.py` compares against), `NI_LAYER_MOTION=0`
-(the panel's page switch and the content's swap animated by SwiftUI, as before `LeafLayerMotion`).
+(the panel's page switch and the content's swap animated by SwiftUI, as before `LeafLayerMotion`), `NI_ANCHOR_FPS=<n>` (Window Anchor's live copy capped at n frames a second;
+`NI_ANCHOR_COMPARE=0`: every frame put in, unchanged or not; `NI_ANCHOR_QUIET_FPS=<n>`: its rate
+over a full-screen app while nothing changes, 0 for none; with `NI_TRACE=1` it logs the frames it
+shows and leaves out).
 Routes: `demo/power?source=battery|charger|real`, `demo/away?on=1|0`, `demo/memorypressure`.
 
 Findings (September 2026, macOS 27, MacBook Air M5):

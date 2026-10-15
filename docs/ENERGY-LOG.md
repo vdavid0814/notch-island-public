@@ -4,6 +4,50 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-15 (night): Window Anchor's live copy at 60 frames a second, over full-screen apps
+
+Asked for: the copy of the anchored window at least 60 frames a second (it was 30 with its app in
+front, 15 behind), and on full-screen spaces too. Release builds, MacBook Air (60 Hz screen), on the
+charger, a test window (`pattern`: a bar moving every display frame, or still) anchored and in
+front, 20 s each, A B B A; the app's coalition (billed included) and WindowServer's.
+
+| | before | after |
+|---|---|---|
+| Frames of a 60 fps window in the copy | 30 | **59–60** |
+| Still window: app + WindowServer | 32.8–38.6 mW (app CPU 7–9 ms/s) | **2.0 mW** (0.5 ms/s) |
+| Window moving at 60 fps: app + WindowServer | 64.0–66.0 mW | 91.1–93.3 mW (twice the frames) |
+
+- The still window cost so much before because the copy fed itself: it lies over the real window,
+  so each frame it showed counted as a change of the window and came back as the next frame, at the
+  stream's full rate. A frame equal to the shown one is now left out (`MirrorOutput.difference`),
+  which ends the loop; a still TextEdit window shows ~4 frames a second (its cursor).
+- The whole frame is compared: the stream's changed rectangles are only where to look first. A first
+  version that compared only inside them left out Safari's frames (the user saw it stutter).
+- Over a full-screen app the real window is on another space, and the stream sends it 60 times a
+  second whether it changed or not: Safari anchored, a full-screen app in front, 18.9 mW app + 69.8
+  mW WindowServer (8.8 + 80.1 without the comparison). Before, the copy was not there at all.
+- So over a full-screen app, once only unchanged frames have come for 0.5 s, the stream is asked
+  for 10 a second, and for the full rate again at the first change (`AnchorMirror.quietRate`).
+  The stream then sends ~3 unchanged frames a second and a changed one at once: the burst
+  pattern's first change was on screen 15–17 ms after it was drawn (20–21 ms at the full rate), the
+  next frame at the full rate again (~20 ms). Same build, `NI_ANCHOR_QUIET_FPS=0` against the
+  default, A B B A, a full-screen Claude in front, 20 s each:
+
+  | | always the full rate | quiet at 10 a second |
+  |---|---|---|
+  | Still window | 80.7 mW (app CPU 35.8 ms/s) | **36.7 mW** (8.9 ms/s) |
+  | 3 s still, 2 s moving | 95.3 mW (39.7 ms/s) | **86.0 mW** (26.2 ms/s) |
+
+- Safari draws no video into a window that is not on the space in front: over a full-screen app the
+  copy shows a YouTube video black (the page itself stays); Picture in Picture is Safari's own way.
+- Something else changing under the window (a video playing in a window behind it) makes the stream
+  send the unchanged window at full rate too: measure with nothing else moving there.
+- Asked for exactly the screen's rate, the stream dropped 2–3 of 60 frames (one arriving a hair
+  early); it is asked for twice the rate and shows them all.
+- `NI_ANCHOR_FPS=<n>` caps the stream, `NI_ANCHOR_COMPARE=0` puts every frame in,
+  `NI_ANCHOR_QUIET_FPS=<n>` sets the quiet rate (0: none); `NI_TRACE=1` logs frames shown and left out
+  and how soon a change after a quiet spell was shown.
+
 ## 2026-10-15 (evening): nothing of Siri kept while macOS's Spotlight is the one ⌘Space opens
 
 Asked for: with "Replace macOS Spotlight" off, Siri's app list, the gallery's icons and the read

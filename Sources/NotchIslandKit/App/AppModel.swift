@@ -912,7 +912,8 @@ import Observation
             anchorEnabled: preferences.anchorEnabled,
             anchorByDrag: preferences.anchorByDrag,
             anchorMirror: preferences.anchorMirror,
-            anchorPaused: metrics == nil || !fullscreen.fullscreenApps.isEmpty
+            anchorPaused: metrics == nil,
+            anchorAway: !fullscreen.fullscreenApps.isEmpty
         )
     }
 
@@ -1009,7 +1010,9 @@ import Observation
         case .setAnchorDrag(let enabled): anchor.setDragEnabled(enabled)
         case .setAnchorPaused(let paused):
             anchor.setPaused(paused)
-            anchorMirror.setPaused(paused)
+            // Paused with the copy still up: a full-screen app in front.
+            anchorMirror.setAway(paused)
+        case .setAnchorMirrorPaused(let paused): anchorMirror.setPaused(paused)
         case .setAnchorMirror(let enabled): anchorMirror.setEnabled(enabled)
         }
     }

@@ -35,6 +35,9 @@ nonisolated struct FeatureState: Sendable, Equatable {
     var anchorDrag = false
     /// The anchored window is left alone: asleep or locked, a full-screen space, no notch screen.
     var anchorPaused = false
+    /// Its live copy is put away: asleep or locked, no notch screen. Not for a full-screen space:
+    /// the copy stays over the app there.
+    var anchorMirrorPaused = false
     /// The anchored window is copied live while covered (the preference; Screen Recording is
     /// checked where the stream starts).
     var anchorMirror = false
@@ -63,7 +66,8 @@ nonisolated struct FeatureState: Sendable, Equatable {
         anchorEnabled: Bool = false,
         anchorByDrag: Bool = false,
         anchorMirror: Bool = false,
-        anchorPaused: Bool = false
+        anchorPaused: Bool = false,
+        anchorAway: Bool = false
     ) {
         nowPlaying = showNowPlaying
         webMedia = showNowPlaying && showWebMedia
@@ -90,7 +94,8 @@ nonisolated struct FeatureState: Sendable, Equatable {
         anchor = anchorEnabled && accessibilityTrusted
         anchorDrag = anchor && anchorByDrag
         self.anchorMirror = anchor && anchorMirror
-        self.anchorPaused = anchor && (anchorPaused || suspended)
+        self.anchorPaused = anchor && (anchorPaused || anchorAway || suspended)
+        anchorMirrorPaused = anchor && (anchorPaused || suspended)
     }
 
     /// The side effects that move the features from `applied` (nil = never) to `new`, in the
@@ -153,6 +158,7 @@ nonisolated struct FeatureState: Sendable, Equatable {
         if new.anchor && !old.anchor { actions.append(.setAnchor(true)) }
         if new.anchorPaused != old.anchorPaused { actions.append(.setAnchorPaused(new.anchorPaused)) }
         if new.anchorDrag != old.anchorDrag { actions.append(.setAnchorDrag(new.anchorDrag)) }
+        if new.anchorMirrorPaused != old.anchorMirrorPaused { actions.append(.setAnchorMirrorPaused(new.anchorMirrorPaused)) }
         if new.anchorMirror != old.anchorMirror { actions.append(.setAnchorMirror(new.anchorMirror)) }
         if !new.anchor && old.anchor { actions.append(.setAnchor(false)) }
         return actions
@@ -175,5 +181,6 @@ nonisolated enum FeatureAction: Sendable, Equatable {
     case setAnchor(Bool)
     case setAnchorDrag(Bool)
     case setAnchorPaused(Bool)
+    case setAnchorMirrorPaused(Bool)
     case setAnchorMirror(Bool)
 }

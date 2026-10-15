@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreVideo
 import Foundation
 import Testing
 @testable import NotchIslandKit
@@ -322,9 +323,10 @@ import Testing
 
 @Suite struct AnchorFeatureStateTests {
     private func state(enabled: Bool = true, trusted: Bool = true, drag: Bool = true, mirror: Bool = false, paused: Bool = false,
-                       suspended: Bool = false) -> FeatureState {
+                       away: Bool = false, suspended: Bool = false) -> FeatureState {
         FeatureState(showNowPlaying: false, showLevelHUD: false, replaceSystemHUD: false, accessibilityTrusted: trusted, shelfEnabled: false,
-                     suspended: suspended, anchorEnabled: enabled, anchorByDrag: drag, anchorMirror: mirror, anchorPaused: paused)
+                     suspended: suspended, anchorEnabled: enabled, anchorByDrag: drag, anchorMirror: mirror, anchorPaused: paused,
+                     anchorAway: away)
     }
 
     @Test func runsOnlyWithThePreferenceAndAccessibility() {
@@ -338,6 +340,15 @@ import Testing
         #expect(FeatureState.off.anchor == false)
     }
 
+    /// A full-screen app in front: the window is left alone, its live copy stays over the app.
+    @Test func fullScreenPausesTheWindowNotItsCopy() {
+        let away = state(mirror: true, away: true)
+        #expect(away.anchorPaused && !away.anchorMirrorPaused)
+        #expect(FeatureState.actions(from: state(mirror: true), to: away) == [.setAnchorPaused(true)])
+        #expect(state(mirror: true, away: true, suspended: true).anchorMirrorPaused)
+        #expect(state(mirror: true, paused: true).anchorMirrorPaused)
+    }
+
     @Test func startsBeforeItsPartsAndStopsAfterThem() {
         let none = state(enabled: false)
         let on = FeatureState.actions(from: none, to: state(mirror: true)).filter { if case .setAnchor = $0 { true } else if case .setAnchorDrag = $0 { true } else if case .setAnchorMirror = $0 { true } else { false } }
@@ -345,7 +356,7 @@ import Testing
         let off = FeatureState.actions(from: state(mirror: true), to: none)
         #expect(off.suffix(3) == [.setAnchorDrag(false), .setAnchorMirror(false), .setAnchor(false)])
         #expect(FeatureState.actions(from: state(), to: state()).isEmpty)
-        #expect(FeatureState.actions(from: state(), to: state(paused: true)) == [.setAnchorPaused(true)])
+        #expect(FeatureState.actions(from: state(), to: state(paused: true)) == [.setAnchorPaused(true), .setAnchorMirrorPaused(true)])
         // Accessibility taken away: everything of it stops.
         #expect(FeatureState.actions(from: state(), to: state(trusted: false)).contains(.setAnchor(false)))
     }
@@ -368,5 +379,42 @@ import Testing
         inputs.isHidden = true
         #expect(IslandResolver.resolve(inputs) == .idle)
         #expect(!BannerKind.anchorTarget.isInteractive && !BannerKind.anchorTarget.showsWhileHidden)
+    }
+}
+
+/// The live copy leaves out a frame that is the same as the one shown in its changed rectangles.
+@Suite struct MirrorFrameTests {
+    private func buffer(width: Int = 40, height: Int = 30, fill: UInt8 = 0x20) -> CVPixelBuffer {
+        var buffer: CVPixelBuffer?
+        CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA, nil, &buffer)
+        let pixels = buffer!
+        CVPixelBufferLockBaseAddress(pixels, [])
+        memset(CVPixelBufferGetBaseAddress(pixels), Int32(fill), CVPixelBufferGetBytesPerRow(pixels) * height)
+        CVPixelBufferUnlockBaseAddress(pixels, [])
+        return pixels
+    }
+
+    private func set(_ pixels: CVPixelBuffer, x: Int, y: Int, to value: UInt8) {
+        CVPixelBufferLockBaseAddress(pixels, [])
+        let row = CVPixelBufferGetBaseAddress(pixels)! + y * CVPixelBufferGetBytesPerRow(pixels)
+        row.storeBytes(of: value, toByteOffset: x * 4, as: UInt8.self)
+        CVPixelBufferUnlockBaseAddress(pixels, [])
+    }
+
+    @Test func onlyAFrameTheSameEverywhereIsLeftOut() {
+        let old = buffer(), new = buffer()
+        #expect(MirrorOutput.difference(new, old) == nil)
+        #expect(MirrorOutput.difference(new, old, hint: 7, rects: [CGRect(x: 0, y: 0, width: 10, height: 10)]) == nil)
+        // A difference outside the changed rectangles counts too (Safari's video is not in them).
+        set(new, x: 30, y: 20, to: 0xFF)
+        #expect(MirrorOutput.difference(new, old, rects: [CGRect(x: 0, y: 0, width: 10, height: 10)]) == 20)
+        #expect(MirrorOutput.difference(new, old, hint: 20) == 20)
+        #expect(MirrorOutput.difference(new, old, hint: 500) == 20)
+    }
+
+    @Test func anythingUnsureIsShown() {
+        // Another size: shown. A rectangle reaching past the frame is clipped to it.
+        #expect(MirrorOutput.difference(buffer(width: 40), buffer(width: 41)) == 0)
+        #expect(MirrorOutput.difference(buffer(), buffer(), rects: [CGRect(x: 30, y: 20, width: 100, height: 100)]) == nil)
     }
 }

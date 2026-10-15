@@ -7,6 +7,14 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-10-15 19:30** — Window Anchor's live copy runs at the screen's rate (60 at least) and stays
+  on every space, over full-screen apps too; there its app is not brought forward by a click. A frame
+  the same as the shown one (the whole frame compared) is left out. Over a full-screen app, while
+  only unchanged frames come, the stream is asked for 10 a second, the full rate at the first change.
+  *Asked for. The real window cannot join a full-screen space (SIP blocks the private calls), only
+  our copy can. The copy fed itself through the window server (60 frames a second of a still
+  window): 2.0 mW at rest instead of ~33. A window on another space is sent 60 a second, changed or
+  not: 80.7 → 36.7 mW with the quiet rate, its first change still on screen in ~16 ms.*
 - **2026-10-15 18:40** — With "Replace macOS Spotlight" off, nothing of Siri is read ahead or kept:
   the app list, the gallery's icons and the lists go 10 s after Siri closes, and at once when the
   setting is turned off. *Asked for: Siri is not opened then (34 → 26 MB after a use, 23 → 18 MB
