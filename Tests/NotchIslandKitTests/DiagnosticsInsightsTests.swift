@@ -466,3 +466,24 @@ import Testing
         #expect(meter.isUse(interval))
     }
 }
+
+/// Settings built ahead is the app's own planned work, not "unusual behaviour" (October 15).
+@MainActor @Suite(.serialized) struct PlannedWorkTests {
+    @Test func aReadingWithPlannedWorkInItIsNotAtRest() {
+        PlannedWork.forget()
+        defer { PlannedWork.forget() }
+        let meter = EnergyMeter(launchedAt: Date(timeIntervalSince1970: 0), powerState: {
+            PowerState(hasBattery: false, level: 100, isCharging: false, isPluggedIn: true, isCharged: true,
+                       minutesRemaining: nil, isLowPowerMode: false)
+        })
+        let start = Date(timeIntervalSince1970: 5_000)
+        let a = EnergySample(date: start, own: .init(), helpers: .init(), onBattery: false)
+        let b = EnergySample(date: start.addingTimeInterval(120), own: .init(energyNJ: 1, cpuNS: 1, wakeups: 0),
+                             helpers: .init(), onBattery: false)
+        let interval = EnergyInterval(from: a, to: b)!
+        #expect(!meter.isUse(interval))
+        PlannedWork.mark(at: start.addingTimeInterval(60))
+        #expect(meter.isUse(interval))
+        #expect(PlannedWork.happened(in: interval))
+    }
+}

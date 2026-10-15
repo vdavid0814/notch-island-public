@@ -171,7 +171,12 @@ import SwiftUI
                     return
                 }
                 let stepStart = CACurrentMediaTime()
-                defer { Log.window.debug("settings preparation step \(Int((CACurrentMediaTime() - stepStart) * 1000), privacy: .public) ms") }
+                // Not "unusual behaviour" in the diagnostics' energy readings (`PlannedWork`).
+                PlannedWork.mark()
+                defer {
+                    PlannedWork.mark()
+                    Log.window.debug("settings preparation step \(Int((CACurrentMediaTime() - stepStart) * 1000), privacy: .public) ms")
+                }
                 if !SettingsWindow.isPrepared {
                     let layout = self.model.layout
                     let size = IslandSettingsView.surfaceSize(layout)

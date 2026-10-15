@@ -358,7 +358,8 @@ import Observation
         // A reading while the island was in use is the use, not the app misbehaving (October 14:
         // Settings opened four times in two minutes was an "unusual behaviour" report of 248 mW).
         guard !Self.wasInUse(during: interval, lastChange: lastIslandChange,
-                             openNow: model.map { !$0.island.presentation.isIdle } ?? false) else { return }
+                             openNow: model.map { !$0.island.presentation.isIdle } ?? false),
+              !PlannedWork.happened(in: interval) else { return }
         let values: [DiagnosticsMetric: Double] = [
             .recentPowerMW: interval.ownMW, .wakeupsPerSecond: interval.wakeupsPerSecond, .memoryMB: interval.footprintMB,
         ]

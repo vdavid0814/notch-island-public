@@ -163,6 +163,25 @@ nonisolated struct EnergySummary: Sendable, Equatable {
     }
 }
 
+/// Work the app does on its own and on purpose (Settings built ahead), marked as it runs: an energy
+/// reading with some in it measures that work, not the app misbehaving (October 15: a tester's
+/// "unusual behaviour" report was Settings built ahead after the Mac was unlocked, 30 mW).
+enum PlannedWork {
+    private(set) static var marks: [Date] = []
+    static let capacity = 2048
+
+    static func mark(at date: Date = Date()) {
+        marks.append(date)
+        if marks.count > capacity { marks.removeFirst(marks.count - capacity) }
+    }
+
+    static func happened(in interval: EnergyInterval) -> Bool {
+        marks.contains { $0 >= interval.start && $0 <= interval.end }
+    }
+
+    static func forget() { marks.removeAll() }
+}
+
 /// Keeps a sample every `interval` while diagnostics are on: a counter read, a few microseconds of
 /// work, far apart. The last `capacity` samples (12 hours) are kept in memory.
 final class EnergyMeter {
@@ -211,9 +230,10 @@ final class EnergyMeter {
         if uses.count > Self.useCapacity { uses.removeFirst(uses.count - Self.useCapacity) }
     }
 
-    /// The island was used during the interval.
+    /// The island was used during the interval, or the app did work of its own on purpose in it
+    /// (`PlannedWork`).
     func isUse(_ interval: EnergyInterval) -> Bool {
-        uses.contains { $0 >= interval.start && $0 <= interval.end }
+        uses.contains { $0 >= interval.start && $0 <= interval.end } || PlannedWork.happened(in: interval)
     }
 
     /// The interval measured a report being collected (or one is being collected now).
