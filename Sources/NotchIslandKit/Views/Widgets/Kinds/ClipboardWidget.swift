@@ -47,7 +47,9 @@ struct ClipboardWidget: View {
     }
 
     var body: some View {
-        let items = isPreview ? [] : model.clipboard.items
+        // Looked at again as it shows (`itemsForList`): nobody at the Mac, the pasteboard is looked
+        // at only every thirty seconds.
+        let items = isPreview ? [] : model.clipboard.itemsForList()
         let rows = Array(1...Self.count(widget))
         // In a picture and in the editor every row is there (to be set), a copy's or a sample.
         let shown = isPreview || isEditing ? rows.count : min(rows.count, items.count)

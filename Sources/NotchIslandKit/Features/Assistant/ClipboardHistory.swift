@@ -73,7 +73,7 @@ nonisolated struct ClipboardItem: Hashable, Identifiable, Sendable, Codable {
         }
     }
 
-    /// The items for the clipboard list: the pasteboard looked at again first (at most every two
+    /// The items for the clipboard list (Siri's, the Clipboard widget): the pasteboard looked at again first (at most every two
     /// seconds), as nobody at the Mac it is looked at only every thirty (`PasteboardWatch`).
     func itemsForList() -> [ClipboardItem] {
         let now = CACurrentMediaTime()
