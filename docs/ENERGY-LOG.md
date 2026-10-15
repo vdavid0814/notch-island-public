@@ -27,6 +27,12 @@ Energy = the coalition's (own + GPU + billed), two builds in turn ABBA (`abbuild
   (~470 elements: the sidebar, the toolbar) — 919 Accessibility calls and 217 ms each time, one
   every 300 ms while an answer came, Siri AI answering each call. Now only its conversation view
   (`innerChatSessionView`, 17 elements): 35 calls, 1.4 ms (measured on Siri AI's live window).
+- A busy Mac (`hang.py`, 10 cores at utility, `memory_pressure` at warn): longest main-thread turns
+  by phase the same as 0.8.6 — Settings 347–364 ms (0.8.6: 356–368), the panel ~110 ms, none over
+  a second (one 468 ms launch turn in the first run, right after a build; 106 ms when run again).
+- Tried and dropped: a gallery card drawing its kept thumbnail from the first frame (no icon
+  first): less CPU (300 against 326 ms) but more energy (48.2 against 43.5 mJ a shelf opening,
+  6 rounds) — the thumbnail drawn through the opening's frames instead of the icon.
 - Tried and dropped: skipping a file search when a shorter query of the same scope had found
   nothing. Typing a sentence at 350 ms a letter cost the same with and without it (464 / 458 mJ;
   a nonsense sentence 210 / 215 mJ): searches that find nothing are cheap, and the costly first
