@@ -30,6 +30,10 @@ Energy = the coalition's (own + GPU + billed), two builds in turn ABBA (`abbuild
 - A busy Mac (`hang.py`, 10 cores at utility, `memory_pressure` at warn): longest main-thread turns
   by phase the same as 0.8.6 — Settings 347–364 ms (0.8.6: 356–368), the panel ~110 ms, none over
   a second (one 468 ms launch turn in the first run, right after a build; 106 ms when run again).
+- A diagnostics report now (telemetry build, measured around `diagnostics/periodic`): the hourly
+  standard one ~18 mJ (58 ms CPU); a detailed one, every section, ~250 mJ (1.3 s CPU, efficiency
+  cores) — not the ~21 J of October 9, before the slow sections were kept between reports. At rest
+  the island itself took 2.6 mJ in 20 minutes once the launch had settled.
 - Tried and dropped: a gallery card drawing its kept thumbnail from the first frame (no icon
   first): less CPU (300 against 326 ms) but more energy (48.2 against 43.5 mJ a shelf opening,
   6 rounds) — the thumbnail drawn through the opening's frames instead of the icon.
