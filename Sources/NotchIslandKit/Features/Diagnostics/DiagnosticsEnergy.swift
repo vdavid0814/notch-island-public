@@ -201,6 +201,21 @@ final class EnergyMeter {
         if collections.count > 64 { collections.removeFirst(collections.count - 64) }
     }
 
+    /// When the island changed what it shows (opened, closed, Siri, Settings, a banner), the last
+    /// `useCapacity`: an interval with one in it measures the user's use, not the app at rest.
+    private(set) var uses: [Date] = []
+    static let useCapacity = 2048
+
+    func markUse(at date: Date = Date()) {
+        uses.append(date)
+        if uses.count > Self.useCapacity { uses.removeFirst(uses.count - Self.useCapacity) }
+    }
+
+    /// The island was used during the interval.
+    func isUse(_ interval: EnergyInterval) -> Bool {
+        uses.contains { $0 >= interval.start && $0 <= interval.end }
+    }
+
     /// The interval measured a report being collected (or one is being collected now).
     func isCollection(_ interval: EnergyInterval) -> Bool {
         if let collectingSince, interval.end >= collectingSince { return true }

@@ -7,6 +7,11 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-10-15 04:20** — The report's energy, CPU and wakeups set against the reference (and sent
+  as `metric_powerMW`, `metric_recentPowerMW`, `metric_cpuPercent`, `metric_wakeupsPerSecond`) are
+  the stretches at rest: no change of the island in them, no report collected. The report still
+  shows since launch and the last hour as they were. *Measured since launch, every report of a Mac
+  in use read as tens of times the idle reference (Sentry NOTCHISLAND-10/Z/V/12 on both Macs).*
 - **2026-10-15 03:30** — Siri AI is read only inside its conversation view (`innerChatSessionView`,
   found once, kept while it answers to its identifier), and the clipboard is looked at every thirty
   seconds once nobody has typed or clicked for ten minutes (the list looks again as it shows).

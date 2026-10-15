@@ -238,7 +238,7 @@ import Testing
         let unusual = Set(result.filter(\.isUnusual).map(\.metric))
         // 30 mW > 2.5 × 10 and ≥ 25; wakeups 40 < 10 × 5 (rule from the file); 25% missing vs 0.
         #expect(unusual == [.powerMW, .spotlightMissingPercent])
-        #expect(result.first { $0.metric == .powerMW }?.line == "Energy use (since launch): 30.0 mW — 3.0× the reference (10.0 mW)")
+        #expect(result.first { $0.metric == .powerMW }?.line == "Energy use at rest (since launch): 30.0 mW — 3.0× the reference (10.0 mW)")
     }
 
     @Test func belowTheMinimumIsNeverUnusual() {

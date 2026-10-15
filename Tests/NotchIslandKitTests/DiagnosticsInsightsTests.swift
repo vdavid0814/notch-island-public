@@ -448,3 +448,21 @@ import Testing
         #expect(!DiagnosticsCenter.wasInUse(during: reading, lastChange: nil, openNow: false))
     }
 }
+
+/// The energy set against the reference is the island's at rest (October 14: every report of a Mac
+/// in use read as tens of times the idle reference).
+@MainActor struct EnergyAtRestTests {
+    @Test func anIntervalWithAChangeOfTheIslandIsUse() {
+        let meter = EnergyMeter(launchedAt: Date(timeIntervalSince1970: 0), powerState: { PowerState(hasBattery: false, level: 100, isCharging: false, isPluggedIn: true, isCharged: true, minutesRemaining: nil, isLowPowerMode: false) })
+        let start = Date(timeIntervalSince1970: 1_000)
+        let a = EnergySample(date: start, own: .init(energyNJ: 0, cpuNS: 0, wakeups: 0), helpers: .init(), onBattery: false)
+        let b = EnergySample(date: start.addingTimeInterval(600), own: .init(energyNJ: 600_000_000, cpuNS: 0, wakeups: 0),
+                             helpers: .init(), onBattery: false)
+        let interval = EnergyInterval(from: a, to: b)!
+        #expect(!meter.isUse(interval))
+        meter.markUse(at: start.addingTimeInterval(-1))
+        #expect(!meter.isUse(interval))
+        meter.markUse(at: start.addingTimeInterval(300))
+        #expect(meter.isUse(interval))
+    }
+}

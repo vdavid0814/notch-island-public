@@ -296,6 +296,7 @@ import Observation
             if kind != DiagnosticsHistory.kind(of: from) { self?.history?.count(kind) }
             DiagnosticsFlow.record("island \(from) → \(to)")
             self?.lastIslandChange = Date()
+            self?.energy.markUse()
         }
     }
 
@@ -894,13 +895,19 @@ import Observation
         let now = energy.isRunning ? energy.take() : EnergySample.now(onBattery: false, batteryLevel: nil)
         if let total = EnergyInterval(from: energy.launch, to: now), let summary = EnergySummary([total]) {
             section.add("Since launch", summary.line)
-            // A few seconds after launch is the launch itself (and Settings, opened to send the report):
-            // 21 s at 290 mW was flagged 6× the reference (seen, v0.4.5). Judged only once it has run.
-            if summary.seconds >= Self.energyJudgedAfter {
-                metrics[.powerMW] = total.ownMW
-                metrics[.helpersPowerMW] = total.helpersMW
-                metrics[.cpuPercent] = total.cpuPercent
-                metrics[.wakeupsPerSecond] = total.wakeupsPerSecond
+        }
+        // Set against the reference (an idle night): the stretches nobody used the island in and no
+        // report was collected in. Since launch as a whole, every report of a Mac in use read as
+        // tens of times the reference (October 14: 34 mW, Siri and Settings opened for minutes).
+        // A few minutes are not judged (the launch itself; Settings opened to send the report).
+        let atRest = energy.intervals.filter { !energy.isUse($0) && !energy.isCollection($0) }
+        if let rest = EnergySummary(atRest) {
+            section.add("At rest", rest.line)
+            if rest.seconds >= Self.energyJudgedAfter {
+                metrics[.powerMW] = rest.ownMW
+                metrics[.helpersPowerMW] = rest.helpersMW
+                metrics[.cpuPercent] = rest.cpuPercent
+                metrics[.wakeupsPerSecond] = rest.wakeupsPerSecond
             }
         }
         metrics[.memoryMB] = Double(now.own.footprint) / 1_048_576
@@ -918,7 +925,10 @@ import Observation
         let intervals = energy.intervals
         if let hour = EnergySummary(intervals.filter { $0.end > now.date.addingTimeInterval(-3600) }) {
             section.add("Last hour", hour.line)
-            if hour.seconds >= Self.energyJudgedAfter { metrics[.recentPowerMW] = hour.ownMW }
+        }
+        if let hour = EnergySummary(atRest.filter { $0.end > now.date.addingTimeInterval(-3600) }),
+           hour.seconds >= Self.energyJudgedAfter {
+            metrics[.recentPowerMW] = hour.ownMW
         }
         if let battery = EnergySummary(intervals.filter(\.onBattery)) {
             section.add("On battery", battery.line)

@@ -12,13 +12,13 @@ nonisolated enum DiagnosticsMetric: String, Sendable, Codable, CaseIterable {
 
     var title: String {
         switch self {
-        case .powerMW: "Energy use (since launch)"
+        case .powerMW: "Energy use at rest (since launch)"
         case .powerOnBatteryMW: "Energy use on battery"
-        case .recentPowerMW: "Energy use (last hour)"
+        case .recentPowerMW: "Energy use at rest (last hour)"
         case .worstPowerMW: "Worst 10 minutes"
         case .helpersPowerMW: "Helper processes' energy"
-        case .cpuPercent: "CPU"
-        case .wakeupsPerSecond: "Wakeups"
+        case .cpuPercent: "CPU at rest"
+        case .wakeupsPerSecond: "Wakeups at rest"
         case .memoryMB: "Memory"
         case .peakMemoryMB: "Peak memory"
         case .memoryGrowthMBPerHour: "Memory growth at rest"
@@ -132,7 +132,7 @@ nonisolated struct DiagnosticsComparison: Sendable, Equatable {
     var reference: Double?
     var isUnusual: Bool
 
-    /// "Energy use (since launch): 41.0 mW — 3.4× the reference (12.0 mW)".
+    /// "Energy use at rest (since launch): 41.0 mW — 3.4× the reference (12.0 mW)".
     var line: String {
         let head = "\(metric.title): \(metric.format(value))"
         guard let reference else { return head }
