@@ -125,11 +125,11 @@ import SwiftUI
         case .siriSample:
             model.controller.openAssistant()
             model.assistant.showSample(SiriReply.sample)
-        case .siriType(let text):
+        case .siriType(let text, let milliseconds):
             model.controller.openAssistant()
             Task { @MainActor in
                 for index in text.indices {
-                    try? await Task.sleep(for: .milliseconds(120))
+                    try? await Task.sleep(for: .milliseconds(milliseconds))
                     model.assistant.query = String(text[...index])
                 }
             }
