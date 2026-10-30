@@ -123,6 +123,7 @@ final class SettingsSurfaceView: NSView {
     private var customizeHost: NSHostingView<AnyView>?
     private var customizePresentation: CustomizePresentation?
     private var customizeRemoval: Timer?
+    private let closeBand: NSHostingView<AnyView>
 
     /// `showsPage` false: built ahead, the surface starts with its sidebar alone and its pages
     /// follow one a step (`SettingsWindow.prepare`).
@@ -131,6 +132,7 @@ final class SettingsSurfaceView: NSView {
         self.placement = placement
         deck = SettingsPageDeckView(model: model)
         sidebarHost = DeferringHostingView(rootView: AnyView(EmptyView()))
+        closeBand = NSHostingView(rootView: AnyView(SettingsCloseBand().environment(model).environment(\.colorScheme, .dark)))
         super.init(frame: .zero)
         wantsLayer = true
         sidebarHost.sizingOptions = []
@@ -144,6 +146,9 @@ final class SettingsSurfaceView: NSView {
         pagesHost.addSubview(edgeScroller)
         edgeScroller.source = { [weak deck] in deck?.edgeScroll }
         addSubview(pagesHost)
+        closeBand.sizingOptions = []
+        closeBand.safeAreaRegions = []
+        addSubview(closeBand)
         if showsPage { deck.show(model.settingsPane) }
         followScroll()
         observePane()
@@ -210,7 +215,10 @@ final class SettingsSurfaceView: NSView {
     override func layout() {
         super.layout()
         pagesHost.frame = bounds
-        sidebarHost.frame = pagesHost.bounds
+        // The room reaches the screen's top; all else starts under the band at the notch's height.
+        let band = model.layout.notch.height
+        sidebarHost.frame = CGRect(x: 0, y: band, width: bounds.width, height: max(0, bounds.height - band))
+        closeBand.frame = CGRect(x: 0, y: 0, width: bounds.width, height: band)
         // Beside the sidebar, as `SettingsPages` leaves room for it.
         let leading = placement.leading + SettingsPlacement.sidebarWidth
         // The pages' room is a box as the sidebar is one: as far from it, from the island's own
@@ -230,7 +238,7 @@ final class SettingsSurfaceView: NSView {
         edgeScroller.gap = placement.gap
         edgeScroller.islandRadius = model.layout.bottomRadius(for: .settings)
         edgeScroller.refresh()
-        customizeHost?.frame = bounds
+        customizeHost?.frame = sidebarHost.frame
     }
 
     /// The scroller in the gap follows the page shown — now, and once more a moment later: a page
@@ -278,7 +286,7 @@ final class SettingsSurfaceView: NSView {
         let host = NSHostingView(rootView: customizeRoot(id, presentation))
         host.sizingOptions = []
         host.safeAreaRegions = []
-        host.frame = bounds
+        host.frame = sidebarHost.frame
         addSubview(host)
         customizeHost = host
         customizePresentation = presentation

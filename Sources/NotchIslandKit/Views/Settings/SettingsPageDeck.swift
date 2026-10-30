@@ -101,10 +101,12 @@ final class SettingsPageDeckView: NSView {
     /// cheap. With Reduce Motion, or the first page of all, it is simply there.
     func show(_ pane: IslandSettingsPane) {
         roundFoot()
+        releases.removeValue(forKey: pane)?.invalidate()
         guard pane != shown || pages[pane]?.visit.isShown == false else { return }
         let old = shown.flatMap { $0 != pane ? pages[$0] : nil }
         let leaving = shown
         old?.visit.isShown = false
+        if old != nil, let leaving { releaseLater(leaving) }
         let page = pages[pane] ?? make(pane)
         page.host.isHidden = false
         // Its live pictures, out of the window since Settings last closed, are put back now
@@ -187,11 +189,13 @@ final class SettingsPageDeckView: NSView {
     func closed() {
         guard let shown, let page = pages[shown] else { return }
         page.visit.isShown = false
+        releaseLater(shown)
     }
 
     /// Settings opens again: the page it shows starts afresh.
     func reopen() {
         guard let shown, let page = pages[shown], !page.visit.isShown else { return }
+        releases.removeValue(forKey: shown)?.invalidate()
         page.host.scrollToTop()
         page.visit.count += 1
         page.visit.isShown = true
@@ -205,14 +209,51 @@ final class SettingsPageDeckView: NSView {
 
     func isBuilt(_ pane: IslandSettingsPane) -> Bool { pages[pane] != nil }
 
-    /// The pages `keeping` does not keep, let go (Settings closed and out of sight); the one shown
-    /// among them is built again when Settings opens on it.
-    func releasePages(keeping: (IslandSettingsPane) -> Bool) {
-        for pane in Array(pages.keys) where !keeping(pane) {
-            guard let page = pages.removeValue(forKey: pane) else { continue }
-            page.visit.isShown = false
-            page.host.removeFromSuperview()
-            if shown == pane { shown = nil }
+    /// How long a page that is not kept (`IslandSettingsPane.isKept`) stays after the user has left
+    /// it, for another page or by closing Settings: back within it, it is there at once (asked
+    /// for, October 30). macOS short of memory gives all of Settings up anyway (`discard`).
+    static let unkeptPagesLinger: TimeInterval = 60
+    /// The pages waiting to be let go.
+    private var releases: [IslandSettingsPane: Timer] = [:]
+
+    /// `pane` let go `unkeptPagesLinger` from now, unless it is shown again meanwhile; in a turn on
+    /// the efficiency cores, as Settings' ordering out is.
+    private func releaseLater(_ pane: IslandSettingsPane) {
+        guard !pane.isKept else { return }
+        releases[pane]?.invalidate()
+        let timer = Timer(timeInterval: Self.unkeptPagesLinger, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.releases[pane] = nil
+                MainThrift.lowPowerTurn(unattended: true) { [weak self] in
+                    guard let self, self.releases[pane] == nil else { return }
+                    self.release(pane)
+                }
+            }
+        }
+        timer.tolerance = 2
+        RunLoop.main.add(timer, forMode: .common)
+        releases[pane] = timer
+    }
+
+    /// `pane` let go, unless it is the one on the screen; built again when the user goes to it.
+    private func release(_ pane: IslandSettingsPane) {
+        guard let page = pages[pane], !page.visit.isShown else { return }
+        let before = AliasTrim.footprint()
+        pages[pane] = nil
+        page.host.removeFromSuperview()
+        if shown == pane { shown = nil }
+        // The last page but the kept ones: what they share, kept for them, goes too. The desktop
+        // pictures alone are two blocks of ~9 MB each (seen with `heap`).
+        if pages.keys.allSatisfy(\.isKept) {
+            WallpaperLibrary.shared.release()
+            IslandPhoto.forget()
+        }
+        AliasTrim.soon()
+        // Told a moment later, the page's views and what was given back then known: a page
+        // something still holds would show here as a view not gone.
+        Task { @MainActor [weak host = page.host] in
+            try? await Task.sleep(for: .seconds(6), tolerance: .seconds(1))
+            Log.window.notice("settings page \(pane.rawValue, privacy: .public) let go: \(before >> 20, privacy: .public) → \(AliasTrim.footprint() >> 20, privacy: .public) MB, view gone \(host == nil, privacy: .public)")
         }
     }
 
@@ -257,11 +298,23 @@ private struct SettingsPageRoot: View {
     }
 }
 
+extension NSScrollView {
+    /// Where the clip view's origin can be, the insets taken in: a page's title lies over the top
+    /// of its scroll view, so at the page's top the origin is above the document's.
+    var originRange: ClosedRange<CGFloat> {
+        let height = documentView?.frame.height ?? 0
+        let flipped = documentView?.isFlipped ?? true
+        let lowest = -(flipped ? contentInsets.top : contentInsets.bottom)
+        let highest = height - contentView.bounds.height + (flipped ? contentInsets.bottom : contentInsets.top)
+        return lowest...max(lowest, highest)
+    }
+}
+
 extension NSView {
     /// The first scroll view inside, back at its top.
     func scrollToTop() {
         guard let scroll = firstSubview(of: NSScrollView.self), let document = scroll.documentView else { return }
-        let top = document.isFlipped ? 0 : max(0, document.frame.height - scroll.contentView.bounds.height)
+        let top = document.isFlipped ? scroll.originRange.lowerBound : scroll.originRange.upperBound
         guard scroll.contentView.bounds.origin.y != top else { return }
         scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.origin.x, y: top))
         scroll.reflectScrolledClipView(scroll.contentView)

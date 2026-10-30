@@ -28,9 +28,9 @@ struct NotchStyleButtons: View {
         .fixedSize()
     }
 
-    /// Between the two, which are together as tall as the page's tile beside the title.
+    /// Between the two, which are together as tall as the title and its line.
     static let spacing: CGFloat = 4
-    static let height: CGFloat = (SettingsPageHeader.tileSide - spacing) / 2
+    static let height: CGFloat = 18
 }
 
 /// The page header's buttons: small, black, their edge a faint grey line.

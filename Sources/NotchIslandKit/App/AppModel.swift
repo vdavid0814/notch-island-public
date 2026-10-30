@@ -550,8 +550,7 @@ import Observation
         case .showSettings:
             showSettings()
         case .showSettingsPane(let pane):
-            settingsPane = pane
-            showSettings()
+            showSettings(pane: pane)
         case .editWidget(.kind(let kind)):
             editWidget(widgets.board.first(of: kind)?.id)
         case .editWidget(.instance(let id)):
@@ -635,8 +634,7 @@ import Observation
     func editWidget(_ id: WidgetID?) {
         if let page = id.flatMap(boards.page(containing:)) { studio.showPage(page) }
         editingWidget = id
-        settingsPane = .widgets
-        showSettings()
+        showSettings(pane: .widgets)
     }
 
     /// Lets go of the window held under the notch.
@@ -664,12 +662,13 @@ import Observation
         return AnchorScreen(frame: frame, band: band, notch: metrics.notchSize)
     }
 
-    /// Settings grows out of the notch; without a notch screen (nothing to grow out of) it opens as
-    /// a window.
-    func showSettings() {
+    /// Settings grows out of the notch, on `pane` (none: General); without a notch screen (nothing
+    /// to grow out of) it opens as a window.
+    func showSettings(pane: IslandSettingsPane? = nil) {
         if isRunning, metrics != nil {
-            controller.openSettings()
+            controller.openSettings(pane: pane)
         } else {
+            if let pane { settingsPane = pane }
             showSettingsWindow()
         }
     }
@@ -934,6 +933,10 @@ import Observation
         clipboard.setWatching(watchesClipboard)
         // Turned off with Siri closed: what it kept goes now (`AssistantModel.keepsLists`).
         if !preferences.commandSpaceOpensSiri, keptSiriLists, !island.presentation.isAssistant { assistant.releaseKept() }
+        // Turned on: all of it read ahead and kept again.
+        if preferences.commandSpaceOpensSiri, !keptSiriLists {
+            Task(priority: .background) { [weak self] in await self?.assistant.prewarm() }
+        }
         keptSiriLists = preferences.commandSpaceOpensSiri
         let actions = FeatureState.actions(from: appliedFeatures, to: state)
         appliedFeatures = state

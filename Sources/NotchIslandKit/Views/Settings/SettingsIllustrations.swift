@@ -199,6 +199,9 @@ struct IslandPhoto: View {
     /// Looked up once each (also the ones that are not there).
     private static var loaded: [String: NSImage?] = [:]
 
+    /// Let go with the pages that show them (`SettingsPageDeckView.release`).
+    static func forget() { loaded.removeAll() }
+
     static func image(desktop: DesktopBackdropStyle, style: IslandGlassStyle, scale: IslandScale) -> NSImage? {
         named("island-\(drawn(desktop).rawValue)-\(style.rawValue)-\(scale.rawValue)")
     }

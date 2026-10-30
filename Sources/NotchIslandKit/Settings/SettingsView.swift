@@ -31,8 +31,9 @@ nonisolated enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.appearsActive) private var appearsActive
-    /// Remembered across launches so Settings reopens where the user left it.
-    @AppStorage("ni2.settings.section") private var section: SettingsSection = .general
+    nonisolated static let sectionKey = "ni2.settings.section"
+    /// The page shown; set to General each time the window opens (`SettingsWindowController.show`).
+    @AppStorage(SettingsView.sectionKey) private var section: SettingsSection = .general
 
     var body: some View {
         NavigationSplitView {

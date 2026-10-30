@@ -222,7 +222,8 @@ struct WidgetsSettingsPage: View {
         }
     }
 
-    private static let topInset: CGFloat = 10
+    /// The gap over the page is the bottom of its title's bar (`SettingsPageHeader`).
+    private static let topInset: CGFloat = 0
     /// Under the page: in Size and Top Bar mode its controls end where the pages' room does,
     /// level with the sidebar's foot.
     private var bottomInset: CGFloat { model.studio.mode == .widgets ? 28 : 0 }
@@ -1090,6 +1091,9 @@ enum StudioStageSpring {
 final class GlidingHostingView: DeferringHostingView<AnyView> {
     /// SwiftUI moves the views around this one, not this one: their moves are watched.
     private var watched: [NSObjectProtocol] = []
+
+    isolated deinit { watched.forEach(NotificationCenter.default.removeObserver) }
+
     /// Where it lay in the page's content (`place`), last seen.
     private var lastPlace: CGFloat?
 

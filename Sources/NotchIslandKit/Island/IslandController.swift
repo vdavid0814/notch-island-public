@@ -323,11 +323,17 @@ nonisolated extension BannerKind {
 
     private var hasOpenedAssistant = false
 
-    /// Settings in the island, on `pane`. It takes the open panel's or the assistant's place.
+    /// Settings in the island, on `pane`; opened without one, on General (asked for: not the page
+    /// it was closed on). It takes the open panel's or the assistant's place.
     func openSettings(pane: IslandSettingsPane? = nil) {
         MainThrift.raise()
         for timer in [hoverDwell, closeTimer, unvisitedTimer] { timer.cancel() }
-        if let pane { model.settingsPane = pane }
+        if let pane {
+            model.settingsPane = pane
+        } else if !wantsSettings, model.settingsPane != .general {
+            // Not a step of the user's: two fingers back do not lead to the page of the last visit.
+            model.settingsHistory.withoutRecording { model.settingsPane = .general }
+        }
         wantsExpanded = false
         wantsAssistant = false
         if model.island.isPinned { model.island.isPinned = false }

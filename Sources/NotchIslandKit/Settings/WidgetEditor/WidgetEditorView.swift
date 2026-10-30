@@ -9,6 +9,8 @@ struct WidgetEditorView: View {
 
     var body: some View {
         WidgetsSettingsPage()
+            // No title's bar over it here (`SettingsPageHeader`).
+            .safeAreaPadding(.top, 10)
             .background(SettingsPalette.window)
             .environment(\.colorScheme, .dark)
     }

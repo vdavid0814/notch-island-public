@@ -9,11 +9,10 @@ nonisolated enum IslandSettingsPane: String, CaseIterable, Identifiable, Sendabl
 
     var id: String { rawValue }
 
-    /// Built ahead and kept while Settings is closed: the pages Settings is opened for. About,
-    /// Spotlight and Live Activities are set once and seldom visited: built only when the user
-    /// goes to one, and let go when Settings closes (asked for, October 15: ~58 MB of the ~200
-    /// kept at rest).
-    var isKept: Bool { self == .general || self == .widgets }
+    /// Built ahead and kept while Settings is closed: General, the page Settings opens on. Every
+    /// other page is built when the user goes to it, one by one, and let go a minute after they
+    /// have left it (`SettingsPageDeckView.unkeptPagesLinger`, asked for, October 30).
+    var isKept: Bool { self == .general }
 
     /// A pane by name, including the names of pages that were merged into others (Appearance is
     /// part of General, Permissions of About), so old links and the remembered pane still work.
@@ -117,6 +116,8 @@ struct IslandSettingsView: View {
     static let sidebarGap: CGFloat = 8
     /// How long the pages take to fade in once the island has grown.
     static let pagesFadeIn: TimeInterval = 0.16
+    /// From Settings' top to the sidebar's top edge; a page's title is level with it.
+    static let sidebarTop: CGFloat = 4
 
     @Environment(AppModel.self) private var model
     /// The pages join once the island has grown. Laid out during the growth they were re-laid out
@@ -133,22 +134,21 @@ struct IslandSettingsView: View {
         )
     }
 
-    /// The pages' room: Settings' size under the band at the notch's height.
+    /// Settings' window: the whole island, from the screen's top, so a page scrolls on under its
+    /// title up to there.
     static func surfaceSize(_ layout: IslandLayout) -> CGSize {
-        let size = layout.size(for: .settings)
-        return CGSize(width: size.width, height: max(0, size.height - layout.notch.height))
+        layout.size(for: .settings)
+    }
+
+    static func split(_ layout: IslandLayout) -> NotchSplit {
+        NotchSplit(layout: layout, presentation: .settings, outerInset: Metrics.Expanded.horizontalInset,
+                   clearance: Metrics.notchClearance)
     }
 
     var body: some View {
         let layout = model.layout
-        let split = NotchSplit(
-            layout: layout,
-            presentation: .settings,
-            outerInset: Metrics.Expanded.horizontalInset,
-            clearance: Metrics.notchClearance
-        )
-        VStack(spacing: 0) {
-            NotchSplitBand(split: split, height: layout.notch.height) {
+        ZStack(alignment: .top) {
+            NotchSplitBand(split: Self.split(layout), height: layout.notch.height) {
                 // Only the window's name: the app's mark and version head the sidebar below.
                 Text("Settings")
                     .font(.subheadline.weight(.semibold))
@@ -162,8 +162,11 @@ struct IslandSettingsView: View {
                 .islandButton(.circle)
                 .controlSize(Metrics.Control.size(fittingBand: layout.notch.height))
                 .help("Close (esc)")
+                // Settings' window, over this band, has its own once it is in (`SettingsCloseBand`).
+                .opacity(showsPages ? 0 : 1)
             }
             .background(.black)
+            .frame(maxHeight: .infinity, alignment: .top)
             // Gone from sight as soon as Settings starts to close (the same fade the removal had);
             // torn down with the rest of Settings once it has closed, on the efficiency cores
             // (`IslandController`), not in the turn the shrink starts in.
@@ -211,6 +214,28 @@ struct IslandSettingsView: View {
     }
 }
 
+/// The close button at the notch's height, in Settings' own window: the window lies over the
+/// island's band, whose button it would take the clicks of.
+struct SettingsCloseBand: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let layout = model.layout
+        NotchSplitBand(split: IslandSettingsView.split(layout), height: layout.notch.height) {
+            EmptyView()
+        } trailing: {
+            Button {
+                model.controller.closeSettings()
+            } label: {
+                Label("Close", systemImage: "xmark")
+            }
+            .islandButton(.circle)
+            .controlSize(Metrics.Control.size(fittingBand: layout.notch.height))
+            .help("Close (esc)")
+        }
+    }
+}
+
 /// Where Settings' sidebar floats (and the Customize editor's outline, in its place): all the pages
 /// take from outside their graph.
 nonisolated struct SettingsPlacement: Equatable, Sendable {
@@ -245,7 +270,7 @@ struct SettingsPages: View {
                 .settingsPanel(in: sidebarShape)
                 .padding(.leading, placement.leading)
                 .padding(.bottom, placement.gap)
-                .padding(.top, 4)
+                .padding(.top, IslandSettingsView.sidebarTop)
             // The pages themselves are kept beside it, each in a graph of its own
             // (`SettingsPageDeckView`, laid over this room by `SettingsSurfaceView`).
             Color.clear
@@ -406,30 +431,29 @@ struct SettingsDetail: View {
     var body: some View {
         // The pages' pictures as large as the page's width has room for (Widgets' are its own).
         let pictureScale = pane == .widgets ? 1 : MiniMetrics.pictureScale(pageWidth: pageWidth > 0 ? pageWidth : Self.roomWidth(model.layout))
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsPageHeader(pane: pane)
-                // Its saved notch styles open over the page under it.
-                .zIndex(1)
-            Group {
-                switch pane {
-                case .general: GeneralSettingsPage()
-                case .widgets: WidgetsSettingsPage()
-                case .activities: ActivitiesSettingsPage()
-                case .siri: SiriSettingsPage()
-                case .about: AboutSettingsPage()
-                }
+        Group {
+            switch pane {
+            case .general: GeneralSettingsPage()
+            case .widgets: WidgetsSettingsPage()
+            case .activities: ActivitiesSettingsPage()
+            case .siri: SiriSettingsPage()
+            case .about: AboutSettingsPage()
             }
-            .formStyle(.settingsPage)
-            // Switches and sliders in the theme's colour, where the system's blue was.
-            .toggleStyle(.islandSwitch)
-            // Every button the system's own, in its capsule (as the pickers are): the square-ish
-            // push button and flat tiles stood out (asked for).
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
-            // Every page as wide as the pages' room, as Widgets' is.
-            .frame(maxWidth: .infinity)
-            .environment(\.settingsPictureScale, pictureScale)
         }
+        .formStyle(.settingsPage)
+        // Switches and sliders in the theme's colour, where the system's blue was.
+        .toggleStyle(.islandSwitch)
+        // Every button the system's own, in its capsule (as the pickers are): the square-ish
+        // push button and flat tiles stood out (asked for).
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        // Every page as wide as the pages' room, as Widgets' is.
+        .frame(maxWidth: .infinity)
+        .environment(\.settingsPictureScale, pictureScale)
+        // The page scrolls on under its title and fades out there, as in the system's own apps
+        // (asked for, with System Settings' picture). Its saved notch styles open over the page.
+        .safeAreaBar(edge: .top, spacing: 0) { SettingsPageHeader(pane: pane) }
+        .scrollEdgeEffectStyle(.soft, for: .top)
         // The width the page is given, whatever is in it: measured on the page itself, a row of
         // pictures too wide for it would count as the page's width.
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
@@ -440,24 +464,48 @@ struct SettingsDetail: View {
     }
 }
 
-/// The page's tile, title and one line on what it is for.
+/// The page's title and one line on what it is for (its tile is the sidebar's alone).
 struct SettingsPageHeader: View {
     let pane: IslandSettingsPane
 
-    static let tileSide: CGFloat = 40
+    @Environment(AppModel.self) private var model
+
+    /// From the top of the title's line to the top of its capitals (measured on screen): taken off,
+    /// the letters are level with the sidebar's top edge, not the empty line over them.
+    private static let overCapitals: CGFloat = 4.5
 
     var body: some View {
-        HStack(spacing: 14) {
-            PaneTile(pane: pane, side: Self.tileSide)
+        HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(pane.title).font(.system(size: 22, weight: .bold))
                 Text(pane.subtitle).font(.system(size: 13)).foregroundStyle(SettingsPalette.secondary)
             }
+            .padding(.top, -Self.overCapitals)
             Spacer(minLength: 0)
             if pane == .widgets { NotchStyleButtons() }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 18)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 6)
+        .padding(.top, model.layout.notch.height + IslandSettingsView.sidebarTop)
+        // As far from the bar's foot as from its side.
+        .padding(.bottom, 6)
+        // A faint black along the blur's top and sides, so it melts into the black around it.
+        .background {
+            let edge = Color.black.opacity(0.55)
+            ZStack {
+                LinearGradient(colors: [edge, .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 14)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                LinearGradient(colors: [edge, .clear], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                LinearGradient(colors: [.clear, edge], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 14)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .allowsHitTesting(false)
+        }
+        // What has scrolled under the title is not clicked through it.
+        .contentShape(.rect)
     }
 }

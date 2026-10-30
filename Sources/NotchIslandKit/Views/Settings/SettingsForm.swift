@@ -25,8 +25,8 @@ nonisolated enum SettingsForm {
     static let cardFill = Color.white.opacity(0.05)
 
     /// Over and under a page of Settings in the island (`SettingsFormStyle.settingsPage`):
-    /// Widgets' own insets.
-    static let pageTopInset: CGFloat = 10
+    /// Widgets' own insets. The gap over a page is the bottom of its title's bar (`SettingsPageHeader`).
+    static let pageTopInset: CGFloat = 0
     static let pageBottomInset: CGFloat = 28
 }
 

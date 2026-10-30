@@ -111,11 +111,12 @@ final class SettingsEdgeScroller: NSView {
 
     // MARK: Where the knob is
 
-    /// The strip in the gap, as tall as the scroll view.
+    /// The strip in the gap, as tall as the scroll view under the page's title.
     private var track: CGRect {
         guard let scroll, scroll.window != nil, scroll.window === window else { return .zero }
         let frame = convert(scroll.bounds, from: scroll)
-        return CGRect(x: bounds.width - gap, y: frame.minY, width: gap, height: frame.height)
+        let top = scroll.contentInsets.top
+        return CGRect(x: bounds.width - gap, y: frame.minY + top, width: gap, height: frame.height - top)
     }
 
     private struct Way {
@@ -130,13 +131,13 @@ final class SettingsEdgeScroller: NSView {
 
     private func way() -> Way? {
         guard let scroll, let document = scroll.documentView else { return nil }
-        let visible = scroll.contentView.bounds.height
         let content = document.frame.height
-        let range = content - visible
+        let range = scroll.originRange.upperBound - scroll.originRange.lowerBound
+        let visible = content - range
         let track = track.insetBy(dx: 0, dy: Self.inset)
         guard range > 1, visible > 0, track.height > Self.shortestKnob * 1.5 else { return nil }
         let length = max(Self.shortestKnob, track.height * visible / content)
-        let offset = scroll.contentView.bounds.minY
+        let offset = scroll.contentView.bounds.minY - scroll.originRange.lowerBound
         let fraction = min(max((document.isFlipped ? offset : range - offset) / range, 0), 1)
         return Way(top: track.minY, height: track.height, length: length, range: range, fraction: fraction)
     }
@@ -229,7 +230,7 @@ final class SettingsEdgeScroller: NSView {
     private func move(to y: CGFloat) {
         guard let grip, let way = way(), let scroll, let document = scroll.documentView, way.height > way.length else { return }
         let fraction = min(max((y - grip - way.top) / (way.height - way.length), 0), 1)
-        let offset = document.isFlipped ? fraction * way.range : (1 - fraction) * way.range
+        let offset = scroll.originRange.lowerBound + (document.isFlipped ? fraction : 1 - fraction) * way.range
         guard abs(scroll.contentView.bounds.minY - offset) > 0.25 else { return }
         scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.minX, y: offset))
         scroll.reflectScrolledClipView(scroll.contentView)

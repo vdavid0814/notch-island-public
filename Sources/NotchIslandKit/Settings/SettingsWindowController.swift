@@ -25,6 +25,8 @@ import SwiftUI
     }
 
     func show() {
+        // Opened, not brought forward: on General (asked for: not the page it was closed on).
+        if window?.isVisible != true { UserDefaults.standard.set(SettingsSection.general.rawValue, forKey: SettingsView.sectionKey) }
         let window = self.window ?? makeWindow()
         self.window = window
         // An accessory app is never frontmost on its own; without activating first the window

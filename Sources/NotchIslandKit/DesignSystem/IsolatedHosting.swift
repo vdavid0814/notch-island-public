@@ -217,8 +217,13 @@ class DeferringHostingView<Content: View>: NSHostingView<Content> {
         }
     }
 
-    private var presenceObserver: (any NSObjectProtocol)?
+    private var presenceObserver: (any NSObjectProtocol)? {
+        didSet { if let oldValue { NotificationCenter.default.removeObserver(oldValue) } }
+    }
     private weak var pausedIn: NSView?
+
+    // A page let go goes with its pictures: the notification center would keep the observers.
+    isolated deinit { if let presenceObserver { NotificationCenter.default.removeObserver(presenceObserver) } }
 
     private func followPresence() {
         if SettingsPresence.shared.isShown {
