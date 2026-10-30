@@ -7,6 +7,17 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-10-31 00:40** — Replace macOS Spotlight on: the app list, every icon and the read lists stay
+  in memory until the app quits (the lists are read again at an opening over 30 min after the last);
+  off: all of it goes, the disk apps and Siri's pictures too; on again: read ahead again. *Asked for.*
+- **2026-10-30 23:40** — Of Settings only General is built ahead and kept; every other page, Widgets
+  too, is built when the user goes to it and let go a minute after they leave it, also with Settings
+  open (`unkeptPagesLinger`). *Asked for; replaces the 30 s after closing and the kept Widgets.*
+- **2026-10-30 23:40** — A reopen with Siri AI in front counts only from Finder, the Dock or
+  Spotlight. *The sender check never matched: every reopen's sender read "unknown" (helpers and gone
+  processes are no `NSRunningApplication`), so Siri AI's reopens opened Settings on a tester's Mac.*
+- **2026-10-15 20:45** — Settings opened without a page (the gear, the menu, `settings`) opens on
+  General, not on the page it was closed on; links to a page still go there. *Asked for.*
 - **2026-10-15 19:30** — Window Anchor's live copy runs at the screen's rate (60 at least) and stays
   on every space, over full-screen apps too; there its app is not brought forward by a click. A frame
   the same as the shown one (the whole frame compared) is left out. Over a full-screen app, while

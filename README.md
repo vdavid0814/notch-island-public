@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.6 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.7 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -23,6 +23,55 @@ How much energy each animation and the idle state take, measured before and afte
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.8.7
+
+A fraction of the memory, Settings that loads one page at a time, and Siri AI no longer opening NotchIsland.
+
+### The biggest changes
+
+- **About a quarter of the memory.** At rest NotchIsland now takes about 47 MB, down from about 190 MB in 0.8.6.
+- **Settings loads page by page.** Only General is in memory. Any other page loads when you go to it and is emptied one minute after you leave it.
+- **Siri AI no longer opens NotchIsland.** Opening Siri AI or starting a chat in it could bring up NotchIsland's Settings. That is fixed.
+- **Replace macOS Spotlight decides what stays in memory.** On: the app gallery, icons and lists are always ready. Off: all of it is freed at once.
+- **Window Anchor at 60 frames a second, over full-screen apps too.** The live copy now follows the window smoothly on every space.
+
+### Memory and Settings
+
+- **Only General is loaded ahead.** Widgets, Live Activities, Spotlight and About are no longer built before you need them.
+- **One minute, then gone.** A page stays for a minute after you switch away or close Settings, so coming back within that minute is instant. After that it is removed, even while Settings stays open on another page.
+- **Measured:** on Widgets 107–147 MB, a minute after leaving it about 75–85 MB, and the same again over repeated visits (no growth, no leaks found). Pictures and desktop images used only by those pages are freed with the last of them.
+- **Settings opens on General.** Opened from the gear or the menu it starts on General, not on the page you last visited. Links to a specific page still go there.
+- **Cleaner page headers.** A page's title lines up with the top of the sidebar, its icon now appears only in the sidebar, and the page scrolls on under the title up to the top of the screen.
+
+### Spotlight
+
+- **Replace macOS Spotlight on:** the app list, every icon and the search lists stay in memory until you quit, so Spotlight opens full every time. Lists older than half an hour are refreshed in the background as you open it.
+- **Replace macOS Spotlight off:** the app list, gallery, icons, lists and the pictures from Siri's answers are all freed as soon as you switch it off, and nothing is read ahead at launch.
+- **Switched on again:** everything is read ahead again, without restarting.
+
+### Siri AI
+
+- **Fixed: Siri AI opening NotchIsland.** NotchIsland now ignores "open again" requests that arrive while Siri AI is in front. Opening NotchIsland from Finder, the Dock or Spotlight works as before.
+- **Answers read with far less work.** Reading Siri AI's answer takes 35 system calls per look instead of 919, inside its conversation view only.
+- **No more freezes while asking.** Talking to Siri AI and checking the clipboard no longer wait on the main thread, which caused reported hangs.
+
+### Window Anchor
+
+- **60 frames a second.** The live copy runs at your screen's rate instead of 15–30 frames a second.
+- **Over full-screen apps.** The copy stays on every space, and clicking it there does not bring its app forward.
+- **Less energy when nothing moves.** A still window costs 2 mW instead of about 33 mW. On another space it drops from 80.7 to 36.7 mW, and the first change still shows within about 16 ms.
+
+### Energy and reliability
+
+- **Lower energy at rest.** Once nobody is at the Mac, the clipboard is checked every 30 seconds on the efficiency cores: 17 % less energy at rest than 0.8.6. The Clipboard widget and Siri's list check again as they appear, so a fresh copy is never missed.
+- **Gentler on a Mac short of memory.** Settings waits longer before building ahead after each memory warning, instead of building and giving up repeatedly.
+- **More accurate diagnostics.** Energy, CPU and wakeups are judged only at rest, so normal use and planned work are no longer reported as unusual behaviour. A false "Settings cannot be seen" report is gone, and what you say to Siri AI no longer counts as an app search.
+
+### Good to know
+
+- **Pages load when you go to them.** The first visit to Widgets, or a visit more than a minute after leaving it, builds the page again, so it takes a moment longer than when it was always kept.
+- **Some memory stays after the first visit to Widgets.** About 30 MB of the system's own caches (fonts, symbols, interface types) stays until NotchIsland quits. It does not grow with further visits.
 
 ## What's new in v0.8.6
 

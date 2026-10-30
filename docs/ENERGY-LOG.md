@@ -4,6 +4,25 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-30: only General kept, every other page for a minute (memory)
+
+Asked for. Release build, on the charger, footprint as Activity Monitor's Memory column, driven by URLs.
+
+| | MB |
+|---|---|
+| At rest after launch, Settings prepared (General only, Spotlight on) | 46–47 (136–141 before, ~190 in 0.8.6) |
+| On Widgets, first visit / later visits | 147–148 / 107–109 |
+| 68–70 s after leaving Widgets, Settings still open on General, rounds 1–3 | 75, 75, 75 |
+| Spotlight on, after the gallery → switched off (+15 s) → on again (+25 s) | 54 → 49 → 50 |
+
+- Every page's view was gone (`settings page … let go … view gone true` in the log), `leaks` found 0
+  and the live objects did not grow over five rounds (497 848 → 499 246 nodes, mostly one CoreGraphics
+  block of 8.7 MB per round with 0 KB resident).
+- What stays after the first Widgets visit is process-wide (Swift metadata, fonts, symbols, SwiftUI's
+  type tables) plus freed heap the allocator keeps: `malloc_zone_pressure_relief` gave back 32 KB,
+  so it was dropped. The attribution is by class and region; not every byte was traced.
+- The energy of going to Widgets (now built on every visit after a minute) was not measured.
+
 ## 2026-10-15 (night): Window Anchor's live copy at 60 frames a second, over full-screen apps
 
 Asked for: the copy of the anchored window at least 60 frames a second (it was 30 with its app in
