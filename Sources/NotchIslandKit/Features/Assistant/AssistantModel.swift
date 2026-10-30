@@ -301,13 +301,16 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// How long the read lists (shortcuts, panes, emoji, bookmarks) outlive a close: read again at
     /// every opening after ten seconds, they were most of what typing a first word cost (a
     /// `shortcuts list` process, the panes' table, the emoji index; Energy Impact ~350, measured).
-    /// They are a few megabytes; read ahead after launch (`prewarm`) and kept half an hour.
+    /// They are a few megabytes; read ahead after launch (`prewarm`), and older than this they are
+    /// read again in the background at the next opening (`listsAreOld`).
     static let listsKeepDuration: Duration = .seconds(30 * 60)
-    /// The app list, the gallery's icons and the read lists are kept after a close (the lists for
-    /// `listsKeepDuration`, the rest until the app quits) while NotchIsland's Spotlight replaces
-    /// macOS's. Off, it is seldom opened, and all of it goes `keepDuration` after a close and is not
-    /// read ahead after launch (asked for, October 15: ~11 MB kept, 23 → 34 MB with the gallery).
+    /// The app list, every icon and the read lists stay until the app quits while NotchIsland's
+    /// Spotlight replaces macOS's (asked for, October 30). Off, it is seldom opened, and all of it
+    /// goes at once and `keepDuration` after a close, and is not read ahead after launch (asked
+    /// for, October 15: ~11 MB kept, 23 → 34 MB with the gallery).
     @ObservationIgnored var keepsLists: () -> Bool = { true }
+    /// The read lists were last read over `listsKeepDuration` ago: the next opening reads them again.
+    @ObservationIgnored private var listsAreOld = false
 
     /// Times `keepDuration` (a test moves its own).
     @ObservationIgnored var clock: any Clock<Duration> = ContinuousClock()
@@ -826,6 +829,10 @@ nonisolated struct FileScope: Sendable, Equatable {
         end()
         releaseTask?.cancel()
         releaseTask = nil
+        if listsAreOld {
+            listsAreOld = false
+            Task(priority: .background) { [weak self] in await self?.readListsAhead(refreshing: true) }
+        }
         // Read ahead in the background (`prewarm`): the first query loads the framework's model
         // catalogue on the calling thread (~0.1 s on the main thread at the first opening, measured).
         if let known = knownIntelligence {
@@ -864,6 +871,8 @@ nonisolated struct FileScope: Sendable, Equatable {
         knownIntelligence = await Self.readIntelligence()
         if allApps.isEmpty {
             let found = await sources.allApps()
+            // Switched off meanwhile (`keepsLists`): nothing read ahead stays.
+            guard keepsLists() else { return releaseKept() }
             // Siri may have opened (and read the list itself) meanwhile.
             if allApps.isEmpty {
                 replaceLists {
@@ -876,9 +885,12 @@ nonisolated struct FileScope: Sendable, Equatable {
             ? allApps.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             : allApps
         for hit in gallery.prefix(icons) {
+            guard keepsLists() else { return releaseKept() }
             _ = await AssistantIcons.thumbnail(for: hit, points: settings().galleryIconSize.points, prewarming: true)
         }
+        guard keepsLists() else { return releaseKept() }
         await readListsAhead()
+        guard keepsLists() else { return releaseKept() }
         // The kept icons of apps and icon styles that are gone go, and the least recently used
         // beyond the cache's bound.
         await AssistantIcons.tidyDisk()?.value
@@ -899,13 +911,13 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// What a first typed word reads — the lists a root query searches, and the system's search
     /// services (Spotlight, the dictionary, Contacts), whose first query of a launch cost several
     /// times a later one, billed to the app — read once ahead, unseen, at background priority.
-    private func readListsAhead() async {
+    private func readListsAhead(refreshing: Bool = false) async {
         let settings = settings()
         let sources = sources
-        let needsShortcuts = shortcuts == nil && settings.includesShortcuts
-        let needsPanes = settingsPanes == nil && settings.showsSystem
-        let needsEmoji = emoji == nil && settings.showsEmoji
-        let needsBookmarks = bookmarks == nil && settings.showsBookmarks
+        let needsShortcuts = (refreshing || shortcuts == nil) && settings.includesShortcuts
+        let needsPanes = (refreshing || settingsPanes == nil) && settings.showsSystem
+        let needsEmoji = (refreshing || emoji == nil) && settings.showsEmoji
+        let needsBookmarks = (refreshing || bookmarks == nil) && settings.showsBookmarks
         async let foundShortcuts = needsShortcuts ? sources.shortcuts() : nil
         async let foundPanes = needsPanes ? sources.settingsPanes() : nil
         async let foundEmoji = needsEmoji ? EmojiIndex.build(sources.emoji) : nil
@@ -916,10 +928,10 @@ nonisolated struct FileScope: Sendable, Equatable {
         if lists.1?.isEmpty == false { icons.insert(AssistantIcons.systemSettingsSource) }
         if !icons.isEmpty { await AssistantIcons.prepare(Array(icons)) }
         // Siri may have opened and read them itself meanwhile.
-        if needsShortcuts, shortcuts == nil { shortcuts = lists.0 ?? [] }
-        if needsPanes, settingsPanes == nil { settingsPanes = lists.1 ?? [] }
-        if needsEmoji, emoji == nil { emoji = lists.2 ?? EmojiIndex([]) }
-        if needsBookmarks, bookmarks == nil { bookmarks = lists.3 ?? [] }
+        if needsShortcuts, refreshing || shortcuts == nil { shortcuts = lists.0 ?? shortcuts ?? [] }
+        if needsPanes, refreshing || settingsPanes == nil { settingsPanes = lists.1 ?? settingsPanes ?? [] }
+        if needsEmoji, refreshing || emoji == nil { emoji = lists.2 ?? emoji ?? EmojiIndex([]) }
+        if needsBookmarks, refreshing || bookmarks == nil { bookmarks = lists.3 ?? bookmarks ?? [] }
         _ = await sources.apps("a", 1)
         if settings.showsDefinitions { _ = await sources.define("notch") }
         if settings.showsPeople, sources.contactsAccess() == .granted { _ = await sources.contacts("a", 1) }
@@ -965,9 +977,6 @@ nonisolated struct FileScope: Sendable, Equatable {
         answer = nil
         languageUnsupported = false
         revealsSuggestions = false
-        // The app list and the gallery's icons stay for the next opening; the icons go after a
-        // while without Siri (`AssistantIcons.purgeLater`).
-        AssistantIcons.purgeLater()
         // The icons kept on disk are tidied here too: the prewarm, which tidies them, is skipped
         // when Siri opens first.
         AssistantIcons.tidyDisk()
@@ -977,22 +986,23 @@ nonisolated struct FileScope: Sendable, Equatable {
             try? await clock.sleep(for: keeps ? Self.listsKeepDuration : Self.keepDuration, tolerance: .seconds(1))
             guard !Task.isCancelled, let self else { return }
             self.releaseTask = nil
-            self.releaseLists(all: !keeps)
+            if keeps { self.listsAreOld = true } else { self.releaseLists() }
         }
     }
 
-    /// The read lists go; with `all`, the app list and every icon kept in memory too (the ones on
-    /// disk stay, for the next opening).
-    private func releaseLists(all: Bool) {
+    /// The read lists, the app list and every icon kept in memory go (the ones on disk stay, for
+    /// the next opening).
+    private func releaseLists() {
         shortcuts = nil
         settingsPanes = nil
         emoji = nil
         bookmarks = nil
         AssistantMatch.forget()
-        guard all else { return }
         allApps = []
         allAppsRead = nil
         AssistantIcons.purgeAll()
+        AssistantSearch.forgetDiskApps()
+        SiriPictures.shared.forget()
     }
 
     /// Everything kept, released now: NotchIsland's Spotlight no longer replaces macOS's
@@ -1000,7 +1010,8 @@ nonisolated struct FileScope: Sendable, Equatable {
     func releaseKept() {
         releaseTask?.cancel()
         releaseTask = nil
-        releaseLists(all: true)
+        listsAreOld = false
+        releaseLists()
     }
 
     // MARK: Keys
@@ -2156,33 +2167,10 @@ nonisolated enum AssistantMatch {
         return context.makeImage()
     }
 
-    /// The rows' icons go; the gallery's thumbnails stay, so the gallery never draws a hundred
-    /// icons again at an opening.
-    static func purge() {
-        icons = [:]
-    }
-
     /// Every icon kept in memory, the gallery's too (`AssistantModel.keepsLists` off).
     static func purgeAll() {
-        purgeTask?.cancel()
-        purgeTask = nil
         icons = [:]
         thumbnails = [:]
-    }
-
-    private static var purgeTask: Task<Void, Never>?
-    /// How long the icons outlive the last opening of Siri.
-    static let keep: Duration = .seconds(10 * 60)
-
-    /// Frees the icons once Siri has not been opened for `keep`; an opening meanwhile keeps them.
-    static func purgeLater() {
-        purgeTask?.cancel()
-        purgeTask = Task {
-            try? await Task.sleep(for: keep, tolerance: .seconds(60))
-            guard !Task.isCancelled else { return }
-            purge()
-            purgeTask = nil
-        }
     }
 
     /// When the icons on disk were last tidied.

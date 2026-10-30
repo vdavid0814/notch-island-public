@@ -125,13 +125,14 @@ final class ManualClock: Clock {
         // The opening stopped the pending release.
         #expect(clock.sleeperCount == 0)
 
-        // Closed for the whole keep: everything goes, and the next opening reads it again.
+        // Closed for the whole keep: everything stays, and the next opening reads it again.
         model.end()
         await settle { clock.sleeperCount == 1 }
         clock.advance(by: AssistantModel.listsKeepDuration)
-        await settle { model.emoji == nil }
-        #expect(model.shortcuts == nil && model.settingsPanes == nil && model.emoji == nil)
+        await settle { false }
+        #expect(model.shortcuts != nil && model.settingsPanes != nil && model.emoji != nil)
         await open()
+        await settle { reads.withLock { $0["emoji"] == 2 } }
         #expect(reads.withLock { $0 } == ["shortcuts": 2, "panes": 2, "emoji": 2, "windows": 3])
         model.end()
     }

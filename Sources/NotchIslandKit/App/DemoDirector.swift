@@ -56,6 +56,8 @@ import SwiftUI
             model.power.followSource(demo: onBattery)
         case .away(let away):
             model.simulateAway(away)
+        case .replaceSpotlight(let on):
+            model.preferences.commandSpaceOpensSiri = on
         case .memoryPressure:
             SettingsWindow.discard(force: true)
         case .state:

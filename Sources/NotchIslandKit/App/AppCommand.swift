@@ -17,6 +17,8 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     /// Nobody at the Mac or back (`demo/away?on=1|0`), as a locked session does for Settings, without
     /// hiding the island.
     case away(Bool)
+    /// The Replace macOS Spotlight switch, as Settings sets it (`demo/replacespotlight?on=1|0`).
+    case replaceSpotlight(Bool)
     /// macOS asking for memory (`demo/memorypressure`), as its warning does for Settings.
     case memoryPressure
     /// Logs presentation, stage and where SwiftUI actually placed the island.
@@ -238,6 +240,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
             default: return nil
             }
         case "demo/away": return .demo(.away(query["on"] != "0"))
+        case "demo/replacespotlight": return .demo(.replaceSpotlight(query["on"] != "0"))
         case "demo/memorypressure": return .demo(.memoryPressure)
         case "demo/segments": return .demo(.segments)
         case "demo/airpods": return .demo(.airPods)

@@ -85,6 +85,9 @@ nonisolated enum AssistantSearch {
         return hits
     }
 
+    /// The list read for `cachedDiskApps` let go (NotchIsland's Spotlight switched off).
+    static func forgetDiskApps() { diskAppsCache.withLock { $0 = nil } }
+
     static let diskAppsLifetime: TimeInterval = 60
     private static let diskAppsCache = Mutex<(read: Date, hits: [AssistantHit])?>(nil)
 

@@ -13,6 +13,12 @@ import Photos
     private var pictures: [String: NSImage] = [:]
     private var missing: Set<String> = []
 
+    /// Every picture let go (NotchIsland's Spotlight switched off).
+    func forget() {
+        pictures = [:]
+        missing = []
+    }
+
     // MARK: Pictures of things
 
     /// Wikipedia's picture for `title`, kept for the session.
