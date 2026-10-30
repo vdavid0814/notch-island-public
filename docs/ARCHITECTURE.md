@@ -137,9 +137,10 @@ itself (the same memory, no page touched through it yet); memory mapped once is 
 
 Settings is built once and kept for as long as the app runs, in a window of its own
 (`SettingsWindow`) that lies over the island's page area and is ordered in only while Settings is
-open: built a few seconds after launch, unseen, on the efficiency cores (sidebar, then one page per
-step, then each page drawn once in the window at no opacity). Each page has a view graph of its own
+open: built a few seconds after launch, unseen, on the efficiency cores (sidebar, then General, then
+General drawn once in the window at no opacity). Each page has a view graph of its own
 (`SettingsPageDeckView`); the pages not shown are hidden and lay nothing out (`DeferringHostingView`).
+Every page but General is built when gone to and let go a minute after it is left (`unkeptPagesLinger`).
 The island's SwiftUI only holds an empty anchor (`SettingsSurfaceAnchor`) that puts the window over
 its place. The window is cut by the island's lower corners at rest and by the island's moving outline
 while Settings closes (`IslandOutlineMotion` hands it the same keyframes). While closed, Settings'
