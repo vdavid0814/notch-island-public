@@ -293,7 +293,7 @@ struct ControlWidget: View {
                             isSecondary: true) {
                     Text(status)
                         .font(.system(size: layout.status))
-                        .clearTextEdge().foregroundStyle(.secondary)
+                        .foregroundStyle(.secondary)
                         .contentTransition(.opacity)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)

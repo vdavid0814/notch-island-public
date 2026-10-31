@@ -46,6 +46,8 @@ nonisolated struct BrokenMac: Sendable, CustomTestStringConvertible {
 }
 
 @MainActor @Suite(.timeLimit(.minutes(1))) struct BrokenPermissionsTests {
+    /// In a folder the gallery lists (`AssistantGallery.isListed`); `xcode`, in Downloads, only a search finds.
+    nonisolated static let listedXcode = AssistantHit(kind: .app, url: URL(fileURLWithPath: "/Applications/Xcode.app"), name: "Xcode", contentType: "com.apple.application-bundle", lastUsed: nil)
     nonisolated static let xcode = AssistantHit(kind: .app, url: URL(fileURLWithPath: "/Users/someone/Downloads/Xcode.app"), name: "Xcode",
                                     contentType: "com.apple.application-bundle", lastUsed: nil)
     nonisolated static let notes = AssistantHit(kind: .file, url: URL(fileURLWithPath: "/Users/someone/Documents/xcode notes.txt"),
@@ -123,19 +125,19 @@ nonisolated struct BrokenMac: Sendable, CustomTestStringConvertible {
         var sources = stubSources()
         sources.allApps = {
             while !gate.value { try? await Task.sleep(for: .milliseconds(10)) }
-            return [BrokenPermissionsTests.xcode]
+            return [BrokenPermissionsTests.listedXcode]
         }
-        sources.quickApps = { [BrokenPermissionsTests.xcode] }
+        sources.quickApps = { [BrokenPermissionsTests.listedXcode] }
         let model = AssistantModel(defaults: UserDefaults(suiteName: "QuickAppsTests.\(UUID().uuidString)")!, sources: sources)
         model.begin()
         model.open(.applications)
-        for _ in 0..<100 where !model.rows.contains(.hit(BrokenPermissionsTests.xcode)) {
+        for _ in 0..<100 where !model.rows.contains(.hit(BrokenPermissionsTests.listedXcode)) {
             try? await Task.sleep(for: .milliseconds(10))
         }
-        #expect(model.rows.contains(.hit(BrokenPermissionsTests.xcode)))
+        #expect(model.rows.contains(.hit(BrokenPermissionsTests.listedXcode)))
         gate.value = true
         await model.settle()
-        #expect(model.rows.contains(.hit(BrokenPermissionsTests.xcode)))
+        #expect(model.rows.contains(.hit(BrokenPermissionsTests.listedXcode)))
     }
 }
 

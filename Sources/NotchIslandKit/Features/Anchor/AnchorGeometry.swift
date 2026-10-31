@@ -18,8 +18,9 @@ nonisolated struct AnchorScreen: Sendable, Equatable {
     var bandBottom: CGFloat { frame.minY + band }
 }
 
-/// The size anchored windows are given, set in Settings: automatic (the screen's own,
-/// `AnchorGeometry.defaultSize`), a size picked by name (it follows the screen), or one set by hand.
+/// The size anchored windows are given, set in Settings: a size picked by name (it follows the
+/// screen). Automatic (the screen's own, `AnchorGeometry.defaultSize`) and a size set by hand can no
+/// longer be chosen, but one saved keeps working until a name is picked.
 nonisolated struct AnchorSizePreference: Codable, Sendable, Equatable {
     var width: Double?
     var height: Double?
@@ -70,6 +71,9 @@ nonisolated enum AnchorSizePreset: String, Codable, Sendable, CaseIterable, Iden
 
     var id: Self { self }
 
+    /// What Settings offers.
+    static let named: [AnchorSizePreset] = [.small, .medium, .large, .tall, .wide]
+
     /// Width and height as parts of the screen's (nil: automatic, custom).
     var fractions: (width: CGFloat, height: CGFloat)? {
         switch self {
@@ -90,9 +94,12 @@ nonisolated enum AnchorSizePreset: String, Codable, Sendable, CaseIterable, Iden
     }
 }
 
-/// Where the stage shows the app's name and Release: beside the notch in the menu bar, or under the window.
+/// How high the live copy's picture is on its stage. The name and Release are beside the notch either way.
 nonisolated enum AnchorBarPlacement: String, Codable, Sendable, CaseIterable, Identifiable {
-    case menuBar, belowWindow
+    /// The picture exactly over the real window, the menu bar's band above it black.
+    case menuBar
+    /// Raised by the tab at its top (`AnchorStageLayout.barHeight`), a slim black bar under it.
+    case belowWindow
 
     var id: Self { self }
 }
@@ -102,11 +109,10 @@ nonisolated enum AnchorBarPlacement: String, Codable, Sendable, CaseIterable, Id
 ///
 /// The real window always stays a menu bar lower than the screen's top (macOS keeps it under the
 /// bar), so whatever the stage shows, it must cover the real window down to its bottom edge:
-/// - Name and Release under the window (`belowWindow`): the picture as high as the bar under it
-///   allows, and a slim bar (`barHeight`) under it.
-/// - Beside the notch (`menuBar`): the picture exactly over the real window and the menu bar's
-///   band above it black, holding the name and Release on either side of the notch. No bar under
-///   the window: nothing of the stage or the app is below the window's own bottom edge.
+/// - Raised (`belowWindow`): the picture as high as the slim bar (`barHeight`) under it allows.
+/// - Not raised (`menuBar`): the picture exactly over the real window and the menu bar's band above
+///   it black. No bar under the window: nothing of the stage or the app is below the window's own
+///   bottom edge.
 nonisolated struct AnchorStageLayout: Sendable, Equatable {
     /// The stage, in global coordinates (y down).
     var frame: CGRect
@@ -121,7 +127,7 @@ nonisolated struct AnchorStageLayout: Sendable, Equatable {
 
     static let shoulder: CGFloat = 10
     static let bottomRadius: CGFloat = 22
-    /// The bar under the window: one line of the name and Release.
+    /// The bar under the raised window: how far the tab at the window's top takes it up.
     static let barHeight: CGFloat = 22
 
     init(screen: AnchorScreen, rest: CGRect, placement: AnchorBarPlacement = .belowWindow) {
@@ -135,6 +141,21 @@ nonisolated struct AnchorStageLayout: Sendable, Equatable {
                        height: top + rest.height + bar)
         copy = CGRect(x: shoulder, y: top, width: rest.width, height: rest.height)
         chin = CGRect(x: shoulder, y: top + rest.height, width: rest.width, height: bar)
+    }
+
+    /// How far from the window's top edge the pointer brings up the tab at its top.
+    static let raiseEdgeReach: CGFloat = 2
+
+    /// `point` (in the stage) on the window's very top edge, beside the notch.
+    func isOnRaiseEdge(_ point: CGPoint, notch: CGRect) -> Bool {
+        abs(point.y - copy.minY) <= Self.raiseEdgeReach && point.x >= copy.minX && point.x <= copy.maxX
+            && (point.x < notch.minX || point.x > notch.maxX)
+    }
+
+    /// The picture on the way up, `raise` above where it is not raised (the stage is the same).
+    func copy(raisedBy raise: CGFloat) -> CGRect {
+        let highest = min(Self.barHeight, copy.minY + offset)
+        return CGRect(x: copy.minX, y: copy.minY + offset - min(max(raise, 0), highest), width: copy.width, height: copy.height)
     }
 
     /// Above the picture: the menu bar's band beside the notch.

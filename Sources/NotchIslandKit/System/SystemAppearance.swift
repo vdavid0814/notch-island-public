@@ -1,6 +1,43 @@
 import AppKit
 import Observation
 
+/// How the system draws app icons (System Settings ▸ Appearance ▸ Icon & widget style): what the
+/// tiles drawn beside them follow (`AssistantTile`).
+nonisolated struct IconLook: Sendable, Equatable {
+    nonisolated enum Kind: Sendable, Equatable { case regular, dark, clearLight, clearDark, tintedLight, tintedDark }
+
+    var kind: Kind = .regular
+    /// The tinted style's colour (red, green, blue, 0…1); nil: the Mac's accent colour.
+    var tint: [Double]?
+
+    /// `theme`: `AppleIconAppearanceTheme`, as Regular, Clear or Tinted with Light, Dark or Automatic;
+    /// Automatic goes with the Mac's mode. Unset, icons are the default colourful ones.
+    static func kind(theme: String?, isDark: Bool) -> Kind {
+        guard let theme else { return .regular }
+        let dark = theme.hasSuffix("Dark") || (theme.hasSuffix("Automatic") && isDark)
+        if theme.hasPrefix("Clear") { return dark ? .clearDark : .clearLight }
+        if theme.hasPrefix("Tinted") { return dark ? .tintedDark : .tintedLight }
+        return dark ? .dark : .regular
+    }
+
+    /// The tint as stored: a colour's name, or "r g b a" for a colour of the user's own.
+    static func tint(name: String?, custom: String?) -> [Double]? {
+        let parts = custom?.split(separator: " ").compactMap { Double($0) } ?? []
+        if parts.count >= 3 { return Array(parts.prefix(3)) }
+        return switch name?.lowercased() {
+        case "red": [1, 0.27, 0.23]
+        case "orange": [1, 0.62, 0.04]
+        case "yellow": [1, 0.8, 0]
+        case "green": [0.2, 0.78, 0.35]
+        case "blue": [0, 0.48, 1]
+        case "purple": [0.69, 0.32, 0.87]
+        case "pink": [1, 0.18, 0.57]
+        case "graphite", "gray", "grey": [0.56, 0.56, 0.58]
+        default: nil
+        }
+    }
+}
+
 /// Whether the Mac is in Light or Dark Mode (System Settings ▸ Appearance). The island's own windows
 /// are pinned to the dark appearance, so this is read from the system, not from a window.
 @MainActor @Observable final class SystemAppearance {
@@ -21,8 +58,12 @@ import Observation
     /// (System Settings ▸ Appearance ▸ Liquid Glass).
     private(set) var glassTint: Double
 
+    /// How the system draws app icons now.
+    private(set) var iconLook = IconLook()
+
     @ObservationIgnored private var token: (any NSObjectProtocol)?
     @ObservationIgnored private var tintObserver: DefaultsObserver?
+    @ObservationIgnored private var iconObservers: [DefaultsObserver] = []
 
     private init() {
         isDark = Self.read()
@@ -45,6 +86,24 @@ import Observation
             let tint = Self.readTint()
             if tint != glassTint { glassTint = tint }
         }
+        iconLook = Self.readIconLook(isDark: isDark)
+        iconObservers = ["AppleIconAppearanceTheme", "AppleIconAppearanceTintColor", "AppleIconAppearanceCustomTintColor"].map { key in
+            DefaultsObserver(key: key) { [weak self] in self?.refreshIconLook() }
+        }
+    }
+
+    private static func readIconLook(isDark: Bool) -> IconLook {
+        // For measuring and pictures only: `NI_ICON_THEME=ClearDark` … stands in for the system's.
+        let environment = ProcessInfo.processInfo.environment
+        let defaults = UserDefaults.standard
+        return IconLook(kind: IconLook.kind(theme: environment["NI_ICON_THEME"] ?? defaults.string(forKey: "AppleIconAppearanceTheme"), isDark: isDark),
+                        tint: IconLook.tint(name: environment["NI_ICON_TINT"] ?? defaults.string(forKey: "AppleIconAppearanceTintColor"),
+                                            custom: defaults.string(forKey: "AppleIconAppearanceCustomTintColor")))
+    }
+
+    private func refreshIconLook() {
+        let look = Self.readIconLook(isDark: isDark)
+        if look != iconLook { iconLook = look }
     }
 
     nonisolated static let tintKey = "NSGlassTintAmount"
@@ -58,6 +117,7 @@ import Observation
 
     private func refresh() {
         let dark = Self.read()
+        defer { refreshIconLook() }
         guard dark != isDark else { return }
         isDark = dark
         UserDefaults.standard.set(dark, forKey: Self.lastKey)

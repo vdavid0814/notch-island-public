@@ -61,7 +61,7 @@ struct AssistantView: View {
                     if let answer = assistant.answer {
                         AnswerPane(answer: answer)
                     } else if isGallery {
-                        AppGallery(assistant: assistant, plateRadius: layout.assistantGalleryPlateRadius)
+                        AppGallery(assistant: assistant, plateRadius: layout.assistantGalleryPlateRadius, width: galleryWidth)
                             .frame(width: galleryWidth)
                     } else if below == .picks {
                         // Each box's corners concentric with the panel's lower corners.
@@ -101,11 +101,11 @@ struct AssistantView: View {
         }
         .frame(height: fullHeight, alignment: .top)
         .onKeyPress(.upArrow) {
-            assistant.moveSelection(by: isGallery ? -assistant.galleryColumns : -1)
+            isGallery ? assistant.moveGalleryRow(by: -1) : assistant.moveSelection(by: -1)
             return .handled
         }
         .onKeyPress(.downArrow) {
-            assistant.moveSelection(by: isGallery ? assistant.galleryColumns : 1)
+            isGallery ? assistant.moveGalleryRow(by: 1) : assistant.moveSelection(by: 1)
             return .handled
         }
         .onKeyPress(.leftArrow) {
@@ -318,7 +318,7 @@ extension AssistantCategory {
 }
 
 /// A symbol on a small coloured tile, the size of an app icon in the list (larger in the quick
-/// picks, `side`).
+/// picks, `side`), in the style the system draws the app icons beside it (`IconLook`).
 struct AssistantTile: View {
     let symbol: String
     let fill: AnyShapeStyle
@@ -335,14 +335,37 @@ struct AssistantTile: View {
     }
 
     var body: some View {
+        let look = SystemAppearance.shared.iconLook
+        let tint = look.tint.map { Color(red: $0[0], green: $0[1], blue: $0[2]) } ?? .accentColor
+        let plate = plate(look.kind, tint: tint)
         RoundedRectangle(cornerRadius: side * 0.27, style: .continuous)
-            .fill(fill)
+            .fill(plate.fill)
+            .overlay {
+                if let rim = plate.rim {
+                    RoundedRectangle(cornerRadius: side * 0.27, style: .continuous)
+                        .strokeBorder(rim, lineWidth: max(0.5, side / 60))
+                }
+            }
             .frame(width: side, height: side)
             .overlay {
                 Image(systemName: symbol)
                     .font(.system(size: side * 0.5, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(plate.symbol)
             }
+    }
+
+    private func plate(_ kind: IconLook.Kind, tint: Color) -> (fill: AnyShapeStyle, symbol: AnyShapeStyle, rim: Color?) {
+        func down(_ top: Color, _ bottom: Color) -> AnyShapeStyle {
+            AnyShapeStyle(LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom))
+        }
+        return switch kind {
+        case .regular: (fill, AnyShapeStyle(.white), nil)
+        case .dark: (down(Color(white: 0.2), Color(white: 0.1)), fill, nil)
+        case .clearDark: (down(.white.opacity(0.2), .white.opacity(0.13)), AnyShapeStyle(.white.opacity(0.85)), .white.opacity(0.14))
+        case .clearLight: (down(.white.opacity(0.72), .white.opacity(0.52)), AnyShapeStyle(.black.opacity(0.55)), .white.opacity(0.6))
+        case .tintedDark: (down(tint.opacity(0.36), tint.opacity(0.2)), AnyShapeStyle(tint), tint.opacity(0.3))
+        case .tintedLight: (AnyShapeStyle(tint.gradient), AnyShapeStyle(.white), nil)
+        }
     }
 }
 
@@ -551,6 +574,7 @@ private struct RowsList: View {
 private struct AppGallery: View {
     let assistant: AssistantModel
     let plateRadius: CGFloat
+    let width: CGFloat
 
     var body: some View {
         // The user's column count (Settings ▸ Siri ▸ App Gallery); the window widens with it.
@@ -560,49 +584,98 @@ private struct AppGallery: View {
                             count: columnCount)
         let rows = assistant.rows
         let count = rows.count
+        // While searching in it, one section of what matched.
+        let counts = assistant.gallerySections?.counts ?? [0, count, 0]
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVGrid(columns: columns, spacing: IslandLayout.galleryRowSpacing) {
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        if case .hit(let hit) = row {
-                            GalleryCell(hit: hit, isMarked: assistant.marksSelection && index == assistant.selection,
-                                        plateRadius: plateRadius, iconSize: iconSize)
-                                .id(row.id)
-                                .contentShape(.rect)
-                                .onTapGesture { assistant.perform(row) }
-                        }
+                VStack(alignment: .leading, spacing: 8) {
+                    if counts[0] > 0 { title("Recent") }
+                    section(rows, range: 0..<counts[0], columns: recentColumns(counts[0], of: columnCount), iconSize: iconSize)
+                        // Fewer than a row: in the middle, in cells as wide as the rows' below.
+                        .frame(maxWidth: .infinity)
+                    if counts[0] > 0, counts[1] > 0 {
+                        rule
+                        title("Apps")
+                    }
+                    section(rows, range: counts[0]..<(counts[0] + counts[1]), columns: columns, iconSize: iconSize)
+                    if counts[2] > 0 {
+                        rule
+                        title("Other")
+                        section(rows, range: (counts[0] + counts[1])..<min(count, counts[0] + counts[1] + counts[2]),
+                                columns: columns, iconSize: iconSize)
                     }
                 }
-                .background { SelectionScroller(assistant: assistant, count: count) { proxy.scrollTo(rows[$0].id) } }
+                // By place, not by app: the last used are in the list twice, as in the system's.
+                .background { SelectionScroller(assistant: assistant, count: count) { proxy.scrollTo($0) } }
             }
             .scrollIndicators(.never)
             // Fewer rows than fit: nothing to scroll, so no rubber-band either.
             .scrollBounceBehavior(.basedOnSize)
         }
     }
+
+    /// The line between the sections, 15 % more white than the system's.
+    private var rule: some View {
+        Divider().overlay(Color.white.opacity(0.15))
+    }
+
+    private func title(_ text: LocalizedStringKey) -> some View {
+        Text(text)
+            .font(.headline)
+            .padding(.horizontal, 4)
+    }
+
+    /// The Recent section's columns: as many as it has apps, up to a full row.
+    private func recentColumns(_ count: Int, of columns: Int) -> [GridItem] {
+        let spacing = IslandLayout.galleryRowSpacing
+        let cell = (width - spacing * CGFloat(columns - 1)) / CGFloat(max(columns, 1))
+        return Array(repeating: GridItem(.fixed(cell), spacing: spacing), count: max(min(count, columns), 1))
+    }
+
+    @ViewBuilder private func section(_ rows: [AssistantRow], range: Range<Int>, columns: [GridItem], iconSize: CGFloat) -> some View {
+        let range = range.clamped(to: 0..<rows.count)
+        if !range.isEmpty {
+            LazyVGrid(columns: columns, spacing: IslandLayout.galleryRowSpacing) {
+                ForEach(range, id: \.self) { index in
+                    if case .hit(let hit) = rows[index] {
+                        GalleryCell(hit: hit, isMarked: assistant.marksSelection && index == assistant.selection,
+                                    plateRadius: plateRadius, iconSize: iconSize)
+                            .id(index)
+                            .contentShape(.rect)
+                            .onTapGesture { assistant.perform(rows[index]) }
+                    }
+                }
+            }
+        }
+    }
 }
 
-private struct GalleryCell: View {
+struct GalleryCell: View {
     let hit: AssistantHit
     /// The keys moved the selection here (`AssistantModel.marksSelection`).
     var isMarked = false
     var plateRadius: CGFloat = 10
     var iconSize: CGFloat = SiriGalleryIconSize.medium.points
+    /// The icon drawn at this size and scaled to `iconSize` (Settings' picture, as its slider moves).
+    var iconFrom: CGFloat?
     @State private var icon: NSImage?
+
+    private var drawnSize: CGFloat { iconFrom ?? iconSize }
 
     var body: some View {
         VStack(spacing: Metrics.Spacing.xSmall) {
             Group {
-                if let icon = icon ?? AssistantIcons.cachedThumbnail(for: hit, points: iconSize) {
+                if let icon = icon ?? AssistantIcons.cachedThumbnail(for: hit, points: drawnSize) {
                     Image(nsImage: icon)
+                        .resizable()
                 } else {
                     // Only a cell without its icon yet asks for it: a gallery of kept icons starts
                     // no task per cell.
                     RoundedRectangle(cornerRadius: iconSize * 0.23, style: .continuous)
                         .fill(.white.opacity(0.08))
                         .padding(4)
-                        .task(id: "\(Int(iconSize)) \(hit.url.path)") {
-                            icon = await AssistantIcons.thumbnail(for: hit, points: iconSize)
+                        .task(id: "\(Int(drawnSize)) \(hit.url.path)") {
+                            icon = await AssistantIcons.thumbnail(for: hit, points: drawnSize)
                         }
                 }
             }

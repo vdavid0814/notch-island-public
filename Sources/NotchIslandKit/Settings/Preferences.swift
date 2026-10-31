@@ -15,6 +15,8 @@ import Foundation
     nonisolated static let closeDelayRange: ClosedRange<Double> = 0...1
     nonisolated static let defaultCloseDelay: Double = 0.1
     nonisolated static let defaultHoverDelay: Double = 0.1
+    /// The Now Playing pill's ears, as a part of their usual width (Live Activities ▸ Now Playing).
+    nonisolated static let nowPlayingWidthRange: ClosedRange<Double> = 0.9...1.2
 
     nonisolated enum Key {
         static let prefix = "ni2."
@@ -56,7 +58,10 @@ import Foundation
         /// The live copy up at the screen's top (0.6.1; "anchor.mirror" was the copy only while covered).
         static let anchorMirror = prefix + "anchor.onTop"
         static let anchorSize = prefix + "anchor.size"
+        /// Where the name and Release sat, before they stayed beside the notch (only to remove it).
         static let anchorBar = prefix + "anchor.bar"
+        static let anchorRaised = prefix + "anchor.raised"
+        static let nowPlayingWidth = prefix + "nowPlayingWidth"
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -164,9 +169,13 @@ import Foundation
     /// notch, as a live copy the clicks go through to (needs Screen Recording; asked for the first
     /// time a window is anchored). Off: the window itself, just under the menu bar.
     var anchorMirror: Bool { didSet { defaults.set(anchorMirror, forKey: Key.anchorMirror) } }
-    /// The size every anchored window is given (nil on an axis: the screen's own, `AnchorGeometry.defaultSize`).
-    /// Where the live copy's stage shows the app's name and Release.
-    var anchorBar: AnchorBarPlacement { didSet { defaults.set(anchorBar.rawValue, forKey: Key.anchorBar) } }
+    /// The live copy dragged up by the tab at its top: the picture as high as it goes, a slim black
+    /// bar under it, the name and Release still beside the notch.
+    var anchorRaised: Bool { didSet { defaults.set(anchorRaised, forKey: Key.anchorRaised) } }
+    /// How wide the Now Playing pill's ears are: the cover and the bars move out with them.
+    var nowPlayingWidth: Double { didSet { defaults.set(nowPlayingWidth, forKey: Key.nowPlayingWidth) } }
+    /// The size every anchored window is given: a named one. A size saved before Automatic and Custom
+    /// went from Settings stays until another is picked.
     var anchorSize: AnchorSizePreference {
         didSet { if let data = try? JSONEncoder().encode(anchorSize) { defaults.set(data, forKey: Key.anchorSize) } }
     }
@@ -201,7 +210,7 @@ import Foundation
         // No longer in Settings (Oct 2026): the island covers macOS's AirPods card and flows out to
         // its cards, and takes the volume and brightness keys. A choice left otherwise before no
         // longer counts — with no control left for it, nobody could take it back.
-        for key in [Key.airPodsSystemCard, Key.liquidVolume, Key.liquidAirPods, Key.replaceSystemHUD] {
+        for key in [Key.airPodsSystemCard, Key.liquidVolume, Key.liquidAirPods, Key.replaceSystemHUD, Key.anchorBar] {
             defaults.removeObject(forKey: key)
         }
         airPodsSystemCard = .cover
@@ -232,8 +241,10 @@ import Foundation
         anchorByDrag = defaults.object(forKey: Key.anchorByDrag) as? Bool ?? true
         anchorMirror = defaults.object(forKey: Key.anchorMirror) as? Bool ?? true
         anchorSize = defaults.data(forKey: Key.anchorSize).flatMap { try? JSONDecoder().decode(AnchorSizePreference.self, from: $0) }
-            ?? AnchorSizePreference()
-        anchorBar = defaults.string(forKey: Key.anchorBar).flatMap(AnchorBarPlacement.init(rawValue:)) ?? .belowWindow
+            ?? AnchorSizePreference(preset: .medium)
+        anchorRaised = defaults.object(forKey: Key.anchorRaised) as? Bool ?? false
+        let pillWidth = defaults.object(forKey: Key.nowPlayingWidth) as? Double ?? 1
+        nowPlayingWidth = min(max(pillWidth.isFinite ? pillWidth : 1, Self.nowPlayingWidthRange.lowerBound), Self.nowPlayingWidthRange.upperBound)
         siri = defaults.data(forKey: Key.siri).flatMap { try? JSONDecoder().decode(SiriSettings.self, from: $0) } ?? SiriSettings()
         panel = defaults.data(forKey: Key.panel).flatMap { try? JSONDecoder().decode(PanelSettings.self, from: $0) } ?? PanelSettings()
         pageSizes = defaults.data(forKey: Key.pageSizes).flatMap { try? JSONDecoder().decode([String: PageSize].self, from: $0) } ?? [:]

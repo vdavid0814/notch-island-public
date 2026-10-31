@@ -1,58 +1,37 @@
 import SwiftUI
 
-/// Settings ▸ Live Activities ▸ Window Anchor: the size every anchored window is given, on a picture
-/// of the notch screen — the window hanging from the notch at that size. A size is picked by name
-/// in the bar under it; any but Automatic opens a width and a height slider. The picture's sides
-/// and bottom edge can be dragged too (the sides together: it stays centred).
+/// Settings ▸ Live Activities ▸ Window Anchor: the size every anchored window is given, picked by
+/// name beside the title, on a picture of the notch screen with the window hanging from the notch.
 struct AnchorSizeEditor: View {
     @Binding var size: AnchorSizePreference
     let screen: AnchorScreen
-    /// "Up to the top of the screen": the window drawn from the screen's top on the stage, else under the menu bar.
+    /// The live copy is in use: the window drawn on its stage, else under the menu bar.
     var onTop = true
-    /// Where the stage shows the app's name and Release.
-    var bar: AnchorBarPlacement = .belowWindow
+    /// Dragged up by the tab at its top.
+    var isRaised = false
 
     /// The picture's width; its height follows the screen's.
     static let pictureWidth: CGFloat = 380
     /// About as wide as the name or Release beside the notch, in screen points.
     static let earWidth: CGFloat = 90
 
-    /// While a handle or a slider is dragged: the size it shows, written once when let go.
-    @State private var draft: CGSize?
-    @State private var isSliding = false
-
-    private var current: CGSize { draft ?? size.size(on: screen) }
+    private var current: CGSize { size.size(on: screen) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // The size on show beside the title, on one line.
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                InfoLabel("Size when anchored", "Every window you anchor opens at this size, centred under the notch. The named sizes follow the screen; drag the sliders or the picture's edges for your own.")
+            HStack(spacing: SettingsForm.titleGap) {
+                InfoLabel("Size when anchored", "Every window you anchor opens at this size, centred under the notch. The sizes follow the screen.")
                 Spacer(minLength: 0)
-                Text("\(Int(current.width)) × \(Int(current.height)) pt")
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(SettingsPalette.secondary)
-                    .contentTransition(.numericText())
-                    .fixedSize()
+                Picker("Size", selection: choice) {
+                    ForEach(AnchorSizePreset.named) { Text(Self.title($0)).tag($0) }
+                }
+                .choiceBar()
+                .labelsHidden()
+                .fixedSize()
             }
             picture
                 .frame(maxWidth: .infinity)
-            Picker("Size", selection: choice) {
-                ForEach(AnchorSizePreset.allCases) { Text(Self.title($0)).tag($0) }
-            }
-            .choiceBar()
-            .labelsHidden()
-            .fixedSize()
-            .frame(maxWidth: .infinity)
-            if !size.isAutomatic {
-                VStack(spacing: 8) {
-                    dimensionSlider("Width", \.width, range: AnchorSizePreference.widths(on: screen))
-                    dimensionSlider("Height", \.height, range: AnchorSizePreference.heights(on: screen))
-                }
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
         }
-        .animation(Motion.content, value: size.isAutomatic)
         .padding(.vertical, 6)
     }
 
@@ -60,52 +39,20 @@ struct AnchorSizeEditor: View {
 
     private static func title(_ preset: AnchorSizePreset) -> String {
         switch preset {
-        case .automatic: String(localized: "Automatic")
         case .small: String(localized: "Small")
         case .medium: String(localized: "Medium")
         case .large: String(localized: "Large")
         case .tall: String(localized: "Tall")
         case .wide: String(localized: "Wide")
-        case .custom: String(localized: "Custom")
+        case .automatic, .custom: ""
         }
     }
 
-    /// The bar's pick: a named size, Automatic, or Custom (the size on show, to set by hand).
+    /// The bar's pick: nothing shows as picked while a size saved earlier (Automatic, by hand) is in use.
     private var choice: Binding<AnchorSizePreset> {
         Binding(get: { size.choice }, set: { picked in
-            draft = nil
-            withAnimation(Motion.content) {
-                switch picked {
-                case .automatic: size = AnchorSizePreference()
-                case .custom:
-                    let shown = size.size(on: screen)
-                    size = AnchorSizePreference(width: Double(shown.width), height: Double(shown.height))
-                default: size = AnchorSizePreference(preset: picked)
-                }
-            }
+            withAnimation(Motion.content) { size = AnchorSizePreference(preset: picked) }
         })
-    }
-
-    /// A width or height slider: the picture follows while it is dragged, the size is written when let go.
-    private func dimensionSlider(_ title: LocalizedStringKey, _ axis: WritableKeyPath<CGSize, CGFloat>, range: ClosedRange<CGFloat>) -> some View {
-        // Its title, the slider across the rest, the value: the three close together.
-        HStack(spacing: 12) {
-            Text(title)
-                .frame(width: 56, alignment: .leading)
-            Slider(value: Binding(get: { Double(current[keyPath: axis]) }, set: { value in
-                var next = current
-                next[keyPath: axis] = CGFloat(value).rounded()
-                guard next != current else { return }
-                if isSliding { draft = next } else { write(next) }
-            }), in: Double(range.lowerBound)...Double(range.upperBound)) { editing in
-                isSliding = editing
-                if !editing { commit() }
-            }
-            .labelsHidden()
-            .tint(Color.islandAccent)
-            ReservedWidthText("\(Int(current[keyPath: axis])) pt", fitting: ["8888 pt"])
-                .foregroundStyle(SettingsPalette.secondary)
-        }
     }
 
     @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
@@ -115,9 +62,9 @@ struct AnchorSizeEditor: View {
         let screenSize = CGSize(width: screen.frame.width * scale, height: screen.frame.height * scale)
         let band = screen.band * scale
         let window = CGSize(width: current.width * scale, height: current.height * scale)
-        // As `AnchorStageLayout`: under the window a slim bar and the picture as high as it allows;
-        // beside the notch the picture where the window is and the band above it black.
-        let barHeight = onTop && bar == .belowWindow ? AnchorStageLayout.barHeight * scale : 0
+        // As `AnchorStageLayout`: raised, a slim bar under the window and the picture as high as it
+        // allows; else the picture where the window is and the band above it black.
+        let barHeight = onTop && isRaised ? AnchorStageLayout.barHeight * scale : 0
         let top = onTop ? max(0, band - barHeight) : band
         let stage = CGRect(x: (screenSize.width - window.width) / 2 - AnchorStageLayout.shoulder * scale, y: onTop ? 0 : band,
                            width: window.width + 2 * AnchorStageLayout.shoulder * scale,
@@ -141,12 +88,11 @@ struct AnchorSizeEditor: View {
                 .shadow(color: .black.opacity(onTop ? 0 : 0.35), radius: 4, y: 2)
                 .offset(x: stage.minX + AnchorStageLayout.shoulder * scale, y: top)
             // The notch; with the name and Release beside it, as wide as those.
-            let notch = (screen.notch.width + (onTop && bar == .menuBar ? 2 * Self.earWidth : 0)) * scale
+            let notch = (screen.notch.width + (onTop ? 2 * Self.earWidth : 0)) * scale
             UnevenRoundedRectangle(bottomLeadingRadius: 4, bottomTrailingRadius: 4, style: .continuous)
                 .fill(.black)
                 .frame(width: notch, height: band)
                 .offset(x: (screenSize.width - notch) / 2)
-            handles(stage: stage, windowBottom: top + window.height)
         }
         .frame(width: screenSize.width, height: screenSize.height, alignment: .topLeading)
         .clipShape(.rect(cornerRadius: 10, style: .continuous))
@@ -170,51 +116,5 @@ struct AnchorSizeEditor: View {
         }
         .frame(width: size.width, height: size.height)
         .clipShape(.rect(cornerRadius: 5, style: .continuous))
-    }
-
-    /// The sides (together) and the bottom edge.
-    private func handles(stage: CGRect, windowBottom: CGFloat) -> some View {
-        let scale = scale
-        return ZStack(alignment: .topLeading) {
-            ForEach([-1.0, 1.0], id: \.self) { side in
-                Capsule()
-                    .fill(.white)
-                    .frame(width: 5, height: 22)
-                    .shadow(radius: 1)
-                    .position(x: side < 0 ? stage.minX + AnchorStageLayout.shoulder * scale : stage.maxX - AnchorStageLayout.shoulder * scale,
-                              y: (stage.minY + windowBottom) / 2)
-                    .gesture(DragGesture().onChanged { value in
-                        let width = (size.size(on: screen).width + 2 * side * value.translation.width / scale)
-                        draft = CGSize(width: Self.clamp(width, AnchorSizePreference.widthRange, screen.frame.width), height: current.height)
-                    }.onEnded { _ in commit() })
-                    .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
-            }
-            Capsule()
-                .fill(.white)
-                .frame(width: 22, height: 5)
-                .shadow(radius: 1)
-                .position(x: stage.midX, y: windowBottom)
-                .gesture(DragGesture().onChanged { value in
-                    let height = size.size(on: screen).height + value.translation.height / scale
-                    draft = CGSize(width: current.width,
-                                   height: Self.clamp(height, AnchorSizePreference.heightRange, screen.frame.height - 2 * screen.band))
-                }.onEnded { _ in commit() })
-                .onHover { inside in if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }
-        }
-    }
-
-    private static func clamp(_ value: CGFloat, _ range: ClosedRange<Double>, _ most: CGFloat) -> CGFloat {
-        min(max(value, CGFloat(range.lowerBound)), min(CGFloat(range.upperBound), most)).rounded()
-    }
-
-    private func commit() {
-        guard let draft else { return }
-        write(draft)
-        self.draft = nil
-    }
-
-    /// A size set by hand: Custom from then on.
-    private func write(_ value: CGSize) {
-        size = AnchorSizePreference(width: Double(value.width), height: Double(value.height))
     }
 }

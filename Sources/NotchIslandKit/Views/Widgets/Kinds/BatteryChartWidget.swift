@@ -40,7 +40,7 @@ struct BatteryChartWidget: View {
                     if widget.shows(.label) {
                         WidgetLabel(id: .label, text: Self.caption, widget: widget, size: Self.captionPoints, weight: .medium,
                                     isSecondary: true) {
-                            Text(Self.caption).font(.system(size: Self.captionPoints, weight: .medium)).clearTextEdge().foregroundStyle(.secondary)
+                            Text(Self.caption).font(.system(size: Self.captionPoints, weight: .medium)).foregroundStyle(.secondary)
                         }
                         .movableElement(.label, of: widget)
                     }
@@ -195,7 +195,6 @@ struct BatteryChartPlot: View {
                         }
                     }
                     .frame(width: Self.percentWidth, height: size.height, alignment: .topTrailing)
-                    .clearTextEdge()
                 }
             }
             if showsHours {
@@ -211,7 +210,6 @@ struct BatteryChartPlot: View {
                     }
                 }
                 .frame(width: lead + size.width, height: height, alignment: .topLeading)
-                .clearTextEdge()
             }
         }
         .padding(.top, top)

@@ -7,6 +7,49 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-11-01 01:30** — The `whats-new` skill is used at every commit and push, enforced by the hook
+  `Scripts/release-guard.py` (it brings the skill up and refuses when the versions disagree). *Asked for:
+  in no situation left out.* 0.8.8's Performance and most of its Fixes keep 0.8.7's, compared with 0.8.6:
+  it went out a day before, and nothing new was measured.
+- **2026-11-01 01:10** — The header menus' lists (Open Notch Styles, Open App Settings) lie over the page,
+  not in its header (`HeaderMenuBox`). *The header became the page's bar (`safeAreaBar`), and what stood
+  out of it drew but took no clicks: Open and Delete did nothing.* What's New has 4–12 cards a topic, in
+  full rows (2×2, 3×2, 4×2, 3×3, 4×3), its window as high as the rows, unfolding on Size's spring. *Asked for.*
+- **2026-11-01 00:40** — General has Save App Settings and Open App Settings, placed and drawn as Widgets'
+  notch style buttons. A save keeps every `ni2.` choice (boards and top bar too); saved lists, the shelf,
+  records and diagnostics stay out. Opening restarts the app and applies them first thing at launch
+  (`AppSettingsStore.applyPending`): every part reads its settings as it starts, and reloading each live
+  would be easy to get wrong. What was set before is kept in the list. *Asked for.*
+- **2026-11-01 00:10** — No outline round widget texts any more (`ClearTextEdge` removed): grey texts and
+  own-colour texts are drawn plainly on every surface. Replaces 2026-10-14 17:50. *Asked for.* The grey
+  bars' edge in Light Mode stays: it is on bars, not text.
+- **2026-10-31 23:50** — What's New from About stays the island's own window under the notch: Settings
+  changes into it, its cards coming in as How NotchIsland Works's do, and two fingers go between the
+  two (`AppModel.openWhatsNewFromSettings`). Opened after an update, it has no gesture. *Asked for.*
+- **2026-10-31 03:00** — What's New has the look and voice of How NotchIsland Works (`InfoPageShell`,
+  `InfoCardGrid`): big numbers, then a short card per change, by topic. On the island's own surface, 0.8 of Settings' width and as high as its rows (no gap below), tabs as on GitHub (Features,
+  Performance, Fixes, Good to Know), full rows of three. Every release writes it with the `whats-new` skill. *Asked for: the info page's build, style and wording were liked.*
+- **2026-10-31 02:20** — The anchored window's raise tab comes only after 0.2 s on the window's very top
+  edge (2 pt) beside the notch, see-through, and says "Move window up"/"Move window down". *Asked for:
+  a zone over the whole title bar brought it up at every pass, and white stood out.*
+- **2026-10-31 02:00** — Now Playing's picture in Live Activities follows the Width slider: drawn in
+  the pill's real sizes (`NowPlayingPicture`), not a photograph. *Asked for; a photograph cannot change
+  width, the one exception to the photographed pictures, as Spotlight's pictures are.*
+- **2026-10-31 01:30** — How NotchIsland Works changes topic only from its bar; two fingers sideways
+  are Settings' back and forward there too, and the page is a place of its own in that history
+  (`SettingsPlace.showsInfo`). The App Gallery has Recent and Apps titles, Recent in the middle. *Asked for.*
+- **2026-10-31 21:30** — Settings cut down, values kept: the switches taken out (Spotlight's Opening,
+  Suggestions, Files, Actions; drag to the notch; up to the top) keep what each user had saved. Named
+  Spotlight sizes became sliders, a saved name becoming its value. *Asked for; nobody's Mac should
+  change by itself because a row is gone.*
+- **2026-10-31 21:30** — The anchored window's name and Release are always beside the notch; a tab at
+  the window's top, shown by the pointer, raises the picture by the old bar's 22 pt and drags back down
+  (`ni2.anchor.raised`). A saved "under the window" is not carried over. *Asked for; without the way
+  back down the raise could not be undone.*
+- **2026-10-31 21:30** — The Now Playing width slider moves each ear by −10…+20 % of its own width
+  (34–46 pt on a 32 pt notch), not of the whole pill: 10 % of the pill would put the cover on the notch.
+  The cover and bars keep their size. *The request's "10 % in, 20 % out" read so; to change: `nowPlayingWidthRange`.*
+- **2026-10-31 21:30** — Update checks are fixed at twice a day, the old setting removed. *Asked for.*
 - **2026-10-31 00:40** — Replace macOS Spotlight on: the app list, every icon and the read lists stay
   in memory until the app quits (the lists are read again at an opening over 30 min after the last);
   off: all of it goes, the disk apps and Siri's pictures too; on again: read ahead again. *Asked for.*

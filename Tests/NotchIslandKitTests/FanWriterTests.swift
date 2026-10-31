@@ -284,7 +284,24 @@ struct ReleaseNotesTests {
             let titles = notes.items(section).map(\.title)
             #expect(Set(titles).count == titles.count)
         }
-        #expect(ReleaseNotes(version: "1", new: [], fixed: [.init(title: "a", detail: "b")], known: []).sections == [.fixed])
+        #expect(ReleaseNotes(version: "1", new: [], fixed: [.init(symbol: "star", tint: .white, title: "a", detail: "b")], known: []).sections == [.fixed])
+    }
+
+    /// The page opens after an update only for the version that runs (the `whats-new` skill).
+    @Test func theNotesAreForThisVersion() throws {
+        let plist = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Support/Info.plist")
+        let info = try #require(NSDictionary(contentsOf: plist))
+        #expect(info["CFBundleShortVersionString"] as? String == ReleaseNotes.current.version)
+    }
+
+    /// Asked for: no row left short, and three numbers or none (the `whats-new` skill).
+    @Test func everyTopicIsFullRows() {
+        let notes = ReleaseNotes.current
+        for section in notes.sections {
+            #expect(ReleaseNotes.allowedCounts.contains(notes.cardCount(section)), "\(section)")
+        }
+        #expect(notes.stats.count == 0 || notes.stats.count == 3)
     }
 
     @Test func thePageIsThePanelsButNeverInThePickerOrStored() {

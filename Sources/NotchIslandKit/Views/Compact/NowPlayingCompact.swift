@@ -33,7 +33,7 @@ struct NowPlayingCompact: View {
                 barWidth: glyphSide * Metrics.Compact.equalizerBarShare,
                 tint: media.artworkColor,
                 palette: media.artworkPalette,
-                // Settings ▸ General ▸ Music Bars: one choice on battery, one on the charger.
+                // Settings ▸ Live Activities ▸ Now Playing: one choice on battery, one on the charger.
                 listensToAudio: (onCharger ? model.preferences.musicBarsOnPower : model.preferences.musicBars) == .followMusic,
                 continuous: model.preferences.musicBarsContinuousOnPower && onCharger
             )

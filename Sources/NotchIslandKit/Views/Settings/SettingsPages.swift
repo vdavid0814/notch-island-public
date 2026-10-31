@@ -7,8 +7,8 @@ import SwiftUI
 
 // MARK: - General
 
-/// General and appearance on one page: how the island looks first (surface cards, size), then how
-/// it opens, how it behaves, and startup.
+/// General and appearance on one page: startup and behaviour first, then how the island looks and
+/// opens; its colour and the pictures' wallpaper last.
 struct GeneralSettingsPage: View {
     @Environment(AppModel.self) private var model
     @AppStorage(DesktopBackdropStyle.key) private var previewWallpaper: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
@@ -17,6 +17,39 @@ struct GeneralSettingsPage: View {
         @Bindable var preferences = model.preferences
         @Bindable var launchAtLogin = model.launchAtLogin
         Form {
+            Section("Startup") {
+                Toggle(isOn: $launchAtLogin.isEnabled) {
+                    InfoLabel("Open at login", "NotchIsland starts when you log in.")
+                }
+                if launchAtLogin.requiresApproval {
+                    LabeledContent {
+                        Button("Open Login Items…") { launchAtLogin.openLoginItemsSettings() }
+                    } label: {
+                        Text("Waiting for approval")
+                        Text("Allow NotchIsland in Login Items.")
+                    }
+                }
+                if let error = launchAtLogin.lastError {
+                    Text(error).font(.callout).foregroundStyle(SettingsPalette.secondary)
+                }
+                Toggle(isOn: $preferences.showMenuBarIcon) {
+                    InfoLabel("Show in menu bar", "The NotchIsland menu in the menu bar. Hidden, open NotchIsland from Finder or Spotlight to come back here.")
+                }
+            }
+
+            Section("Behavior") {
+                Toggle(isOn: $preferences.hideInFullscreen) {
+                    InfoLabel("Hide during full-screen video",
+                              preferences.showNowPlaying && preferences.showWebMedia
+                              ? "While a video plays in full screen nothing appears by itself. Hovering the notch still opens the island."
+                              : "Needs Now Playing and browser playback in Live Activities, which tell the island that a video is playing.")
+                }
+                .disabled(!preferences.showNowPlaying)
+                Toggle(isOn: $preferences.hapticsEnabled) {
+                    InfoLabel("Haptic feedback", "A light tap on the trackpad when the island opens, snaps or changes a value.")
+                }
+            }
+
             Section {
                 SurfacePicker(selection: $preferences.glassStyle, scale: preferences.scale, desktop: previewWallpaper)
                 if model.activity.isLowPowerMode {
@@ -27,13 +60,6 @@ struct GeneralSettingsPage: View {
                 }
             } header: {
                 InfoLabel("Appearance", "What the island is made of: Clear glass that follows the system's Liquid Glass, solid black like the hardware island, or black at the notch fading into the glass below it.")
-            }
-
-            Section {
-                ThemePicker(theme: $preferences.theme)
-                    .settingsCornerElement(radius: ThemePicker.swatch / 2)
-            } header: {
-                InfoLabel("Theme", "The island's colour, where the system's blue was: sliders, selections, active controls and the widgets' glow. A colour of its own, or Mix: two colours of your choice blended.")
             }
 
             Section {
@@ -54,7 +80,7 @@ struct GeneralSettingsPage: View {
                 InfoLabel("Size when open", "How large the island opens: the panel, its widgets and its controls. The pill beside the notch always matches the notch.")
             }
 
-            Section("Opening") {
+            Section("Opening and Animation") {
                 Toggle(isOn: $preferences.openOnHover) {
                     InfoLabel("Open on hover", "The island opens when the pointer rests on the notch. Off: it opens with a click.")
                 }
@@ -83,56 +109,11 @@ struct GeneralSettingsPage: View {
                 SettingPictureRow { GrowthPicture(duration: preferences.animationDuration) }
             }
 
-            Section("Behavior") {
-                Toggle(isOn: $preferences.hideInFullscreen) {
-                    InfoLabel("Hide during full-screen video",
-                              preferences.showNowPlaying && preferences.showWebMedia
-                              ? "While a video plays in full screen nothing appears by itself. Hovering the notch still opens the island."
-                              : "Needs Now Playing and browser playback in Live Activities, which tell the island that a video is playing.")
-                }
-                .disabled(!preferences.showNowPlaying)
-                Toggle(isOn: $preferences.hapticsEnabled) {
-                    InfoLabel("Haptic feedback", "A light tap on the trackpad when the island opens, snaps or changes a value.")
-                }
-            }
-
-            Section("Music Bars") {
-                Picker(selection: $preferences.musicBars) {
-                    ForEach(MusicBarsStyle.allCases) { Text($0.title).tag($0) }
-                } label: {
-                    InfoLabel("On battery", "Follow the Music: the bars move with what is playing — they listen to the Mac's sound (System Audio Recording; macOS shows a purple dot meanwhile). Nothing is recorded or kept. Animation: a set animation, nothing is listened to, the least energy.")
-                }
-                .choiceBar()
-                Picker(selection: $preferences.musicBarsOnPower) {
-                    ForEach(MusicBarsStyle.allCases) { Text($0.title).tag($0) }
-                } label: {
-                    InfoLabel("On the charger", "The same choice while the Mac is charging (a Mac without a battery always uses this one).")
-                }
-                .choiceBar()
-                Toggle(isOn: $preferences.musicBarsContinuousOnPower) {
-                    InfoLabel("Listen more often while charging", "On battery the bars listen 2 seconds in every 8 to save energy. On the charger they listen 0.8 seconds in every 1.8, so they follow the music closely.")
-                }
-                .disabled(preferences.musicBarsOnPower != .followMusic)
-            }
-
-            Section("Startup") {
-                Toggle(isOn: $launchAtLogin.isEnabled) {
-                    InfoLabel("Open at login", "NotchIsland starts when you log in.")
-                }
-                if launchAtLogin.requiresApproval {
-                    LabeledContent {
-                        Button("Open Login Items…") { launchAtLogin.openLoginItemsSettings() }
-                    } label: {
-                        Text("Waiting for approval")
-                        Text("Allow NotchIsland in Login Items.")
-                    }
-                }
-                if let error = launchAtLogin.lastError {
-                    Text(error).font(.callout).foregroundStyle(SettingsPalette.secondary)
-                }
-                Toggle(isOn: $preferences.showMenuBarIcon) {
-                    InfoLabel("Show in menu bar", "The NotchIsland menu in the menu bar. Hidden, open NotchIsland from Finder or Spotlight to come back here.")
-                }
+            Section {
+                ThemePicker(theme: $preferences.theme)
+                    .settingsCornerElement(radius: ThemePicker.swatch / 2)
+            } header: {
+                InfoLabel("Theme", "The island's colour, where the system's blue was: sliders, selections, active controls and the widgets' glow. A colour of its own, or Mix: two colours of your choice blended.")
             }
 
             Section {
@@ -366,7 +347,7 @@ private struct NoticeDuration: View {
 }
 
 /// A number chosen with the system's stepper, its value beside it.
-private struct RowsStepper: View {
+struct RowsStepper: View {
     let title: String
     let detail: String
     @Binding var value: Int
@@ -414,6 +395,42 @@ struct DurationSlider: View {
     }
 }
 
+/// A slider with its value beside it, written when let go: while it is dragged only `draft` moves
+/// (a picture can follow that), so a drag does not rewrite the setting and everything that observes
+/// it at every step. Clicks and keys write at once.
+struct ValueSlider: View {
+    let value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    let format: (Double) -> String
+    @Binding var draft: Double?
+    let set: (Double) -> Void
+
+    @State private var isSliding = false
+
+    var body: some View {
+        let shown = draft ?? value
+        HStack {
+            Slider(value: Binding(get: { shown }, set: { new in
+                let snapped = min(max((new / step).rounded() * step, range.lowerBound), range.upperBound)
+                guard snapped != shown else { return }
+                if isSliding { draft = snapped } else { set(snapped) }
+            }), in: range) { editing in
+                isSliding = editing
+                if !editing, let draft {
+                    set(draft)
+                    self.draft = nil
+                }
+            }
+            .labelsHidden()
+            .tint(Color.islandAccent)
+            .frame(minWidth: 160, maxWidth: 240)
+            ReservedWidthText(format(shown), fitting: [format(range.lowerBound), format(range.upperBound), format(1)])
+                .foregroundStyle(SettingsPalette.secondary)
+        }
+    }
+}
+
 /// A value beside a slider or a stepper, as wide as the widest it can read: sized by the text on
 /// show, "1,500 ms" pushed the slider shorter than "120 ms" did, so the slider changed length
 /// under the pointer while it was being dragged.
@@ -443,28 +460,19 @@ struct ReservedWidthText: View {
 
 struct ActivitiesSettingsPage: View {
     @Environment(AppModel.self) private var model
+    @State private var nowPlayingWidthDraft: Double?
 
-    /// The stage is told at once, while a window is up.
-    private var anchorBar: Binding<AnchorBarPlacement> {
-        Binding(get: { model.preferences.anchorBar }, set: { placement in
-            model.preferences.anchorBar = placement
-            model.anchorMirror.setBar(placement)
-        })
-    }
-
-    /// Turning the live copy on is what asks for Screen Recording.
-    private var anchorMirror: Binding<Bool> {
-        Binding(get: { model.preferences.anchorMirror }, set: { on in
-            model.preferences.anchorMirror = on
-            if on { model.anchorMirror.requestAccess() }
-        })
+    /// "−10 %", "Usual", "+20 %".
+    private static func widthChange(_ value: Double) -> String {
+        let percent = Int(((value - 1) * 100).rounded())
+        return percent == 0 ? String(localized: "Usual") : percent < 0 ? "−\(-percent) %" : "+\(percent) %"
     }
 
     var body: some View {
         @Bindable var preferences = model.preferences
         Form {
             Section("Now Playing") {
-                SettingPictureRow { ActivityPicture(activity: .nowPlaying) { NowPlayingPicture() } }
+                SettingPictureRow { NowPlayingPicture(width: nowPlayingWidthDraft ?? preferences.nowPlayingWidth) }
                 Toggle(isOn: $preferences.showNowPlaying) {
                     InfoLabel("Show what's playing", "The cover beside the notch and moving level bars while something plays, with the playback controls when the island opens.")
                 }
@@ -472,6 +480,29 @@ struct ActivitiesSettingsPage: View {
                     InfoLabel("Browser and video playback", "YouTube and other videos in Safari and other browsers, and video apps like QuickTime or IINA. Read only while one of them is open, to save battery; Music and Spotify always report on their own.")
                 }
                 .disabled(!preferences.showNowPlaying)
+                LabeledContent {
+                    ValueSlider(value: preferences.nowPlayingWidth, range: Preferences.nowPlayingWidthRange, step: 0.01,
+                                format: Self.widthChange, draft: $nowPlayingWidthDraft) { preferences.nowPlayingWidth = $0 }
+                } label: {
+                    InfoLabel("Width", "How far the cover and the music bars sit from the notch: from a tenth closer to a fifth further out than usual.")
+                }
+                .disabled(!preferences.showNowPlaying)
+                Picker(selection: $preferences.musicBars) {
+                    ForEach(MusicBarsStyle.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    InfoLabel("Music bars on battery", "Follow the Music: the bars move with what is playing — they listen to the Mac's sound (System Audio Recording; macOS shows a purple dot meanwhile). Nothing is recorded or kept. Animation: a set animation, nothing is listened to, the least energy.")
+                }
+                .choiceBar()
+                Picker(selection: $preferences.musicBarsOnPower) {
+                    ForEach(MusicBarsStyle.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    InfoLabel("Music bars on the charger", "The same choice while the Mac is charging (a Mac without a battery always uses this one).")
+                }
+                .choiceBar()
+                Toggle(isOn: $preferences.musicBarsContinuousOnPower) {
+                    InfoLabel("Listen more often while charging", "On battery the bars listen 2 seconds in every 8 to save energy. On the charger they listen 0.8 seconds in every 1.8, so they follow the music closely.")
+                }
+                .disabled(preferences.musicBarsOnPower != .followMusic)
             }
 
             Section("AirPods") {
@@ -526,27 +557,10 @@ struct ActivitiesSettingsPage: View {
 
             Section("Window Anchor") {
                 Toggle(isOn: $preferences.anchorEnabled) {
-                    InfoLabel("Anchor a window under the notch", "Holds another app's window centred under the notch: moved, it goes back; resized, it stays centred at its new size; dragged well away, zoomed or closed, it is let go. From the menu bar item, Spotlight (\u{201C}Anchor Front Window\u{201D}) or by dragging. Needs Accessibility.")
+                    InfoLabel("Anchor a window under the notch", "Holds another app's window centred under the notch: moved, it goes back; resized, it stays centred at its new size; dragged well away, zoomed or closed, it is let go. From the menu bar item, Spotlight (\u{201C}Anchor Front Window\u{201D}) or by dragging it just under the notch. On the window, the pointer at its top brings a tab: drag it up to take the window up to the screen's top. Needs Accessibility and Screen Recording.")
                 }
-                Toggle(isOn: $preferences.anchorByDrag) {
-                    InfoLabel("Drag a window to the notch", "While you drag a window by its title bar, letting it go just under the notch anchors it. The island shows where it will land.")
-                }
-                .disabled(!preferences.anchorEnabled)
-                Toggle(isOn: anchorMirror) {
-                    InfoLabel("Up to the top of the screen", "The window reaches the screen's top edge, in line with the menu bar and the notch, on a stage that grows out of the notch. macOS keeps other apps' windows under the menu bar, so what you see there is a live copy, and your clicks, scrolls and typing go through to the real window behind it. Needs Screen Recording (macOS shows its screen-sharing indicator meanwhile). Off: the window itself, right under the menu bar.")
-                }
-                .disabled(!preferences.anchorEnabled)
-                Picker(selection: anchorBar) {
-                    Text("Beside the Notch").tag(AnchorBarPlacement.menuBar)
-                    Text("Under the Window").tag(AnchorBarPlacement.belowWindow)
-                } label: {
-                    InfoLabel("App name and Release", "Where the anchored app's name and the Release button sit while the window is up at the top. Beside the notch: in the menu bar's band on both sides of the notch (past what is playing, when that shows there), the window right under it and nothing below. Under the window: a slim bar under it, the window up to the screen's top.")
-                }
-                .choiceBar()
-                .fixedSize()
-                .disabled(!preferences.anchorEnabled || !preferences.anchorMirror)
                 AnchorSizeEditor(size: $preferences.anchorSize, screen: model.anchorScreenForSettings, onTop: preferences.anchorMirror,
-                                 bar: preferences.anchorBar)
+                                 isRaised: preferences.anchorRaised)
                     .disabled(!preferences.anchorEnabled)
                     .opacity(preferences.anchorEnabled ? 1 : 0.5)
                 if preferences.anchorEnabled, !model.permissions.accessibilityTrusted {
@@ -647,58 +661,9 @@ struct SiriSettingsPage: View {
                 Text("Spotlight in the Notch")
             }
 
-            Section {
-                Toggle(isOn: $preferences.siri.shortcutCloses) {
-                    InfoLabel("Shortcut again closes Spotlight", "Like the system's search: the same keys close Spotlight. Off, they only open it and Esc closes it.")
-                }
-                .disabled(!preferences.commandSpaceOpensSiri)
-                Toggle(isOn: $preferences.siri.swipeOpens) {
-                    InfoLabel("Swipe down on the notch", "With the pointer on the notch, a light two-finger swipe down on the trackpad (or the mouse wheel turned down) opens Spotlight.")
-                }
-                Toggle(isOn: $preferences.siri.hoverRevealsSuggestions) {
-                    InfoLabel("Show suggestions on hover", "With the pointer over Spotlight, Applications, Files and Actions come down under the field. Off, only ↓ brings them.")
-                }
-                LabeledContent("Open Spotlight now") {
-                    Button("Open") {
-                        model.controller.closeSettings()
-                        model.perform(.assistant)
-                    }
-                }
-            } header: {
-                Text("Opening")
-            }
+            SpotlightWindowSection(settings: $preferences.siri)
 
-            Section {
-                Picker(selection: $preferences.siri.panelSize) {
-                    ForEach(SiriPanelSize.allCases) { Text($0.title).tag($0) }
-                } label: {
-                    InfoLabel("Width", "How wide Spotlight's window grows out of the notch. The island's own size (General) scales it too.")
-                }
-                .choiceBar()
-                RowsStepper(title: "List height", detail: "How many results — and how much of an answer — show before the list scrolls.",
-                            value: $preferences.siri.listRows, range: SiriSettings.listRowsRange, unit: "rows")
-            } header: {
-                Text("Window")
-            }
-
-            Section("App Gallery") {
-                Picker(selection: $preferences.siri.gallerySort) {
-                    ForEach(SiriGallerySort.allCases) { Text($0.title).tag($0) }
-                } label: {
-                    InfoLabel("Order", "The apps in the gallery (⌘1): the ones you used last first, or alphabetically.")
-                }
-                .choiceBar()
-                Picker(selection: $preferences.siri.galleryIconSize) {
-                    ForEach(SiriGalleryIconSize.allCases) { Text($0.title).tag($0) }
-                } label: {
-                    InfoLabel("Icon size", "How large the apps are in the gallery (⌘1). Its window grows with them, so the same number of apps fits in a row.")
-                }
-                .choiceBar()
-                RowsStepper(title: "Columns", detail: "Apps in a row. The gallery's window widens with them.",
-                            value: $preferences.siri.galleryColumns, range: SiriSettings.galleryColumnsRange, unit: "apps")
-                RowsStepper(title: "Rows", detail: "Rows of apps shown before the gallery scrolls: the gallery's height.",
-                            value: $preferences.siri.galleryRows, range: SiriSettings.galleryRowsRange, unit: "rows")
-            }
+            SpotlightGallerySection(settings: $preferences.siri)
 
             Section {
                 LabeledContent {
@@ -719,81 +684,6 @@ struct SiriSettingsPage: View {
             } header: {
                 Text("Search")
             }
-
-            Section {
-                Toggle(isOn: $preferences.siri.showsApplications) {
-                    InfoLabel("Applications  ⌘1", "Apps in search results, and the app gallery.")
-                }
-                Toggle(isOn: $preferences.siri.showsFiles) {
-                    InfoLabel("Files  ⌘2", "Documents in search results, and your recent files.")
-                }
-                Toggle(isOn: $preferences.siri.showsActions) {
-                    InfoLabel("Actions  ⌘3", "The island's actions and your shortcuts in search results.")
-                }
-                Toggle(isOn: $preferences.siri.showsClipboard) {
-                    InfoLabel("Clipboard  ⌘4", "The last 50 texts you copied, kept on this Mac; Return pastes one where you were typing. Copies that password managers mark as secret are never kept. Off, nothing is watched.")
-                }
-                Toggle(isOn: $preferences.siri.showsSystem) {
-                    InfoLabel("System  ⌘5", "The island's commands (\u{201C}timer 10\u{201D} starts one), Control Center's switches with their state, Lock, Sleep, Restart, Empty Trash and System Settings' panes, found by name. Restart, Shut Down and Log Out ask first; Empty Trash asks for a second Return.")
-                }
-                Toggle(isOn: $preferences.siri.showsWindows) {
-                    InfoLabel("Windows  ⌘6", "Your open apps and their windows: Return switches to one, ⌘H hides its app, ⌘Q quits it. Read only while Spotlight lists them; window names need Accessibility.")
-                }
-                Toggle(isOn: $preferences.siri.showsEmoji) {
-                    InfoLabel("Emoji  ⌘7", "Emoji by name (\u{201C}thumbs up\u{201D}, \u{201C}fire\u{201D}): Return pastes one where you were typing, ⌘C copies it.")
-                }
-                Toggle(isOn: $preferences.siri.showsPeople) {
-                    InfoLabel("People & Calendar  ⌘8", "Your contacts (call, message, email, copy) and your coming events. Each is read only after you allow it from its own row there, only while Spotlight is open, and never leaves this Mac.")
-                }
-                Toggle(isOn: $preferences.siri.showsDefinitions) {
-                    InfoLabel("Dictionary", "A word typed alone is looked up in your Mac's dictionaries: Return shows the whole entry.")
-                }
-                Toggle(isOn: $preferences.siri.showsBookmarks) {
-                    InfoLabel("Bookmarks", "Your browsers' bookmarks in search results: Chrome's, Arc's and Brave's, and Safari's where macOS lets NotchIsland read them. Read from their files while Spotlight is open; history is never read.")
-                }
-                Toggle(isOn: $preferences.siri.convertsCurrency) {
-                    InfoLabel("Currencies", "\u{201C}100 usd in eur\u{201D}: the European Central Bank's daily rates, fetched at most once a day and only when you type a currency. What you type is never sent.")
-                }
-            } header: {
-                InfoLabel("Suggestions", "What Spotlight lists and searches. A suggestion that is off does not open with its shortcut either.")
-            }
-
-            Section {
-                ForEach(SiriFolder.allCases) { folder in
-                    Toggle(isOn: Binding(
-                        get: { preferences.siri.folders.contains(folder) },
-                        set: { on in
-                            if on { preferences.siri.folders.insert(folder) } else { preferences.siri.folders.remove(folder) }
-                        }
-                    )) {
-                        Label(folder.title, systemImage: folder.systemImage)
-                    }
-                }
-                Toggle(isOn: $preferences.siri.searchesFileContents) {
-                    InfoLabel("Search Inside Files", "Also find files by what they say, from three letters on. Files named after the word come first.")
-                }
-                Picker(selection: $preferences.siri.recentDays) {
-                    ForEach(SiriSettings.recentDayChoices, id: \.self) { days in
-                        Text(days == 7 ? "Last Week" : days == 30 ? "Last Month" : "Last 3 Months").tag(days)
-                    }
-                } label: {
-                    InfoLabel("Recent files", "How far back the Files suggestion (⌘2) lists the files you used.")
-                }
-                .choiceBar()
-            } header: {
-                InfoLabel("Files", "The folders Spotlight searches for files. macOS asks for access to Desktop, Documents, Downloads and iCloud Drive the first time. On a file, Space or ⌘Y previews it and ⌘R shows it in Finder.")
-            }
-            .disabled(!siri.showsFiles)
-
-            Section("Actions") {
-                Toggle(isOn: $preferences.siri.includesIslandActions) {
-                    InfoLabel("Island actions", "Play, Pause, Next, Timer, Stopwatch, Shelf and Settings, found by name.")
-                }
-                Toggle(isOn: $preferences.siri.includesShortcuts) {
-                    InfoLabel("Your shortcuts", "Every shortcut from the Shortcuts app, found by name and run in the background.")
-                }
-            }
-            .disabled(!siri.showsActions)
 
             Section("Answers") {
                 LabeledContent {
@@ -864,10 +754,7 @@ private struct UpdateSection: View {
             }
             if ReleaseNotes.current.version == updater.current {
                 LabeledContent("What this version brought") {
-                    Button("What's New…") {
-                        model.controller.closeSettings()
-                        model.controller.showWhatsNew()
-                    }
+                    Button("What's New…") { model.openWhatsNewFromSettings() }
                 }
             }
             switch updater.state {
@@ -946,23 +833,6 @@ private struct UpdateSection: View {
                         .foregroundStyle(.primary)
                 }
             }
-            LabeledContent {
-                HStack {
-                    Slider(value: Binding(get: { Double(updater.checksPerDay) }, set: { new in
-                        let count = Int(new.rounded())
-                        if count != updater.checksPerDay { updater.checksPerDay = count }
-                    }), in: Double(AppUpdater.checksPerDayRange.lowerBound)...Double(AppUpdater.checksPerDayRange.upperBound))
-                    .labelsHidden()
-                    .tint(Color.islandAccent)
-                    .frame(minWidth: 160, maxWidth: 240)
-                    ReservedWidthText(SettingsFormat.checksPerDay(updater.checksPerDay),
-                                      fitting: [SettingsFormat.checksPerDay(AppUpdater.checksPerDayRange.lowerBound),
-                                                SettingsFormat.checksPerDay(AppUpdater.checksPerDayRange.upperBound)])
-                        .foregroundStyle(SettingsPalette.secondary)
-                }
-            } label: {
-                InfoLabel("Automatic checks", "How often NotchIsland looks for a new version on its own: now \(SettingsFormat.checkInterval(perDay: updater.checksPerDay)). Each look is one small request to GitHub.")
-            }
         } header: {
             Text("Updates")
         } footer: {
@@ -1017,10 +887,8 @@ private struct UpdateSection: View {
 
 struct AboutSettingsPage: View {
     @Environment(AppModel.self) private var model
-    @State private var isConfirmingClear = false
 
     var body: some View {
-        let count = model.shelf.items.count
         Form {
             UpdateSection()
 
@@ -1029,37 +897,6 @@ struct AboutSettingsPage: View {
             PermissionsSection()
 
             DiagnosticsSection()
-
-            Section("Shelf") {
-                LabeledContent("Items on the Shelf") {
-                    Text(count.formatted()).foregroundStyle(SettingsPalette.secondary)
-                }
-                LabeledContent("Remove every item") {
-                    Button("Clear Shelf…", role: .destructive) { isConfirmingClear = true }
-                        .disabled(count == 0)
-                        .popover(isPresented: $isConfirmingClear, arrowEdge: .trailing) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Clear the Shelf?").font(.headline)
-                                Text("All items are removed from the Shelf. The files themselves are not touched.")
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                HStack {
-                                    Spacer()
-                                    Button("Cancel") { isConfirmingClear = false }
-                                        .keyboardShortcut(.cancelAction)
-                                    Button("Clear Shelf", role: .destructive) {
-                                        model.shelf.clear()
-                                        isConfirmingClear = false
-                                    }
-                                    .keyboardShortcut(.defaultAction)
-                                }
-                            }
-                            .padding()
-                            .frame(width: 280)
-                        }
-                }
-            }
         }
     }
 }

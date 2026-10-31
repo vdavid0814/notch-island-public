@@ -237,7 +237,7 @@ nonisolated extension BannerKind {
         // A page asked for by name (a file dragged to the shelf, `open?page=`) is the panel, also
         // while recording; the pointer and a plain open bring the recording card then.
         if page != nil, model.recorder.isRecording || model.updater.notice != nil { wantsPanelWhileRecording = true }
-        if let page, model.island.page != page, model.availablePages.contains(page) || page == .whatsNew { model.island.show(page) }
+        if let page, model.island.page != page, model.availablePages.contains(page) || page == .whatsNew || page == .appInfo { model.island.show(page) }
         if pinned, !model.island.isPinned { model.island.isPinned = true }
         // Opened without a page asked for, on one the user has since hidden from the picker: the
         // first page it offers.
@@ -262,6 +262,17 @@ nonisolated extension BannerKind {
     /// (Done, a click elsewhere, another page).
     func showWhatsNew() {
         expand(page: .whatsNew, pinned: true, userInitiated: false)
+    }
+
+    /// The same in Settings' place, one change of the island (`AppModel.openWhatsNewFromSettings`).
+    func showWhatsNewOverSettings() {
+        wantsSettings = false
+        expand(page: .whatsNew, pinned: true, userInitiated: true)
+    }
+
+    /// How NotchIsland works and what it costs (`AppInfoPage`), kept open the same way.
+    func showAppInfo() {
+        expand(page: .appInfo, pinned: true, userInitiated: true)
     }
 
     // MARK: Recording

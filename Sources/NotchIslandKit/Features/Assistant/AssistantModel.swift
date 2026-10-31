@@ -460,7 +460,7 @@ nonisolated struct FileScope: Sendable, Equatable {
     /// Columns of the Applications gallery (↑/↓ move by a row of them).
     var galleryColumns: Int { settings().galleryColumns }
     /// The gallery's icon side (Settings ▸ Spotlight ▸ App Gallery).
-    var galleryIconSize: CGFloat { settings().galleryIconSize.points }
+    var galleryIconSize: CGFloat { CGFloat(settings().galleryIcon) }
 
     /// Apple Intelligence answers here: it is available and the user has not turned it off.
     private var answersWithIntelligence: Bool { intelligenceAvailable && settings().usesIntelligence }
@@ -564,11 +564,9 @@ nonisolated struct FileScope: Sendable, Equatable {
                          events: [CalendarEvent]) -> [AssistantRow] {
         switch category {
         case .applications:
-            let gallery = settings.gallerySort == .name
-                ? allApps.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-                : allApps
-            guard !text.isEmpty else { return gallery.map(AssistantRow.hit) }
-            return AssistantSearch.rank(gallery.filter { AssistantMatch.matches($0.name, text, settings.matching) }, for: text)
+            let gallery = AssistantGallery(apps: allApps, sort: settings.gallerySort, columns: settings.galleryColumns)
+            guard !text.isEmpty else { return gallery.all.map(AssistantRow.hit) }
+            return AssistantSearch.rank((gallery.main + gallery.other).filter { AssistantMatch.matches($0.name, text, settings.matching) }, for: text)
                 .map(AssistantRow.hit)
         case .files:
             return files.map(AssistantRow.hit)
@@ -886,7 +884,7 @@ nonisolated struct FileScope: Sendable, Equatable {
             : allApps
         for hit in gallery.prefix(icons) {
             guard keepsLists() else { return releaseKept() }
-            _ = await AssistantIcons.thumbnail(for: hit, points: settings().galleryIconSize.points, prewarming: true)
+            _ = await AssistantIcons.thumbnail(for: hit, points: CGFloat(settings().galleryIcon), prewarming: true)
         }
         guard keepsLists() else { return releaseKept() }
         await readListsAhead()
@@ -1018,6 +1016,19 @@ nonisolated struct FileScope: Sendable, Equatable {
 
     /// ↑/↓ (and ←/→ in the gallery). The first press on the bare field brings the suggestions down
     /// with the first one selected.
+    /// The gallery's sections as cells in `rows` (`AssistantGallery`); nil while searching in it.
+    var gallerySections: AssistantGallery? {
+        guard category == .applications, trimmedQuery.isEmpty else { return nil }
+        return AssistantGallery(apps: allApps, sort: settings().gallerySort, columns: galleryColumns)
+    }
+
+    /// ↑/↓ in the gallery: a row, the sections' short rows taken into account.
+    func moveGalleryRow(by delta: Int) {
+        guard rowsAreShowing, let sections = gallerySections else { return moveSelection(by: delta * galleryColumns) }
+        revealsSuggestions = true
+        mark(AssistantGallery.index(from: selection, rows: delta, counts: sections.counts, columns: galleryColumns))
+    }
+
     func moveSelection(by delta: Int) {
         guard answer == nil else { return }
         if !rowsAreShowing {

@@ -214,6 +214,90 @@ struct IslandSettingsView: View {
     }
 }
 
+/// The ⓘ beside About's title: grows into how NotchIsland works, over the whole page, and back into
+/// the button when closed, as Open Notch Styles does (`NotchStylesMenu`).
+struct AppInfoMenu: View {
+    static let space = "appInfo"
+
+    @Environment(AppModel.self) private var model
+    @State private var isOpen = false
+    /// The page built only while it is open or on its way.
+    @State private var isBuilt = false
+    @State private var contentIn = false
+    @State private var buttonFrame: CGRect = .zero
+    /// The page's width, the title's bar being as wide.
+    @State private var pageWidth: CGFloat = 0
+
+    var body: some View {
+        let layout = model.layout
+        let top = layout.notch.height + IslandSettingsView.sidebarTop
+        let room = CGSize(width: pageWidth,
+                          height: layout.size(for: .settings).height - top - IslandSettingsView.sidebarGap)
+        let radius = isOpen ? WidgetVersionsMenu.radius : buttonFrame.height / 2
+        Button("How NotchIsland Works", systemImage: "info.circle", action: toggle)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .font(.system(size: 15))
+            .foregroundStyle(SettingsPalette.secondary)
+            .help("How it works, what it costs and what it does")
+            .opacity(isOpen ? 0 : 1)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { buttonFrame = $0 }
+            .onGeometryChange(for: CGFloat.self) { $0.bounds(of: .named(Self.space))?.width ?? 0 } action: { pageWidth = $0 }
+            .overlay(alignment: .topLeading) {
+                Group {
+                    if isBuilt {
+                        AppInfoPage(close: toggle)
+                            .padding(10)
+                            .frame(width: room.width, height: room.height)
+                            .opacity(contentIn ? 1 : 0)
+                            .blur(radius: contentIn ? 0 : 6)
+                            .offset(y: contentIn ? 0 : -10)
+                    }
+                }
+                .frame(width: isOpen ? room.width : buttonFrame.width, height: isOpen ? room.height : buttonFrame.height,
+                       alignment: .topLeading)
+                .background { SettingsBackdrop() }
+                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(isOpen ? 0.5 : 0), radius: 18, y: 8)
+                .offset(x: isOpen ? -buttonFrame.minX : 0, y: isOpen ? top - buttonFrame.minY : 0)
+                .opacity(isOpen ? 1 : 0)
+                .allowsHitTesting(isOpen)
+            }
+            // Another page, or Settings closed: it does not wait there.
+            .onSettingsPageVisit(shown: {}, hidden: {
+                isOpen = false
+                contentIn = false
+                isBuilt = false
+                if model.settingsInfo == .howItWorks { model.settingsHistory.withoutRecording { model.settingsInfo = nil } }
+            })
+            // Also by two fingers, a place in Settings' history of its own.
+            .onChange(of: model.settingsInfo) { _, open in follow(open == .howItWorks) }
+            .onAppear { follow(model.settingsInfo == .howItWorks) }
+    }
+
+    private func toggle() { model.settingsInfo = model.settingsInfo == .howItWorks ? nil : .howItWorks }
+
+    private func follow(_ open: Bool) {
+        guard open != isOpen else { return }
+        if isOpen {
+            withAnimation(.easeIn(duration: 0.12)) { contentIn = false }
+            withAnimation(.spring(duration: 0.38, bounce: 0.08).delay(0.06)) { isOpen = false }
+            Task {
+                try? await Task.sleep(for: .seconds(0.5))
+                if !isOpen { isBuilt = false }
+            }
+        } else {
+            isBuilt = true
+            withAnimation(WidgetVersionsMenu.unfold) { isOpen = true }
+            withAnimation(.spring(duration: 0.45, bounce: 0.1).delay(0.1)) { contentIn = true }
+        }
+    }
+}
+
 /// The close button at the notch's height, in Settings' own window: the window lies over the
 /// island's band, whose button it would take the clicks of.
 struct SettingsCloseBand: View {
@@ -316,6 +400,8 @@ struct SettingsBackdrop: View {
 private struct SettingsSidebar: View {
     @Binding var selection: IslandSettingsPane
 
+    @Environment(AppModel.self) private var model
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
@@ -338,10 +424,12 @@ private struct SettingsSidebar: View {
                 ForEach(Array(IslandSettingsPane.groups.enumerated()), id: \.offset) { _, group in
                     Section {
                         ForEach(group) { pane in
-                            Label {
-                                Text(pane.title).font(.system(size: 13.5, weight: .medium))
-                            } icon: {
-                                PaneTile(pane: pane, side: 24)
+                            HStack(spacing: 0) {
+                                Label {
+                                    Text(pane.title).font(.system(size: 13.5, weight: .medium))
+                                } icon: {
+                                    PaneTile(pane: pane, side: 24)
+                                }
                             }
                             .padding(.vertical, 3)
                             .padding(.horizontal, 6)
@@ -461,6 +549,21 @@ struct SettingsDetail: View {
             if pane != .widgets, width > 0, width != pageWidth { pageWidth = width }
         }
         .notchStylesDismissal(model, if: pane == .widgets)
+        .headerMenuDismissal(isOpen: pane == .general && model.studio.showsAppSettings, frame: model.studio.appSettingsFrame) {
+            model.studio.showsAppSettings = false
+        }
+        // Over the page, not in its header: what stands out of the page's bar takes no clicks.
+        .overlay(alignment: .topLeading) {
+            @Bindable var studio = model.studio
+            if pane == .widgets {
+                HeaderMenuBox(width: NotchStylesMenu.width, isOpen: $studio.showsNotchStyles, buttonFrame: studio.notchStylesButton,
+                              frame: $studio.notchStylesFrame) { close in NotchStylesPanel(close: close) }
+            } else if pane == .general {
+                HeaderMenuBox(width: NotchStylesMenu.width, isOpen: $studio.showsAppSettings, buttonFrame: studio.appSettingsButton,
+                              frame: $studio.appSettingsFrame) { close in AppSettingsPanel(close: close) }
+            }
+        }
+        .coordinateSpace(.named(NotchStylesMenu.space))
     }
 }
 
@@ -477,12 +580,18 @@ struct SettingsPageHeader: View {
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(pane.title).font(.system(size: 22, weight: .bold))
+                HStack(spacing: 8) {
+                    Text(pane.title).font(.system(size: 22, weight: .bold))
+                    if pane == .about { AppInfoMenu() }
+                }
+                // What it opens lies over the line under it.
+                .zIndex(1)
                 Text(pane.subtitle).font(.system(size: 13)).foregroundStyle(SettingsPalette.secondary)
             }
             .padding(.top, -Self.overCapitals)
             Spacer(minLength: 0)
             if pane == .widgets { NotchStyleButtons() }
+            if pane == .general { AppSettingsButtons() }
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 6)
@@ -505,6 +614,7 @@ struct SettingsPageHeader: View {
             }
             .allowsHitTesting(false)
         }
+        .coordinateSpace(.named(AppInfoMenu.space))
         // What has scrolled under the title is not clicked through it.
         .contentShape(.rect)
     }

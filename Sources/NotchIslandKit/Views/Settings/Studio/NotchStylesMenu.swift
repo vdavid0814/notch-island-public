@@ -34,7 +34,7 @@ struct NotchStyleButtons: View {
 }
 
 /// The page header's buttons: small, black, their edge a faint grey line.
-private struct HeaderOutlineButtonStyle: ButtonStyle {
+struct HeaderOutlineButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -67,76 +67,103 @@ private struct HeaderLabelStyle: LabelStyle {
 struct NotchStylesMenu: View {
     @Environment(AppModel.self) private var model
 
-    @State private var buttonSize: CGSize = .zero
-    @State private var listHeight: CGFloat = 0
-    /// The list in the box: in a moment after the box starts growing, out before it shrinks.
-    @State private var contentIn = false
-
     static let width: CGFloat = 380
 
     var body: some View {
-        let studio = model.studio
-        let isOpen = studio.showsNotchStyles
-        Button(action: toggle) {
-            Label("Open Notch Styles", systemImage: "rectangle.stack")
-                .frame(maxWidth: .infinity)
-        }
-        .help("The saved notch styles: open one, rename or delete it")
-        .opacity(isOpen ? 0 : 1)
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { buttonSize = $0 }
-        .overlay(alignment: .topTrailing) {
-            NotchStylesPanel(close: toggle)
-                // Settings' own buttons on the list, not the header's.
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
-                .frame(width: Self.width)
-                .fixedSize(horizontal: false, vertical: true)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                    // Open, the box unfolds to the list's new height rather than jumping to it.
-                    if studio.showsNotchStyles, listHeight > 0 {
-                        withAnimation(WidgetVersionsMenu.unfold) { listHeight = height }
-                    } else {
-                        listHeight = height
-                    }
-                }
-                // Comes up out of a blur and a little from above as the box opens around it.
-                .opacity(contentIn ? 1 : 0)
-                .blur(radius: contentIn ? 0 : 6)
-                .offset(y: contentIn ? 0 : -10)
-                .frame(width: isOpen ? Self.width : buttonSize.width, height: isOpen ? listHeight : buttonSize.height,
-                       alignment: .topTrailing)
-                .background { SettingsBackdrop() }
-                .clipShape(RoundedRectangle(cornerRadius: isOpen ? WidgetVersionsMenu.radius : buttonSize.height / 2, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: isOpen ? WidgetVersionsMenu.radius : buttonSize.height / 2, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-                }
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(NotchStylesMenu.space)) } action: {
-                    studio.notchStylesFrame = $0
-                }
-                .shadow(color: .black.opacity(isOpen ? 0.5 : 0), radius: 18, y: 8)
-                .opacity(isOpen ? 1 : 0)
-                .allowsHitTesting(isOpen)
-                .controlSize(.regular)
-        }
-        // Closed from elsewhere (a click beside it, another page): the list goes with it.
-        .onChange(of: isOpen) { _, open in
-            if !open, contentIn { withAnimation(.easeIn(duration: 0.12)) { contentIn = false } }
-        }
+        @Bindable var studio = model.studio
+        HeaderMenuButton(title: "Open Notch Styles", symbol: "rectangle.stack",
+                         help: "The saved notch styles: open one, rename or delete it",
+                         isOpen: $studio.showsNotchStyles, buttonFrame: $studio.notchStylesButton)
     }
 
     /// The space the open list's frame is measured in: the Settings page around it, where a click
     /// beside the list closes it (`NotchStylesDismissal`).
     static let space = "notchStyles"
+}
 
-    private func toggle() {
-        let studio = model.studio
-        if studio.showsNotchStyles {
-            withAnimation(.easeIn(duration: 0.12)) { contentIn = false }
-            withAnimation(.spring(duration: 0.38, bounce: 0.08).delay(0.06)) { studio.showsNotchStyles = false }
-        } else {
-            withAnimation(WidgetVersionsMenu.unfold) { studio.showsNotchStyles = true }
-            withAnimation(.spring(duration: 0.45, bounce: 0.1).delay(0.1)) { contentIn = true }
+/// The button of a page header's menu. The list it grows into lies over the page, not in the header
+/// (`HeaderMenuBox`): the header is the page's bar, and what stands out of a bar takes no clicks.
+struct HeaderMenuButton: View {
+    let title: LocalizedStringKey
+    let symbol: String
+    let help: LocalizedStringKey
+    @Binding var isOpen: Bool
+    @Binding var buttonFrame: CGRect
+
+    var body: some View {
+        Button {
+            if isOpen {
+                withAnimation(.spring(duration: 0.38, bounce: 0.08).delay(0.06)) { isOpen = false }
+            } else {
+                withAnimation(WidgetVersionsMenu.unfold) { isOpen = true }
+            }
+        } label: {
+            Label(title, systemImage: symbol)
+                .frame(maxWidth: .infinity)
+        }
+        .help(help)
+        .opacity(isOpen ? 0 : 1)
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(NotchStylesMenu.space)) } action: { buttonFrame = $0 }
+    }
+}
+
+/// What a header's menu grows into, down and to the left over the page, and back into the button
+/// when closed — as Open Widgets does in Customize (`WidgetVersionsMenu`), from the button's
+/// top-trailing corner, the window's edge being on its right.
+struct HeaderMenuBox<Panel: View>: View {
+    let width: CGFloat
+    @Binding var isOpen: Bool
+    let buttonFrame: CGRect
+    @Binding var frame: CGRect
+    @ViewBuilder let panel: (_ close: @escaping () -> Void) -> Panel
+
+    @State private var listHeight: CGFloat = 0
+    /// The list in the box: in a moment after the box starts growing, out before it shrinks.
+    @State private var contentIn = false
+
+    var body: some View {
+        let boxWidth = isOpen ? width : buttonFrame.width
+        let radius = isOpen ? WidgetVersionsMenu.radius : buttonFrame.height / 2
+        panel {
+            withAnimation(.spring(duration: 0.38, bounce: 0.08).delay(0.06)) { isOpen = false }
+        }
+        // Settings' own buttons on the list, not the header's.
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .frame(width: width)
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            // Open, the box unfolds to the list's new height rather than jumping to it.
+            if isOpen, listHeight > 0 {
+                withAnimation(WidgetVersionsMenu.unfold) { listHeight = height }
+            } else {
+                listHeight = height
+            }
+        }
+        // Comes up out of a blur and a little from above as the box opens around it.
+        .opacity(contentIn ? 1 : 0)
+        .blur(radius: contentIn ? 0 : 6)
+        .offset(y: contentIn ? 0 : -10)
+        .frame(width: boxWidth, height: isOpen ? listHeight : buttonFrame.height, alignment: .topTrailing)
+        .background { SettingsBackdrop() }
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+        }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(NotchStylesMenu.space)) } action: { frame = $0 }
+        .shadow(color: .black.opacity(isOpen ? 0.5 : 0), radius: 18, y: 8)
+        .opacity(isOpen ? 1 : 0)
+        .allowsHitTesting(isOpen)
+        .controlSize(.regular)
+        .offset(x: buttonFrame.maxX - boxWidth, y: buttonFrame.minY)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onChange(of: isOpen) { _, open in
+            if open {
+                withAnimation(.spring(duration: 0.45, bounce: 0.1).delay(0.1)) { contentIn = true }
+            } else {
+                withAnimation(.easeIn(duration: 0.12)) { contentIn = false }
+            }
         }
     }
 }
@@ -144,13 +171,18 @@ struct NotchStylesMenu: View {
 extension View {
     /// The saved notch styles open: a click anywhere but on them closes them (and does nothing else).
     func notchStylesDismissal(_ model: AppModel, if applies: Bool) -> some View {
+        headerMenuDismissal(isOpen: applies && model.studio.showsNotchStyles, frame: model.studio.notchStylesFrame) {
+            model.studio.showsNotchStyles = false
+        }
+    }
+
+    /// A header menu open (`HeaderUnfoldMenu`): a click anywhere but on it closes it (and does nothing else).
+    func headerMenuDismissal(isOpen: Bool, frame: CGRect, close: @escaping () -> Void) -> some View {
         overlay {
-            if applies, model.studio.showsNotchStyles {
+            if isOpen {
                 Color.clear
-                    .contentShape(Rectangle().subtracting(Rectangle().path(in: model.studio.notchStylesFrame)))
-                    .onTapGesture {
-                        withAnimation(.spring(duration: 0.38, bounce: 0.08)) { model.studio.showsNotchStyles = false }
-                    }
+                    .contentShape(Rectangle().subtracting(Rectangle().path(in: frame)))
+                    .onTapGesture { withAnimation(.spring(duration: 0.38, bounce: 0.08), close) }
             }
         }
         .coordinateSpace(.named(NotchStylesMenu.space))

@@ -9,7 +9,11 @@ import Observation
 @Observable final class AppModel {
     /// Created on first access (from `NotchIslandApp.init`, on the main actor). Creating it starts
     /// nothing; `start()` does, once the app has finished launching.
-    static let shared = AppModel()
+    static let shared: AppModel = {
+        // Before anything reads a setting.
+        AppSettingsStore.applyPending()
+        return AppModel()
+    }()
 
     /// Stands in for the notch while no screen exists, so views and layout always have a size.
     nonisolated static let fallbackNotchSize = CGSize(width: 180, height: 32)
@@ -75,7 +79,9 @@ import Observation
     func layout(for page: ExpandedPage) -> IslandLayout {
         let size = size(of: page)
         return IslandLayout(notch: metrics?.notchSize ?? Self.fallbackNotchSize, scale: size.scale,
-                            screen: metrics?.screenFrame.size ?? .zero, siri: preferences.siri.layout, panel: size.panel.layout,
+                            screen: metrics?.screenFrame.size ?? .zero, siri: preferences.siri.layout,
+                            nowPlayingWidth: CGFloat(preferences.nowPlayingWidth),
+                            whatsNewRows: ReleaseNotes.current.rows(whatsNewSection), panel: size.panel.layout,
                             display: DisplayProfile.factor(for: metrics),
                             settingsFillsLikeReference: DisplayProfile.isKnown(metrics))
     }
@@ -154,6 +160,7 @@ import Observation
 
     /// The saved notch styles (Settings ▸ Widgets' Save Notch Style and Open Notch Styles).
     let notchStyles = NotchStyleStore()
+    let appSettings = AppSettingsStore()
 
     /// The island as Settings ▸ Widgets has it now, as a notch style (not yet named or kept).
     func currentNotchStyle() -> NotchStyle {
@@ -248,7 +255,7 @@ import Observation
     /// The page the panel shows: the one chosen, or home once that one is gone (the shelf switched
     /// off while it was the page).
     var panelPage: ExpandedPage {
-        island.page == .whatsNew || availablePages.contains(island.page) ? island.page : .home
+        island.page == .whatsNew || island.page == .appInfo || availablePages.contains(island.page) ? island.page : .home
     }
 
     /// Created at the end of `init` (it needs `self`) and never replaced, hence not observed.
@@ -545,6 +552,8 @@ import Observation
             timers.startStopwatch()
         case .showWhatsNew:
             controller.showWhatsNew()
+        case .showAppInfo:
+            controller.showAppInfo()
         case .removeFanHelper:
             Task { await fans.removeHelper() }
         case .showSettings:
@@ -603,7 +612,8 @@ import Observation
     ) ?? .general {
         didSet {
             UserDefaults.standard.set(settingsPane.rawValue, forKey: IslandSettingsPane.key)
-            settingsHistory.moved(from: SettingsPlace(pane: oldValue, customizing: studio.customizing), to: settingsPlace)
+            settingsHistory.moved(from: SettingsPlace(pane: oldValue, customizing: studio.customizing,
+                                                      info: oldValue == .about ? settingsInfo : nil), to: settingsPlace)
         }
     }
 
@@ -611,14 +621,50 @@ import Observation
     @ObservationIgnored let settingsHistory = SettingsHistory()
 
     /// Where Settings is now.
-    var settingsPlace: SettingsPlace { SettingsPlace(pane: settingsPane, customizing: studio.customizing) }
+    var settingsPlace: SettingsPlace {
+        SettingsPlace(pane: settingsPane, customizing: studio.customizing, info: settingsPane == .about ? settingsInfo : nil)
+    }
+
+    /// What About has led to.
+    var settingsInfo: SettingsInfoPage? {
+        didSet {
+            guard settingsInfo != oldValue, settingsPane == .about else { return }
+            settingsHistory.moved(from: SettingsPlace(pane: .about, customizing: studio.customizing, info: oldValue), to: settingsPlace)
+        }
+    }
+
+    /// Opens saved app settings: NotchIsland starts again with them (`AppSettingsStore`).
+    func open(_ settings: SavedAppSettings) {
+        boards.flush()
+        appSettings.openAtNextLaunch(settings)
+        AppUpdater.reopenAfterExit(Bundle.main.bundleURL)
+        NSApp.terminate(nil)
+    }
+
+    /// The topic What's New shows: its window fits that topic's rows.
+    var whatsNewSection = ReleaseNotes.Section.new
+
+    /// What's New from About's button: the island's page in Settings' place, a step of Settings'
+    /// history (two fingers lead back to Settings, `WhatsNewPage`).
+    func openWhatsNewFromSettings() {
+        settingsInfo = .whatsNew
+        controller.showWhatsNewOverSettings()
+    }
 
     /// Two fingers sideways in Settings: to the right back where the user was, to the left forward
     /// again. A widget removed since is not opened in Customize again.
     func swipeSettings(back: Bool) {
+        let wasOnWhatsNew = settingsInfo == .whatsNew
         _ = settingsHistory.step(back ? .back : .forward, from: settingsPlace) { place in
             settingsPane = place.pane
+            settingsInfo = place.info
             studio.customizing = place.customizing.flatMap { boards.page(containing: $0) != nil ? $0 : nil }
+        }
+        // What's New is the island's page, not Settings': the step goes between the two.
+        if settingsInfo == .whatsNew, !wasOnWhatsNew {
+            controller.showWhatsNewOverSettings()
+        } else if settingsInfo != .whatsNew, wasOnWhatsNew {
+            controller.openSettings(pane: settingsPane)
         }
     }
 
@@ -762,7 +808,8 @@ import Observation
         }
         anchor.onAppWindowsChanged = { [weak self] in self?.anchorMirror.appWindowsChanged() }
         anchorMirror.onRelease = { [weak self] in self?.anchor.release(reason: "released from the stage") }
-        anchorMirror.setBar(preferences.anchorBar)
+        anchorMirror.onRaisedChanged = { [weak self] raised in self?.preferences.anchorRaised = raised }
+        anchorMirror.setRaised(preferences.anchorRaised)
     }
 
     private func powerEvent(_ event: PowerEvent) {

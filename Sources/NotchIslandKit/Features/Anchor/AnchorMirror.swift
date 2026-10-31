@@ -41,8 +41,10 @@ import SwiftUI
     /// at the first change. `NI_ANCHOR_QUIET_FPS=<n>` (measuring only; 0: never lowered).
     static let quietRate = ProcessInfo.processInfo.environment["NI_ANCHOR_QUIET_FPS"].flatMap(Int.init).map { max(0, $0) } ?? 10
 
-    /// "Release" on the stage's bar.
+    /// "Release" beside the notch.
     @ObservationIgnored var onRelease: (() -> Void)?
+    /// The tab at the window's top was dragged (the setting follows).
+    @ObservationIgnored var onRaisedChanged: ((Bool) -> Void)?
 
     @ObservationIgnored private var isEnabled = false
     @ObservationIgnored private var isPaused = false
@@ -50,7 +52,8 @@ import SwiftUI
     @ObservationIgnored private var isAway = false
     /// Only unchanged frames have come for a while.
     @ObservationIgnored private var isQuiet = false
-    @ObservationIgnored private var bar: AnchorBarPlacement = .belowWindow
+    /// Dragged up by the tab at its top.
+    @ObservationIgnored private var isRaised = false
     /// How far the island reaches out beside the notch on each side right now (its compact ears,
     /// with what is playing): the name and Release move out past it.
     @ObservationIgnored private var islandReach: CGFloat = 0
@@ -110,10 +113,10 @@ import SwiftUI
         reconcile()
     }
 
-    /// Where the stage shows the app's name and Release (redrawn at once while it is up).
-    func setBar(_ placement: AnchorBarPlacement) {
-        guard placement != bar else { return }
-        bar = placement
+    /// The picture as high as it goes, or exactly over the real window (redrawn at once while it is up).
+    func setRaised(_ raised: Bool) {
+        guard raised != isRaised else { return }
+        isRaised = raised
         if isShowing { reconcile() }
     }
 
@@ -121,7 +124,7 @@ import SwiftUI
     func setIslandReach(_ reach: CGFloat) {
         guard reach != islandReach else { return }
         islandReach = reach
-        if isShowing, bar == .menuBar { reconcile() }
+        if isShowing { reconcile() }
     }
 
     /// The anchored window (nil: none) on the notch screen.
@@ -157,7 +160,7 @@ import SwiftUI
     }
 
     private func layout(_ held: WindowAnchor.Held) -> AnchorStageLayout? {
-        screen.map { AnchorStageLayout(screen: $0, rest: held.rest, placement: bar) }
+        screen.map { AnchorStageLayout(screen: $0, rest: held.rest, placement: isRaised ? .belowWindow : .menuBar) }
     }
 
     private func reconcile() {
@@ -305,9 +308,12 @@ import SwiftUI
         guard let panel else { return }
         let app = NSRunningApplication(processIdentifier: held.window.pid)
         panel.stage.onRelease = { [weak self] in self?.onRelease?() }
+        panel.stage.onRaised = { [weak self] raised in
+            self?.setRaised(raised)
+            self?.onRaisedChanged?(raised)
+        }
         panel.stage.configure(layout: layout, target: StageTarget(pid: held.window.pid, windowID: held.window.windowID ?? 0),
-                              appName: app?.localizedName ?? "", icon: app?.icon, notch: notchRect(screen, in: layout), placement: bar,
-                              islandReach: islandReach)
+                              appName: app?.localizedName ?? "", icon: app?.icon, notch: notchRect(screen, in: layout), islandReach: islandReach)
         let top = NSScreen.screens.first?.frame.maxY ?? 0
         let frame = CGRect(x: layout.frame.minX, y: top - layout.frame.maxY, width: layout.frame.width, height: layout.frame.height)
         if panel.frame != frame { panel.setFrame(frame, display: false) }
@@ -548,24 +554,31 @@ final class StagePanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-/// The stage: the island-black backdrop with the shoulders, the window's picture flush with the
-/// screen's top, and the bar under it. Events on the picture go to the real window.
+/// The stage: the island-black backdrop with the shoulders, the window's picture, the app's name
+/// and Release beside the notch, and a tab at the picture's top that raises it. Events on the rest of
+/// the picture go to the real window.
 final class StageView: NSView {
     /// Where the frames go.
     let surface = CALayer()
     private let container = CALayer()
     private let backdrop = CAShapeLayer()
-    private var bar: NSHostingView<StageBar>?
+    private var raiseTab: UnclickableHosting<StageRaiseTab>?
     private var leadingEar: NSHostingView<StageEar>?
     private var trailingEar: NSHostingView<StageEar>?
     private var layout: AnchorStageLayout?
     private var target: StageTarget?
     private var tracking: NSTrackingArea?
+    private var raiseDwell: Timer?
     /// A press on the picture: its drag and release go to the real window too, wherever the pointer goes.
     private var isForwarding = false
+    /// The notch in the stage, which the tab hangs under.
+    private var notch: CGRect = .zero
+    /// A drag of the tab: where it started and how far the picture is up now.
+    private var tabDrag: (startY: CGFloat, startRaise: CGFloat, raise: CGFloat)?
     /// While its app comes to the front: the events to send once it is there (nil: none held).
     private var queued: [CGEvent]?
     var onRelease: (() -> Void)?
+    var onRaised: ((Bool) -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -584,8 +597,9 @@ final class StageView: NSView {
     override var isFlipped: Bool { true }
 
     func configure(layout: AnchorStageLayout, target: StageTarget, appName: String, icon: NSImage?, notch: CGRect,
-                   placement: AnchorBarPlacement, islandReach: CGFloat = 0) {
+                   islandReach: CGFloat = 0) {
         self.target = target
+        self.notch = notch
         if layout != self.layout {
             self.layout = layout
             CATransaction.begin()
@@ -595,15 +609,12 @@ final class StageView: NSView {
             backdrop.frame = bounds
             backdrop.path = IslandShapeGeometry(rect: bounds, bottomRadius: layout.bottomRadius, shoulderRadius: layout.shoulder,
                                                 topInset: 0).path().cgPath
-            surface.frame = layout.copy
+            if tabDrag == nil { surface.frame = layout.copy }
             CATransaction.commit()
         }
         let release: () -> Void = { [weak self] in self?.onRelease?() }
-        // Under the window: a bar in the chin. Beside the notch: the name to its left, Release to its right.
-        let bar = host(self.bar, StageBar(appName: appName, icon: icon, release: release))
-        self.bar = bar
-        bar.frame = layout.chin
-        bar.isHidden = placement != .belowWindow || layout.chin.height == 0
+        placeRaiseTab(layout)
+        // Beside the notch: the name to its left, Release to its right.
         // Past the island's own ears when they are out (what is playing beside the notch): the
         // notch reads as widened by them, the name and Release just outside.
         let reach = islandReach
@@ -620,8 +631,112 @@ final class StageView: NSView {
         let under = StageEar.underNotch
         leading.frame = CGRect(x: notch.minX + under - leadingWidth, y: 0, width: leadingWidth, height: height)
         trailing.frame = CGRect(x: notch.maxX - under, y: 0, width: trailingWidth, height: height)
-        leading.isHidden = placement != .menuBar
-        trailing.isHidden = placement != .menuBar
+    }
+
+    // MARK: The tab at the window's top
+
+    /// How long the pointer rests on the window's top edge before the tab comes: passing over the
+    /// edge on the way to the menu bar brings nothing up.
+    private static let raiseDwell: TimeInterval = 0.2
+
+    /// Where the tab stays once it is up: the picture's top, down to just under the tab.
+    private func raiseZone(_ layout: AnchorStageLayout) -> CGRect {
+        CGRect(x: layout.copy.minX, y: layout.copy.minY, width: layout.copy.width,
+               height: raiseTabFrame(layout).maxY + 6 - layout.copy.minY)
+    }
+
+    /// Centred under the notch, on the window's title bar.
+    private func raiseTabFrame(_ layout: AnchorStageLayout) -> CGRect {
+        let size = StageRaiseTab.size
+        return CGRect(x: layout.frame.width / 2 - size.width / 2, y: max(notch.maxY, layout.copy.minY) + 3,
+                      width: size.width, height: size.height)
+    }
+
+    private func placeRaiseTab(_ layout: AnchorStageLayout) {
+        let root = StageRaiseTab(isRaised: layout.offset > 0)
+        let tab: UnclickableHosting<StageRaiseTab>
+        if let raiseTab {
+            tab = raiseTab
+            tab.rootView = root
+        } else {
+            tab = UnclickableHosting(rootView: root)
+            tab.sizingOptions = []
+            tab.alphaValue = 0
+            addSubview(tab)
+            raiseTab = tab
+        }
+        tab.frame = raiseTabFrame(layout)
+    }
+
+    /// The pointer moved: on the window's very edge beside the notch the tab comes after
+    /// `raiseDwell`; once up, it stays while the pointer is on its way to it.
+    private func followPointerForRaiseTab(_ point: CGPoint) {
+        guard let layout, let raiseTab else { return }
+        if raiseTab.alphaValue > 0.5 {
+            if !raiseZone(layout).contains(point) { showRaiseTab(false) }
+            return
+        }
+        guard layout.isOnRaiseEdge(point, notch: notch) else {
+            raiseDwell?.invalidate()
+            raiseDwell = nil
+            return
+        }
+        guard raiseDwell == nil else { return }
+        let timer = Timer(timeInterval: Self.raiseDwell, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let window = self.window else { return }
+                self.raiseDwell = nil
+                let point = self.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+                if self.layout?.isOnRaiseEdge(point, notch: self.notch) == true { self.showRaiseTab(true) }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        raiseDwell = timer
+    }
+
+    private func showRaiseTab(_ shown: Bool) {
+        guard let raiseTab, shown != (raiseTab.alphaValue > 0.5) else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.14
+            raiseTab.animator().alphaValue = shown ? 1 : 0
+        }
+    }
+
+    private func onRaiseTab(_ event: NSEvent) -> Bool {
+        guard let raiseTab, raiseTab.alphaValue > 0 else { return false }
+        return raiseTab.frame.insetBy(dx: -4, dy: -4).contains(convert(event.locationInWindow, from: nil))
+    }
+
+    private func beginTabDrag(_ event: NSEvent) {
+        guard let layout else { return }
+        let raise = layout.offset
+        tabDrag = (startY: event.locationInWindow.y, startRaise: raise, raise: raise)
+    }
+
+    /// The picture follows the pointer, only one way: up from where it was not raised, down from raised.
+    private func moveTabDrag(_ event: NSEvent) {
+        guard let layout, let drag = tabDrag else { return }
+        let moved = event.locationInWindow.y - drag.startY
+        let raise = drag.startRaise > 0 ? min(drag.startRaise, drag.startRaise + moved) : max(0, moved)
+        tabDrag?.raise = raise
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        surface.frame = layout.copy(raisedBy: raise)
+        CATransaction.commit()
+    }
+
+    /// Past a quarter of the way it goes all the way (a short tug is enough); else back.
+    private func endTabDrag() {
+        guard let layout, let drag = tabDrag else { return }
+        tabDrag = nil
+        let moved = abs(drag.raise - drag.startRaise)
+        let raised = moved > AnchorStageLayout.barHeight / 4 ? drag.startRaise == 0 : drag.startRaise > 0
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.2)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        surface.frame = layout.copy(raisedBy: raised ? AnchorStageLayout.barHeight : 0)
+        CATransaction.commit()
+        if raised != (drag.startRaise > 0) { onRaised?(raised) }
     }
 
     /// A SwiftUI part of the stage, made once, its content replaced after.
@@ -677,7 +792,7 @@ final class StageView: NSView {
         container.opacity = opacity.1
         container.add(move, forKey: "grow")
         container.add(fade, forKey: "fade")
-        for view in [bar, leadingEar, trailingEar] as [NSView?] { view?.alphaValue = CGFloat(opacity.1) }
+        for view in [leadingEar, trailingEar] as [NSView?] { view?.alphaValue = CGFloat(opacity.1) }
         CATransaction.commit()
     }
 
@@ -686,23 +801,42 @@ final class StageView: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(rect: bounds, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self)
+        let area = NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
         addTrackingArea(area)
         tracking = area
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func mouseDown(with event: NSEvent) { press(event) }
+    override func mouseDown(with event: NSEvent) {
+        if onRaiseTab(event) { beginTabDrag(event) } else { press(event) }
+    }
     override func rightMouseDown(with event: NSEvent) { press(event) }
     override func otherMouseDown(with event: NSEvent) { press(event) }
-    override func mouseDragged(with event: NSEvent) { if isForwarding { forward(event) } }
+    override func mouseDragged(with event: NSEvent) {
+        if tabDrag != nil { moveTabDrag(event) } else if isForwarding { forward(event) }
+    }
     override func rightMouseDragged(with event: NSEvent) { if isForwarding { forward(event) } }
     override func otherMouseDragged(with event: NSEvent) { if isForwarding { forward(event) } }
-    override func mouseUp(with event: NSEvent) { release(event) }
+    override func mouseUp(with event: NSEvent) {
+        if tabDrag != nil { endTabDrag() } else { release(event) }
+    }
     override func rightMouseUp(with event: NSEvent) { release(event) }
     override func otherMouseUp(with event: NSEvent) { release(event) }
-    override func mouseMoved(with event: NSEvent) { if onPicture(event) { forward(event) } }
+    override func mouseMoved(with event: NSEvent) {
+        followPointerForRaiseTab(convert(event.locationInWindow, from: nil))
+        if onRaiseTab(event) {
+            (layout?.offset ?? 0 > 0 ? NSCursor.frameResize(position: .top, directions: .inward) : NSCursor.frameResize(position: .top, directions: .outward)).set()
+        } else if onPicture(event) {
+            forward(event)
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        raiseDwell?.invalidate()
+        raiseDwell = nil
+        if tabDrag == nil { showRaiseTab(false) }
+    }
     override func scrollWheel(with event: NSEvent) { if onPicture(event) { forward(event) } }
     override func magnify(with event: NSEvent) { if onPicture(event) { forward(event) } }
 
@@ -863,35 +997,28 @@ struct StageEar: View {
     }
 }
 
-/// Under the picture: the app's icon and name, and Release.
-struct StageBar: View {
-    let appName: String
-    let icon: NSImage?
-    let release: () -> Void
+/// A hosting view the stage's own events pass through: the stage takes the drag of the tab.
+final class UnclickableHosting<Content: View>: NSHostingView<Content> {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// The tab at the anchored window's top: it says the one way it goes.
+struct StageRaiseTab: View {
+    static let size = CGSize(width: 132, height: 20)
+
+    let isRaised: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
-            if let icon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 16, height: 16)
-            }
-            Text(appName)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.75))
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            Button(action: release) {
-                Label("Release", systemImage: "rectangle.topthird.inset.filled")
-                    .labelStyle(.titleAndIcon)
-                    .font(.system(size: 11, weight: .semibold))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white.opacity(0.7))
-            .help("Let the window go")
+        HStack(spacing: 4) {
+            Image(systemName: isRaised ? "arrow.down" : "arrow.up")
+            Text(isRaised ? "Move window down" : "Move window up").fixedSize()
         }
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(.white)
+        .frame(width: Self.size.width, height: Self.size.height)
+        // See-through, readable on a light title bar and a dark one alike.
+        .background(.black.opacity(0.45), in: .capsule)
+        .overlay { Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.5) }
         .environment(\.colorScheme, .dark)
     }
 }

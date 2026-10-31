@@ -47,6 +47,10 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     var screen: CGSize = .zero
     /// Siri's window proportions (Settings ▸ Siri ▸ Window).
     var siri = SiriLayout()
+    /// The Now Playing pill's ears, as a part of their usual width (Live Activities ▸ Now Playing).
+    var nowPlayingWidth: CGFloat = 1
+    /// What's New's rows on the topic it shows: its window is as high as they are.
+    var whatsNewRows = 2
     /// The open panel's width and board height (Settings ▸ Widgets ▸ Size).
     var panel = PanelLayout()
     /// The MacBook screen's own factor (`DisplayProfile`): 1 on the reference Mac and on any
@@ -172,11 +176,6 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     /// The assistant below its header band: the search field, a list of hits and actions, or an
     /// answer. As wide as the expanded panel, so from the header's Siri button it grows downward.
     static let assistantPageHeight: CGFloat = 280
-    /// Settings in the island: most of the screen, grown out of the notch (a full-screen feel
-    /// without leaving it). Kept this far from the screen's sides and bottom, and no larger than
-    /// the maximum on big displays.
-    /// What's New's size, as a share of Settings'.
-    static let whatsNewShare: CGFloat = 0.7
     static let settingsSideMargin: CGFloat = 50
     static let settingsBottomMargin: CGFloat = 64
     static let settingsMaximum = CGSize(width: 1180, height: 740)
@@ -191,6 +190,10 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     /// between rows: the gallery is exactly the user's number of rows tall, never a cut-off row.
     static let galleryCellHeight: CGFloat = 77
     static let galleryRowSpacing: CGFloat = 4
+    /// What's New's width against Settings'.
+    static let whatsNewWidthShare: CGFloat = 0.8
+    /// Its height beside the notch and the cards: the bar over them and the insets.
+    static let whatsNewAround: CGFloat = 50
 
     /// The gallery page for `rows` rows: the field above them, the insets around.
     static func galleryPageHeight(rows: Int, icon: CGFloat = SiriGalleryIconSize.medium.points) -> CGFloat {
@@ -293,6 +296,9 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             return CGSize(width: notch.width + 2 * recordingEar, height: notch.height)
         case .compact(.update):
             return CGSize(width: notch.width + 2 * updateEar, height: notch.height)
+        case .compact(.nowPlaying):
+            // The cover and the bars keep their size: wider, they move out with the ears' ends.
+            return CGSize(width: notch.width + 2 * (ear * nowPlayingWidth).rounded(), height: notch.height)
         case .compact:
             // Never taller than the notch: a taller pill reads as a window stuck to the screen.
             return CGSize(width: notch.width + 2 * ear, height: notch.height)
@@ -324,10 +330,13 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         case .expanded(.update):
             return CGSize(width: max(notch.width + 2 * updateEar, Self.updateCardMinimumWidth),
                           height: notch.height + Self.recordingCardDetailHeight)
+        case .expanded(.appInfo):
+            // How it works and what it costs: a display as large as Settings.
+            return size(for: .settings)
         case .expanded(.whatsNew):
-            // What's New: a display of its own, three tenths smaller than Settings each way.
-            let settings = size(for: .settings)
-            return CGSize(width: (settings.width * Self.whatsNewShare).rounded(), height: (settings.height * Self.whatsNewShare).rounded())
+            // In the look of How NotchIsland Works, narrower than Settings and as high as its rows.
+            return CGSize(width: (size(for: .settings).width * Self.whatsNewWidthShare).rounded(),
+                          height: (notch.height + Self.whatsNewAround + ReleaseNotes.cardsHeight(rows: whatsNewRows)).rounded())
         case .expanded:
             // Exactly as large as its cells (`PanelLayout`'s pitch) and the insets round them, rounded
             // so glass edges stay on the pixel grid; within the screen (`maximumExpandedSize`).

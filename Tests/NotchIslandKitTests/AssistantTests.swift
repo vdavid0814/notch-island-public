@@ -83,7 +83,7 @@ import Testing
 /// Fixed lists instead of Spotlight and `shortcuts list`.
 @MainActor func stubSources(
     apps: [String] = [], files: [String] = [], recent: [String] = [], allApps: [String] = [], shortcuts: [String] = [],
-    panes: [SystemSettingsPane] = [], windows: [AssistantWindow] = [], emoji: [AssistantEmoji] = []
+    panes: [SystemSettingsPane] = [], windows: [AssistantWindow] = [], emoji: [AssistantEmoji] = [], listsApps: Bool = false
 ) -> AssistantSources {
     func hits(_ names: [String], _ kind: AssistantHit.Kind) -> [AssistantHit] {
         names.enumerated().map { index, name in
@@ -92,7 +92,11 @@ import Testing
         }
     }
     let appHits = hits(apps, .app), fileHits = hits(files, .file), recentHits = hits(recent, .file)
-    let allAppHits = hits(allApps, .app)
+    // `listsApps`: where the gallery lists apps from (`AssistantGallery.isListed`).
+    let allAppHits = !listsApps ? hits(allApps, .app) : allApps.enumerated().map { index, name in
+        AssistantHit(kind: .app, url: URL(fileURLWithPath: "/Applications/\(name).app"), name: name, contentType: nil,
+                     lastUsed: Date(timeIntervalSinceReferenceDate: Double(1000 - index)))
+    }
     return AssistantSources(
         apps: { query, limit in Array(appHits.filter { AssistantMatch.matches($0.name, query) }.prefix(limit)) },
         files: { query, limit, _ in Array(fileHits.filter { AssistantMatch.matches($0.name, query) }.prefix(limit)) },
@@ -242,7 +246,11 @@ import Testing
     }
 
     @Test func applicationsGalleryFiltersInMemory() async {
-        let model = model(stubSources(allApps: ["Safari", "Music", "System Settings", "Mail"]))
+        let model = model(stubSources(allApps: ["Safari", "Music", "System Settings", "Mail"], listsApps: true))
+        // By name: one row each, no Recent section over them.
+        var settings = SiriSettings()
+        settings.gallerySort = .name
+        model.settings = { settings }
         model.open(.applications)
         await model.settle()
         #expect(model.rows.count == 4)
@@ -277,7 +285,10 @@ import Testing
     }
 
     @Test func typingASuggestionsNameOffersItFirstAndReturnOpensIt() async {
-        let model = model(stubSources(apps: ["App Store"], allApps: ["Safari", "Music"]))
+        let model = model(stubSources(apps: ["App Store"], allApps: ["Safari", "Music"], listsApps: true))
+        var settings = SiriSettings()
+        settings.gallerySort = .name
+        model.settings = { settings }
         model.query = "application"
         await model.settle()
         #expect(model.rows.first == .category(.applications))
@@ -581,11 +592,27 @@ import Testing
                 == standard.size(for: .assistant(.list)))
         settings.galleryColumns = 12
         settings.galleryRows = 6
-        settings.panelSize = .large
+        settings.widthFactor = 1.2
         let custom = IslandLayout(notch: notch, scale: .standard, siri: settings.layout)
         #expect(custom.size(for: .assistant(.gallery)).width > standard.size(for: .assistant(.gallery)).width)
         #expect(custom.size(for: .assistant(.gallery)).height > standard.size(for: .assistant(.gallery)).height)
         #expect(custom.size(for: .assistant(.field)).width > standard.size(for: .assistant(.field)).width)
+    }
+
+    /// The named sizes saved before the sliders keep their size; a value out of range comes back in it.
+    @Test func namedSizesBecomeSliderValues() throws {
+        func decoded(_ json: String) throws -> SiriSettings { try JSONDecoder().decode(SiriSettings.self, from: Data(json.utf8)) }
+        let old = try decoded(#"{"panelSize":"large","galleryIconSize":"extraLarge","showsFiles":false}"#)
+        #expect(old.widthFactor == 1.2 && old.galleryIcon == 72 && !old.showsFiles)
+        #expect(try decoded(#"{"panelSize":"small","galleryIconSize":"small"}"#).widthFactor == 0.85)
+        #expect(try decoded("{}").widthFactor == 1 && decoded("{}").galleryIcon == 48)
+        #expect(try decoded(#"{"widthFactor":3,"galleryIcon":1}"#).widthFactor == SiriSettings.widthFactorRange.upperBound)
+        #expect(try decoded(#"{"widthFactor":3,"galleryIcon":1}"#).galleryIcon == SiriSettings.galleryIconRange.lowerBound)
+        // Saved again, the new values are what comes back.
+        var settings = SiriSettings()
+        settings.widthFactor = 0.7
+        settings.galleryIcon = 80
+        #expect(try JSONDecoder().decode(SiriSettings.self, from: JSONEncoder().encode(settings)) == settings)
     }
 
     @Test func otherShortcutModifiers() {

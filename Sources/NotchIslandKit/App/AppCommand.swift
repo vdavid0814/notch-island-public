@@ -129,6 +129,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
     case removeFanHelper
     /// What this version brought, in the notch (`whatsnew`), as after an update.
     case showWhatsNew
+    /// How NotchIsland works and what it costs (`AppInfoPage`).
+    case showAppInfo
     case demo(DemoCommand)
 
     static let scheme = "notchisland"
@@ -212,6 +214,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "stopwatch": return .startStopwatch
         case "fans/remove-helper": return .removeFanHelper
         case "whatsnew": return .showWhatsNew
+        case "appinfo": return .showAppInfo
 
         case "demo/media": return .demo(.media)
         case "demo/charging": return .demo(.charging)

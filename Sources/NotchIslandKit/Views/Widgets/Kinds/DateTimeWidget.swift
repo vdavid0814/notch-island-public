@@ -60,7 +60,7 @@ struct DateTimeWidget: View {
                 Text(date, format: .dateTime.day()).fixedSize()
             }
             .font(.system(size: datePoints, weight: .medium))
-            .clearTextEdge().foregroundStyle(.secondary)
+            .foregroundStyle(.secondary)
         }
         .movableElement(.dateLine, of: widget)
         let showsTime = widget.shows(.readout), showsDate = widget.shows(.dateLine)

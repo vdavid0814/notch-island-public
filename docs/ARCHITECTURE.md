@@ -154,6 +154,13 @@ in the page was told its place changed and SwiftUI updated the whole page, hover
 are built whole for it (no lazy grids: `GalleryGrid`, `SwatchGrid`). The ends stretch and spring
 back on the layer too, with AppKit's rubber-band curves (measured).
 
+## Window Anchor's stage
+
+The live copy's stage (`StageView`, `AnchorStageLayout`) has one frame whether raised or not: the name
+and Release beside the notch, the picture exactly over the real window. The pointer at the picture's
+top brings a tab; dragged, it moves only the picture's layer, one way, by up to 22 pt, and the black
+band left under it covers the real window's bottom edge. Clicks are sent `offset` lower to match.
+
 ## Browser playback
 
 Commands to the system's Now Playing are checked (`AdapterCommandCheck`): a browser suspends a

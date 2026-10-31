@@ -4,6 +4,21 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-10-31: an average day, for About's ⓘ page (worked out, not measured as one day)
+
+Added up from the numbers below (`AppInfoEnergy`), the coalition's energy on a MacBook Pro M5, on the
+charger, release builds from October 14–15, before 0.8.7's page-by-page Settings. Not re-measured on 0.8.7.
+
+| | How much | Each | J |
+|---|---|---|---|
+| At rest | 10 hours | 143.4 mJ per 5 min | 17.2 |
+| Hover opening and close | 50 | 73.6 mJ | 3.7 |
+| Spotlight opening, close and search | 10 | 31 + 45 + 303 mJ | 3.8 |
+| Standard diagnostics report | 10 | 18 mJ | 0.2 |
+| **Total** | | | **≈ 25** (0.013 % of a 53.8 Wh battery) |
+
+Not counted: the music bars following the music, the anchored window's live copy, time in Settings.
+
 ## 2026-10-30: only General kept, every other page for a minute (memory)
 
 Asked for. Release build, on the charger, footprint as Activity Monitor's Memory column, driven by URLs.

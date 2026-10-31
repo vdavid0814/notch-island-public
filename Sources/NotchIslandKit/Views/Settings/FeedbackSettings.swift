@@ -321,13 +321,7 @@ struct DiagnosticsSection: View {
         } header: {
             Text("Diagnostics")
         } footer: {
-            Text("""
-                Sent: the Mac's model and setup, its apps, devices and battery; NotchIsland's settings, state, \
-                energy use, log and crash reports. Full reports (sent by you, after a problem, or hourly with \
-                Detailed Diagnostics) also hold what you typed into Spotlight and the files on the Shelf. Kept in \
-                the EU (Sentry, Mixpanel) under an anonymous ID, and your name if you gave one. Never sent: your \
-                clipboard or passwords.
-                """)
+            Text("The Mac's setup, NotchIsland's state, energy, log and crashes, in the EU under an anonymous ID. Full reports also hold what you typed into Spotlight and the Shelf's files. Never your clipboard or passwords.")
         }
         .task { await diagnostics.refreshStatus() }
     }

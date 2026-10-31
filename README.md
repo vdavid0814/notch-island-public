@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.7 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.8 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -23,6 +23,61 @@ How much energy each animation and the idle state take, measured before and afte
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.8.8
+
+Save all your settings in one click, a new page on how NotchIsland works, and a What's New you can actually read.
+
+### The biggest changes
+
+- **Save App Settings.** Keep every setting in one click and open it again from General.
+- **How It Works.** A new page in About: what NotchIsland uses, why so little, and what it can do.
+- **A new What's New.** Cards by topic, on your island's own surface, opening smoothly from Settings.
+- **Spotlight matches your Mac.** Its icons follow your icon style, and the App Gallery has Recent and Apps sections.
+
+### Features
+
+- **Save App Settings.** Save and Open buttons on General keep all your settings, widgets and look included. Opening saved settings restarts NotchIsland, and what was set before stays in the list.
+- **How It Works.** The ⓘ beside About's title opens a page on memory, energy and features, in plain words.
+- **A new What's New.** Features, Performance, Fixes and Good to Know, each as a neat grid of cards. Opened from Settings, two fingers lead back and forward.
+- **Gallery sections.** Your recent apps on top, in the middle, then every app by name.
+- **Icons that match.** Spotlight's own icons follow your Clear, Dark or Tinted icon style.
+- **Spotlight your size.** Width and icon size are sliders now, with a live picture of the result.
+- **Move window up.** Rest on an anchored window's top edge, beside the notch, then drag its tab up or down.
+- **Anchor controls.** The anchored window's name and Release are always beside the notch.
+- **Now Playing width.** The picture in Settings follows the slider as you drag it.
+- **Cleaner text.** Grey text no longer has an outline around it.
+- **A simpler Settings.** Fewer switches to go through. Your choices stay as you set them.
+- **Automatic updates.** NotchIsland now looks for a new version twice a day.
+
+### Performance
+
+Since 0.8.6:
+
+- **Memory at rest:** about 48 MB, down from about 190 MB.
+- **Window Anchor:** 60 frames a second, up from 15–30.
+- **Energy at rest:** 17 % less while you're away.
+- **Still windows save energy:** an anchored window that isn't moving takes about 2 mW, down from about 33.
+- **Lighter Siri AI answers:** reading an answer takes about 25 times less work.
+- **Calmer on low memory:** after a memory warning, Settings waits longer before it prepares itself again.
+
+### Fixes
+
+- **Buttons in saved lists.** Open and Delete did nothing in Open Notch Styles.
+- **Siri AI opened Settings.** Opening Siri AI or starting a chat could bring up NotchIsland's Settings.
+- **Freezes while asking Siri AI.** Waiting for Siri AI could hold up the island.
+- **Freezes from the clipboard.** Checking what you copied could hold up the island.
+- **Settings rebuilt over and over.** On low memory it could prepare itself and be dropped again and again.
+- **False alarms in reports.** Using the island normally no longer shows up as unusual behaviour.
+
+### Good to know
+
+- **Opening settings restarts.** Opening saved App Settings restarts NotchIsland for a moment.
+- **Pages take a moment.** A page loads again if you left it over a minute ago.
+- **Some memory stays.** About 30 MB stays after you first open Widgets, until you quit. It doesn't keep growing.
+- **Spotlight off opens slower.** With nothing kept ready, it reads your apps and icons as it opens.
+- **Pictures show one Mac.** The island in Settings' photos may be wider or narrower than yours.
+- **Fan Control.** Only tried on an M5 MacBook Pro. With the fans stopped, the chip gets hot under load.
 
 ## What's new in v0.8.7
 

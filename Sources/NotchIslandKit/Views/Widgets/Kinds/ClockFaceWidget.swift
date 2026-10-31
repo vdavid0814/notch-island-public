@@ -77,7 +77,7 @@ struct ClockFaceWidget: View {
         let caption = WidgetLabel(id: .label, text: text, widget: widget, size: points, weight: .medium, isSecondary: true) {
             Text(text)
                 .font(.system(size: points, weight: .medium))
-                .clearTextEdge().foregroundStyle(.secondary)
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }

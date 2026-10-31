@@ -102,6 +102,31 @@ import Testing
         #expect(high.frame.minY == -200 && high.offset == 22 && high.copy.minY == 3)
     }
 
+    /// Only the window's very top edge beside the notch brings the tab up.
+    @Test func theRaiseEdgeIsTheWindowsTopBesideTheNotch() {
+        let rest = AnchorGeometry.restFrame(screen, size: CGSize(width: 620, height: 433))
+        let stage = AnchorStageLayout(screen: screen, rest: rest, placement: .menuBar)
+        let top = stage.copy.minY
+        let notch = CGRect(x: stage.frame.width / 2 - 50, y: 0, width: 100, height: top)
+        let beside = stage.copy.minX + 10
+        #expect(stage.isOnRaiseEdge(CGPoint(x: beside, y: top), notch: notch))
+        #expect(stage.isOnRaiseEdge(CGPoint(x: beside, y: top + AnchorStageLayout.raiseEdgeReach), notch: notch))
+        #expect(!stage.isOnRaiseEdge(CGPoint(x: beside, y: top + AnchorStageLayout.raiseEdgeReach + 1), notch: notch))
+        #expect(!stage.isOnRaiseEdge(CGPoint(x: notch.midX, y: top), notch: notch))
+        #expect(!stage.isOnRaiseEdge(CGPoint(x: stage.copy.minX - 1, y: top), notch: notch))
+    }
+
+    /// The tab at the window's top moves the picture; the stage stays exactly where it is.
+    @Test func raisingMovesOnlyThePicture() {
+        let rest = AnchorGeometry.restFrame(screen, size: CGSize(width: 620, height: 433))
+        let low = AnchorStageLayout(screen: screen, rest: rest, placement: .menuBar)
+        let high = AnchorStageLayout(screen: screen, rest: rest, placement: .belowWindow)
+        #expect(low.frame == high.frame)
+        #expect(low.copy(raisedBy: 0) == low.copy && low.copy(raisedBy: 22) == high.copy)
+        #expect(low.copy(raisedBy: 100) == high.copy)
+        #expect(low.copy(raisedBy: -5) == low.copy)
+    }
+
     @Test func besideTheNotchNothingIsBelowTheWindow() {
         let rest = AnchorGeometry.restFrame(screen, size: CGSize(width: 620, height: 433))
         let layout = AnchorStageLayout(screen: screen, rest: rest, placement: .menuBar)
@@ -416,5 +441,37 @@ import Testing
         // Another size: shown. A rectangle reaching past the frame is clipped to it.
         #expect(MirrorOutput.difference(buffer(width: 40), buffer(width: 41)) == 0)
         #expect(MirrorOutput.difference(buffer(), buffer(), rects: [CGRect(x: 30, y: 20, width: 100, height: 100)]) == nil)
+    }
+}
+
+@Suite struct AppInfoEnergyTests {
+    /// What the ⓘ page says: about 25 J a day, about a hundredth of a percent of the battery.
+    @Test func anAverageDayIsNextToNothing() {
+        #expect(abs(AppInfoEnergy.totalJoules - 24.9) < 0.1)
+        #expect(abs(AppInfoEnergy.batteryShare * 100 - 0.013) < 0.001)
+    }
+
+    @Test func theNowPlayingPillMovesOnlyItsOwnEars() {
+        let notch = CGSize(width: 180, height: 32)
+        let usual = IslandLayout(notch: notch, scale: .standard)
+        var wide = usual
+        wide.nowPlayingWidth = 1.2
+        var narrow = usual
+        narrow.nowPlayingWidth = 0.9
+        // Each ear: 38 pt usually, 46 at its widest, 34 at its narrowest.
+        #expect(usual.size(for: .compact(.nowPlaying)).width == 256)
+        #expect(wide.size(for: .compact(.nowPlaying)).width == 272)
+        #expect(narrow.size(for: .compact(.nowPlaying)).width == 248)
+        #expect(wide.size(for: .compact(.timer)) == usual.size(for: .compact(.timer)))
+        // The cover stays clear of the notch at the narrowest.
+        let split = NotchSplit(layout: narrow, presentation: .compact(.nowPlaying), outerInset: Metrics.Compact.inset,
+                               clearance: Metrics.Compact.notchClearance)
+        #expect(split.earWidth + Metrics.Compact.notchClearance >= narrow.notch.height - 2 * Metrics.Compact.inset)
+    }
+
+    @Test func theAppInfoPageIsNeverStoredOrPicked() {
+        #expect(!ExpandedPage.allCases.contains(.appInfo) && !ExpandedPage.appInfo.isBoard)
+        #expect(ExpandedPage(rawValue: "appInfo") == nil)
+        #expect(AppCommand.parse(URL(string: "notchisland://appinfo")!) == .showAppInfo)
     }
 }

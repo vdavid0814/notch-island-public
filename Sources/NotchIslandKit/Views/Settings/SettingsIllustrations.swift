@@ -756,24 +756,55 @@ private struct MiniSlider: View {
     }
 }
 
-/// Now Playing's pill: the cover beside the notch, the level bars moving on the other side.
+/// Now Playing's pill at `width` (the Width slider, also while it is dragged), in its real sizes over
+/// the desktop. Not a photograph, as the other activities' are: one could not follow the slider.
 struct NowPlayingPicture: View {
-    @Environment(\.settingsPictureScale) private var k
+    let width: Double
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.settingsPictureScale) private var scale
+    @Environment(\.settingsPictureRadius) private var radius
+    @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
+
+    private static let clock = Calendar.current.date(bySettingHour: 9, minute: 41, second: 0, of: .now) ?? .now
+    private static let barColor = ArtworkColor(red: 1, green: 0.38, blue: 0.3)
 
     var body: some View {
-        MiniDesktop(width: 150, height: 56) {
-            MiniIsland(width: MiniMetrics.notchWidth + 2 * 16, height: MiniMetrics.menuBar) {
-                HStack {
-                    RoundedRectangle(cornerRadius: 2 * k)
-                        .fill(LinearGradient(colors: [.pink, .orange], startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 8 * k, height: 8 * k)
-                    Spacer(minLength: MiniMetrics.notchWidth * k)
-                    MiniEqualizer().frame(width: 8 * k, height: 7 * k)
-                }
-                .padding(.horizontal, 4 * k)
-                .frame(height: MiniMetrics.menuBar * k)
+        var layout = model.layout
+        let _ = layout.nowPlayingWidth = CGFloat(width)
+        let screen = layout.screen == .zero ? IslandLayout.fallbackScreen : layout.screen
+        // The middle of the screen, on the scale of the activities' photographs.
+        let k = IslandPhoto.activitySize.width * scale / DemoDirector.activityPictureSize.width
+        let presentation = IslandPresentation.compact(.nowPlaying)
+        let pill = layout.size(for: presentation)
+        let split = NotchSplit(layout: layout, presentation: presentation, outerInset: Metrics.Compact.inset,
+                               clearance: Metrics.Compact.notchClearance)
+        let glyph = max(0, layout.notch.height - 2 * Metrics.Compact.inset) * k
+        let shape = IslandShape(bottomRadius: layout.bottomRadius(for: presentation) * k,
+                                shoulderRadius: layout.shoulderRadius(for: presentation) * k)
+        ZStack(alignment: .top) {
+            DesktopBackdrop(style: backdrop, detail: .miniature)
+                .frame(width: screen.width * k, height: screen.height * k)
+            PreviewMenuBar(height: layout.notch.height * k, notchWidth: pill.width * k, darkText: backdrop.prefersDarkMenuBar,
+                           backing: backdrop.menuBarBacking, date: Self.clock)
+                .frame(width: IslandPhoto.activitySize.width * scale)
+            shape.fill(.black)
+                .frame(width: pill.width * k, height: pill.height * k)
+            HStack(spacing: 0) {
+                RoundedRectangle(cornerRadius: Metrics.Compact.artworkMinimumRadius * k, style: .continuous)
+                    .fill(LinearGradient(colors: [.pink, .orange], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: glyph, height: glyph)
+                Spacer(minLength: 0)
+                EqualizerView(isAnimating: true, onBattery: true, size: CGSize(width: glyph, height: glyph),
+                              barWidth: glyph * Metrics.Compact.equalizerBarShare, tint: Self.barColor)
+                    .frame(width: glyph, height: glyph)
             }
+            .padding(.horizontal, split.contentInset * k)
+            .frame(width: pill.width * k, height: layout.notch.height * k)
         }
+        .frame(width: IslandPhoto.activitySize.width * scale, height: IslandPhoto.activitySize.height * scale, alignment: .top)
+        .clipShape(.rect(cornerRadius: radius, style: .continuous))
+        .accessibilityHidden(true)
     }
 }
 

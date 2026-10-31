@@ -99,6 +99,10 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
     /// under its top bar. Never in the picker, never stored.
     static let whatsNew = ExpandedPage(own: "whatsNew")
 
+    /// How NotchIsland works and what it costs (`AppInfoPage`, from the ⓘ beside About in Settings):
+    /// Settings' size, under its top bar. Never in the picker, never stored.
+    static let appInfo = ExpandedPage(own: "appInfo")
+
     /// The cards the pointer opens over an ongoing notice instead of the panel.
     var isNoticeCard: Bool { self == .recording || self == .update }
 
@@ -118,7 +122,7 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
 
     /// Drawn as a board of widgets the user arranges: home, the timer's and the battery's, and the
     /// user's own (the shelf is its own).
-    var isBoard: Bool { self != .shelf && self != .whatsNew && !isNoticeCard }
+    var isBoard: Bool { self != .shelf && self != .whatsNew && self != .appInfo && !isNoticeCard }
 
     var id: String { rawValue }
 
@@ -144,6 +148,7 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
         case .recording: "Recording"
         case .update: "Update"
         case .whatsNew: "What's New"
+        case .appInfo: "About NotchIsland"
         default: CustomPage.catalog.withLock { $0[self]?.title } ?? "Page"
         }
     }
@@ -157,6 +162,7 @@ nonisolated struct ExpandedPage: RawRepresentable, Sendable, Hashable, Codable, 
         case .recording: "record.circle"
         case .update: "arrow.down.circle"
         case .whatsNew: "sparkles"
+        case .appInfo: "info.circle"
         default: CustomPage.catalog.withLock { $0[self]?.symbol } ?? CustomPage.defaultSymbol
         }
     }

@@ -1,93 +1,160 @@
-import Foundation
+import SwiftUI
 
-/// What a version brought, for the page shown in the notch after an update (`WhatsNewPage`): what
-/// is new, what was fixed and what is still known not to work. Written with each release; the page
-/// shows only the notes of the version that runs (`AppUpdater.current`).
-nonisolated struct ReleaseNotes: Sendable, Equatable {
-    nonisolated enum Section: String, Sendable, CaseIterable, Identifiable {
-        case new, fixed, known
+/// What a version brought, for the page shown in the notch after an update (`WhatsNewPage`): its
+/// features, performance (with the largest numbers), fixes and what is good to know. Written with each release,
+/// with the `whats-new` skill; the page shows only the notes of the version that runs
+/// (`AppUpdater.current`).
+nonisolated struct ReleaseNotes: Sendable {
+    enum Section: String, CaseIterable, Identifiable, Sendable {
+        case new, performance, fixed, known
 
         var id: String { rawValue }
 
         var title: String {
             switch self {
-            case .new: String(localized: "What's New")
-            case .fixed: String(localized: "Fixed")
-            case .known: String(localized: "Known Issues")
-            }
-        }
-
-        var symbol: String {
-            switch self {
-            case .new: "sparkles"
-            case .fixed: "checkmark.seal.fill"
-            case .known: "exclamationmark.triangle.fill"
+            case .new: String(localized: "Features")
+            case .performance: String(localized: "Performance")
+            case .fixed: String(localized: "Fixes")
+            case .known: String(localized: "Good to Know")
             }
         }
     }
 
-    nonisolated struct Item: Sendable, Equatable, Identifiable {
+    /// A large number at the top of Performance (three, one row).
+    struct Stat: Identifiable, Sendable {
         var title: String
+        var symbol: String
+        var tint: Color
+        var value: String
         var detail: String
-        /// Changed rather than new: marked so among What's New.
-        var isChange = false
 
         var id: String { title }
     }
 
+    typealias Item = InfoCard
+
     var version: String
+    var stats: [Stat] = []
     var new: [Item]
+    var performance: [Item] = []
     var fixed: [Item]
     var known: [Item]
 
     func items(_ section: Section) -> [Item] {
         switch section {
         case .new: new
+        case .performance: performance
         case .fixed: fixed
         case .known: known
         }
+    }
+
+    /// A row of the page: a large number's card fits, and three lines of text.
+    static let rowHeight: CGFloat = 160
+
+    /// The cards a topic may have, the only ones that fill their rows: 2×2, 3×2, 4×2, 3×3, 4×3. Asked
+    /// for: at least 4, at most 12, always even and square with the window (`InfoCardGrid`).
+    static let allowedCounts: Set<Int> = [4, 6, 8, 9, 12]
+
+    /// Its cards, Performance's large numbers among them.
+    func cardCount(_ section: Section) -> Int {
+        items(section).count + (section == .performance ? stats.count : 0)
+    }
+
+    /// Cards in each of its rows. Performance's numbers are three in a row, the rest under them too.
+    func columns(_ section: Section) -> Int {
+        if section == .performance, !stats.isEmpty { return 3 }
+        return switch cardCount(section) {
+        case 4: 2
+        case 8, 12: 4
+        default: 3
+        }
+    }
+
+    /// Its rows: the window is as high as they are (`IslandLayout.size(for:)`).
+    func rows(_ section: Section) -> Int {
+        (cardCount(section) + columns(section) - 1) / columns(section)
+    }
+
+    /// `rows` together, with the gaps between them (`InfoRow.spacing`).
+    static func cardsHeight(rows: Int) -> CGFloat {
+        let rows = CGFloat(rows)
+        return rows * rowHeight + max(0, rows - 1) * 12
     }
 
     /// The sections with anything in them.
     var sections: [Section] { Section.allCases.filter { !items($0).isEmpty } }
 
     static let current = ReleaseNotes(
-        version: "0.8.7",
+        version: "0.8.8",
+        stats: [
+            Stat(title: String(localized: "Memory at rest"), symbol: "moon.fill", tint: .indigo, value: "≈ 48 MB",
+                 detail: String(localized: "In 0.8.6 it was about 190 MB.")),
+            Stat(title: String(localized: "Window Anchor"), symbol: "macwindow", tint: .teal, value: "60 fps",
+                 detail: String(localized: "In 0.8.6 it was 15–30.")),
+            Stat(title: String(localized: "Energy at rest"), symbol: "leaf.fill", tint: .green, value: "−17 %",
+                 detail: String(localized: "Against 0.8.6, while you're away.")),
+        ],
         new: [
-            Item(title: "About a quarter of the memory",
-                 detail: "At rest NotchIsland now takes about 47 MB, down from about 190 MB in 0.8.6.",
-                 isChange: true),
-            Item(title: "Settings loads page by page",
-                 detail: "Only General is in memory. Any other page loads when you go to it and is emptied one minute after you leave it, even while Settings stays open on another page.",
-                 isChange: true),
-            Item(title: "Replace macOS Spotlight decides what stays",
-                 detail: "On: the app gallery, icons and lists stay in memory, so Spotlight opens full every time. Off: all of it is freed at once. On again: it is read ahead again without a restart.",
-                 isChange: true),
-            Item(title: "Window Anchor at 60 frames a second",
-                 detail: "The live copy runs at your screen's rate and stays on every space, over full-screen apps too. A still window costs 2 mW instead of about 33 mW."),
-            Item(title: "Settings opens on General",
-                 detail: "From the gear or the menu it starts on General, not on the page you last visited. Page titles line up with the sidebar and pages scroll on under them.",
-                 isChange: true),
-            Item(title: "Lower energy at rest",
-                 detail: "Once nobody is at the Mac, the clipboard is checked every 30 seconds: 17 % less energy at rest than 0.8.6.",
-                 isChange: true),
+            Item(symbol: "square.and.arrow.down.fill", tint: .blue, title: String(localized: "Save App Settings"),
+                 detail: String(localized: "Keep all your settings in one click, and open them again from General.")),
+            Item(symbol: "info.circle.fill", tint: .cyan, title: String(localized: "How It Works"),
+                 detail: String(localized: "A new page in About: what it uses, why so little, and what it can do.")),
+            Item(symbol: "sparkles", tint: .yellow, title: String(localized: "A new What's New"),
+                 detail: String(localized: "Cards by topic, on your island's own surface. Opens nicely from Settings.")),
+            Item(symbol: "square.grid.2x2.fill", tint: .indigo, title: String(localized: "Gallery sections"),
+                 detail: String(localized: "Your recent apps on top, in the middle, then every app by name.")),
+            Item(symbol: "paintbrush.fill", tint: .pink, title: String(localized: "Icons that match"),
+                 detail: String(localized: "Spotlight's own icons follow your Clear, Dark or Tinted icon style.")),
+            Item(symbol: "slider.horizontal.below.rectangle", tint: .purple, title: String(localized: "Spotlight your size"),
+                 detail: String(localized: "Width and icon size are sliders now, with a live picture of the result.")),
+            Item(symbol: "arrow.up.and.down", tint: .teal, title: String(localized: "Move window up"),
+                 detail: String(localized: "Rest on an anchored window's top edge, then drag its tab up or down.")),
+            Item(symbol: "macwindow", tint: .mint, title: String(localized: "Anchor controls"),
+                 detail: String(localized: "The anchored window's name and Release are always beside the notch.")),
+            Item(symbol: "music.note", tint: .red, title: String(localized: "Now Playing width"),
+                 detail: String(localized: "The picture in Settings follows the slider as you drag it.")),
+            Item(symbol: "textformat", tint: .orange, title: String(localized: "Cleaner text"),
+                 detail: String(localized: "Grey text no longer has an outline around it.")),
+            Item(symbol: "gearshape.fill", tint: .gray, title: String(localized: "A simpler Settings"),
+                 detail: String(localized: "Fewer switches to go through. Your choices stay as you set them.")),
+            Item(symbol: "arrow.triangle.2.circlepath", tint: .green, title: String(localized: "Automatic updates"),
+                 detail: String(localized: "NotchIsland now looks for a new version twice a day.")),
+        ],
+        performance: [
+            Item(symbol: "pause.rectangle.fill", tint: .teal, title: String(localized: "Still windows save energy"),
+                 detail: String(localized: "An anchored window that isn't moving takes about 2 mW, down from about 33.")),
+            Item(symbol: "text.bubble.fill", tint: .purple, title: String(localized: "Lighter Siri AI answers"),
+                 detail: String(localized: "Reading an answer takes about 25 times less work than before.")),
+            Item(symbol: "memorychip.fill", tint: .orange, title: String(localized: "Calmer on low memory"),
+                 detail: String(localized: "After a memory warning, Settings waits longer before it prepares itself again.")),
         ],
         fixed: [
-            Item(title: "Siri AI opening NotchIsland",
-                 detail: "Opening Siri AI or starting a chat in it could bring up NotchIsland's Settings."),
-            Item(title: "Freezes while asking Siri AI",
-                 detail: "Talking to Siri AI and checking the clipboard no longer wait on the main thread, and reading an answer takes 35 system calls per look instead of 919."),
-            Item(title: "False alarms in diagnostics",
-                 detail: "Normal use and planned work are no longer reported as unusual behaviour, and a false \"Settings cannot be seen\" report is gone."),
+            Item(symbol: "sparkles", tint: .indigo, title: String(localized: "Siri AI opened Settings"),
+                 detail: String(localized: "Opening Siri AI or starting a chat could bring up NotchIsland's Settings.")),
+            Item(symbol: "hourglass", tint: .yellow, title: String(localized: "Freezes while asking Siri AI"),
+                 detail: String(localized: "Waiting for Siri AI could hold up the island. It now waits in the background.")),
+            Item(symbol: "list.clipboard.fill", tint: .gray, title: String(localized: "Freezes from the clipboard"),
+                 detail: String(localized: "Checking what you copied could hold up the island. That's in the background too.")),
+            Item(symbol: "cursorarrow.click.2", tint: .teal, title: String(localized: "Buttons in saved lists"),
+                 detail: String(localized: "Open and Delete did nothing in Open Notch Styles.")),
+            Item(symbol: "arrow.triangle.2.circlepath", tint: .orange, title: String(localized: "Settings rebuilt over and over"),
+                 detail: String(localized: "On low memory it could prepare itself and be dropped again and again.")),
+            Item(symbol: "stethoscope", tint: .mint, title: String(localized: "False alarms in reports"),
+                 detail: String(localized: "Using the island normally no longer shows up as unusual behaviour.")),
         ],
         known: [
-            Item(title: "Pages load when you go to them",
-                 detail: "The first visit to Widgets, or a visit more than a minute after leaving it, builds the page again, so it takes a moment longer."),
-            Item(title: "Settings' pictures show one island",
-                 detail: "The photographs were taken on one Mac: the island in them has that Mac's width, not yours."),
-            Item(title: "Fan Control on M1–M4",
-                 detail: "Tried on an M5 MacBook Pro only. If the fans do not follow the dial, or do not stay where it was set, send a report from About."),
-            Item(title: "A fan held still",
-                 detail: "With the fans stopped the chip gets hot under load and macOS slows it down. Click Manual for automatic before heavy work."),
+            Item(symbol: "clock.fill", tint: .orange, title: String(localized: "Pages take a moment"),
+                 detail: String(localized: "A page loads again if you left it over a minute ago, so it takes a little longer to appear.")),
+            Item(symbol: "memorychip.fill", tint: .blue, title: String(localized: "Some memory stays"),
+                 detail: String(localized: "About 30 MB stays after you first open Widgets, until you quit. It doesn't keep growing.")),
+            Item(symbol: "magnifyingglass", tint: .purple, title: String(localized: "Spotlight off opens slower"),
+                 detail: String(localized: "With nothing kept ready, it reads your apps and icons as it opens.")),
+            Item(symbol: "arrow.clockwise", tint: .green, title: String(localized: "Opening settings restarts"),
+                 detail: String(localized: "Opening saved App Settings restarts NotchIsland for a moment.")),
+            Item(symbol: "photo.fill", tint: .gray, title: String(localized: "Pictures show one Mac"),
+                 detail: String(localized: "The island in Settings' photos may be wider or narrower than yours.")),
+            Item(symbol: "fan.fill", tint: .mint, title: String(localized: "Fan Control"),
+                 detail: String(localized: "Only tried on an M5 MacBook Pro. With the fans stopped, the chip gets hot under load.")),
         ])
 }

@@ -4,7 +4,13 @@ import Foundation
 nonisolated struct SettingsPlace: Equatable, Sendable {
     var pane: IslandSettingsPane
     var customizing: WidgetID?
+    /// A page open over About: a place of its own.
+    var info: SettingsInfoPage?
 }
+
+/// What About leads to: how NotchIsland works, over the page (`AppInfoMenu`); what's new, in the island
+/// in Settings' place (`AppModel.openWhatsNewFromSettings`).
+nonisolated enum SettingsInfoPage: Sendable, Equatable { case howItWorks, whatsNew }
 
 /// Settings' steps back and forward, as a browser's: two fingers to the right go back where the
 /// user was (out of Customize to Widgets, to the page before), to the left forward again (asked

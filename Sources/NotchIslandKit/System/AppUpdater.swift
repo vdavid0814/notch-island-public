@@ -45,42 +45,12 @@ import Security
     nonisolated static let dismissedKey = "ni2.update.dismissed"
     /// The first look for a new version after launch.
     nonisolated static let firstCheckDelay: Duration = .seconds(60)
-    /// How many times a day it looks again (About ▸ Updates): one small request to GitHub each
-    /// time, ~4 mJ (measured: at rest the app takes that in 20 s).
-    nonisolated static let checksPerDayRange = 1...48
-    nonisolated static let defaultChecksPerDay = 5
+    /// How many times a day it looks again: one small request to GitHub each time, ~4 mJ (measured:
+    /// at rest the app takes that in 20 s).
+    nonisolated static let checksPerDay = 2
+    /// What used to choose it (only to remove it).
     nonisolated static let checksPerDayKey = "ni2.update.checksPerDay"
-    /// After the setting moved, a check that is overdue waits this long (the slider may still move).
-    nonisolated static let rescheduleGap: Duration = .seconds(10)
-
-    var checksPerDay: Int {
-        didSet {
-            let allowed = Self.checksPerDay(stored: checksPerDay)
-            guard checksPerDay == allowed else { checksPerDay = allowed; return }
-            guard checksPerDay != oldValue else { return }
-            UserDefaults.standard.set(checksPerDay, forKey: Self.checksPerDayKey)
-            Log.app.notice("update checks: \(self.checksPerDay, privacy: .public) a day")
-            // From the last look, not from now: more often takes effect at once.
-            if checks != nil { scheduleChecks(first: Self.delay(sinceLastCheck: lastCheck.map { ContinuousClock.now - $0 }, perDay: checksPerDay)) }
-        }
-    }
-
-    /// The stored number within the range; the default for none or a value of another type.
-    nonisolated static func checksPerDay(stored: Any?) -> Int {
-        guard let count = stored as? Int else { return defaultChecksPerDay }
-        return min(max(count, checksPerDayRange.lowerBound), checksPerDayRange.upperBound)
-    }
-
-    nonisolated static func checkInterval(perDay: Int) -> Duration {
-        .seconds(24 * 3600) / checksPerDay(stored: perDay)
-    }
-
-    /// How long until the next automatic look when the setting changes `elapsed` after the last
-    /// one (nil: none yet this launch).
-    nonisolated static func delay(sinceLastCheck elapsed: Duration?, perDay: Int) -> Duration {
-        guard let elapsed else { return firstCheckDelay }
-        return max(checkInterval(perDay: perDay) - elapsed, rescheduleGap)
-    }
+    nonisolated static let checkInterval: Duration = .seconds(24 * 3600) / checksPerDay
 
     /// A notice in the notch that a new version is out (`UpdateCompact`): from the first check that
     /// finds one until it is installed or closed. While it installs, it stays to show how far.
@@ -96,11 +66,10 @@ import Security
     /// A demo's made-up release (`notchisland://demo/update`): Update does not install it.
     private(set) var isDemo = false
     @ObservationIgnored private var checks: Task<Void, Never>?
-    @ObservationIgnored private var lastCheck: ContinuousClock.Instant?
 
     init() {
         let defaults = UserDefaults.standard
-        checksPerDay = Self.checksPerDay(stored: defaults.object(forKey: Self.checksPerDayKey))
+        defaults.removeObject(forKey: Self.checksPerDayKey)
         if let from = defaults.string(forKey: Self.updatedFromKey) {
             defaults.removeObject(forKey: Self.updatedFromKey)
             if from != current { updatedFrom = from }
@@ -122,12 +91,11 @@ import Security
                 do { try await Task.sleep(for: delay, tolerance: delay / 10) } catch { return }
                 guard let self else { return }
                 // A check already showing its result, or an install under way, is left alone.
-                // In a task of its own: the setting moving meanwhile ends the wait, not the request.
                 switch self.state {
                 case .idle, .upToDate, .failed: await Task { await self.check() }.value
                 default: break
                 }
-                delay = Self.checkInterval(perDay: self.checksPerDay)
+                delay = Self.checkInterval
             }
         }
     }
@@ -190,7 +158,6 @@ import Security
         } catch {
             state = .failed(String(localized: "GitHub could not be reached. Try again later."))
         }
-        lastCheck = .now
         Log.app.notice("update check: \(String(describing: self.state), privacy: .public)")
     }
 
@@ -290,7 +257,7 @@ import Security
     }
 
     /// A shell that waits for this process to end, then opens the new copy. It outlives the app.
-    private static func reopenAfterExit(_ app: URL) {
+    static func reopenAfterExit(_ app: URL) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.2; done; /usr/bin/open \"$2\"",

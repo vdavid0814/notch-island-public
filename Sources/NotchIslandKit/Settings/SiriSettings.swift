@@ -48,7 +48,7 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
     var galleryColumns = 9
     var gallerySort: SiriGallerySort = .recent
     /// How large the apps' icons are; the cells, the rows and the window grow with them.
-    var galleryIconSize: SiriGalleryIconSize = .medium
+    var galleryIcon: Double = Double(SiriGalleryIconSize.medium.points)
 
     // MARK: Files
 
@@ -72,8 +72,8 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
 
     // MARK: Window
 
-    /// Siri's width (the field, the list and the answer).
-    var panelSize: SiriPanelSize = .standard
+    /// Siri's width (the field, the list and the answer), scaling it on top of the island's own size.
+    var widthFactor: Double = 1
     /// Rows of hits the list shows before it scrolls (also the answer's height).
     var listRows = 7
     /// Rows of apps the gallery shows before it scrolls (its columns set its width).
@@ -85,6 +85,12 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
     static let recentDayChoices = [7, 30, 90]
     static let listRowsRange: ClosedRange<Int> = 4...10
     static let galleryRowsRange: ClosedRange<Int> = 2...6
+    /// A fifth past the named sizes they replaced, each way (0.85 and 1.2; 36 and 72 pt, whole points).
+    static let widthFactorRange: ClosedRange<Double> = 0.68...1.44
+    static let galleryIconRange: ClosedRange<Double> = 29...86
+
+    /// What a value saved before the sliders was called.
+    private enum LegacyKeys: String, CodingKey { case panelSize, galleryIconSize }
 
     init() {}
 
@@ -118,7 +124,11 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
         searchesFileContents = value(.searchesFileContents, d.searchesFileContents)
         galleryColumns = min(max(value(.galleryColumns, d.galleryColumns), Self.galleryColumnsRange.lowerBound), Self.galleryColumnsRange.upperBound)
         gallerySort = value(.gallerySort, d.gallerySort)
-        galleryIconSize = value(.galleryIconSize, d.galleryIconSize)
+        // A named size saved before the slider keeps its size on it.
+        let legacy = try? decoder.container(keyedBy: LegacyKeys.self)
+        let namedIcon = (try? legacy?.decodeIfPresent(SiriGalleryIconSize.self, forKey: .galleryIconSize)).flatMap { $0 }
+        galleryIcon = min(max(value(.galleryIcon, namedIcon.map { Double($0.points) } ?? d.galleryIcon), Self.galleryIconRange.lowerBound),
+                          Self.galleryIconRange.upperBound)
         // The folders chosen before the home folder could be: it stays off until it is chosen.
         folders = value(.folders, d.folders.subtracting([.home]))
         recentDays = max(1, value(.recentDays, d.recentDays))
@@ -128,15 +138,17 @@ nonisolated struct SiriSettings: Sendable, Equatable, Codable {
         answerLength = value(.answerLength, d.answerLength)
         searchEngine = value(.searchEngine, d.searchEngine)
         offersChatGPT = value(.offersChatGPT, d.offersChatGPT)
-        panelSize = value(.panelSize, d.panelSize)
+        let namedWidth = (try? legacy?.decodeIfPresent(SiriPanelSize.self, forKey: .panelSize)).flatMap { $0 }
+        widthFactor = min(max(value(.widthFactor, namedWidth.map { Double($0.factor) } ?? d.widthFactor), Self.widthFactorRange.lowerBound),
+                          Self.widthFactorRange.upperBound)
         listRows = min(max(value(.listRows, d.listRows), Self.listRowsRange.lowerBound), Self.listRowsRange.upperBound)
         galleryRows = min(max(value(.galleryRows, d.galleryRows), Self.galleryRowsRange.lowerBound), Self.galleryRowsRange.upperBound)
     }
 
     /// The part of the settings that sizes Siri's window, for `IslandLayout`.
     var layout: SiriLayout {
-        SiriLayout(widthFactor: panelSize.factor, listRows: listRows, galleryRows: galleryRows, galleryColumns: galleryColumns,
-                   galleryIcon: galleryIconSize.points)
+        SiriLayout(widthFactor: CGFloat(widthFactor), listRows: listRows, galleryRows: galleryRows, galleryColumns: galleryColumns,
+                   galleryIcon: CGFloat(galleryIcon))
     }
 
     /// The suggestions (⌘1–⌘7) that are switched on, in order.
@@ -216,8 +228,8 @@ nonisolated enum SiriGallerySort: String, Sendable, Codable, CaseIterable, Ident
     var title: String { self == .recent ? "Recently Used" : "Name" }
 }
 
-/// The app gallery's icon sizes (Settings ▸ Spotlight ▸ App Gallery). Medium is the size the
-/// gallery had before it could be set.
+/// The app gallery's named icon sizes, as saved before its slider. Medium is the size the gallery
+/// had before it could be set, and the slider's start.
 nonisolated enum SiriGalleryIconSize: String, Sendable, Codable, CaseIterable, Identifiable {
     case small, medium, large, extraLarge
 
@@ -330,6 +342,7 @@ nonisolated enum SiriSearchEngine: String, Sendable, Codable, CaseIterable, Iden
     }
 }
 
+/// Siri's named widths, as saved before the slider.
 nonisolated enum SiriPanelSize: String, Sendable, Codable, CaseIterable, Identifiable {
     case small, standard, large
 

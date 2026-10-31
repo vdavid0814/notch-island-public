@@ -43,6 +43,11 @@ import SwiftUI
     /// The saved notch styles are open beside the page's title (`NotchStylesMenu`), and where.
     var showsNotchStyles = false
     var notchStylesFrame: CGRect = .zero
+    var notchStylesButton: CGRect = .zero
+    /// The saved app settings are open beside General's title (`AppSettingsButtons`), and where.
+    var showsAppSettings = false
+    var appSettingsFrame: CGRect = .zero
+    var appSettingsButton: CGRect = .zero
     /// What is picked of the top bar in Top Bar mode: its buttons and the picker's pages, one by a
     /// click, more with ⌘-click. Button Colour sets the colour of these (of everything, with none).
     var headerPicks: Set<HeaderPart> = []

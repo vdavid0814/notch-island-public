@@ -3,6 +3,20 @@ import Testing
 @testable import NotchIslandKit
 
 @MainActor @Suite struct SettingsHistoryTests {
+    @Test func theInfoPageIsAPlaceOfItsOwn() {
+        let history = SettingsHistory()
+        let about = SettingsPlace(pane: .about)
+        let info = SettingsPlace(pane: .about, info: .howItWorks)
+        var here = info
+        history.moved(from: SettingsPlace(pane: .general), to: about)
+        history.moved(from: about, to: info)
+        let apply: (SettingsPlace) -> Void = { here = $0 }
+        #expect(history.step(.back, from: here, apply: apply) && here == about)
+        #expect(history.step(.back, from: here, apply: apply) && here == SettingsPlace(pane: .general))
+        #expect(history.step(.forward, from: here, apply: apply) && here == about)
+        #expect(history.step(.forward, from: here, apply: apply) && here == info)
+    }
+
     @Test func stepsBackAndForwardAsABrowser() {
         let history = SettingsHistory()
         var here = SettingsPlace(pane: .general)

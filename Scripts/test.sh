@@ -34,7 +34,8 @@ env -u NI_SNAPSHOTS xcrun swift test ${@+"$@"} || status=$?
 # Each in a process of its own.
 for suite in "${drawing[@]}"; do
     if ! $filtered || grep -Eq -- "$filter" <<< "NotchIslandKitTests.$suite/"; then
-        NI_SNAPSHOTS="${NI_SNAPSHOTS:-verify}" xcrun swift test ${unfiltered[@]+"${unfiltered[@]}"} --filter "$suite" || status=$?
+        # The same on every Mac: not this one's Light or Dark Mode or Liquid Glass slider.
+        NI_APPEARANCE=dark NI_GLASS_TINT=0 NI_SNAPSHOTS="${NI_SNAPSHOTS:-verify}" xcrun swift test ${unfiltered[@]+"${unfiltered[@]}"} --filter "$suite" || status=$?
     fi
 done
 exit "$status"
