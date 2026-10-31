@@ -27,3 +27,6 @@ Scripts/perf/ws/axfocus
 Scripts/perf/hog
 Scripts/perf/thrift_watch
 Scripts/perf/frames/wins
+
+# Claude Code: personal settings
+.claude/settings.local.json

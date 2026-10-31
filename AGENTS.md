@@ -31,6 +31,7 @@ notch app v0.8/
 │   ├── make-dmg.sh                ← release image; refuses a wrong signer or missing report addresses
 │   ├── settings-pictures.sh       ← retakes the island photographs used in Settings
 │   └── perf/                      ← energy / FPS measuring tools (README.md explains them)
+├── .claude/skills/whats-new/      ← how What's New and the release notes are written, every release
 ├── docs/
 │   ├── ARCHITECTURE.md            ← how the island, window, glass and Settings work — read this first
 │   ├── OPTIMIZATION-PLAYBOOK.md   ← how energy/FPS work is done here
@@ -68,6 +69,14 @@ notch app v0.8/
   privacy prompt blocks the app's own file searches until someone answers it. Measure inside the app.
 - **Save energy by dropping frames or updates.** Fewer FPS is a regression here, whatever the meter says.
 - **Draw mock-ups of the island** for Settings; retake real photographs (`Scripts/settings-pictures.sh`).
+
+## Every commit and push
+
+**Use the `whats-new` skill (`.claude/skills/whats-new/`) every time, without exception.** The hook
+`Scripts/release-guard.py` brings it up at each `git commit`, `git push` and `gh release create`, and refuses
+them while `Support/Info.plist`, `ReleaseNotes.current` and the README disagree on the version. What a user
+would notice goes into `ReleaseNotes.current`, the README section and the GitHub notes, in the look and voice
+of How NotchIsland Works: 4–12 cards on each tab, in full rows.
 
 ## Before you call it done
 
