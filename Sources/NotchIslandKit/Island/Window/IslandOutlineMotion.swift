@@ -30,6 +30,12 @@ import SwiftUI
     /// How long the mask outlives the hold, so the surface drawn at its presentation is on screen
     /// before the mask stops cutting the larger one.
     static let unmaskDelay: TimeInterval = 0.05
+    /// Faded out into a drawn notch: longer, so the black the hold was drawn in is gone from the
+    /// window before the mask stops hiding it.
+    static let fadedUnmaskDelay: TimeInterval = 0.15
+    /// On a screen without a notch the island fades over this last part of its way into the notch
+    /// (and the first part out of it), so no black notch is left where there is none.
+    static let fadeShare: Double = 0.4
 
     private struct Flight {
         let id: Int
@@ -65,7 +71,7 @@ import SwiftUI
     }
 
     func move(from: IslandPresentation, to: IslandPresentation, spring: Spring) -> SurfaceHold? {
-        guard let stage, stage.layer != nil else { return nil }
+        guard let stage, stage.content.layer != nil else { return nil }
         let layout = model.layout
         let start = layout.outline(for: from), end = layout.outline(for: to)
         let now = CACurrentMediaTime()
@@ -115,7 +121,7 @@ import SwiftUI
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        stage.layer?.mask = mask
+        stage.content.layer?.mask = mask
         place()
         shape.path = Self.path(outlines[count - 1])
         let animation = CAKeyframeAnimation(keyPath: "path")
@@ -131,6 +137,25 @@ import SwiftUI
             animation.isRemovedOnCompletion = false
         }
         shape.add(animation, forKey: "outline")
+        // On a screen without a notch: the same move, fading out as it closes into the notch and in
+        // as it comes out of it, in step with the outline (the share of the way left, or gone).
+        let fades = model.metrics?.isPhysical == false && (to.isIdle || from.isIdle) && to != from
+        if fades {
+            let total = max(delta.magnitudeSquared.squareRoot(), 0.001)
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.values = outlines.map { outline -> Float in
+                let way = (OutlineVector(outline) - (to.isIdle ? origin + delta : origin)).magnitudeSquared.squareRoot() / total
+                return Float(min(max(way / Self.fadeShare, 0), 1))
+            }
+            fade.keyTimes = animation.keyTimes
+            fade.duration = duration
+            fade.calculationMode = .linear
+            mask.opacity = to.isIdle ? 0 : 1
+            mask.add(fade, forKey: "fade")
+        } else {
+            mask.removeAnimation(forKey: "fade")
+            mask.opacity = 1
+        }
         // Settings' own window over the island clips to the same outline (`SettingsWindow`).
         SettingsWindow.current?.followOutline(animation, final: shape.path)
         CATransaction.commit()
@@ -141,9 +166,10 @@ import SwiftUI
             guard let self else { return }
             self.flight = nil
             self.model.island.releaseSurface(hold)
-            self.unmasking.schedule(after: Self.unmaskDelay) { [weak self] in
+            self.unmasking.schedule(after: fades && to.isIdle ? Self.fadedUnmaskDelay : Self.unmaskDelay) { [weak self] in
                 guard let self, self.flight == nil else { return }
-                self.stage?.layer?.mask = nil
+                self.stage?.content.layer?.mask = nil
+                self.mask.opacity = 1
             }
         }
         return hold
@@ -156,11 +182,13 @@ import SwiftUI
         let live = previous.flatMap { $0.state(at: now) }
         landing.cancel()
         unmasking.cancel()
-        if let stage, stage.layer?.mask != nil {
+        if let stage, stage.content.layer?.mask != nil {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             shape.removeAnimation(forKey: "outline")
-            stage.layer?.mask = nil
+            mask.removeAnimation(forKey: "fade")
+            mask.opacity = 1
+            stage.content.layer?.mask = nil
             CATransaction.commit()
         }
         // SwiftUI starts a spring from rest, at the outline the render server had reached; one of
@@ -202,14 +230,99 @@ import SwiftUI
     }
 }
 
-/// The island window's content view: a plain view the hosting view fills, which reports its resizes
-/// (the outline mask follows them).
+/// The island window's content view: a plain view the hosting view fills (inside `content`, which
+/// the outline mask cuts), which reports its resizes (the mask follows them), and the line that
+/// stands for the island at rest on a screen without a notch, over the content and outside the
+/// mask: as the island fades into the notch it fades too, and the line stays (it went with the
+/// island and flashed back once the mask was taken away).
 final class IslandStageView: NSView {
     var onResize: (() -> Void)?
+    /// What the outline mask cuts: the hosting view.
+    let content = NSView()
+    private let restLine = RestLineStrip()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        content.frame = bounds
+        content.autoresizingMask = [.width, .height]
+        content.wantsLayer = true
+        addSubview(content)
+        restLine.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin]
+        restLine.isHidden = true
+        addSubview(restLine)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         onResize?()
+    }
+
+    /// The line at the top centre (nil: none), shown or faded out.
+    func showRestLine(_ line: RestLine?, visible: Bool, fades: Bool) {
+        guard let line, line.isShown else {
+            // At every transition on a notched screen: nothing to touch.
+            if !restLine.isHidden { restLine.isHidden = true }
+            return
+        }
+        let width = CGFloat(min(line.length, RestLine.lengthRange.upperBound))
+        let height = CGFloat(line.thickness)
+        let frame = CGRect(x: ((bounds.width - width) / 2).rounded(), y: bounds.height - RestLine.topInset - height,
+                           width: width, height: height)
+        if restLine.frame != frame { restLine.frame = frame }
+        restLine.paint(opacity: line.opacity)
+        if visible {
+            restLine.layer?.removeAnimation(forKey: "fade")
+            restLine.alphaValue = 1
+            restLine.isHidden = false
+        } else if !restLine.isHidden {
+            guard fades else {
+                restLine.isHidden = true
+                return
+            }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.18
+                restLine.animator().alphaValue = 0
+            } completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.restLine.alphaValue == 0 else { return }
+                    self.restLine.isHidden = true
+                }
+            }
+        }
+    }
+}
+
+/// The rest line itself: a grey stroke with round ends, which takes no clicks (the notch's hover
+/// target under it does).
+private final class RestLineStrip: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = bounds.height / 2
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        layer?.cornerRadius = newSize.height / 2
+    }
+
+    /// Grey, not white or black, so it reads on a light menu bar and a dark one alike.
+    func paint(opacity: Double) {
+        let color = CGColor(gray: 0.5, alpha: opacity)
+        if layer?.backgroundColor != color { layer?.backgroundColor = color }
     }
 }
 

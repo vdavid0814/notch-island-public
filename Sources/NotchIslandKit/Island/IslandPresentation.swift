@@ -41,6 +41,11 @@ nonisolated enum BannerKind: Sendable, Equatable {
     case anchorTarget
     /// Headphones connected: their picture, name and batteries.
     case airPods(AirPodsInfo)
+    /// A display was connected: a bar of the screens (this many) to pick the island's.
+    case displays(Int)
+    /// A new track (a song, a video) started: the pill drops a little lower and wider, its title in
+    /// one line under the notch, in the cover's colour (`TrackTitleBanner`).
+    case trackTitle
 }
 
 nonisolated extension BannerKind {
@@ -320,6 +325,10 @@ nonisolated enum IslandPresentation: Sendable, Equatable {
             "banner.anchorTarget"
         case .banner(.airPods):
             "banner.airPods"
+        case .banner(.displays):
+            "banner.displays"
+        case .banner(.trackTitle):
+            "banner.trackTitle"
         case .expanded(let page):
             "expanded.\(page.rawValue)"
         case .assistant:

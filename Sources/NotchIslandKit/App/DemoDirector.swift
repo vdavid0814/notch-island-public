@@ -116,6 +116,18 @@ import SwiftUI
             }, forMode: .common)
         case .airPods:
             model.airPodsConnected(.demo)
+        case .displays:
+            model.showDisplaysNotice()
+        case .track(let title):
+            var track = Self.pictureTrack()
+            track.title = title
+            model.media.injectDemo(track, playing: true)
+        case .lastPlayed(let on):
+            let sample = Self.pictureTrack()
+            model.media.injectDemoLastPlayed(on ? LastPlayedTrack(title: sample.title, artist: sample.artist, album: sample.album) : nil,
+                                             artwork: on ? sample.artworkData : nil)
+        case .quiet(let on):
+            model.demoQuietsMedia = on
         case .airPodsMode(let mode):
             model.airPodsModeChanged(name: AirPodsInfo.demo.name, to: mode)
         case .siriApps:

@@ -50,8 +50,8 @@ nonisolated extension BannerKind {
     /// island out from under it.
     var isInteractive: Bool {
         switch self {
-        case .level, .levelPill, .levelCovering, .timerFinished: true
-        case .power, .dropTarget, .anchorTarget, .airPods: false
+        case .level, .levelPill, .levelCovering, .timerFinished, .displays: true
+        case .power, .dropTarget, .anchorTarget, .airPods, .trackTitle: false
         }
     }
 
@@ -61,7 +61,7 @@ nonisolated extension BannerKind {
     var showsWhileHidden: Bool {
         switch self {
         case .level, .levelPill: true
-        case .levelCovering, .power, .timerFinished, .dropTarget, .anchorTarget, .airPods: false
+        case .levelCovering, .power, .timerFinished, .dropTarget, .anchorTarget, .airPods, .displays, .trackTitle: false
         }
     }
 }
@@ -595,7 +595,7 @@ nonisolated extension BannerKind {
             isAnchorTargeted: isAnchorTargeted,
             countdownActive: model.timers.isCountdownActive,
             stopwatchActive: model.timers.isStopwatchActive,
-            nowPlayingActive: model.preferences.showNowPlaying && model.media.isActive,
+            nowPlayingActive: model.preferences.showNowPlaying && model.media.isActive && !model.demoQuietsMedia,
             recordingActive: model.recorder.isRecording,
             wantsPanelWhileRecording: wantsPanelWhileRecording,
             updateNoticeActive: model.updater.notice != nil

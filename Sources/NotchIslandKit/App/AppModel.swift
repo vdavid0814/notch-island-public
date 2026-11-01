@@ -56,9 +56,14 @@ import Observation
     let controls = SystemControls()
     /// The coming events, read only while Spotlight shows them.
     let calendar = CalendarService()
+    /// The screens connected, and the notice a monitor plugged in brings.
+    let displays = DisplayCenter()
     @ObservationIgnored private let commandSpaceTap = CommandSpaceTap()
     /// Whether ⌘Space is really caught (About ▸ Permissions shows it).
     private(set) var commandSpaceState: InterceptionState = .off
+    /// `demo/quiet`: what plays goes on, unseen, so the island rests (for checking the rest with
+    /// the user's music on). Not stored.
+    var demoQuietsMedia = false
     let permissions = PermissionCenter()
     let activity = SystemActivity()
     let haptics: Haptics
@@ -81,6 +86,7 @@ import Observation
         return IslandLayout(notch: metrics?.notchSize ?? Self.fallbackNotchSize, scale: size.scale,
                             screen: metrics?.screenFrame.size ?? .zero, siri: preferences.siri.layout,
                             nowPlayingWidth: CGFloat(preferences.nowPlayingWidth),
+                            trackTitleSize: CGFloat(preferences.trackTitleSize),
                             whatsNewRows: whatsNewRows, panel: size.panel.layout,
                             display: DisplayProfile.factor(for: metrics),
                             settingsFillsLikeReference: DisplayProfile.isKnown(metrics))
@@ -428,6 +434,8 @@ import Observation
         launchAtLogin.refresh()
         power.start()
         airPods.start()
+        displays.onConnected = { [weak self] _ in self?.displayConnected() }
+        displays.start()
         shelf.pruneMissingInBackground()
         lightBackdrop = LightGlassBackdrop(model: self)
         lightBackdrop.start()
@@ -512,6 +520,7 @@ import Observation
         appliedFeatures = nil
         clipboard.setWatching(false)
         power.stop()
+        displays.stop()
         battery.stop()
         airPods.stop()
         listeningModes.stop()
@@ -558,6 +567,8 @@ import Observation
             controller.showWhatsNew()
         case .showAppInfo:
             controller.showAppInfo()
+        case .islandScreen(let choice):
+            preferences.islandScreen = choice
         case .removeFanHelper:
             Task { await fans.removeHelper() }
         case .showSettings:
@@ -818,6 +829,7 @@ import Observation
         airPods.onUpdate = { [weak self] info in self?.airPodsUpdated(info) }
         levels.onChange = { [weak self] kind, source in self?.levelChanged(kind, source: source) }
         timers.onFinished = { [weak self] in self?.timerFinished() }
+        media.onTrackChange = { [weak self] in self?.trackChanged() }
         dragMonitor.onDragBegan = { [weak self] in self?.externalDragBegan() }
         dragMonitor.onDragEnded = { [weak self] in self?.externalDragEnded() }
         anchor.screen = { [weak self] in self?.anchorScreen }
@@ -907,6 +919,15 @@ import Observation
         banners.post(banner, duration: duration, preempting: source == .key)
         // Only a key press is felt; a Control Center slider drag (`.external`) must not buzz.
         if source == .key { haptics.play(.tick) }
+    }
+
+    /// A new song or video: its title under the notch (Live Activities ▸ New Track). A notice nobody
+    /// asked for: it buries no other banner, waits for no open island, and stays away over a
+    /// full-screen video.
+    private func trackChanged() {
+        guard preferences.showNowPlaying, preferences.trackTitle, !demoQuietsMedia,
+              appliedFeatures?.hidden != true, !island.presentation.isOpen else { return }
+        banners.post(.trackTitle, duration: preferences.trackTitleDuration, preempting: false)
     }
 
     private func timerFinished() {
@@ -1034,6 +1055,37 @@ import Observation
     private var isPlayingVideoFullscreen: Bool {
         guard media.isActive, let player = media.item?.bundleIdentifier else { return false }
         return fullscreen.fullscreenApps.contains(player)
+    }
+
+    // MARK: Displays
+
+    /// A monitor was plugged in beside another screen: the notice to pick the island's screen, on
+    /// the screen the island is on (after it has moved there, if the choice is "Monitor").
+    func displayConnected() {
+        guard preferences.displayNotice else { return }
+        showDisplaysNotice()
+    }
+
+    /// The displays notice (also `demo/displays`), for as long as Live Activities ▸ Displays says.
+    func showDisplaysNotice() {
+        let count = displayChoices(includesAutomatic: false).count
+        guard count > 1 else { return }
+        banners.post(.displays(count), duration: preferences.displayNoticeDuration)
+    }
+
+    /// The screens a bar offers (`IslandScreenPicker.choices`). A Mac with a battery is a MacBook:
+    /// its own screen is offered also while it is closed.
+    func displayChoices(includesAutomatic: Bool) -> [IslandScreenChoice] {
+        IslandScreenPicker.choices(screens: displays.screens, current: preferences.islandScreen,
+                                   hasBuiltIn: power.hasBattery, includesAutomatic: includesAutomatic)
+    }
+
+    /// The screen the island is on now, as the notice's bar names it.
+    var currentScreenChoice: IslandScreenChoice {
+        guard let id = metrics?.displayID, let screen = displays.screens.first(where: { $0.metrics.displayID == id }) else {
+            return preferences.islandScreen
+        }
+        return screen.choice
     }
 
     /// The screen the island lives on.

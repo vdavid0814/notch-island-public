@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.9.1 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.9 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -23,6 +23,47 @@ How much energy each animation and the idle state take, measured before and afte
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.9
+
+A new song's title in the notch, Listen Again, and the island on a monitor or a Mac without a notch.
+
+### The biggest changes
+
+- **A new song's title.** When the next song or video starts, the pill drops a little lower and wider with its title in one line, in the colour of its cover. A title too long for it stands still for half a second, then glides through once.
+- **Listen Again.** With nothing playing, Now Playing shows the last song from Music — its cover, title and artist — instead of Nothing Playing. Listen Again opens Music right at that song, without playing it.
+- **The island on a monitor.** Pick the island's screen — Automatic, the MacBook or a monitor — and when you plug a monitor in, the notch asks where the island should live.
+- **Screens without a notch.** On a monitor or a MacBook Air M1, a faint line shows where the island comes out, and it grows out of a notch's shape and fades back into nothing.
+
+### Features
+
+- **Its size and time.** Live Activities ▸ New Track sets how large the title is and how long it stays, with a moving picture of it.
+- **Listen Again in General.** It can be turned off there; Nothing Playing then comes back.
+- **The line, your way.** Its length, thickness and how much of it shows are set in Live Activities ▸ Screens Without a Notch.
+- **Switch, picture, options.** Settings' sections start with the switch and its picture; the options fold away while it's off.
+
+### Performance
+
+- **Opening and closing:** 693 mJ for six, down from 733 mJ in 0.8.9.1 (median of three runs).
+- **At rest:** Energy Impact 0.28–0.35 with nothing to show, as before.
+- **Passing the notch:** 13–16 mJ for six passes, about as before.
+- **Titles glide for free.** macOS draws the title's glide, so the app does no work while it moves.
+- **Covers when shown.** Listen Again's cover is only read when Now Playing shows it.
+
+### Fixes
+
+- **A black notch on a monitor.** On a screen without a notch, a black shape could stay at the top while the island was closed.
+- **Two scroll bars.** With a mouse connected, Settings' pages could show two scroll bars.
+
+### Good to know
+
+- **Music only.** Listen Again offers songs played in Music, not Spotify or videos.
+- **Not in your library?** A song you only streamed opens as a search in Music.
+- **Not over full screen.** A new title doesn't appear while a video plays in full screen.
+- **A longer page.** Live Activities has more on it, so its first opening each visit takes a little longer.
+- **Quiet after waking.** No monitor notice for 15 seconds after the Mac wakes.
+- **Moves after Settings.** A screen picked in Settings is moved to once Settings closes.
+- From 0.8.9.1: Full Disk Access for your folders, Empty Trash is for good, Fan Control only tried on an M5 MacBook Pro.
 
 ## What's new in v0.8.9.1
 

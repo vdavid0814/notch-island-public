@@ -4,6 +4,40 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-11-01: Monitors and screens without a notch, Settings rearranged
+
+What this round added: the island's screen chosen (MacBook, a monitor, Automatic), the notice when a
+monitor connects, the faint rest line and the fade into the drawn notch on screens without one, and
+Settings' sections as switch → picture → options, the options folding away while off. Release builds,
+on the charger at 100 %, each run a fresh launch with 35 s to settle (28 s for the page openings),
+old (0.8.9.1, HEAD) and new in turn (A B A B), three rounds; the coalition (own + GPU + billed).
+
+| Scenario | Old | New |
+|---|---|---|
+| Rest, still mouse, 30 s: Energy Impact mean | 0.28 / 0.42 (0.04*) | 0.28 / 0.30 / 0.35 |
+| Mouse moving around the screen, 6 times | 3–4 mJ | 3–4 mJ |
+| Passing by the notch, 6 times | 13–14 mJ | 13–16 mJ |
+| Hover open and close (`hover-slow`), 6 times | 714 / 733 / 733 mJ | 691 / 718 / 693 mJ |
+| Settings ▸ General | 7–9 mJ | 7–8 mJ |
+| Settings closing | 44–50 mJ | 45–49 mJ |
+| Settings ▸ Live Activities, first opening (page built) | median 373–401 mJ | median 529–564 mJ |
+
+\* a run with input in it, left out.
+
+- Rest, the mouse and the panel: unchanged. The panel kept at rest now draws nothing of its surface
+  (`isHiddenAtRest`, the fade's shade drawn clear in place, not taken out): openings a little lower.
+- Live Activities' first opening costs ~+40 %, once per visit (the page is kept a minute): the page is
+  a third longer (Displays, Screens Without a Notch). Ablations, medians: without the line's picture
+  514, without its sliders 536, without the screens' bar 562, without both sections 336–339, the
+  folding rows 533 (nothing). No single part: the page's one turn is longer and more of it runs on
+  the performance cores (P-core ms ~118 → ~170). Tried: the sections joined a turn later on the
+  efficiency cores (`lowPowerTurn`): 636–989 mJ, the page laid out twice — reverted. Kept: the line's
+  picture shares the menu bar's measured fit with Now Playing's and draws the wallpaper at the
+  island's screen's size, not 2560 pt.
+- Only rows that fold have the fold's layout and clip (`settingsFolded`); every other row is as before.
+- Not measurable on this Mac without a monitor: the rest line (one layer, static) and the fade into
+  the drawn notch (one keyframe animation on the outline's mask, render server).
+
 ## 2026-11-01: About ▸ Storage, measuring the disk
 
 Opening Storage walks ~200 GB of files (this Mac, with Full Disk Access). Release builds,

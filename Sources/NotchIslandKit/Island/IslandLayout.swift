@@ -49,6 +49,8 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     var siri = SiriLayout()
     /// The Now Playing pill's ears, as a part of their usual width (Live Activities ▸ Now Playing).
     var nowPlayingWidth: CGFloat = 1
+    /// The new track's title under the notch, as a part of its usual size (Live Activities ▸ New Track).
+    var trackTitleSize: CGFloat = 1
     /// What's New's rows on the topic it shows: its window is as high as they are.
     var whatsNewRows = 2
     /// The open panel's width and board height (Settings ▸ Widgets ▸ Size).
@@ -170,6 +172,21 @@ nonisolated struct IslandLayout: Sendable, Equatable {
     static let levelPillEar: CGFloat = 92
     /// The detail row a banner adds below the header band.
     static let bannerDetailHeight: CGFloat = 48
+    /// The displays notice: a line saying what it is for, and the screens' bar under it.
+    static let displayDetailHeight: CGFloat = 78
+    static let displaySegmentWidth: CGFloat = 150
+    static let displayBarInset: CGFloat = 28
+    /// The new track's title: the row it adds under the pill, how much wider than the pill it is
+    /// at each side, and the title's size — each times `trackTitleSize`.
+    static let trackTitleRowHeight: CGFloat = 30
+    static let trackTitleWidening: CGFloat = 36
+    static let trackTitleFontSize: CGFloat = 14
+    /// From the title's row to the island's sides, past the round lower corners.
+    static let trackTitleSideInset: CGFloat = 16
+
+    /// The title's row and font at the size in use.
+    var trackTitleRow: CGFloat { (Self.trackTitleRowHeight * trackTitleSize).rounded() }
+    var trackTitleFont: CGFloat { (Self.trackTitleFontSize * trackTitleSize * 2).rounded() / 2 }
     /// The open panel is no taller than this share of the screen (and no wider than Settings may
     /// be): past it, its cells are drawn smaller to fit.
     static let expandedMaximumScreenShare: CGFloat = 0.62
@@ -316,6 +333,18 @@ nonisolated struct IslandLayout: Sendable, Equatable {
             // notch, in a 352 × 148 window with its shadow), which the island covers.
             return CGSize(width: max(notch.width + 2 * ear, Self.airPodsBannerWidth),
                           height: notch.height + Self.airPodsDetailHeight)
+        case .banner(.displays(let count)):
+            // The screens' bar, centred under the notch: each segment a symbol and a short name.
+            let bar = CGFloat(max(count, 2)) * Self.displaySegmentWidth + 2 * Self.displayBarInset
+            let widest = screen == .zero ? CGFloat.greatestFiniteMagnitude : screen.width - 2 * Self.settingsSideMargin
+            return CGSize(width: min(max(notch.width + 2 * ear, Self.bannerMinimumWidth, bar.rounded()), widest),
+                          height: notch.height + Self.displayDetailHeight)
+        case .banner(.trackTitle):
+            // The Now Playing pill, a little lower and wider: its title in one row under it.
+            let pill = size(for: .compact(.nowPlaying))
+            let widest = screen == .zero ? CGFloat.greatestFiniteMagnitude : screen.width - 2 * Self.settingsSideMargin
+            return CGSize(width: min((pill.width + 2 * Self.trackTitleWidening * trackTitleSize).rounded(), widest),
+                          height: notch.height + trackTitleRow)
         case .banner(.levelPill):
             // Pill height; the trailing ear holds a small slider, so both ears are that wide.
             return CGSize(width: notch.width + 2 * Self.levelPillEar, height: notch.height)
@@ -419,6 +448,8 @@ nonisolated struct IslandLayout: Sendable, Equatable {
         // A little rounder than macOS's volume card under it.
         case .banner(.levelCovering): Self.coveringBottomRadius
         case .banner(.airPods) where Self.coversAirPodsCard: SystemVolumeCard.Kind.airPods.radius
+        // Round as the pill's ends, scaled with its title.
+        case .banner(.trackTitle): (min(notch.height, trackTitleRow) * 0.7).rounded()
         case .banner, .expanded(.recording), .expanded(.update): 24
         // The widgets' corners (`WidgetMetrics.cornerRadius`) and the page's inset under them, so
         // the board's bottom corners are concentric with the panel's and as round as every widget's.

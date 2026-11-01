@@ -41,9 +41,20 @@ extension ContainerValues {
     /// The corner radius of something in a row that sits the inset from the card's corner: the
     /// card is rounded concentric with it instead of with a capsule.
     @Entry var settingsCornerElementRadius: CGFloat?
+    /// An option of a feature: its row is folded away while true (`settingsFolded`); nil: a row
+    /// that never folds, laid out as it always was.
+    @Entry var settingsFolded: Bool?
 }
 
 extension View {
+    /// This row is an option of a feature whose switch heads the section: while the feature is off
+    /// the row folds up out of sight, and unfolds when it is switched on, on the spring the Widgets
+    /// page's Size room unfolds with (`StudioStageSpring.unfold`). The switch and the picture under
+    /// it stay (asked for: switch, picture, then the options).
+    func settingsFolded(_ folded: Bool) -> some View {
+        containerValue(\.settingsFolded, folded)
+    }
+
     /// This row holds something rounded `radius` at the card's corner (a picture, a big button):
     /// the section's card is rounded concentric with it.
     func settingsCornerElement(radius: CGFloat) -> some View {
@@ -74,8 +85,10 @@ struct SettingsFormStyle: FormStyle {
             .padding(.horizontal, fillsPage ? 0 : 20)
         }
         // A page's scroller stands out in the gap beside the room (`SettingsEdgeScroller`): the
-        // room's own ran over the cards at its edge.
-        .scrollIndicators(fillsPage ? .hidden : .automatic)
+        // room's own ran over the cards at its edge. Never, not hidden: with a mouse connected
+        // macOS shows its always-on scrollers, and `.hidden` let the room's come back beside the
+        // edge one (two bars, seen November 1).
+        .scrollIndicators(fillsPage ? .never : .automatic)
         .labeledContentStyle(SettingsRowStyle())
         .environment(\.isSettingsForm, true)
     }
@@ -111,6 +124,8 @@ private struct SettingsFormScroll<Content: View>: View {
 private struct SettingsFormSection: View {
     let section: SectionConfiguration
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !section.header.isEmpty {
@@ -125,12 +140,32 @@ private struct SettingsFormSection: View {
                         .map { $0 + SettingsForm.inset } ?? SettingsForm.cardRadius
                     VStack(spacing: 0) {
                         ForEach(rows.indices, id: \.self) { index in
-                            if index > 0 {
-                                Divider().padding(.horizontal, SettingsForm.inset)
+                            // Only an option row has the fold round it (and its line): every other
+                            // row is laid out and drawn as before, no layout or clip of its own.
+                            if let folded = rows[index].containerValues.settingsFolded {
+                                SettingsFold(shown: folded ? 0 : 1) {
+                                    VStack(spacing: 0) {
+                                        if index > 0 {
+                                            Divider().padding(.horizontal, SettingsForm.inset)
+                                        }
+                                        rows[index]
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(SettingsForm.inset)
+                                    }
+                                }
+                                .clipped()
+                                .opacity(folded ? 0 : 1)
+                                .allowsHitTesting(!folded)
+                                .accessibilityHidden(folded)
+                                .animation(reduceMotion ? .easeOut(duration: 0.2) : .spring(StudioStageSpring.unfold), value: folded)
+                            } else {
+                                if index > 0 {
+                                    Divider().padding(.horizontal, SettingsForm.inset)
+                                }
+                                rows[index]
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(SettingsForm.inset)
                             }
-                            rows[index]
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(SettingsForm.inset)
                         }
                     }
                     .background(SettingsForm.cardFill, in: .rect(cornerRadius: radius, style: .continuous))
@@ -145,6 +180,29 @@ private struct SettingsFormSection: View {
                     .padding(.top, SettingsForm.footerGap)
             }
         }
+    }
+}
+
+/// A row as high as this share of its own height (0 folded away, 1 whole), its top in place: the
+/// share is animated, so the row folds up into the one above and unfolds out of it, and the card
+/// and everything under it follow at every frame.
+private struct SettingsFold: Layout, Animatable {
+    var shown: CGFloat
+
+    var animatableData: CGFloat {
+        get { shown }
+        set { shown = newValue }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let row = subviews.first else { return .zero }
+        let size = row.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        return CGSize(width: proposal.width ?? size.width, height: max(0, size.height * min(max(shown, 0), 1.2)))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: CGPoint(x: bounds.minX, y: bounds.minY), anchor: .topLeading,
+                              proposal: ProposedViewSize(width: bounds.width, height: nil))
     }
 }
 

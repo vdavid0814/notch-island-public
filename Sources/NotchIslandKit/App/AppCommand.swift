@@ -50,6 +50,14 @@ nonisolated enum DemoCommand: Sendable, Equatable {
     case pressBar(bar: Int, segment: Int, hold: Double)
     /// The AirPods-connected banner with sample batteries.
     case airPods
+    /// What plays left out of the island, the music going on (`demo/quiet?on=1|0`).
+    case quiet(Bool)
+    /// The notice a monitor plugged in brings (`demo/displays`), with the screens connected now.
+    case displays
+    /// A demo track of this title starts playing, as a new track does (`demo/track?title=…`).
+    case track(String)
+    /// Listen Again offers a sample song (`demo/lastplayed`), or the one kept again (`?on=0`).
+    case lastPlayed(Bool)
     /// The card for the AirPods' noise control changing (`demo/airpodsmode?mode=anc|transparency|adaptive|off`).
     case airPodsMode(AirPodsListeningMode)
     /// Siri opened on its app gallery (as ⌘Space then ⌘1).
@@ -104,6 +112,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
     case media(MediaCommand)
     case startTimer(minutes: Double), cancelTimer, startStopwatch
     case showSettings
+    /// The island's screen, as Live Activities ▸ Displays sets it (`display?on=auto|macbook|monitor`).
+    case islandScreen(IslandScreenChoice)
     /// Settings on one tab (`settings/widgets`…).
     case showSettingsPane(IslandSettingsPane)
     /// About's Storage page (`settings/storage`): what fills the disk.
@@ -260,6 +270,17 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "demo/memorypressure": return .demo(.memoryPressure)
         case "demo/segments": return .demo(.segments)
         case "demo/airpods": return .demo(.airPods)
+        case "demo/displays": return .demo(.displays)
+        case "demo/track": return .demo(.track(query["title"].flatMap { $0.isEmpty ? nil : $0 } ?? "Island Lights"))
+        case "demo/lastplayed": return .demo(.lastPlayed(query["on"] != "0"))
+        case "demo/quiet": return .demo(.quiet(query["on"] != "0"))
+        case "display":
+            switch query["on"] {
+            case "auto": return .islandScreen(.automatic)
+            case "macbook", "builtin": return .islandScreen(.builtIn)
+            case "monitor", "external": return .islandScreen(.external(nil))
+            default: return nil
+            }
         case "demo/airpodsmode":
             let modes: [String: AirPodsListeningMode] = ["anc": .noiseCancellation, "transparency": .transparency,
                                                          "adaptive": .adaptive, "off": .off]

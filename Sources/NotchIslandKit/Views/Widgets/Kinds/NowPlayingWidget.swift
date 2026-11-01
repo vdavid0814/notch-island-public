@@ -23,25 +23,35 @@ struct NowPlayingWidget: View {
         let media = model.media
         // In the editor, a track even while none plays: every part is there to be moved.
         let item = media.item ?? (isEditing ? Self.sample : nil)
+        // Nothing plays: the song last played in Music, offered again (General ▸ Listen Again).
+        let again = item == nil ? Self.listenAgain(model) : nil
         Group {
             if size.height < WidgetMetrics.singleRowHeight {
-                minimal(media, item)
+                minimal(media, item, again)
             } else {
-                beside(media, item)
+                beside(media, item, again)
             }
         }
         .frame(width: size.width, height: size.height, alignment: .leading)
         .whileShown { if renderMode == .live { withoutAnimation { media.refreshPosition() } } }
+        .task(id: again?.title) { if again != nil { media.loadListenAgainCover() } }
+    }
+
+    /// The song Listen Again offers while nothing plays: the one last played in Music, while General
+    /// says so.
+    static func listenAgain(_ model: AppModel) -> LastPlayedTrack? {
+        guard model.media.item == nil, model.preferences.listenAgain else { return nil }
+        return model.media.lastPlayed
     }
 
     // The cover as tall as the widget, giving way when the text would be squeezed (it needs 110 pt).
-    private func beside(_ media: MediaController, _ item: NowPlayingItem?) -> some View {
+    private func beside(_ media: MediaController, _ item: NowPlayingItem?, _ again: LastPlayedTrack?) -> some View {
         HStack(spacing: size.height >= 90 ? Metrics.Spacing.large : Metrics.Spacing.medium) {
             if widget.shows(.artwork), Self.hasRoom(for: .artwork, inner: size) {
                 artwork
             }
             VStack(alignment: .leading, spacing: 0) {
-                titles(item, room: size.height, oneLine: size.height < 70)
+                titles(item, again, room: size.height, oneLine: size.height < 70)
                     .elementGroup(Self.titleParts, of: widget)
                 Spacer(minLength: Metrics.Spacing.xSmall)
                 // The progress line from 84 pt.
@@ -51,7 +61,7 @@ struct NowPlayingWidget: View {
                                      elapsedStyle: widget.textStyles[.elapsedTime], remainingStyle: widget.textStyles[.remainingTime])
                         .movableElement(.progress, of: widget)
                 }
-                controls(media, item)
+                controls(media, item, again)
                     .frame(maxWidth: .infinity)
                     .padding(.top, Metrics.Spacing.xSmall)
                     .elementGroup(Self.buttonParts, of: widget)
@@ -123,15 +133,15 @@ struct NowPlayingWidget: View {
         return placed
     }
 
-    private func minimal(_ media: MediaController, _ item: NowPlayingItem?) -> some View {
+    private func minimal(_ media: MediaController, _ item: NowPlayingItem?, _ again: LastPlayedTrack?) -> some View {
         HStack(spacing: Metrics.Spacing.medium) {
             if widget.shows(.artwork), Self.hasRoom(for: .artwork, inner: size) {
                 artwork
             }
-            titles(item, room: size.height * 2.4, oneLine: size.height < 34)
+            titles(item, again, room: size.height * 2.4, oneLine: size.height < 34)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .elementGroup(Self.titleParts, of: widget)
-            controls(media, item)
+            controls(media, item, again)
                 .elementGroup(Self.buttonParts, of: widget)
         }
     }
@@ -139,55 +149,56 @@ struct NowPlayingWidget: View {
     /// Title over artist, sized from the room, one line each (shrinking a little before they are
     /// cut). On one line, the artist joins the title's line while both fit, and gives way first.
     /// Either may be restyled in Customize (`WidgetLabel`).
-    @ViewBuilder private func titles(_ item: NowPlayingItem?, room: CGFloat, oneLine: Bool) -> some View {
+    @ViewBuilder private func titles(_ item: NowPlayingItem?, _ again: LastPlayedTrack?, room: CGFloat, oneLine: Bool) -> some View {
         let showsTitle = widget.shows(.trackInfo), showsArtist = widget.shows(.artist)
         let titleSize = Self.titleSize(room: room), artistSize = Self.artistSize(room: room)
-        let title = Text(Self.title(item)).font(.system(size: titleSize, weight: .semibold))
-        let artist = Text(Self.subtitle(item)).font(.system(size: artistSize)).foregroundStyle(.secondary)
+        let title = Text(Self.title(item, again: again)).font(.system(size: titleSize, weight: .semibold))
+        let artist = Text(Self.subtitle(item, again: again)).font(.system(size: artistSize)).foregroundStyle(.secondary)
         if oneLine {
             ViewThatFits(in: .horizontal) {
                 if showsTitle, showsArtist {
                     // Two texts on one baseline, a space apart, so each moves by itself.
                     HStack(alignment: .firstTextBaseline, spacing: Metrics.Spacing.small) {
-                        titleLabel(item, titleSize, title.lineLimit(1).fixedSize())
-                        artistLabel(item, artistSize, artist.lineLimit(1).fixedSize())
+                        titleLabel(item, again, titleSize, title.lineLimit(1).fixedSize())
+                        artistLabel(item, again, artistSize, artist.lineLimit(1).fixedSize())
                     }
                 }
                 if showsTitle {
-                    titleLabel(item, titleSize, title.lineLimit(1).minimumScaleFactor(0.75))
+                    titleLabel(item, again, titleSize, title.lineLimit(1).minimumScaleFactor(0.75))
                 } else if showsArtist {
-                    artistLabel(item, artistSize, artist.lineLimit(1).minimumScaleFactor(0.75))
+                    artistLabel(item, again, artistSize, artist.lineLimit(1).minimumScaleFactor(0.75))
                 }
             }
         } else {
             VStack(alignment: .leading, spacing: Metrics.Spacing.xxSmall) {
-                if showsTitle { titleLabel(item, titleSize, title.lineLimit(1).minimumScaleFactor(0.75)) }
+                if showsTitle { titleLabel(item, again, titleSize, title.lineLimit(1).minimumScaleFactor(0.75)) }
                 if showsArtist {
                     // Nothing playing: the hint may take two lines rather than end in "…".
-                    artistLabel(item, artistSize, artist
-                        .lineLimit(item == nil ? 2 : 1)
+                    let isHint = item == nil && again == nil
+                    artistLabel(item, again, artistSize, artist
+                        .lineLimit(isHint ? 2 : 1)
                         .minimumScaleFactor(0.85)
-                        .fixedSize(horizontal: false, vertical: item == nil))
+                        .fixedSize(horizontal: false, vertical: isHint))
                 }
             }
         }
     }
 
-    private func titleLabel(_ item: NowPlayingItem?, _ size: CGFloat, _ plain: some View) -> some View {
-        WidgetLabel(id: .trackInfo, text: Self.title(item), widget: widget, size: size, weight: .semibold,
+    private func titleLabel(_ item: NowPlayingItem?, _ again: LastPlayedTrack?, _ size: CGFloat, _ plain: some View) -> some View {
+        WidgetLabel(id: .trackInfo, text: Self.title(item, again: again), widget: widget, size: size, weight: .semibold,
                     isSecondary: false) { plain }
             .movableElement(.trackInfo, of: widget)
     }
 
-    private func artistLabel(_ item: NowPlayingItem?, _ size: CGFloat, _ plain: some View) -> some View {
-        WidgetLabel(id: .artist, text: Self.subtitle(item), widget: widget, size: size, weight: .regular,
+    private func artistLabel(_ item: NowPlayingItem?, _ again: LastPlayedTrack?, _ size: CGFloat, _ plain: some View) -> some View {
+        WidgetLabel(id: .artist, text: Self.subtitle(item, again: again), widget: widget, size: size, weight: .regular,
                     isSecondary: true) { plain }
             .movableElement(.artist, of: widget)
     }
 
-    /// Back, previous, play or pause, next, forward — or, while nothing plays, a button that opens
-    /// the player.
-    @ViewBuilder private func controls(_ media: MediaController, _ item: NowPlayingItem?) -> some View {
+    /// Back, previous, play or pause, next, forward — or, while nothing plays, a button that plays
+    /// the last song again (Listen Again) or opens the player.
+    @ViewBuilder private func controls(_ media: MediaController, _ item: NowPlayingItem?, _ again: LastPlayedTrack?) -> some View {
         let row = Self.controlRow(widget, inner: size)
         let points = row.points
         let seconds = widget.effectiveSeekSeconds
@@ -223,6 +234,14 @@ struct NowPlayingWidget: View {
                                      points: points, look: widget.buttonLook(of: .seekForwardButton)) { media.skip(by: Double(seconds)) }
                         .movableElement(.seekForwardButton, of: widget)
                 }
+            } else if again != nil {
+                // Where play and pause will be: the words, not a symbol (asked for).
+                Button("Listen Again") { media.listenAgain() }
+                    .font(.system(size: max(points * 0.65, 11), weight: .semibold))
+                    .lineLimit(1)
+                    .islandButton()
+                    .help("Show the last song in Music")
+                    .movableElement(.playbackButtons, of: widget)
             } else if size.width >= 150 {
                 // Where play and pause will be.
                 NowPlayingButton(title: "Open Music", symbol: "arrow.up.forward.app", points: points,
@@ -287,13 +306,16 @@ struct NowPlayingWidget: View {
     static let sample = NowPlayingItem(title: String(localized: "Title"), artist: String(localized: "Artist"), album: "",
                                        duration: 210, artworkData: nil, bundleIdentifier: nil)
 
-    static func title(_ item: NowPlayingItem?) -> String {
-        guard let item else { return String(localized: "Nothing Playing") }
+    static func title(_ item: NowPlayingItem?, again: LastPlayedTrack? = nil) -> String {
+        guard let item else { return again?.title ?? String(localized: "Nothing Playing") }
         return item.title.isEmpty ? String(localized: "Unknown Title") : item.title
     }
 
-    static func subtitle(_ item: NowPlayingItem?) -> String {
-        guard let item else { return String(localized: "Music you play appears here.") }
+    static func subtitle(_ item: NowPlayingItem?, again: LastPlayedTrack? = nil) -> String {
+        guard let item else {
+            guard let again else { return String(localized: "Music you play appears here.") }
+            return again.artist.isEmpty ? again.album : again.artist
+        }
         return item.artist.isEmpty ? item.album : item.artist
     }
 }
@@ -314,6 +336,12 @@ struct NowPlayingArtwork: View {
                             minimumRadius: side < 44 ? 6 : Metrics.Expanded.artworkMinimumRadius, drawsAsPicture: isGrown)
                     .onTapGesture { media.openPlayerApp() }
                     .help("Open the player")
+            } else if NowPlayingWidget.listenAgain(model) != nil {
+                // The last song's own cover, no note: a click plays it again.
+                ArtworkView(image: media.lastPlayedArtwork, bundleIdentifier: ScriptablePlayer.music.bundleID,
+                            minimumRadius: side < 44 ? 6 : Metrics.Expanded.artworkMinimumRadius, drawsAsPicture: isGrown)
+                    .onTapGesture { media.listenAgain() }
+                    .help("Show the last song in Music")
             } else {
                 Image(systemName: "music.note")
                     .font(.system(size: side * 0.36))

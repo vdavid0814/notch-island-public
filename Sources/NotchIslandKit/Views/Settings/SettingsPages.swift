@@ -48,6 +48,9 @@ struct GeneralSettingsPage: View {
                 Toggle(isOn: $preferences.hapticsEnabled) {
                     InfoLabel("Haptic feedback", "A light tap on the trackpad when the island opens, snaps or changes a value.")
                 }
+                Toggle(isOn: $preferences.listenAgain) {
+                    InfoLabel("Listen Again when nothing plays", "Instead of Nothing Playing, Now Playing shows the song last played in Music: its cover, title and artist. Listen Again opens Music at that song, without playing it.")
+                }
             }
 
             Section {
@@ -81,9 +84,11 @@ struct GeneralSettingsPage: View {
             }
 
             Section("Opening and Animation") {
+                // The switch, its picture, then what it changes (asked for, on every page).
                 Toggle(isOn: $preferences.openOnHover) {
                     InfoLabel("Open on hover", "The island opens when the pointer rests on the notch. Off: it opens with a click.")
                 }
+                SettingPictureRow { GrowthPicture(duration: preferences.animationDuration) }
                 LabeledContent {
                     DurationSlider(value: preferences.hoverDelay, range: Preferences.hoverDelayRange) {
                         preferences.hoverDelay = $0
@@ -91,7 +96,7 @@ struct GeneralSettingsPage: View {
                 } label: {
                     InfoLabel("Hover delay", "How long the pointer has to rest on the notch before the island opens. Shorter opens faster; longer avoids opening it by accident.")
                 }
-                .disabled(!preferences.openOnHover)
+                .settingsFolded(!preferences.openOnHover)
                 LabeledContent {
                     DurationSlider(value: preferences.closeDelay, range: Preferences.closeDelayRange) {
                         preferences.closeDelay = $0
@@ -106,7 +111,6 @@ struct GeneralSettingsPage: View {
                 } label: {
                     InfoLabel("Animation length", "How long the island takes to grow out of the notch and to shrink back into it. The picture shows it at this speed.")
                 }
-                SettingPictureRow { GrowthPicture(duration: preferences.animationDuration) }
             }
 
             Section {
@@ -317,23 +321,24 @@ private struct ThumbnailSurface<S: Shape>: View {
     }
 }
 
-/// How long a notice stays up, 0.5–10 s in half seconds.
+/// How long a notice stays up, 0.5–10 s in half seconds (or another range, in other steps).
 private struct NoticeDuration: View {
     let title: String
     @Binding var value: Double
+    var range: ClosedRange<Double> = Preferences.noticeDurationRange
+    var step: Double = 0.5
 
     var body: some View {
         LabeledContent {
             HStack {
                 Slider(value: Binding(get: { value }, set: { new in
-                    let snapped = (new * 2).rounded() / 2
+                    let snapped = min(max((new / step).rounded() * step, range.lowerBound), range.upperBound)
                     if snapped != value { value = snapped }
-                }), in: Preferences.noticeDurationRange)
+                }), in: range)
                 .labelsHidden()
                 .tint(Color.islandAccent)
                 .frame(minWidth: 160, maxWidth: 240)
-                ReservedWidthText(Self.format(value), fitting: [Self.format(Preferences.noticeDurationRange.lowerBound),
-                                                                Self.format(Preferences.noticeDurationRange.upperBound)])
+                ReservedWidthText(format(value), fitting: [format(range.lowerBound), format(range.upperBound)])
                     .foregroundStyle(SettingsPalette.secondary)
             }
         } label: {
@@ -341,8 +346,8 @@ private struct NoticeDuration: View {
         }
     }
 
-    static func format(_ seconds: Double) -> String {
-        seconds.formatted(.number.precision(.fractionLength(1))) + " s"
+    private func format(_ seconds: Double) -> String {
+        seconds.formatted(.number.precision(.fractionLength(step < 1 ? 1 : 0))) + " s"
     }
 }
 
@@ -461,6 +466,7 @@ struct ReservedWidthText: View {
 struct ActivitiesSettingsPage: View {
     @Environment(AppModel.self) private var model
     @State private var nowPlayingWidthDraft: Double?
+    @State private var trackTitleSizeDraft: Double?
 
     /// "−10 %", "Usual", "+20 %".
     private static func widthChange(_ value: Double) -> String {
@@ -472,44 +478,70 @@ struct ActivitiesSettingsPage: View {
         @Bindable var preferences = model.preferences
         Form {
             Section("Now Playing") {
-                SettingPictureRow { NowPlayingPicture(width: nowPlayingWidthDraft ?? preferences.nowPlayingWidth) }
+                // The switch, its picture, then its options, folded away while it is off.
+                let nowPlaying = preferences.showNowPlaying
                 Toggle(isOn: $preferences.showNowPlaying) {
                     InfoLabel("Show what's playing", "The cover beside the notch and moving level bars while something plays, with the playback controls when the island opens.")
                 }
+                SettingPictureRow { NowPlayingPicture(width: nowPlayingWidthDraft ?? preferences.nowPlayingWidth) }
                 Toggle(isOn: $preferences.showWebMedia) {
                     InfoLabel("Browser and video playback", "YouTube and other videos in Safari and other browsers, and video apps like QuickTime or IINA. Read only while one of them is open, to save battery; Music and Spotify always report on their own.")
                 }
-                .disabled(!preferences.showNowPlaying)
+                .settingsFolded(!nowPlaying)
                 LabeledContent {
                     ValueSlider(value: preferences.nowPlayingWidth, range: Preferences.nowPlayingWidthRange, step: 0.01,
                                 format: Self.widthChange, draft: $nowPlayingWidthDraft) { preferences.nowPlayingWidth = $0 }
                 } label: {
                     InfoLabel("Width", "How far the cover and the music bars sit from the notch: from a tenth closer to a fifth further out than usual.")
                 }
-                .disabled(!preferences.showNowPlaying)
+                .settingsFolded(!nowPlaying)
                 Picker(selection: $preferences.musicBars) {
                     ForEach(MusicBarsStyle.allCases) { Text($0.title).tag($0) }
                 } label: {
                     InfoLabel("Music bars on battery", "Follow the Music: the bars move with what is playing — they listen to the Mac's sound (System Audio Recording; macOS shows a purple dot meanwhile). Nothing is recorded or kept. Animation: a set animation, nothing is listened to, the least energy.")
                 }
                 .choiceBar()
+                .settingsFolded(!nowPlaying)
                 Picker(selection: $preferences.musicBarsOnPower) {
                     ForEach(MusicBarsStyle.allCases) { Text($0.title).tag($0) }
                 } label: {
                     InfoLabel("Music bars on the charger", "The same choice while the Mac is charging (a Mac without a battery always uses this one).")
                 }
                 .choiceBar()
+                .settingsFolded(!nowPlaying)
                 Toggle(isOn: $preferences.musicBarsContinuousOnPower) {
                     InfoLabel("Listen more often while charging", "On battery the bars listen 2 seconds in every 8 to save energy. On the charger they listen 0.8 seconds in every 1.8, so they follow the music closely.")
                 }
                 .disabled(preferences.musicBarsOnPower != .followMusic)
+                .settingsFolded(!nowPlaying)
+            }
+
+            Section("New Track") {
+                // The switch, its picture, then its options, folded away while it is off.
+                let shown = preferences.showNowPlaying && preferences.trackTitle
+                Toggle(isOn: $preferences.trackTitle) {
+                    InfoLabel("Show the new title", "When the next song or video starts, the pill drops a little lower and wider with its title in one line, in the colour of its cover. A title too long for it stands still for half a second, then glides through.")
+                }
+                .disabled(!preferences.showNowPlaying)
+                SettingPictureRow {
+                    TrackTitlePicture(size: trackTitleSizeDraft ?? preferences.trackTitleSize, duration: preferences.trackTitleDuration)
+                }
+                LabeledContent {
+                    ValueSlider(value: preferences.trackTitleSize, range: Preferences.trackTitleSizeRange, step: 0.01,
+                                format: Self.widthChange, draft: $trackTitleSizeDraft) { preferences.trackTitleSize = $0 }
+                } label: {
+                    InfoLabel("Size", "How large the title and the room round it are: from a fifth smaller to a third larger than usual.")
+                }
+                .settingsFolded(!shown)
+                NoticeDuration(title: "Shown for", value: $preferences.trackTitleDuration)
+                    .settingsFolded(!shown)
             }
 
             Section("AirPods") {
-                SettingPictureRow { ActivityPicture(activity: .airPods) { AirPodsPicture() } }
                 Toggle(isOn: $preferences.showAirPods) {
                     InfoLabel("Show AirPods connecting", "When AirPods (or other Bluetooth headphones) connect: their picture, name and the batteries of each earbud and the case.")
                 }
+                SettingPictureRow { ActivityPicture(activity: .airPods) { AirPodsPicture() } }
             }
 
             Section("Volume and Brightness") {
@@ -523,7 +555,7 @@ struct ActivitiesSettingsPage: View {
                 .disabled(!preferences.showLevelHUD)
                 .opacity(preferences.showLevelHUD ? 1 : 0.5)
                 NoticeDuration(title: "Shown for", value: $preferences.levelDuration)
-                    .disabled(!preferences.showLevelHUD)
+                    .settingsFolded(!preferences.showLevelHUD)
                 if preferences.showLevelHUD, !model.permissions.accessibilityTrusted {
                     LabeledContent {
                         Button("Open System Settings…") { model.permissions.promptOrOpenAccessibilitySettings() }
@@ -537,47 +569,135 @@ struct ActivitiesSettingsPage: View {
             // the whole power state changed at every percent and redrew this page, kept unseen.)
             if model.power.hasBattery {
                 Section("Battery") {
-                    SettingPictureRow { ActivityPicture(activity: .power) { PowerPicture() } }
                     Toggle(isOn: $preferences.showPowerAlerts) {
                         InfoLabel("Power alerts", "Charger connected or removed, fully charged, and low battery at 20, 10 and 5 %.")
                     }
+                    SettingPictureRow { ActivityPicture(activity: .power) { PowerPicture() } }
                     NoticeDuration(title: "Shown for", value: $preferences.powerDuration)
-                        .disabled(!preferences.showPowerAlerts)
+                        .settingsFolded(!preferences.showPowerAlerts)
                 }
             }
 
-            Section("Shelf and Timer") {
-                Toggle(isOn: $preferences.shelfEnabled) {
-                    InfoLabel("Shelf", "Drag files onto the notch to keep them at hand, then drag them out or AirDrop them.")
-                }
-                Toggle(isOn: $preferences.timerSound) {
-                    InfoLabel("Play a sound when a timer ends", "The timer's alert sound plays with the notice in the island.")
-                }
-            }
+            lowerSections(preferences: preferences)
+        }
+    }
 
-            Section("Window Anchor") {
-                Toggle(isOn: $preferences.anchorEnabled) {
-                    InfoLabel("Anchor a window under the notch", "Holds another app's window centred under the notch: moved, it goes back; resized, it stays centred at its new size; dragged well away, zoomed or closed, it is let go. From the menu bar item, Spotlight (\u{201C}Anchor Front Window\u{201D}) or by dragging it just under the notch. On the window, the pointer at its top brings a tab: drag it up to take the window up to the screen's top. Needs Accessibility and Screen Recording.")
-                }
-                AnchorSizeEditor(size: $preferences.anchorSize, screen: model.anchorScreenForSettings, onTop: preferences.anchorMirror,
-                                 isRaised: preferences.anchorRaised)
-                    .disabled(!preferences.anchorEnabled)
-                    .opacity(preferences.anchorEnabled ? 1 : 0.5)
-                if preferences.anchorEnabled, !model.permissions.accessibilityTrusted {
-                    LabeledContent {
-                        Button("Open System Settings…") { model.permissions.promptOrOpenAccessibilitySettings() }
-                    } label: {
-                        StatusLabel(title: "Accessibility access needed", tone: .attention)
-                    }
-                }
-                if preferences.anchorEnabled, preferences.anchorMirror, !model.anchorMirror.isAllowed {
-                    LabeledContent {
-                        Button("Open System Settings…") { AnchorMirror.openSettings() }
-                    } label: {
-                        StatusLabel(title: "Screen Recording access needed", tone: .attention)
-                    }
+    /// Displays and the sections under it.
+    @ViewBuilder private func lowerSections(@Bindable preferences: Preferences) -> some View {
+        DisplaysSettingsSection()
+
+        Section("Shelf and Timer") {
+            Toggle(isOn: $preferences.shelfEnabled) {
+                InfoLabel("Shelf", "Drag files onto the notch to keep them at hand, then drag them out or AirDrop them.")
+            }
+            Toggle(isOn: $preferences.timerSound) {
+                InfoLabel("Play a sound when a timer ends", "The timer's alert sound plays with the notice in the island.")
+            }
+        }
+
+        Section("Window Anchor") {
+            Toggle(isOn: $preferences.anchorEnabled) {
+                InfoLabel("Anchor a window under the notch", "Holds another app's window centred under the notch: moved, it goes back; resized, it stays centred at its new size; dragged well away, zoomed or closed, it is let go. From the menu bar item, Spotlight (\u{201C}Anchor Front Window\u{201D}) or by dragging it just under the notch. On the window, the pointer at its top brings a tab: drag it up to take the window up to the screen's top. Needs Accessibility and Screen Recording.")
+            }
+            AnchorSizeEditor(size: $preferences.anchorSize, screen: model.anchorScreenForSettings, onTop: preferences.anchorMirror,
+                             isRaised: preferences.anchorRaised)
+                .disabled(!preferences.anchorEnabled)
+                .opacity(preferences.anchorEnabled ? 1 : 0.5)
+            if preferences.anchorEnabled, !model.permissions.accessibilityTrusted {
+                LabeledContent {
+                    Button("Open System Settings…") { model.permissions.promptOrOpenAccessibilitySettings() }
+                } label: {
+                    StatusLabel(title: "Accessibility access needed", tone: .attention)
                 }
             }
+            if preferences.anchorEnabled, preferences.anchorMirror, !model.anchorMirror.isAllowed {
+                LabeledContent {
+                    Button("Open System Settings…") { AnchorMirror.openSettings() }
+                } label: {
+                    StatusLabel(title: "Screen Recording access needed", tone: .attention)
+                }
+            }
+        }
+    }
+}
+
+/// Live Activities ▸ Displays: which screen the island lives on and the notice a monitor plugged in
+/// brings; ▸ Screens Without a Notch: the line that stands for the island at rest there.
+private struct DisplaysSettingsSection: View {
+    @Environment(AppModel.self) private var model
+    @State private var lengthDraft: Double?
+    @State private var thicknessDraft: Double?
+    @State private var opacityDraft: Double?
+
+    var body: some View {
+        @Bindable var preferences = model.preferences
+        let choices = model.displayChoices(includesAutomatic: true)
+        Section("Displays") {
+            Picker(selection: Binding {
+                IslandScreenPicker.selection(in: choices, current: preferences.islandScreen)
+            } set: { preferences.islandScreen = $0 }) {
+                ForEach(choices, id: \.self) { choice in
+                    Text(choice.title).tag(choice)
+                }
+            } label: {
+                InfoLabel("Show the island on", "Automatic: the MacBook's screen with its notch, or the screen with the menu bar. MacBook: the Mac's own screen while it is open. A monitor: that one while it is connected, else any monitor. Kept until changed here or in the notice. Changed here, the island moves once Settings closes.")
+            }
+            // Up to four fit side by side; more monitors make a menu.
+            .modifier(ChoiceBarUpTo(count: choices.count, limit: 4))
+            Toggle(isOn: $preferences.displayNotice) {
+                InfoLabel("Ask when a display connects", "Plugging the Mac into a monitor brings a notice in the notch with the screens in a bar: pick where the island lives.")
+            }
+            NoticeDuration(title: "Shown for", value: $preferences.displayNoticeDuration,
+                           range: Preferences.displayNoticeRange, step: 1)
+                .settingsFolded(!preferences.displayNotice)
+        }
+        Section("Screens Without a Notch") {
+            Toggle(isOn: $preferences.restLine.isShown) {
+                InfoLabel("Line where the island rests", "On a monitor or a MacBook without a notch (MacBook Air M1, MacBook Neo), a faint grey line at the top of the screen shows where the island comes out while nothing plays. Off: nothing at all.")
+            }
+            // The line as the sliders below have it, while they are dragged too.
+            SettingPictureRow {
+                RestLinePicture(line: RestLine(isShown: preferences.restLine.isShown,
+                                               length: lengthDraft ?? preferences.restLine.length,
+                                               thickness: thicknessDraft ?? preferences.restLine.thickness,
+                                               opacity: opacityDraft ?? preferences.restLine.opacity))
+            }
+            LabeledContent {
+                ValueSlider(value: preferences.restLine.length, range: RestLine.lengthRange, step: 2,
+                            format: { "\(Int($0)) pt" }, draft: $lengthDraft) { preferences.restLine.length = $0 }
+            } label: {
+                InfoLabel("Length", "How long the line is, in points.")
+            }
+            .settingsFolded(!preferences.restLine.isShown)
+            LabeledContent {
+                ValueSlider(value: preferences.restLine.thickness, range: RestLine.thicknessRange, step: 0.5,
+                            format: { $0.formatted(.number.precision(.fractionLength(1))) + " pt" },
+                            draft: $thicknessDraft) { preferences.restLine.thickness = $0 }
+            } label: {
+                InfoLabel("Thickness", "How thick the line is; its ends are round.")
+            }
+            .settingsFolded(!preferences.restLine.isShown)
+            LabeledContent {
+                ValueSlider(value: preferences.restLine.opacity, range: RestLine.opacityRange, step: 0.05,
+                            format: { IslandFormat.percent($0) }, draft: $opacityDraft) { preferences.restLine.opacity = $0 }
+            } label: {
+                InfoLabel("Visibility", "How much of the grey shows: low, it is barely there.")
+            }
+            .settingsFolded(!preferences.restLine.isShown)
+        }
+    }
+}
+
+/// The choice bar while the choices fit in one, else the system's menu.
+private struct ChoiceBarUpTo: ViewModifier {
+    let count: Int
+    let limit: Int
+
+    func body(content: Content) -> some View {
+        if count <= limit {
+            content.choiceBar()
+        } else {
+            content.pickerStyle(.menu)
         }
     }
 }
@@ -656,7 +776,7 @@ struct SiriSettingsPage: View {
                     InfoLabel("Shortcut", "The keys that open Spotlight: Space with Command, Option or Control. ⌘Space replaces the system's search; the others leave it where it is.")
                 }
                 .choiceBar()
-                .disabled(!preferences.commandSpaceOpensSiri)
+                .settingsFolded(!preferences.commandSpaceOpensSiri)
             } header: {
                 Text("Spotlight in the Notch")
             }
@@ -701,7 +821,8 @@ struct SiriSettingsPage: View {
                     InfoLabel("Answer length", "Brief: a few sentences. Detailed: a fuller answer, in paragraphs or a list where it helps.")
                 }
                 .choiceBar()
-                .disabled(!intelligenceAvailable || !siri.usesIntelligence)
+                .disabled(!intelligenceAvailable)
+                .settingsFolded(!siri.usesIntelligence)
                 Picker(selection: $preferences.siri.searchEngine) {
                     ForEach(SiriSearchEngine.allCases) { Text($0.title).tag($0) }
                 } label: {

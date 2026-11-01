@@ -110,7 +110,8 @@ struct IslandRootView: View {
                 isHeld: hold != nil,
                 // Closing into a pill at the notch's height (or into the notch): Liquid Glass's black
                 // comes in while it closes, not as it lands (asked for, October 13).
-                landsAsPill: hold != nil && layout.size(for: presentation).height <= layout.notch.height + 1
+                landsAsPill: hold != nil && layout.size(for: presentation).height <= layout.notch.height + 1,
+                isHiddenAtRest: restsKept
             )))
             // Kept at rest, nothing of it is drawn: the rest looks as it does without it.
             .opacity(restsKept ? 0 : 1)
@@ -123,6 +124,8 @@ struct IslandRootView: View {
     }
 
     /// The notch at rest: alpha > 0 so the window server delivers hover to it; see `hitTargetOpacity`.
+    /// (On a screen without a notch the faint line over it is the window's own, outside the outline's
+    /// mask: `IslandStageView.showRestLine`.)
     private func restTarget(_ layout: IslandLayout) -> some View {
         IslandShape(
             bottomRadius: layout.bottomRadius(for: .idle),
@@ -401,6 +404,10 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
     var isHeld = false
     /// The outline is on its way into a pill at the notch's height: Liquid Glass's black fades in.
     var landsAsPill = false
+    /// At rest with the panel kept (`restsKept`): nothing of the surface is drawn. The opacity
+    /// round the content stack did not reach what the glass container draws, so the pill's black
+    /// stayed at the notch's size — unseen under a real notch, a black notch on a monitor.
+    var isHiddenAtRest = false
 
     var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<AnimatablePair<CGFloat, CGFloat>, Double>> {
         // Always the real values: a move on the render server changes them only in transactions
@@ -435,14 +442,15 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
         // pill's edge all that time. Per frame, it goes the moment the outline reaches the band
         // on the way down and returns the moment it leaves it on the way up.
         let isPill = drawn.size.height <= notch.size.height + 1
-        let glassOn = showsGlass && (!glassStyle.blacksNotchPill(isDark: SystemAppearance.shared.glassIsDark) || !isPill)
+        let glassOn = showsGlass && !isHiddenAtRest
+            && (!glassStyle.blacksNotchPill(isDark: SystemAppearance.shared.glassIsDark) || !isPill)
         // Liquid Glass: a pill at the notch's height is solid black, as Fade's and Black's are, in
         // Light Mode too (asked for, October 13); Fade's own shade does that for Fade. Closing into
         // one, the black fades in over the close (`landsAsPill`); opening, it goes at once.
         let pillScheme = glassStyle == .liquidGlass && isPill
-        let pillBlack = glassStyle == .liquidGlass && (isPill || landsAsPill)
+        let pillBlack = glassStyle == .liquidGlass && (isPill || landsAsPill) && !isHiddenAtRest
         let parksGlass = isStill
-        let showsBand = glassStyle == .liquidGlass && wearsNotchBand && !isPill
+        let showsBand = glassStyle == .liquidGlass && wearsNotchBand && !isPill && !isHiddenAtRest
         GlassEffectContainer {
             content
                 // A faint edge round the grey bars on Liquid Glass in Light Mode (`IslandGlassStyle.grayEdge`).
@@ -458,6 +466,7 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
                                     size: CGSize(width: size.width, height: size.height + IslandLayout.overdraw),
                                     fadeStretch: fadeStretch,
                                     isSettled: size == settledSize || isHeld,
+                                    isHidden: isHiddenAtRest,
                                     in: surface.inset(by: -IslandGlassStyle.shadeBleed))
                 .background(alignment: .top) {
                     IslandNotchBand(width: size.width + 2 * IslandGlassStyle.shadeBleed, notchWidth: notch.size.width,
@@ -492,6 +501,7 @@ nonisolated private struct IslandSurface: ViewModifier, Animatable {
             // (`IslandGlassStyle.hasEdge`), on the clip's own outline so the clip keeps its inner
             // half. Kept in place, clear, where it is off.
             let edged = glassStyle.hasEdge(isDark: SystemAppearance.shared.glassIsDark, tint: SystemAppearance.shared.glassTint)
+                && !isHiddenAtRest
             drawn.stroke(.black.opacity(edged ? IslandGlassStyle.edgeOpacity : 0), lineWidth: IslandGlassStyle.edgeWidth * 2)
                 .allowsHitTesting(false)
         }

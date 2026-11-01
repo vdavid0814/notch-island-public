@@ -80,14 +80,4 @@ nonisolated struct NotchMetrics: Sendable, Equatable {
             isBuiltin: CGDisplayIsBuiltin(displayID) != 0
         )
     }
-
-    /// The screen with a camera housing, else the menu-bar screen.
-    ///
-    /// The fallback is `NSScreen.screens.first` (the screen that owns the menu
-    /// bar), not `NSScreen.main`, which follows the key window and would move
-    /// the island between displays as focus changes.
-    static func preferred() -> NotchMetrics? {
-        let all = NSScreen.screens.compactMap(metrics(for:))
-        return all.first(where: \.isPhysical) ?? all.first
-    }
 }

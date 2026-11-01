@@ -17,6 +17,12 @@ import Foundation
     nonisolated static let defaultHoverDelay: Double = 0.1
     /// The Now Playing pill's ears, as a part of their usual width (Live Activities ▸ Now Playing).
     nonisolated static let nowPlayingWidthRange: ClosedRange<Double> = 0.9...1.2
+    /// How long the notice a connected display brings stays up (Live Activities ▸ Displays).
+    nonisolated static let displayNoticeRange: ClosedRange<Double> = 1...30
+    nonisolated static let defaultDisplayNoticeDuration: Double = 15
+    /// The new track's title under the notch, as a part of its usual size (Live Activities ▸ New Track).
+    nonisolated static let trackTitleSizeRange: ClosedRange<Double> = 0.8...1.3
+    nonisolated static let defaultTrackTitleDuration: Double = 4
 
     nonisolated enum Key {
         static let prefix = "ni2."
@@ -62,6 +68,14 @@ import Foundation
         static let anchorBar = prefix + "anchor.bar"
         static let anchorRaised = prefix + "anchor.raised"
         static let nowPlayingWidth = prefix + "nowPlayingWidth"
+        static let islandScreen = prefix + "display.screen"
+        static let displayNotice = prefix + "display.notice"
+        static let displayNoticeDuration = prefix + "display.noticeDuration"
+        static let restLine = prefix + "display.restLine"
+        static let trackTitle = prefix + "trackTitle"
+        static let trackTitleSize = prefix + "trackTitle.size"
+        static let trackTitleDuration = prefix + "trackTitle.duration"
+        static let listenAgain = prefix + "listenAgain"
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -182,6 +196,33 @@ import Foundation
     var musicBarsContinuousOnPower: Bool {
         didSet { defaults.set(musicBarsContinuousOnPower, forKey: Key.musicBarsContinuousOnPower) }
     }
+    /// The screen the island lives on (Live Activities ▸ Displays, or the notice of a display
+    /// connected).
+    var islandScreen: IslandScreenChoice {
+        didSet {
+            guard islandScreen != oldValue, let data = try? JSONEncoder().encode(islandScreen) else { return }
+            defaults.set(data, forKey: Key.islandScreen)
+        }
+    }
+    /// A display connected brings a notice in the notch to pick the island's screen.
+    var displayNotice: Bool { didSet { defaults.set(displayNotice, forKey: Key.displayNotice) } }
+    /// Seconds that notice stays up.
+    var displayNoticeDuration: Double { didSet { defaults.set(displayNoticeDuration, forKey: Key.displayNoticeDuration) } }
+    /// On a screen without a notch, the faint line that shows where the island is at rest.
+    var restLine: RestLine {
+        didSet {
+            guard restLine != oldValue, let data = try? JSONEncoder().encode(restLine) else { return }
+            defaults.set(data, forKey: Key.restLine)
+        }
+    }
+    /// A new track (a song, a video) brings its title under the notch, in the cover's colour.
+    var trackTitle: Bool { didSet { defaults.set(trackTitle, forKey: Key.trackTitle) } }
+    /// How large that is, as a part of its usual size.
+    var trackTitleSize: Double { didSet { defaults.set(trackTitleSize, forKey: Key.trackTitleSize) } }
+    /// Seconds it stays up.
+    var trackTitleDuration: Double { didSet { defaults.set(trackTitleDuration, forKey: Key.trackTitleDuration) } }
+    /// While nothing plays, Now Playing offers the song last played in Music (General).
+    var listenAgain: Bool { didSet { defaults.set(listenAgain, forKey: Key.listenAgain) } }
     /// ⌘Space opens Siri in the notch instead of the system's Search window (needs Accessibility).
     var commandSpaceOpensSiri: Bool { didSet { defaults.set(commandSpaceOpensSiri, forKey: Key.commandSpaceOpensSiri) } }
 
@@ -222,6 +263,11 @@ import Foundation
         levelDuration = duration(Key.levelDuration, 1.5)
         airPodsDuration = duration(Key.airPodsDuration, 5)
         powerDuration = duration(Key.powerDuration, 3)
+        trackTitleDuration = duration(Key.trackTitleDuration, Self.defaultTrackTitleDuration)
+        trackTitle = defaults.object(forKey: Key.trackTitle) as? Bool ?? true
+        let titleSize = defaults.object(forKey: Key.trackTitleSize) as? Double ?? 1
+        trackTitleSize = min(max(titleSize.isFinite ? titleSize : 1, Self.trackTitleSizeRange.lowerBound), Self.trackTitleSizeRange.upperBound)
+        listenAgain = defaults.object(forKey: Key.listenAgain) as? Bool ?? true
         replaceSystemHUD = true
         shelfEnabled = defaults.object(forKey: Key.shelfEnabled) as? Bool ?? true
         timerSound = defaults.object(forKey: Key.timerSound) as? Bool ?? true
@@ -245,6 +291,14 @@ import Foundation
         anchorRaised = defaults.object(forKey: Key.anchorRaised) as? Bool ?? false
         let pillWidth = defaults.object(forKey: Key.nowPlayingWidth) as? Double ?? 1
         nowPlayingWidth = min(max(pillWidth.isFinite ? pillWidth : 1, Self.nowPlayingWidthRange.lowerBound), Self.nowPlayingWidthRange.upperBound)
+        islandScreen = defaults.data(forKey: Key.islandScreen).flatMap { try? JSONDecoder().decode(IslandScreenChoice.self, from: $0) }
+            ?? .automatic
+        displayNotice = defaults.object(forKey: Key.displayNotice) as? Bool ?? true
+        let noticeSeconds = defaults.object(forKey: Key.displayNoticeDuration) as? Double ?? Self.defaultDisplayNoticeDuration
+        displayNoticeDuration = min(max(noticeSeconds.isFinite ? noticeSeconds.rounded() : Self.defaultDisplayNoticeDuration,
+                                        Self.displayNoticeRange.lowerBound), Self.displayNoticeRange.upperBound)
+        restLine = (defaults.data(forKey: Key.restLine).flatMap { try? JSONDecoder().decode(RestLine.self, from: $0) } ?? RestLine())
+            .clamped()
         siri = defaults.data(forKey: Key.siri).flatMap { try? JSONDecoder().decode(SiriSettings.self, from: $0) } ?? SiriSettings()
         panel = defaults.data(forKey: Key.panel).flatMap { try? JSONDecoder().decode(PanelSettings.self, from: $0) } ?? PanelSettings()
         pageSizes = defaults.data(forKey: Key.pageSizes).flatMap { try? JSONDecoder().decode([String: PageSize].self, from: $0) } ?? [:]
@@ -256,6 +310,35 @@ import Foundation
             max(duration.isFinite ? duration : Motion.defaultDuration, Motion.durationRange.lowerBound),
             Motion.durationRange.upperBound
         )
+    }
+}
+
+/// The line that stands for the island at rest on a screen without a notch (a monitor, a MacBook
+/// Air M1): a faint grey stroke with round ends at the top of the screen, where the island comes
+/// out — barely seen, so the menu bar looks as it does without the app.
+nonisolated struct RestLine: Sendable, Hashable, Codable {
+    var isShown = true
+    /// Points across.
+    var length: Double = 64
+    /// Points high (the ends are half of it round).
+    var thickness: Double = 3
+    /// How much of the grey shows, 0–1.
+    var opacity: Double = 0.35
+
+    static let lengthRange: ClosedRange<Double> = 24...160
+    static let thicknessRange: ClosedRange<Double> = 2...8
+    static let opacityRange: ClosedRange<Double> = 0.1...0.9
+    /// From the screen's top edge to the line.
+    static let topInset: CGFloat = 4
+
+    func clamped() -> RestLine {
+        func clamp(_ value: Double, _ range: ClosedRange<Double>, _ fallback: Double) -> Double {
+            min(max(value.isFinite ? value : fallback, range.lowerBound), range.upperBound)
+        }
+        let standard = RestLine()
+        return RestLine(isShown: isShown, length: clamp(length, Self.lengthRange, standard.length),
+                        thickness: clamp(thickness, Self.thicknessRange, standard.thickness),
+                        opacity: clamp(opacity, Self.opacityRange, standard.opacity))
     }
 }
 

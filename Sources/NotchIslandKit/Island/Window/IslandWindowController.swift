@@ -45,6 +45,11 @@ import SwiftUI
             self?.armSettle()
             self?.keyboardFollows(from: from, to: to)
             if to.isOpen { self?.prepareSettingsAgain() }
+            // A screen chosen while the island was open: it goes there once it has closed.
+            if !to.isOpen, self?.movesWhenClosed == true {
+                self?.movesWhenClosed = false
+                self?.reanchor()
+            }
         }
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -55,6 +60,8 @@ import SwiftUI
         }
         observationGeneration += 1
         observeLayout()
+        observeScreenChoice()
+        observeRestLine()
         reanchor()
         // `NI_NO_PREPARE=1` (measuring): Settings is built only when first opened.
         followPowerSource()
@@ -392,11 +399,56 @@ import SwiftUI
 
     // MARK: Anchoring
 
-    /// Finds the notch screen and puts the panel there. With no screen at all
-    /// the panel stays hidden; the next screen-parameters notification retries.
+    /// The island goes to another screen when the user picks one (Settings, the displays notice).
+    private func observeScreenChoice() {
+        let generation = observationGeneration
+        withObservationTracking {
+            _ = model.preferences.islandScreen
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.isStarted, generation == self.observationGeneration else { return }
+                self.observeScreenChoice()
+                // Settings (or the panel) open stays where it is, on its window over this screen:
+                // the island moves once it has closed.
+                if self.model.island.presentation.isOpen {
+                    self.movesWhenClosed = true
+                } else {
+                    self.reanchor()
+                }
+            }
+        }
+    }
+
+    /// A screen was chosen while the island was open.
+    private var movesWhenClosed = false
+    private weak var stageView: IslandStageView?
+
+    /// The line that stands for the island at rest on a screen without a notch: there from the
+    /// moment a close begins (the island fades into it), gone as one opens.
+    private func updateRestLine(for presentation: IslandPresentation, fades: Bool = false) {
+        let line = metrics?.isPhysical == false ? model.preferences.restLine : nil
+        stageView?.showRestLine(line, visible: presentation.isIdle, fades: fades)
+    }
+
+    /// Settings ▸ Live Activities ▸ Displays changes the line: drawn again at once.
+    private func observeRestLine() {
+        let generation = observationGeneration
+        withObservationTracking {
+            _ = model.preferences.restLine
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.isStarted, generation == self.observationGeneration else { return }
+                self.observeRestLine()
+                self.updateRestLine(for: self.model.island.presentation)
+            }
+        }
+    }
+
+    /// Finds the island's screen (the user's choice, `IslandScreenPicker`) and puts the panel there.
+    /// With no screen at all the panel stays hidden; the next screen-parameters notification retries.
     private func reanchor() {
         guard isStarted else { return }
-        let next = ScreenLocator.preferred()
+        let next = ScreenLocator.preferred(choice: model.preferences.islandScreen)
         if next != metrics || model.metrics != next {
             metrics = next
             model.updateMetrics(next)
@@ -412,6 +464,7 @@ import SwiftUI
         let panel = ensurePanel()
         settle.cancel()
         stageResting(for: model.island.presentation)
+        updateRestLine(for: model.island.presentation)
         guard !isSuspended else { return }
         panel.orderFrontRegardless()
         hostingView?.setNeedsPointerRefresh()
@@ -438,10 +491,11 @@ import SwiftUI
         // a transition (even with `sizingOptions = []`), which shrank the stage around the
         // animating island, pinned at its top-left corner, and crashed AppKit's constraints pass.
         let stage = IslandStageView(frame: CGRect(origin: .zero, size: panel.frame.size))
-        hosting.frame = stage.bounds
+        hosting.frame = stage.content.bounds
         hosting.autoresizingMask = [.width, .height]
-        stage.addSubview(hosting)
+        stage.content.addSubview(hosting)
         panel.contentView = stage
+        stageView = stage
         outlineMotion.attach(to: stage)
         model.island.outlineMover = outlineMotion
         // `NI_LAYER_MOTION=0` (measuring only): the page switch and the content's swap animated by
@@ -487,6 +541,7 @@ import SwiftUI
         }
         // Covering macOS's AirPods card: raised while ours grows, is shown and shrinks.
         if Self.covers(to) || Self.covers(from) { panel?.level = IslandPanel.coveringLevel }
+        updateRestLine(for: to, fades: true)
         guard let metrics else { return }
         let layout = model.layout
         let fromRect = StageGeometry.islandFrame(for: from, layout: stagedLayout ?? layout, metrics: metrics)

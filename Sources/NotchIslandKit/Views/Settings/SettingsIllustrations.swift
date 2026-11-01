@@ -808,6 +808,50 @@ struct NowPlayingPicture: View {
     }
 }
 
+/// The island at rest on a screen without a notch (Live Activities ▸ Displays): the top of a monitor
+/// with its menu bar, and the faint line where the island comes out, as long, thick and grey as the
+/// sliders under it say while they are dragged. Drawn, as Now Playing's is: a photograph could not
+/// follow the sliders.
+struct RestLinePicture: View {
+    let line: RestLine
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.settingsPictureScale) private var scale
+    @Environment(\.settingsPictureRadius) private var radius
+    @AppStorage(DesktopBackdropStyle.key) private var backdrop: DesktopBackdropStyle = DesktopBackdropStyle.defaultStyle
+
+    private static let clock = Calendar.current.date(bySettingHour: 9, minute: 41, second: 0, of: .now) ?? .now
+
+    var body: some View {
+        // The middle of the screen, on the scale of the activities' photographs.
+        let k = IslandPhoto.activitySize.width * scale / DemoDirector.activityPictureSize.width
+        // The menu bar as Now Playing's picture on the same page has it (its height, the room its
+        // pill keeps clear): the menus' fit is then measured once for both (`PreviewMenuBarFit`).
+        // Its own sizes measured the menus again at every building of the page (~90 mJ, measured).
+        let layout = model.layout
+        let room = layout.size(for: .compact(.nowPlaying)).width
+        // The wallpaper at the island's screen's size, as Now Playing's: only its middle shows, and
+        // at a monitor's 2560 pt it was a picture twice as large for the same few points.
+        let screen = layout.screen == .zero ? IslandLayout.fallbackScreen : layout.screen
+        ZStack(alignment: .top) {
+            DesktopBackdrop(style: backdrop, detail: .miniature)
+                .frame(width: screen.width * k, height: screen.height * k)
+            PreviewMenuBar(height: layout.notch.height * k, notchWidth: room * k,
+                           darkText: backdrop.prefersDarkMenuBar, backing: backdrop.menuBarBacking, date: Self.clock)
+                .frame(width: IslandPhoto.activitySize.width * scale)
+            if line.isShown {
+                Capsule()
+                    .fill(Color(white: 0.5).opacity(line.opacity))
+                    .frame(width: line.length * k, height: max(line.thickness * k, 1))
+                    .padding(.top, RestLine.topInset * k)
+            }
+        }
+        .frame(width: IslandPhoto.activitySize.width * scale, height: IslandPhoto.activitySize.height * scale, alignment: .top)
+        .clipShape(.rect(cornerRadius: radius, style: .continuous))
+        .accessibilityHidden(true)
+    }
+}
+
 /// The pill's own bars in miniature: Core Animation, so an open Settings page costs no frames.
 /// (A SwiftUI `TimelineView` here re-rendered the page 8 times a second for as long as it was open.)
 private struct MiniEqualizer: View {

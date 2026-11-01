@@ -73,6 +73,18 @@ Hit testing is scoped to the island rect (the union of both ends while a
 transition runs). At idle an almost-transparent fill (alpha > 0) under the notch
 lets the window server deliver hover.
 
+## Screens
+
+`IslandScreenPicker` picks the island's screen from every screen (`ScreenLocator.candidates()`, each
+named by vendor-model-serial, which outlives a reconnection) and the user's `IslandScreenChoice`:
+automatic (the notch, else the menu bar's screen), the MacBook's, or a monitor (that one, else any).
+`IslandWindowController` re-anchors when the screens change and when the choice does — after the island
+has closed if it is open, since Settings' window lies over its screen. `DisplayCenter` reads the
+screens a moment after they settle and posts `BannerKind.displays` when a monitor appears (not for 15 s
+after a wake). A screen without a notch gets a drawn one (`NotchMetrics.synthesizedWidth`), and at rest
+only `RestLineView`, a faint line, over the invisible hover target. `DisplayProfile` also knows the
+notch-less MacBook panels (13.3-inch Air/Pro M1–M2, MacBook Neo), so the open island keeps its size.
+
 ## Glass
 
 One material, defined in `IslandGlass`, taken from the CAD app: smoked clear glass

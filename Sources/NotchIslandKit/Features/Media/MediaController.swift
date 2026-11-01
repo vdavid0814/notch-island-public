@@ -20,6 +20,15 @@ import AppKit
     private(set) var status: MediaSourceStatus = .off
     /// Playing, or paused less than `pauseGrace` ago.
     private(set) var isActive = false
+    /// The song last played in Music (`LastPlayedStore`), offered while nothing plays (General ▸
+    /// Listen Again); its cover and the cover's colour once a view asks for them
+    /// (`loadListenAgainCover`).
+    private(set) var lastPlayed: LastPlayedTrack?
+    private(set) var lastPlayedArtwork: NSImage?
+    private(set) var lastPlayedColor: ArtworkColor?
+    /// A new track began playing (`TrackAnnouncer`): called once its cover's colour is in, or
+    /// `announceWait` later without it, so its title shows in that colour from the start.
+    @ObservationIgnored var onTrackChange: (() -> Void)?
 
     /// How long a paused track keeps the compact island: long enough to resume without the island
     /// collapsing and re-opening, short enough that a finished session gets out of the way.
@@ -45,6 +54,17 @@ import AppKit
     @ObservationIgnored private var artworkBytes: Data?
     @ObservationIgnored private var reprobeTask: Task<Void, Never>?
     @ObservationIgnored private var reprobeDate: Date?
+    @ObservationIgnored private var announcer = TrackAnnouncer()
+    @ObservationIgnored private var startedAt: Date?
+    @ObservationIgnored private var announcement: Task<Void, Never>?
+    @ObservationIgnored private var lastPlayedBytes: Data?
+    @ObservationIgnored private var lastPlayedCoverTask: Task<Void, Never>?
+    @ObservationIgnored private var didLoadLastPlayed = false
+
+    /// What plays this soon after the start was already playing: not announced as new.
+    static let launchQuiet: TimeInterval = 3
+    /// How long a new track's title waits for its cover's colour.
+    static let announceWait: Duration = .milliseconds(800)
 
     init() {}
 
@@ -53,6 +73,8 @@ import AppKit
     func start() {
         guard !isStarted else { return }
         isStarted = true
+        startedAt = .now
+        loadLastPlayed()
         if !didLocateAdapter {
             didLocateAdapter = true
             installation = AdapterInstallation.locate()
@@ -74,6 +96,8 @@ import AppKit
     func stop() {
         trackGapTask?.cancel()
         trackGapTask = nil
+        announcement?.cancel()
+        announcement = nil
         isStarted = false
         adapterHealthy = false
         adapter?.stop()
@@ -321,6 +345,9 @@ import AppKit
         if isPlaying != playing { isPlaying = playing }
         if clock != next?.clock { clock = next?.clock }
         updateArtwork(for: next?.item)
+        rememberLastPlayed(next?.item)
+        let quiet = demo == nil && startedAt.map { Date.now.timeIntervalSince($0) < Self.launchQuiet } ?? true
+        if announcer.isNewTrack(next, quiet: quiet) { announceWhenCoverIsIn() }
         updateActivity(playing: playing, hasItem: next != nil,
                        justPaused: treatPauseAsFresh || (previous?.isPlaying == true && !playing))
     }
@@ -417,6 +444,110 @@ import AppKit
             self.artwork = shown.map { NSImage(cgImage: $0, size: .zero) }
             if self.artworkColor != color { self.artworkColor = color }
             if self.artworkPalette != palette { self.artworkPalette = palette }
+            if self.announcement != nil, self.coverIsCurrent { self.announce() }
+        }
+    }
+
+    // MARK: New track
+
+    /// The shown track's own cover is decoded (its colour is the one shown).
+    private var coverIsCurrent: Bool {
+        guard let bytes = item?.artworkData else { return false }
+        return bytes == artworkBytes && artworkTask == nil
+    }
+
+    /// A new track's cover often follows it by a moment: its title waits for it, at most
+    /// `announceWait`, rather than showing in the last track's colour and changing.
+    private func announceWhenCoverIsIn() {
+        announcement?.cancel()
+        announcement = nil
+        if coverIsCurrent { return announce() }
+        announcement = Task { [weak self] in
+            try? await Task.sleep(for: Self.announceWait)
+            guard !Task.isCancelled, let self else { return }
+            self.announce()
+        }
+    }
+
+    private func announce() {
+        announcement?.cancel()
+        announcement = nil
+        onTrackChange?()
+    }
+
+    // MARK: Listen Again
+
+    private func loadLastPlayed() {
+        guard !didLoadLastPlayed else { return }
+        didLoadLastPlayed = true
+        Task { [weak self] in
+            let saved = await Task.detached(priority: .utility) { LastPlayedStore.load() }.value
+            guard let self, let saved, self.lastPlayed == nil else { return }
+            self.lastPlayedBytes = saved.artwork
+            self.lastPlayed = saved.track
+        }
+    }
+
+    /// Music moved to another song (or its cover came in): kept, on disk too. Demo tracks are not.
+    private func rememberLastPlayed(_ item: NowPlayingItem?) {
+        guard demo == nil, let item, let track = LastPlayedTrack(item) else { return }
+        let bytes = item.artworkData ?? (lastCover?.belongs(to: item) == true ? lastCover?.bytes : nil)
+        let sameSong = lastPlayed?.isSameSong(as: track) == true
+        if sameSong, bytes == nil || bytes == lastPlayedBytes { return }
+        let cover = bytes ?? (sameSong ? lastPlayedBytes : nil)
+        setLastPlayed(track, cover: cover)
+        Task.detached(priority: .utility) { LastPlayedStore.save(track, artwork: cover) }
+    }
+
+    private func setLastPlayed(_ track: LastPlayedTrack?, cover: Data?) {
+        if lastPlayed != track { lastPlayed = track }
+        guard cover != lastPlayedBytes else { return }
+        lastPlayedBytes = cover
+        lastPlayedCoverTask?.cancel()
+        lastPlayedCoverTask = nil
+        if lastPlayedArtwork != nil { lastPlayedArtwork = nil }
+        if lastPlayedColor != nil { lastPlayedColor = nil }
+    }
+
+    /// The last song's cover and colour, decoded the first time a view shows it.
+    func loadListenAgainCover() {
+        guard lastPlayedArtwork == nil, lastPlayedCoverTask == nil, let bytes = lastPlayedBytes else { return }
+        lastPlayedCoverTask = Task { [weak self] in
+            let image = await ArtworkDecoder.decode(bytes)
+            let color = if let image { await ArtworkDecoder.averageColor(image)?.accent } else { ArtworkColor?.none }
+            let shown: CGImage? = if let image { await ArtworkDecoder.displayReady(image) } else { nil }
+            guard !Task.isCancelled, let self, self.lastPlayedBytes == bytes else { return }
+            self.lastPlayedCoverTask = nil
+            self.lastPlayedArtwork = shown.map { NSImage(cgImage: $0, size: .zero) }
+            self.lastPlayedColor = color
+        }
+    }
+
+    /// Listen Again: Music in front at the last song played in it, not playing it; where it is not in
+    /// the library, Music's search for it.
+    func listenAgain() {
+        guard let track = lastPlayed else { return openPlayerApp() }
+        Task { [weak self] in
+            let outcome = await ListenAgain.show(track)
+            Log.media.notice("listen again: \(outcome.rawValue, privacy: .public)")
+            guard outcome == .missing || outcome == .failed else { return }
+            guard let url = ListenAgain.searchURL(for: track),
+                  let music = NSWorkspace.shared.urlForApplication(withBundleIdentifier: ScriptablePlayer.music.bundleID) else {
+                self?.openPlayerApp()
+                return
+            }
+            _ = try? await NSWorkspace.shared.open([url], withApplicationAt: music, configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
+
+    /// `demo/lastplayed`: a song offered again without touching the one kept (nil: the kept one).
+    func injectDemoLastPlayed(_ track: LastPlayedTrack?, artwork: Data?) {
+        if let track {
+            setLastPlayed(track, cover: artwork)
+        } else {
+            didLoadLastPlayed = false
+            setLastPlayed(nil, cover: nil)
+            loadLastPlayed()
         }
     }
 }

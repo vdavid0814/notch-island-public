@@ -7,6 +7,40 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-11-01 21:00** — A new track's title (Live Activities ▸ New Track) is a banner nobody asked
+  for: it buries no other notice, shows only for a title other than the last one played (no pause,
+  resume or gap between tracks), not for what already plays at launch, and waits up to 0.8 s for the
+  cover so it shows in the cover's colour. Its glide is one Core Animation move on a pre-drawn title.
+  Listen Again keeps only Music's last song (on disk, cover decoded only when shown) and opens Music at
+  it by Apple Event without playing it (asked for): Music's current track, else the library by title
+  and artist, else Music's search for it.
+  *Asked for; the energy rules: no SwiftUI frames for motion, nothing decoded unseen.*
+- **2026-11-01 19:00** — The island's screen is the user's choice (Live Activities ▸ Displays: Automatic,
+  MacBook or a monitor, kept by vendor-model-serial since display ids change at every plug-in); a choice
+  that cannot be met falls back, never hides the island. A monitor plugged in beside another screen
+  brings a notice with the screens as the island's choice bar (1–30 s, off in Settings); none for 15 s
+  after a wake. A screen picked while Settings is open is moved to once it closes. On a screen without
+  a notch the island at rest is a faint grey line, not nothing. *Asked for: MacBook + monitor use, and
+  the M1 Air / MacBook Neo, which have no notch.*
+- **2026-11-01 19:40** — Settings' page scroll views use `.scrollIndicators(.never)`, not `.hidden`: with a
+  mouse connected macOS's always-on scroller came back beside the edge scroller (two bars). The panel
+  kept at rest draws no surface at all (`isHiddenAtRest`): the opacity round it did not reach the glass
+  container's black, a black notch on a monitor. *Both seen by the user on an external display.*
+- **2026-11-01 19:15** — On a screen without a notch the island opens and closes with the same move out
+  of the notch's shape and back into it, fading in over the first 40 % of the way out and out over
+  the last 40 % of the way in (`IslandOutlineMotion`, on the render server with the outline), so no
+  black notch is left where there is none. *Asked for: a sliver-shaped rest outline was rejected.*
+- **2026-11-01 19:30** — The rest line is the island window's own view (`IslandStageView.showRestLine`), over
+  the content and outside the outline's mask: shown as a close begins and kept through it, faded as an
+  open begins. *Inside SwiftUI it faded with the island and flashed back when the mask went (asked for).*
+- **2026-11-01 19:40** — Live Activities ▸ Screens Without a Notch opens on a drawn picture (`RestLinePicture`):
+  a monitor's top with the line as the sliders have it, drafts included, like Now Playing's width
+  picture. *Asked for; a photograph could not follow the sliders.*
+- **2026-11-01 19:50** — A Settings section headed by a feature's switch reads: the switch, its picture,
+  then its options; while the switch is off the options fold up out of sight (`settingsFolded`, an
+  animated `SettingsFold` layout on `StudioStageSpring.unfold`, the Size room's spring) and the picture
+  stays. A choice drawn as pictures (volume style, anchor size) stays, dimmed. *Asked for, on General,
+  Live Activities and Spotlight.*
 - **2026-11-01 18:00** — Storage shows System Data's places outside the home folder: Time Machine's
   snapshots (counted; deleted in Disk Utility, which it opens: their size is not readable), Simulator
   runtimes, macOS downloads, temporary files, swap, system logs, iPhone updates, purgeable space, and with

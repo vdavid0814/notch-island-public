@@ -142,8 +142,9 @@ struct WidgetsSettingsPage: View {
                 .animation(.spring(duration: 0.3, bounce: 0.05), value: model.studio.draft?.panel.rows)
             }
             // Its scroller stands out in the gap beside the room (`SettingsEdgeScroller`): the
-            // room's own ran over the cards at its edge.
-            .scrollIndicators(.hidden)
+            // room's own ran over the cards at its edge. Never, not hidden: with a mouse the
+            // system's always-on scroller came back beside it.
+            .scrollIndicators(.never)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
         }
         .background { StudioUndoKeys(selection: $selection, group: $group) }

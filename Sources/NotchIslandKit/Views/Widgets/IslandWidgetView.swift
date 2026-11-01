@@ -52,6 +52,8 @@ struct IslandWidgetView: View {
     private var accent: Color? {
         guard widget.kind == .nowPlaying else { return nil }
         guard widget.background == .tinted else { return Self.neutralAccent }
+        // Nothing playing: Listen Again's song's cover.
+        if NowPlayingWidget.listenAgain(model) != nil { return model.media.lastPlayedColor.map { Color($0) } }
         return model.media.artworkColor.map { Color($0) }
     }
 

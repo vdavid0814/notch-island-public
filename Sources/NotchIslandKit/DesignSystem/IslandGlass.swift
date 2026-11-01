@@ -235,11 +235,13 @@ extension View {
     /// anything on it changes (~0.08 J per open and close, measured; the same pixels within 4/255).
     /// A surface SwiftUI sizes frame by frame keeps the layers: as a picture it would be drawn again
     /// on the CPU in every frame.
+    /// `isHidden`: drawn clear, kept in place (the panel kept at rest): taken out and put back, the
+    /// shade was built again at every opening.
     func islandSurfaceShade(_ style: IslandGlassStyle, solidDepth: CGFloat, size: CGSize, fadeStretch: CGFloat = 1,
-                            isSettled: Bool = false, in shape: some Shape) -> some View {
+                            isSettled: Bool = false, isHidden: Bool = false, in shape: some Shape) -> some View {
         background {
             if style == .fade {
-                shape.fill(Color.black).mask(alignment: .top) {
+                shape.fill(Color.black.opacity(isHidden ? 0 : 1)).mask(alignment: .top) {
                     if isSettled {
                         FadeShadePicture(solidDepth: solidDepth, size: size, stretch: fadeStretch)
                     } else {
