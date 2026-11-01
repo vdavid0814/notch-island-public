@@ -305,7 +305,7 @@ struct PermissionsSection: View {
         var tint: Color {
             switch kind {
             case .accessibility, .bluetooth: .blue
-            case .inputMonitoring: .gray
+            case .inputMonitoring, .fullDiskAccess: .gray
             case .screenRecording, .calendars: .red
             case .automation: .indigo
             case .systemAudio: .pink
@@ -400,6 +400,16 @@ struct PermissionsSection: View {
                        summary: String(localized: "Only the Bluetooth widget, to show and switch Bluetooth."),
                        features: [plain(String(localized: "Bluetooth widget"), on: true)],
                        steps: [String(localized: "Asked the first time the widget is used."), toggle])
+        case .fullDiskAccess:
+            // Optional: without it Storage still measures most places, so it is never a warning.
+            return Row(kind: kind, status: status,
+                       summary: String(localized: "Only for Storage, to measure and clear Messages' leftovers, the Trash and iPhone backups."),
+                       features: [Feature(name: String(localized: "Storage sees every place"),
+                                          note: allowed ? nil : String(localized: "Without it, those places show Size unknown."),
+                                          state: allowed ? .working : .off)],
+                       steps: [String(localized: "Click Open System Settings…"),
+                               String(localized: "Click \u{201C}+\u{201D} under the list and choose NotchIsland."), toggle,
+                               String(localized: "Still Size unknown? Quit NotchIsland and open it again.")])
         }
     }
 

@@ -81,7 +81,7 @@ import Observation
         return IslandLayout(notch: metrics?.notchSize ?? Self.fallbackNotchSize, scale: size.scale,
                             screen: metrics?.screenFrame.size ?? .zero, siri: preferences.siri.layout,
                             nowPlayingWidth: CGFloat(preferences.nowPlayingWidth),
-                            whatsNewRows: ReleaseNotes.current.rows(whatsNewSection), panel: size.panel.layout,
+                            whatsNewRows: whatsNewRows, panel: size.panel.layout,
                             display: DisplayProfile.factor(for: metrics),
                             settingsFillsLikeReference: DisplayProfile.isKnown(metrics))
     }
@@ -552,6 +552,10 @@ import Observation
             timers.startStopwatch()
         case .showWhatsNew:
             controller.showWhatsNew()
+        case .showWhatsNewDetails(let section):
+            whatsNewSection = section
+            whatsNewDetails = true
+            controller.showWhatsNew()
         case .showAppInfo:
             controller.showAppInfo()
         case .removeFanHelper:
@@ -560,6 +564,10 @@ import Observation
             showSettings()
         case .showSettingsPane(let pane):
             showSettings(pane: pane)
+        case .showStorage:
+            showSettings(pane: .about)
+            // Once About is up, its drive opened, as a click on it does.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.settingsInfo = .storage }
         case .editWidget(.kind(let kind)):
             editWidget(widgets.board.first(of: kind)?.id)
         case .editWidget(.instance(let id)):
@@ -625,6 +633,9 @@ import Observation
         SettingsPlace(pane: settingsPane, customizing: studio.customizing, info: settingsPane == .about ? settingsInfo : nil)
     }
 
+    /// About's Storage measuring, 0…1, shown round the notch (`StorageLoadingBand`); nil: not measuring.
+    var storageLoading: Double?
+
     /// What About has led to.
     var settingsInfo: SettingsInfoPage? {
         didSet {
@@ -643,6 +654,14 @@ import Observation
 
     /// The topic What's New shows: its window fits that topic's rows.
     var whatsNewSection = ReleaseNotes.Section.new
+    /// What's New shows its cards (More Details); false: its highlights, as it opens.
+    var whatsNewDetails = false
+
+    /// The rows What's New's window is as high as: the highlights', or the topic's.
+    private var whatsNewRows: Int {
+        let notes = ReleaseNotes.current
+        return whatsNewDetails || notes.highlights.isEmpty ? notes.rows(whatsNewSection) : ReleaseNotes.highlightRows
+    }
 
     /// What's New from About's button: the island's page in Settings' place, a step of Settings'
     /// history (two fingers lead back to Settings, `WhatsNewPage`).

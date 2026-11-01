@@ -32,13 +32,17 @@ struct WhatsNewPage: View {
             .onChange(of: isPanelHidden) { _, hidden in
                 // Closed: whatever comes next is no longer a step from Settings.
                 if hidden, isFromSettings { model.settingsHistory.withoutRecording { model.settingsInfo = nil } }
-                if !hidden { model.whatsNewSection = ReleaseNotes.current.sections.first ?? .new }
+                // Opened again: on the highlights, the first topic behind them.
+                if hidden {
+                    model.whatsNewSection = ReleaseNotes.current.sections.first ?? .new
+                    model.whatsNewDetails = false
+                }
             }
             .onDisappear { swipe.stop() }
     }
 }
 
-/// The topics and their cards.
+/// The highlights first (`WhatsNewHighlights`), then from More Details the topics and their cards.
 struct WhatsNewContent: View {
     var solidGround = true
     let close: () -> Void
@@ -47,12 +51,29 @@ struct WhatsNewContent: View {
 
     var body: some View {
         let notes = ReleaseNotes.current
-        InfoPageShell(topics: notes.sections, title: \.title, label: "What's new in NotchIsland \(notes.version)",
-                      solidGround: solidGround, scrolls: false, picked: { section in
-            // The window unfolds and folds to the topic's rows, as Widgets' stage does for Size.
-            withAnimation(.spring(StudioStageSpring.unfold)) { model.whatsNewSection = section }
-        }, close: close) { section in
-            Topic(notes: notes, section: section)
+        Group {
+            if model.whatsNewDetails || notes.highlights.isEmpty {
+                InfoPageShell(topics: notes.sections, title: \.title, label: "What's new in NotchIsland \(notes.version)",
+                              solidGround: solidGround, scrolls: false, opening: model.whatsNewSection,
+                              back: notes.highlights.isEmpty ? nil : { show(details: false) }, picked: { section in
+                    // The window unfolds and folds to the topic's rows, as Widgets' stage does for Size.
+                    withAnimation(.spring(StudioStageSpring.unfold)) { model.whatsNewSection = section }
+                }, close: close) { section in
+                    Topic(notes: notes, section: section)
+                }
+                .transition(.opacity)
+            } else {
+                WhatsNewHighlights(notes: notes, more: { show(details: true) }, close: close)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    /// The window unfolds to the first topic's rows, or folds back to the highlights'.
+    private func show(details: Bool) {
+        withAnimation(.spring(StudioStageSpring.unfold)) {
+            model.whatsNewSection = ReleaseNotes.current.sections.first ?? .new
+            model.whatsNewDetails = details
         }
     }
 }
@@ -75,7 +96,7 @@ private struct Topic: View {
             }
             InfoCardGrid(cards: notes.items(section), columns: notes.columns(section))
         }
-        .environment(\.infoRowHeight, ReleaseNotes.rowHeight)
+        .environment(\.infoRowHeight, ReleaseNotes.rowHeight(rows: notes.rows(section)))
         // From the same top on every tab.
         .frame(height: ReleaseNotes.cardsHeight(rows: notes.rows(section)), alignment: .top)
     }

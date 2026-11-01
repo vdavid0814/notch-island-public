@@ -7,6 +7,26 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-11-01 14:05** — Storage measures four places at once (one lane per efficiency core, at most four),
+  folders read in bulk (`getattrlistbulk`). *54 s → 18 s for 8.9 → 9.4 J (asked: quicker loading); the
+  bulk read alone gave 6 %.* Its overview lists as many places as the box holds, then "Everything else".
+
+- **2026-11-01 12:10** — About's Storage page (the drive beside ⓘ) clears only to the Trash, the Trash
+  itself excepted, and asks on the card, not in a dialog. `com.apple.…` folders are never opened.
+  *Reading Caches' Apple Music folder brought up a media-library prompt; Messages' leftovers and the Trash need Full Disk Access.*
+  Every card says Safe to delete / You'd notice / Leave alone and its Storage row (System Data…). A page's
+  scroll content is at least the room's height (`SettingsFormScroll`). *What About opens below a short page's
+  end took no clicks: clicks reach only the scroll view's content.*
+  Only About's page fills its room (every page switch paid the extra pass). The info pages' frame is
+  rounded as the room's foot and their cards concentric inside it (8 pt gap, as the sidebar's). While
+  Storage measures, "Loading" and a green line round the notch show it (`StorageLoadingBand`, a host
+  that takes no clicks). Your own files are measured only with Full Disk Access: without it macOS asks per folder.
+  Storage walks with `fts` in one background task nobody awaits, and keeps a report 10 minutes. *An awaited
+  task is lifted to its awaiter's priority: the walk went to the performance cores (68 J → 10 J, ENERGY-LOG).*
+- **2026-11-01 (later)** — What's New opens on its highlights (`WhatsNewHighlights`): seven tiles of
+  pictures drawn from the release's true numbers and its cards' symbols, round the title, with More Details
+  leading to the cards by topic and a back button returning. A topic may have up to 15 cards, the 16th only
+  "And many more…" (4×4). *Asked for: a home screen in the look of a bento of pictures, and 15 + 1.*
 - **2026-11-01 01:30** — The `whats-new` skill is used at every commit and push, enforced by the hook
   `Scripts/release-guard.py` (it brings the skill up and refuses when the versions disagree). *Asked for:
   in no situation left out.* 0.8.8's Performance and most of its Fixes keep 0.8.7's, compared with 0.8.6:

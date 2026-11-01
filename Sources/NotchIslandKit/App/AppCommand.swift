@@ -106,6 +106,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
     case showSettings
     /// Settings on one tab (`settings/widgets`…).
     case showSettingsPane(IslandSettingsPane)
+    /// About's Storage page (`settings/storage`): what fills the disk.
+    case showStorage
     /// A widget's editor in Settings ▸ Widgets (`widget/timer`, `widget/<id>`).
     case editWidget(WidgetTarget)
     /// The same widget opened straight in Customize (`widget/<kind>?customize=1`).
@@ -129,6 +131,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
     case removeFanHelper
     /// What this version brought, in the notch (`whatsnew`), as after an update.
     case showWhatsNew
+    /// The same on a topic's cards (`whatsnew/details?topic=new|performance|fixed|known`), as from More Details.
+    case showWhatsNewDetails(ReleaseNotes.Section)
     /// How NotchIsland works and what it costs (`AppInfoPage`).
     case showAppInfo
     case demo(DemoCommand)
@@ -150,7 +154,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
     ///     open[?page=home|shelf|timer|battery]   close   pin   settings[/general|widgets|activities|permissions|about]
     ///     customize   widget/<kind>|<id>   siri   diagnostics/send   diagnostics/baseline
     ///     media/play|pause|toggle|next|previous
-    ///     timer[?minutes=N]   timer/cancel   stopwatch   fans/remove-helper   whatsnew
+    ///     timer[?minutes=N]   timer/cancel   stopwatch   fans/remove-helper   whatsnew[/details?topic=…]
     ///     demo/media|charging|unplug|low|timerdone|drop|shelf|reset
     ///     demo/volume[?level=0…1]   demo/brightness[?level=0…1]
     ///     demo/hover[?inside=1|0]   demo/state   demo/surface?style=smoked|black|fade   demo/airpods
@@ -184,6 +188,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
             let target: WidgetTarget? = WidgetID(string: name).map { .instance($0) }
                 ?? IslandWidgetKind.allCases.first { $0.rawValue.lowercased() == name }.map { .kind($0) }
             return target.map { query["customize"] == "1" ? .customizeWidget($0) : .editWidget($0) }
+        case "settings/storage": return .showStorage
         case let route where route.hasPrefix("settings/"):
             return IslandSettingsPane.named(String(route.dropFirst("settings/".count))).map { .showSettingsPane($0) }
         case "customize": return .customize
@@ -214,6 +219,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
         case "stopwatch": return .startStopwatch
         case "fans/remove-helper": return .removeFanHelper
         case "whatsnew": return .showWhatsNew
+        case "whatsnew/details": return .showWhatsNewDetails(query["topic"].flatMap(ReleaseNotes.Section.init) ?? .new)
         case "appinfo": return .showAppInfo
 
         case "demo/media": return .demo(.media)

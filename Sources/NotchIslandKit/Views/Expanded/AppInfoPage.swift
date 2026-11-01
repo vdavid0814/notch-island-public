@@ -67,11 +67,16 @@ struct AppInfoPage: View {
     }
 }
 
+nonisolated enum InfoPageMetrics {
+    /// From the page's edge to its cards, past its own padding.
+    static let inset: CGFloat = 4
+}
+
 /// The look of the info pages (this one and What's New, `WhatsNewPage`): the version, a bar of topics
 /// and Done over a page of cards. Two fingers sideways are left to whatever
 /// is around it: only the bar changes the topic.
 struct InfoPageShell<Topic: Hashable & Identifiable, Page: View>: View {
-    private static var inset: CGFloat { 4 }
+    private static var inset: CGFloat { InfoPageMetrics.inset }
 
     let topics: [Topic]
     let title: (Topic) -> String
@@ -80,13 +85,19 @@ struct InfoPageShell<Topic: Hashable & Identifiable, Page: View>: View {
     var solidGround = true
     /// False: the window is made as high as the cards want (`IslandLayout.size(for:)`).
     var scrolls = true
+    /// The topic shown until the bar picks another; nil: the first.
+    var opening: Topic?
+    /// A back button before the version (What's New's cards, back to its highlights).
+    var back: (() -> Void)?
     /// The bar picked another topic.
     var picked: (Topic) -> Void = { _ in }
     let close: () -> Void
     @ViewBuilder let page: (Topic) -> Page
 
     @State private var chosen: Topic?
-    private var shown: Topic? { chosen.flatMap { topics.contains($0) ? $0 : nil } ?? topics.first }
+    private var shown: Topic? {
+        (chosen ?? opening).flatMap { topics.contains($0) ? $0 : nil } ?? topics.first
+    }
     private var topic: Binding<Topic?> {
         Binding(get: { shown }, set: { new in
             withAnimation(.smooth(duration: 0.25)) { chosen = new }
@@ -106,6 +117,13 @@ struct InfoPageShell<Topic: Hashable & Identifiable, Page: View>: View {
                     .fixedSize()
                 }
                 HStack {
+                    if let back {
+                        Button("Highlights", systemImage: "chevron.left", action: back)
+                            .buttonStyle(.glass)
+                            .buttonBorderShape(.circle)
+                            .labelStyle(.iconOnly)
+                            .help("Back to the highlights")
+                    }
                     Text(verbatim: SettingsFormat.version(Bundle.main.infoDictionary))
                         .font(.callout.weight(.medium))
                         .foregroundStyle(.secondary)
@@ -207,6 +225,8 @@ extension EnvironmentValues {
     @Entry var infoPageWidth: CGFloat = 0
     /// How high every row is (`WhatsNewPage`); nil: as the room falls.
     @Entry var infoRowHeight: CGFloat?
+    /// The cards' corner: concentric with the page they lie in (`AppInfoMenu`).
+    @Entry var infoCardRadius: CGFloat = 20
 }
 
 /// A row of cards on the page's three columns, as tall as the room it is given. (A `Grid` took its
@@ -248,6 +268,8 @@ struct InfoWidget<Content: View>: View {
     var tint: Color = .white
     @ViewBuilder var content: Content
 
+    @Environment(\.infoCardRadius) private var radius
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let title {
@@ -263,8 +285,8 @@ struct InfoWidget<Content: View>: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.white.opacity(0.07), in: .rect(cornerRadius: 20, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.08)) }
+        .background(.white.opacity(0.07), in: .rect(cornerRadius: radius, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(.white.opacity(0.08)) }
     }
 }
 
@@ -293,7 +315,7 @@ struct InfoStat: View {
     }
 }
 
-private struct InfoLine: View {
+struct InfoLine: View {
     let symbol: String
     let tint: Color
     let title: String

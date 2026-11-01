@@ -215,9 +215,14 @@ struct IslandSettingsView: View {
 }
 
 /// The ⓘ beside About's title: grows into how NotchIsland works, over the whole page, and back into
-/// the button when closed, as Open Notch Styles does (`NotchStylesMenu`).
+/// the button when closed, as Open Notch Styles does (`NotchStylesMenu`). The drive beside it, the
+/// same way into what fills the disk (`StoragePage`).
 struct AppInfoMenu: View {
     static let space = "appInfo"
+    /// From the page's edge to its bar and cards: with the shell's inset, the sidebar's gap (8).
+    static let pagePadding: CGFloat = 4
+
+    var page: SettingsInfoPage = .howItWorks
 
     @Environment(AppModel.self) private var model
     @State private var isOpen = false
@@ -233,21 +238,28 @@ struct AppInfoMenu: View {
         let top = layout.notch.height + IslandSettingsView.sidebarTop
         let room = CGSize(width: pageWidth,
                           height: layout.size(for: .settings).height - top - IslandSettingsView.sidebarGap)
-        let radius = isOpen ? WidgetVersionsMenu.radius : buttonFrame.height / 2
-        Button("How NotchIsland Works", systemImage: "info.circle", action: toggle)
+        // Open, rounded as the room's foot (the deck's, `SettingsSurface`), its cards concentric
+        // inside it (asked for: the corners did not line up).
+        let outer = IslandSettingsView.placement(layout).outerRadius
+        let radius = isOpen ? outer : buttonFrame.height / 2
+        Button(page == .storage ? "Storage" : "How NotchIsland Works",
+               systemImage: page == .storage ? "internaldrive" : "info.circle", action: toggle)
             .labelStyle(.iconOnly)
             .buttonStyle(.plain)
             .font(.system(size: 15))
             .foregroundStyle(SettingsPalette.secondary)
-            .help("How it works, what it costs and what it does")
+            .help(page == .storage ? "What fills your disk, and clearing it" : "How it works, what it costs and what it does")
             .opacity(isOpen ? 0 : 1)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { buttonFrame = $0 }
             .onGeometryChange(for: CGFloat.self) { $0.bounds(of: .named(Self.space))?.width ?? 0 } action: { pageWidth = $0 }
             .overlay(alignment: .topLeading) {
                 Group {
                     if isBuilt {
-                        AppInfoPage(close: toggle)
-                            .padding(10)
+                        Group {
+                            if page == .storage { StoragePage(close: toggle) } else { AppInfoPage(close: toggle) }
+                        }
+                            .padding(Self.pagePadding)
+                            .environment(\.infoCardRadius, max(8, outer - Self.pagePadding - InfoPageMetrics.inset))
                             .frame(width: room.width, height: room.height)
                             .opacity(contentIn ? 1 : 0)
                             .blur(radius: contentIn ? 0 : 6)
@@ -272,14 +284,14 @@ struct AppInfoMenu: View {
                 isOpen = false
                 contentIn = false
                 isBuilt = false
-                if model.settingsInfo == .howItWorks { model.settingsHistory.withoutRecording { model.settingsInfo = nil } }
+                if model.settingsInfo == page { model.settingsHistory.withoutRecording { model.settingsInfo = nil } }
             })
             // Also by two fingers, a place in Settings' history of its own.
-            .onChange(of: model.settingsInfo) { _, open in follow(open == .howItWorks) }
-            .onAppear { follow(model.settingsInfo == .howItWorks) }
+            .onChange(of: model.settingsInfo) { _, open in follow(open == page) }
+            .onAppear { follow(model.settingsInfo == page) }
     }
 
-    private func toggle() { model.settingsInfo = model.settingsInfo == .howItWorks ? nil : .howItWorks }
+    private func toggle() { model.settingsInfo = model.settingsInfo == page ? nil : page }
 
     private func follow(_ open: Bool) {
         guard open != isOpen else { return }
@@ -538,6 +550,7 @@ struct SettingsDetail: View {
         // Every page as wide as the pages' room, as Widgets' is.
         .frame(maxWidth: .infinity)
         .environment(\.settingsPictureScale, pictureScale)
+        .environment(\.settingsPageFillsRoom, pane == .about)
         // The page scrolls on under its title and fades out there, as in the system's own apps
         // (asked for, with System Settings' picture). Its saved notch styles open over the page.
         .safeAreaBar(edge: .top, spacing: 0) { SettingsPageHeader(pane: pane) }
@@ -582,7 +595,10 @@ struct SettingsPageHeader: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
                     Text(pane.title).font(.system(size: 22, weight: .bold))
-                    if pane == .about { AppInfoMenu() }
+                    if pane == .about {
+                        AppInfoMenu()
+                        AppInfoMenu(page: .storage)
+                    }
                 }
                 // What it opens lies over the line under it.
                 .zIndex(1)
@@ -615,7 +631,9 @@ struct SettingsPageHeader: View {
             .allowsHitTesting(false)
         }
         .coordinateSpace(.named(AppInfoMenu.space))
-        // What has scrolled under the title is not clicked through it.
-        .contentShape(.rect)
+        // What has scrolled under the title is not clicked through it. A ground that takes the
+        // clicks, not the header's shape: that one cut off the pages About's buttons open below it
+        // (Storage's buttons took no clicks).
+        .background { Color.clear.contentShape(.rect) }
     }
 }

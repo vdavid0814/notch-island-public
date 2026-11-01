@@ -49,18 +49,27 @@ user, and leave the claim out or word it for what was checked.
 
 ## How it is built
 
-The page draws itself from `ReleaseNotes.current` (`Sources/NotchIslandKit/System/ReleaseNotes.swift`),
-through the same parts as the info page (`InfoPageShell`, `InfoStat`, `InfoCardGrid`). So only the
-data is written at a release; the page's look is not touched. Replace the whole of `current`:
+The page draws itself from `ReleaseNotes.current` (`Sources/NotchIslandKit/System/ReleaseNotes.swift`).
+It opens on **the highlights** (`WhatsNewHighlights`): seven tiles of pictures round a "What's New" title,
+the summary line and **More Details**, which leads to the cards by topic, drawn through the same parts as
+the info page (`InfoPageShell`, `InfoStat`, `InfoCardGrid`), with a back button to the highlights. So only
+the data is written at a release; the page's look is not touched. Replace the whole of `current`:
 
 ```swift
 static let current = ReleaseNotes(
     version: "0.8.8",           // must be the new version, or the page does not open after the update
+    summary: String(localized: "…"),   // one line under the title: the release's biggest changes, ~15 words
+    highlights: [               // exactly 7 tiles, in this order: left column top and bottom, the wide one over
+                                // the title, the two under it, right column top and bottom
+        Highlight(title: String(localized: "Memory at rest"), visual: .bars([
+            .init(label: "0.8.6", value: "190 MB", amount: 190, tint: .gray),
+            .init(label: "0.8.8", value: "48 MB", amount: 48, tint: .indigo)])),
+    ],
     stats: [                    // Performance's three largest numbers, each with one short line
         Stat(title: String(localized: "Memory at rest"), symbol: "moon.fill", tint: .indigo, value: "≈ 48 MB",
              detail: String(localized: "It was about 190 MB.")),
     ],
-    new: [                      // the "Features" tab, the biggest first; 4, 6, 8, 9 or 12 cards
+    new: [                      // the "Features" tab, the biggest first; 4, 6, 8, 9, 12 or 15 + manyMore
         Item(symbol: "square.stack.3d.up.fill", tint: .blue, title: String(localized: "…"),
              detail: String(localized: "…")),
     ],
@@ -71,10 +80,38 @@ static let current = ReleaseNotes(
 
 The tabs follow the GitHub notes: Features, Performance, Fixes, Good to Know.
 
+### The highlights
+
+The first thing the reader sees, so it says the release's biggest things in pictures, not words.
+
+- **Seven tiles, always** (a test refuses another count), or none: then the page opens on the cards.
+  The wide tile over the title suits a row of symbols; the two under it a number or a small diagram.
+- **Each tile a picture of what it says**, drawn from true data, with a 1–4 word title (about 20 letters):
+  - `.bars` — before and after, from `docs/ENERGY-LOG.md` (memory, energy). The last bar is this version.
+  - `.gauge` — one large measured number in a ring (fps, a percentage), a short `note` such as "was 15–30".
+  - `.bubbles` — glossy symbols in a row: several cards at once (the fixes, with their own symbols and tints).
+  - `.flow` — small symbols going into one: many things kept as one (settings saved in one file).
+  - `.orbit` — one symbol with its parts round it (a page and its topics).
+  - `.iconStyles` — a symbol in Clear, Dark and Tinted: something that follows the Mac's icon style.
+  A new kind of picture is added to `WhatsNewHighlights.swift` when none of these fits. Never a drawn
+  mock-up of the island (`AGENTS.md`): show the island only in a real photograph.
+- **The biggest things in the biggest places** (asked for): the left and right columns and the wide tile
+  get what the reader cares about most, such as a new feature, a page redone, memory or energy measured; the
+  two small tiles under the title the rest. A fix only gets a tile when it was what users ran into most.
+- **Numbers only as measured on this Mac for this release** (asked for): from `docs/ENERGY-LOG.md` or a
+  measurement made now on the release build (Activity Monitor, `footprint`), against the version named
+  under the bar. Nothing estimated, nothing carried over without saying from when.
+- **Say what was redone, not only what was added**: a Settings page or a part of the island made anew
+  belongs among the highlights as much as a new feature (`git diff --stat <last-tag>..HEAD -- Sources/…/Views`).
+- **Use the cards' own symbols and tints**, so a tile and its card are recognisably the same thing.
+- The `summary` is one sentence of plain words, two lines at most under the title.
+
 - **Each card has its own SF Symbol and colour**, chosen for its meaning, as on the info page. A
   feature that has a card there keeps that symbol and tint.
-- **Between 4 and 12 cards on each tab, always in full rows (approved by the user).** Only 4, 6, 8, 9 or
-  12 cards: 2×2, 3×2, 4×2, 3×3 or 4×3. Never a short row. The cards reach the window's sides, bottom and each
+- **Between 4 and 15 cards on each tab, always in full rows (approved by the user).** Only 4, 6, 8, 9,
+  12 or 16 cards: 2×2, 3×2, 4×2, 3×3, 4×3 or 4×4. 16 means 15 cards and `ReleaseNotes.manyMore` ("And many
+  more…") last; that card is used nowhere else. Never a short row. Four rows are lower (132 pt instead of
+  160, `ReleaseNotes.rowHeight(rows:)`), so there each card's text is three lines at most (~65 letters). The cards reach the window's sides, bottom and each
   other evenly, and the window is as high as that tab's rows, unfolding between tabs on Size's spring. All of
   that comes by itself from the count; a test refuses any other count.
 - **Performance counts its three numbers as cards**, in rows of three: so 3 or 6 cards under them.
@@ -94,7 +131,9 @@ The tabs follow the GitHub notes: Features, Performance, Fixes, Good to Know.
 3. Write the README's `## What's new in vX` section and the GitHub release notes from the same
    content and topics: the largest changes at the top, then each topic in detail. Add the link text at the README's
    download button.
-4. Build (`Scripts/run.sh`), open `notchisland://whatsnew`, and look at every tab with `screencapture`:
+4. Build (`Scripts/run.sh`), open `notchisland://whatsnew` (the highlights) and
+   `notchisland://whatsnew/details?topic=new|performance|fixed|known`, and look at each with `screencapture`:
+   every tile's picture whole and centred, and on the tabs
    every row full and even, no title cut off or on two lines, no scrolling, and readable on Liquid
   Glass and Fade (the page lies on the island's own surface).
 5. Run `Scripts/test.sh --filter ReleaseNotesTests`, then go on with the release (see `AGENTS.md`).

@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.8 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.9 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -23,6 +23,45 @@ How much energy each animation and the idle state take, measured before and afte
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.8.9
+
+See what fills your disk, what's safe to delete, and clear it to the Trash. And What's New now opens in pictures.
+
+### The biggest changes
+
+- **Storage.** A new page in About, beside ⓘ, shows what takes your Mac's storage, System Data most of all.
+- **Safe to delete, marked.** Every place says plainly: safe to delete, you'd notice, or leave alone. And what happens if it goes.
+- **Clear to the Trash.** Move a place to the Trash right on its card. Only Empty Trash deletes for good.
+- **What's New in pictures.** This page opens on the release's highlights; More Details leads to every change.
+
+### Features
+
+- **What fills your disk.** An overview of every place, largest first, as many as fit, then everything else.
+- **What is System Data?** What System Settings counts there, how much of it was found, and how much is filler.
+- **Your files counted.** Apps, documents, photos and music are measured too, so you see what's yours.
+- **Apps' own data.** Large folders apps keep for themselves, listed by the app's name.
+- **Loading in the notch.** While the disk is measured, "Loading" sits beside the notch and a green line round it shows how far it is.
+- **Full Disk Access.** Now beside the other permissions. Storage needs it to measure your own folders.
+
+### Performance
+
+- **Disk measured:** about 18 seconds for about 200 GB, on a MacBook Pro M5.
+- **Energy to measure:** about 9 J for all of it, mostly on the Mac's energy-saving cores.
+- **Shown again at once:** opened again within 10 minutes, nothing is measured.
+- **Stops when you leave:** close the page and the measuring stops. Nothing runs while it's closed.
+- **Calm Loading dots:** the dots come and go in steps, so the screen isn't redrawn all the time.
+
+### Good to know
+
+- **Your folders need access.** Without Full Disk Access, Documents, Downloads, Photos and Music show a question mark.
+- **macOS's data unlisted.** Its own folders aren't opened, so part of System Data stays under Everything else.
+- **Empty Trash is for good.** Everything else goes to the Trash first. Emptying it can't be undone.
+- **Sizes differ a little.** System Settings counts some places in other rows, so its numbers won't match exactly.
+- **Pages take a moment.** A page loads again if you left it over a minute ago.
+- **Some memory stays.** About 30 MB stays after you first open Widgets, until you quit. It doesn't keep growing.
+- **Spotlight off opens slower.** With nothing kept ready, it reads your apps and icons as it opens.
+- **Fan Control.** Only tried on an M5 MacBook Pro. With the fans stopped, the chip gets hot under load.
 
 ## What's new in v0.8.8
 

@@ -33,6 +33,8 @@ nonisolated enum SettingsForm {
 extension EnvironmentValues {
     /// Inside Settings' form, where a switch is the small one the system's form shows.
     @Entry var isSettingsForm = false
+    /// The page's content is made as high as its room (`SettingsFormScroll`): About's.
+    @Entry var settingsPageFillsRoom = false
 }
 
 extension ContainerValues {
@@ -61,7 +63,7 @@ struct SettingsFormStyle: FormStyle {
     var fillsPage = false
 
     func makeBody(configuration: Configuration) -> some View {
-        ScrollView {
+        SettingsFormScroll(fillsPage: fillsPage) {
             VStack(alignment: .leading, spacing: SettingsForm.sectionGap) {
                 ForEach(sections: configuration.content) { section in
                     SettingsFormSection(section: section)
@@ -76,6 +78,33 @@ struct SettingsFormStyle: FormStyle {
         .scrollIndicators(fillsPage ? .hidden : .automatic)
         .labeledContentStyle(SettingsRowStyle())
         .environment(\.isSettingsForm, true)
+    }
+}
+
+/// A page's scroll view. About's content is at least as high as the room under the title: a click
+/// reaches only what lies over the scroll view's content, and what About's title opens over the page
+/// (`AppInfoMenu`) reaches below its end (Storage's lower buttons took no clicks). Only About: on
+/// every page the extra layout pass it costs came with each page switch.
+private struct SettingsFormScroll<Content: View>: View {
+    let fillsPage: Bool
+    @ViewBuilder let content: Content
+
+    @Environment(\.settingsPageFillsRoom) private var fillsRoom
+    @State private var room: CGFloat = 0
+
+    var body: some View {
+        if fillsPage, fillsRoom {
+            ScrollView {
+                content.frame(minHeight: room, alignment: .top)
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                (geometry.containerSize.height - geometry.contentInsets.top - geometry.contentInsets.bottom).rounded(.down)
+            } action: { _, height in
+                room = max(0, height)
+            }
+        } else {
+            ScrollView { content }
+        }
     }
 }
 

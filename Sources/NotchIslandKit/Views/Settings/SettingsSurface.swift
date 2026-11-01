@@ -124,6 +124,9 @@ final class SettingsSurfaceView: NSView {
     private var customizePresentation: CustomizePresentation?
     private var customizeRemoval: Timer?
     private let closeBand: NSHostingView<AnyView>
+    /// Storage's measuring round the notch (`StorageLoadingBand`): over the band and the gap under
+    /// it, taking no clicks.
+    private let loadingBand: PassThroughHostingView
 
     /// `showsPage` false: built ahead, the surface starts with its sidebar alone and its pages
     /// follow one a step (`SettingsWindow.prepare`).
@@ -133,6 +136,7 @@ final class SettingsSurfaceView: NSView {
         deck = SettingsPageDeckView(model: model)
         sidebarHost = DeferringHostingView(rootView: AnyView(EmptyView()))
         closeBand = NSHostingView(rootView: AnyView(SettingsCloseBand().environment(model).environment(\.colorScheme, .dark)))
+        loadingBand = PassThroughHostingView(rootView: AnyView(StorageLoadingBand().environment(model)))
         super.init(frame: .zero)
         wantsLayer = true
         sidebarHost.sizingOptions = []
@@ -149,6 +153,9 @@ final class SettingsSurfaceView: NSView {
         closeBand.sizingOptions = []
         closeBand.safeAreaRegions = []
         addSubview(closeBand)
+        loadingBand.sizingOptions = []
+        loadingBand.safeAreaRegions = []
+        addSubview(loadingBand)
         if showsPage { deck.show(model.settingsPane) }
         followScroll()
         observePane()
@@ -219,6 +226,7 @@ final class SettingsSurfaceView: NSView {
         let band = model.layout.notch.height
         sidebarHost.frame = CGRect(x: 0, y: band, width: bounds.width, height: max(0, bounds.height - band))
         closeBand.frame = CGRect(x: 0, y: 0, width: bounds.width, height: band)
+        loadingBand.frame = CGRect(x: 0, y: 0, width: bounds.width, height: band + IslandSettingsView.sidebarTop)
         // Beside the sidebar, as `SettingsPages` leaves room for it.
         let leading = placement.leading + SettingsPlacement.sidebarWidth
         // The pages' room is a box as the sidebar is one: as far from it, from the island's own
@@ -378,4 +386,9 @@ final class SettingsPagesView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override var isFlipped: Bool { true }
+}
+
+/// A hosting view that draws and never takes a click: what lies under it gets them.
+final class PassThroughHostingView: NSHostingView<AnyView> {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

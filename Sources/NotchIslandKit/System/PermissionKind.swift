@@ -14,6 +14,8 @@ nonisolated enum PermissionKind: String, CaseIterable, Identifiable, Sendable {
     case calendars
     case contacts
     case bluetooth
+    /// Only for About ▸ Storage: the folders macOS keeps from every app without it.
+    case fullDiskAccess
 
     var id: String { rawValue }
 
@@ -27,6 +29,7 @@ nonisolated enum PermissionKind: String, CaseIterable, Identifiable, Sendable {
         case .calendars: String(localized: "Calendars")
         case .contacts: String(localized: "Contacts")
         case .bluetooth: String(localized: "Bluetooth")
+        case .fullDiskAccess: String(localized: "Full Disk Access")
         }
     }
 
@@ -40,6 +43,7 @@ nonisolated enum PermissionKind: String, CaseIterable, Identifiable, Sendable {
         case .calendars: "calendar"
         case .contacts: "person.crop.circle.fill"
         case .bluetooth: "wave.3.right"
+        case .fullDiskAccess: "internaldrive.fill"
         }
     }
 
@@ -54,6 +58,7 @@ nonisolated enum PermissionKind: String, CaseIterable, Identifiable, Sendable {
         case .calendars: "Privacy_Calendars"
         case .contacts: "Privacy_Contacts"
         case .bluetooth: "Privacy_Bluetooth"
+        case .fullDiskAccess: "Privacy_AllFiles"
         }
     }
 
@@ -68,6 +73,7 @@ nonisolated enum PermissionKind: String, CaseIterable, Identifiable, Sendable {
         case .calendars: "Calendar"
         case .contacts: "AddressBook"
         case .bluetooth: "BluetoothAlways"
+        case .fullDiskAccess: "SystemPolicyAllFiles"
         }
     }
 
@@ -90,7 +96,7 @@ nonisolated enum PermissionKind: String, CaseIterable, Identifiable, Sendable {
     var appearsWhenAsked: Bool {
         switch self {
         case .accessibility, .inputMonitoring, .screenRecording, .automation, .calendars, .contacts, .bluetooth: true
-        case .systemAudio: false
+        case .systemAudio, .fullDiskAccess: false
         }
     }
 
@@ -144,7 +150,16 @@ nonisolated enum PermissionStatus: Sendable, Equatable {
             case .notDetermined: .notAsked
             default: .denied
             }
+        case .fullDiskAccess: fullDiskAccess()
         }
+    }
+
+    /// No check of its own, and it never prompts: a file only it opens (the privacy database).
+    private static func fullDiskAccess() -> PermissionStatus {
+        let file = open("/Library/Application Support/com.apple.TCC/TCC.db", O_RDONLY)
+        guard file >= 0 else { return .denied }
+        close(file)
+        return .allowed
     }
 
     /// The apps Now Playing scripts when the MediaRemote adapter is missing.

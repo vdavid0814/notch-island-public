@@ -4,6 +4,42 @@ Reference numbers for how much CPU, GPU and battery NotchIsland takes, per anima
 Every copy carries this file (the repository, the `.dmg` and `NotchIsland.app/Contents/Resources/`), so any
 later version can be measured the same way and compared with it.
 
+## 2026-11-01: About ▸ Storage, measuring the disk
+
+Opening Storage walks ~200 GB of files (this Mac, with Full Disk Access). Release builds,
+on the charger, each run a fresh launch, 25 s to settle, then `settings/storage` by URL; old and new
+in turn (A B A B), the coalition over 45 s from the opening (`ptime` probe: cpu, performance-core ms,
+energy), Activity Monitor's Energy Impact read during the walk.
+
+| | CPU ms | P-core ms | Energy | Activity Monitor |
+|---|---|---|---|---|
+| Before: `FileManager` enumerator + URL resource values per file, `.utility` tasks awaited from the main actor | 13 563 / 13 599 | 13 112 / 13 120 | **68.1 / 68.4 J** | 1 666 – 3 428 |
+| `fts` + `stat` blocks, tasks still awaited (lifted to the awaiter's priority) | 34 680 / 10 145 | 1 003 / 9 944 | 13.2 / 48.9 J | 200 – 342 |
+| `fts`, one background task awaited by nobody (efficiency cores) | 38 474 / 33 062 | 976 / 948 | **9.8 / 11.9 J** | 156 – 228 |
+
+About 6× less. The walk takes longer on the efficiency cores (~40 s of CPU, the notch's Loading line
+shows it); opened again within 10 minutes, the kept report is shown and nothing is walked.
+
+Quicker (asked for), same release-build setup, the coalition over 100 s from the opening, the walk's
+time from the app's log (`storage: measured in`), A B A B:
+
+| | CPU ms | P-core ms | Energy | Walk |
+|---|---|---|---|---|
+| `fts`, one place after another (above) | 38 765 / 38 611 | 933 / 933 | 9.0 / 9.0 J | 54.7 / 54.3 s |
+| Folders read in bulk (`getattrlistbulk`), one after another | 37 019 / 35 485 | 1 662 / 959 | 9.5 / 8.1 J | 51.1 / 51.3 s |
+| `fts`, one place after another (again) | 38 187 / 37 627 | 906 / 887 | 9.1 / 8.7 J | 54.2 / 53.2 s |
+| In bulk, four places at once (four of the six efficiency cores) | 38 250 / 37 975 | 2 140 / 2 124 | 9.4 / 9.3 J | **17.6 / 17.6 s** |
+
+Three times quicker for about 0.4 J more; the same sizes found. The notch's Loading band is up a
+third as long.
+
+The notch's "Loading" dots (30 s during the walk, app and WindowServer coalitions, A B A B):
+
+| | App energy | App wake-ups | WindowServer energy |
+|---|---|---|---|
+| Dots fading (SwiftUI `PhaseAnimator`, a redraw every frame) | 9.90 / 6.26 J | 1 978 / 1 974 | 4.89 / 4.72 J |
+| Dots in steps of 0.35 s (`TimelineView`), as asked: they appear and go one by one | 6.75 / 5.74 J | 346 / 358 | 4.25 / 3.99 J |
+
 ## 2026-10-31: an average day, for About's ⓘ page (worked out, not measured as one day)
 
 Added up from the numbers below (`AppInfoEnergy`), the coalition's energy on a MacBook Pro M5, on the

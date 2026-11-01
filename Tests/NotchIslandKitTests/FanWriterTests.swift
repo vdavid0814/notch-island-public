@@ -304,6 +304,27 @@ struct ReleaseNotesTests {
         #expect(notes.stats.count == 0 || notes.stats.count == 3)
     }
 
+    /// Asked for: at most 15 cards a topic, the 16th only "And many more…", and never anywhere else.
+    @Test func atMostFifteenAndManyMore() {
+        let notes = ReleaseNotes.current
+        for section in notes.sections {
+            let titles = notes.items(section).map(\.title)
+            let more = titles.filter { $0 == ReleaseNotes.manyMore.title }.count
+            #expect(titles.count - more <= 15, "\(section)")
+            #expect(more == 0 || titles.last == ReleaseNotes.manyMore.title && more == 1, "\(section)")
+            #expect(notes.cardCount(section) != 16 || more == 1, "\(section)")
+        }
+        #expect(notes.columns(.new) == 4 || notes.cardCount(.new) != 16)
+    }
+
+    /// The first page's tiles fill its every place, or there is no first page.
+    @Test func theHighlightsFillTheirPlaces() {
+        let notes = ReleaseNotes.current
+        #expect(notes.highlights.isEmpty || notes.highlights.count == ReleaseNotes.highlightSlots)
+        #expect(notes.highlights.isEmpty || !notes.summary.isEmpty)
+        #expect(Set(notes.highlights.map(\.title)).count == notes.highlights.count)
+    }
+
     @Test func thePageIsThePanelsButNeverInThePickerOrStored() {
         #expect(!ExpandedPage.allCases.contains(.whatsNew) && !ExpandedPage.whatsNew.isBoard && !ExpandedPage.whatsNew.isNoticeCard)
         #expect(ExpandedPage(rawValue: "whatsNew") == nil)

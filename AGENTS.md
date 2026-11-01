@@ -76,7 +76,8 @@ notch app v0.8/
 `Scripts/release-guard.py` brings it up at each `git commit`, `git push` and `gh release create`, and refuses
 them while `Support/Info.plist`, `ReleaseNotes.current` and the README disagree on the version. What a user
 would notice goes into `ReleaseNotes.current`, the README section and the GitHub notes, in the look and voice
-of How NotchIsland Works: 4–12 cards on each tab, in full rows.
+of How NotchIsland Works: seven highlight tiles in pictures first, then 4–15 cards on each tab (+ "And many
+more…" as the 16th), in full rows.
 
 ## Before you call it done
 
