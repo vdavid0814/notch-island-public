@@ -171,8 +171,15 @@ private struct StorageOverview: View {
                     StorageLine(title: String(localized: "Some is your apps' data"),
                                 detail: String(localized: "Their settings, sign-ins and downloads."))
                     StorageLine(title: String(localized: "The rest is macOS's"),
-                                detail: report.snapshots == 0 ? String(localized: "Swap and Spotlight's index. It manages them itself.")
-                                    : String(localized: "Swap, Spotlight's index and \(report.snapshots) Time Machine snapshots."))
+                                detail: String(localized: "Swap, logs, its downloads and Spotlight's index. It manages them itself."))
+                    if report.snapshots > 0 {
+                        StorageLine(title: String(localized: "\(report.snapshots) Time Machine snapshots"),
+                                    detail: String(localized: "Often the largest part. Only Disk Utility shows their size."))
+                    }
+                    if report.purgeable >= 1 << 30 {
+                        StorageLine(title: String(localized: "\(StorageFormat.bytes(report.purgeable)) macOS frees itself"),
+                                    detail: String(localized: "Purgeable: it removes this when space runs low, and counts it as free."))
+                    }
                 }
                 .frame(width: 330)
             }
@@ -400,6 +407,10 @@ private struct StorageCard: View {
             Text(verbatim: "?")
                 .font(.system(size: 20, weight: .bold, design: .rounded))
                 .foregroundStyle(.yellow)
+        case .items(let count):
+            Text(verbatim: "\(count)")
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
         }
     }
 
@@ -430,6 +441,11 @@ private struct StorageCard: View {
                 Button("Allow Full Disk Access", systemImage: "lock.open") { report.openFullDiskAccess() }
                     .buttonStyle(.glass)
                 showButton
+            } else if let app = spot.opens {
+                Button("Open \(FileManager.default.displayName(atPath: app.path))", systemImage: "arrow.up.forward.app") {
+                    report.reveal(spot)
+                }
+                .buttonStyle(.glass)
             } else if spot.removal == .none {
                 Button("Show in Finder", systemImage: "folder") { report.reveal(spot) }
                     .buttonStyle(.glass)

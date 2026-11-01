@@ -68,6 +68,8 @@ nonisolated struct StorageSpot: Sendable, Identifiable, Equatable {
     /// macOS's own items (`com.apple.…`) left alone: its services own them, and reading some (Music's)
     /// asks the user for their media library.
     var skipsApple = false
+    /// The app that clears it, opened from its card (Disk Utility for Time Machine's snapshots).
+    var opens: URL?
 
     func skips(_ name: String) -> Bool {
         name == ".DS_Store" || skipping.contains(name) || skipsApple && name.hasPrefix("com.apple.")
@@ -80,6 +82,8 @@ nonisolated enum StorageSize: Sendable, Equatable {
     case bytes(Int64)
     /// macOS keeps it from apps without Full Disk Access.
     case denied
+    /// Counted, not measured: Time Machine's snapshots, whose size only Disk Utility knows.
+    case items(Int)
 }
 
 /// What fills the Mac's disk, measured when the Storage page opens (`StoragePage`), and clearing
@@ -95,6 +99,8 @@ nonisolated enum StorageSize: Sendable, Equatable {
     /// The startup disk: its size and what is free (counting what macOS can purge).
     private(set) var capacity: Int64 = 0
     private(set) var available: Int64 = 0
+    /// Of what is free, what macOS frees itself when space runs low (purgeable).
+    private(set) var purgeable: Int64 = 0
     /// Every spot measured.
     private(set) var isDone = false
     /// How far the measuring is, 0…1, for the line round the notch (`StorageLoadingBand`).
@@ -156,6 +162,7 @@ nonisolated enum StorageSize: Sendable, Equatable {
             let volume = StorageScanner.volume()
             capacity = volume.capacity
             available = volume.available
+            purgeable = volume.purgeable
             return
         }
         let home = home
@@ -166,10 +173,11 @@ nonisolated enum StorageSize: Sendable, Equatable {
         }
     }
 
-    fileprivate func began(_ spots: [StorageSpot], capacity: Int64, available: Int64) {
+    fileprivate func began(_ spots: [StorageSpot], volume: (capacity: Int64, available: Int64, purgeable: Int64)) {
         self.spots = spots
-        self.capacity = capacity
-        self.available = available
+        capacity = volume.capacity
+        available = volume.available
+        purgeable = volume.purgeable
     }
 
     fileprivate func measured(_ id: String, _ size: StorageSize, progress: Double) {
@@ -214,6 +222,7 @@ nonisolated enum StorageSize: Sendable, Equatable {
             let volume = await Task.detached(priority: .background) { StorageScanner.volume() }.value
             capacity = volume.capacity
             available = volume.available
+            purgeable = volume.purgeable
             removing.remove(spot.id)
             keep()
             Log.system.notice("storage: cleared \(spot.id, privacy: .public)")
@@ -221,6 +230,10 @@ nonisolated enum StorageSize: Sendable, Equatable {
     }
 
     func reveal(_ spot: StorageSpot) {
+        if let app = spot.opens {
+            NSWorkspace.shared.open(app)
+            return
+        }
         let existing = spot.paths.filter { FileManager.default.fileExists(atPath: $0.path) }
         if spot.removal == .emptyTrash, let trash = existing.first {
             NSWorkspace.shared.open(trash)
@@ -241,9 +254,9 @@ nonisolated enum StorageScanner {
         let began = ContinuousClock.now
         let disk = volume()
         let fixed = catalog(home: home)
-        await report?.began(fixed, capacity: disk.capacity, available: disk.available)
+        await report?.began(fixed, volume: disk)
         // The known places, then apps' own folders (a list of their own, largest first), then the snapshots.
-        let jobs = fixed.map(Job.spot) + appFolders(home: home).map(Job.appFolder) + [.snapshots]
+        let jobs = fixed.filter { $0.id != snapshotsID }.map(Job.spot) + appFolders(home: home).map(Job.appFolder) + [.snapshots]
         var appData: [(StorageSpot, Int64)] = []
         var snapshots = 0
         await withTaskGroup(of: Done.self) { group in
@@ -265,7 +278,7 @@ nonisolated enum StorageScanner {
                     await report?.advanced(to: progress)
                 case .snapshots(let count):
                     snapshots = count
-                    await report?.advanced(to: progress)
+                    await report?.measured(snapshotsID, count > 0 ? .items(count) : .bytes(0), progress: progress)
                 }
                 add()
             }
@@ -305,12 +318,18 @@ nonisolated enum StorageScanner {
         return min(4, Int(cores))
     }()
 
-    static func volume() -> (capacity: Int64, available: Int64) {
+    /// The startup disk: its size, what is free counting what macOS can purge, and that purgeable part.
+    static func volume() -> (capacity: Int64, available: Int64, purgeable: Int64) {
         let values = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [
-            .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey,
+            .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey,
         ])
-        return (Int64(values?.volumeTotalCapacity ?? 0), values?.volumeAvailableCapacityForImportantUsage ?? 0)
+        let available = values?.volumeAvailableCapacityForImportantUsage ?? 0
+        let free = Int64(values?.volumeAvailableCapacity ?? 0)
+        return (Int64(values?.volumeTotalCapacity ?? 0), available, max(0, available - free))
     }
+
+    /// Time Machine's snapshots' spot: counted by `localSnapshots`, not walked.
+    static let snapshotsID = "snapshots"
 
     /// The places that fill System Data on most Macs, a developer's included.
     static func catalog(home: URL) -> [StorageSpot] {
@@ -407,19 +426,66 @@ nonisolated enum StorageScanner {
                         detail: String(localized: "What Spotlight knows about your files, so it finds them at once."),
                         consequence: String(localized: "Spotlight would find nothing for hours while it rebuilds it. macOS keeps it in check."),
                         category: .systemData, paths: [at("Library/Metadata/CoreSpotlight")], verdict: .keep, removal: .none),
+            // What System Data holds outside the home folder, the large ones a Mac can grow by hundreds of GB.
+            StorageSpot(id: snapshotsID, symbol: "clock.arrow.circlepath", tint: .teal, title: String(localized: "Time Machine snapshots"),
+                        detail: String(localized: "Hourly copies of your disk, kept on the Mac while the backup disk is away. They can grow to hundreds of GB."),
+                        consequence: String(localized: "The last hours' backups on this Mac go; your backup disk keeps its own. In Disk Utility: View ▸ Show APFS Snapshots."),
+                        category: .systemData, paths: [], verdict: .notice, removal: .none,
+                        opens: URL(fileURLWithPath: "/System/Applications/Utilities/Disk Utility.app")),
+            StorageSpot(id: "simulator-runtimes", symbol: "square.stack.3d.down.right.fill", tint: .blue, title: String(localized: "Simulator runtimes"),
+                        detail: String(localized: "The iOS, watchOS and other systems Xcode's Simulator runs, several GB each."),
+                        consequence: String(localized: "Their simulators can't start until you download them again. Remove unused ones in Xcode ▸ Settings ▸ Components."),
+                        category: .systemData, paths: [URL(fileURLWithPath: "/Library/Developer/CoreSimulator/Images")]
+                            + simulatorRuntimeAssets.map { assets.appending(path: $0, directoryHint: .isDirectory) },
+                        verdict: .notice, removal: .none),
+            StorageSpot(id: "ios-updates", symbol: "arrow.down.app.fill", tint: .teal, title: String(localized: "iPhone updates"),
+                        detail: String(localized: "iOS updates Finder downloaded to update your iPhone or iPad."),
+                        consequence: String(localized: "Nothing. Finder downloads one again the next time it updates a device."),
+                        category: .systemData, paths: ["iPhone", "iPad"].map { at("Library/iTunes/\($0) Software Updates") },
+                        verdict: .filler, removal: .contents),
+            StorageSpot(id: "macos-assets", symbol: "square.and.arrow.down.on.square.fill", tint: .gray, title: String(localized: "macOS downloads"),
+                        detail: String(localized: "Parts macOS downloaded for you: Apple Intelligence, Siri, dictation, voices and fonts."),
+                        consequence: String(localized: "Leave them: macOS downloads them again, and removes what it no longer needs."),
+                        category: .systemData, paths: [assets], verdict: .keep, removal: .none,
+                        skipping: Set(simulatorRuntimeAssets)),
+            StorageSpot(id: "temporary", symbol: "hourglass", tint: .gray, title: String(localized: "Temporary files"),
+                        detail: String(localized: "What macOS and apps keep for a while in a hidden folder of yours."),
+                        consequence: String(localized: "A restart clears much of it. Deleting it while apps run can break them."),
+                        category: .systemData, paths: [URL(fileURLWithPath: NSTemporaryDirectory()).deletingLastPathComponent()],
+                        verdict: .keep, removal: .none),
+            StorageSpot(id: "swap", symbol: "memorychip", tint: .gray, title: String(localized: "Memory on disk"),
+                        detail: String(localized: "What didn't fit in memory, and the copy of it kept for sleep."),
+                        consequence: String(localized: "Restarting your Mac frees it."),
+                        category: .systemData, paths: [URL(fileURLWithPath: "/private/var/vm")], verdict: .keep, removal: .none),
+            StorageSpot(id: "system-logs", symbol: "doc.text.magnifyingglass", tint: .gray, title: String(localized: "System logs"),
+                        detail: String(localized: "What macOS writes down about itself, kept for a few days."),
+                        consequence: String(localized: "Nothing to do: macOS trims them by itself."),
+                        category: .systemData, paths: ["diagnostics", "uuidtext"].map { URL(fileURLWithPath: "/private/var/db/\($0)") },
+                        verdict: .keep, removal: .none),
         ]
     }
 
-    /// Apps' own folders in Application Support: not macOS's, not NotchIsland's.
+    /// Where macOS keeps what it downloads for itself (`MobileAsset`).
+    static let assets = URL(fileURLWithPath: "/System/Library/AssetsV2", isDirectory: true)
+
+    /// The Simulator's systems among them, counted as runtimes, not as macOS's.
+    static let simulatorRuntimeAssets = ["iOS", "watchOS", "tvOS", "visionOS", "xrOS"].map { "com_apple_MobileAsset_\($0)SimulatorRuntime" }
+
+    /// Apps' own folders: in Application Support, and with Full Disk Access their containers too (where
+    /// Docker's and virtual machines' disks are, often the largest of all). Not macOS's, not NotchIsland's.
     static func appFolders(home: URL) -> [URL] {
-        let support = home.appending(path: "Library/Application Support", directoryHint: .isDirectory)
         let own = Bundle.main.bundleIdentifier ?? "com.davidvarga.notchisland"
-        let folders = (try? FileManager.default.contentsOfDirectory(at: support, includingPropertiesForKeys: nil,
-                                                                     options: [.skipsHiddenFiles])) ?? []
-        // macOS's own folders are not opened: some (Contacts, call history) ask the user first.
-        return folders.filter { folder in
-            let name = folder.lastPathComponent
-            return name != own && !name.hasPrefix("com.apple.") && !appleFolders.contains(name)
+        // Other apps' containers ask the user first without Full Disk Access.
+        let places = ["Library/Application Support"] + (hasFullDiskAccess() ? ["Library/Containers", "Library/Group Containers"] : [])
+        return places.flatMap { place in
+            let folders = (try? FileManager.default.contentsOfDirectory(at: home.appending(path: place, directoryHint: .isDirectory),
+                                                                         includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+            // macOS's own folders are not opened: some (Contacts, call history) ask the user first.
+            return folders.filter { folder in
+                let name = folder.lastPathComponent
+                return name != own && !name.contains(own) && !name.contains("com.apple.") && !name.hasPrefix("group.com.apple")
+                    && !appleFolders.contains(name)
+            }
         }
     }
 
@@ -431,10 +497,12 @@ nonisolated enum StorageScanner {
         let bytes = allocatedSize(of: folder, skipping: Set(inside))
         guard bytes >= limit else { return nil }
         let name = folder.lastPathComponent
-        return (StorageSpot(id: "app:" + name, symbol: "app.dashed", tint: .white.opacity(0.7), title: appName(for: name),
-                            detail: String(localized: "This app's own data, in Application Support ▸ \(name)."),
+        let place = folder.deletingLastPathComponent().lastPathComponent
+        return (StorageSpot(id: "app:\(place)/\(name)", symbol: "app.dashed", tint: .white.opacity(0.7), title: appName(for: name),
+                            detail: String(localized: "This app's own data, in \(place) ▸ \(name)."),
                             consequence: String(localized: "The app loses what it kept here: settings, sign-ins, downloads, projects."),
-                            category: .systemData, paths: [folder], verdict: .notice, removal: .folder), bytes)
+                            category: .systemData, paths: [folder], verdict: .notice, removal: .folder,
+                            caution: String(localized: "Quit the app first.")), bytes)
     }
 
     /// macOS's folders in Application Support without a `com.apple.` name.
@@ -449,12 +517,18 @@ nonisolated enum StorageScanner {
     /// installed, else `Cadapp`), never the bare identifier.
     static func appName(for folder: String) -> String {
         guard folder.contains(".") else { return folder }
+        // A group container: `group.` or a team's ten letters before the identifier.
+        var folder = folder.hasPrefix("group.") ? String(folder.dropFirst(6)) : folder
+        if let dot = folder.firstIndex(of: "."), folder.distance(from: folder.startIndex, to: dot) == 10,
+           folder[..<dot].allSatisfy({ $0.isUppercase || $0.isNumber }) {
+            folder = String(folder[folder.index(after: dot)...])
+        }
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: folder),
            let name = FileManager.default.displayName(atPath: url.path).split(separator: ".").first {
             return String(name)
         }
         let parts = folder.split(separator: ".").map(String.init)
-        let plain = parts.dropFirst(parts.count > 2 ? 2 : 0).filter { !["native", "app", "mac", "macos", "desktop"].contains($0.lowercased()) }
+        let plain = parts.dropFirst(parts.count > 2 ? 2 : parts.count == 2 ? 1 : 0).filter { !["native", "app", "mac", "macos", "desktop"].contains($0.lowercased()) }
         guard let name = plain.first ?? parts.last else { return folder }
         return name.prefix(1).uppercased() + name.dropFirst()
     }

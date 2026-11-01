@@ -7,6 +7,14 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-11-01 18:00** — Storage shows System Data's places outside the home folder: Time Machine's
+  snapshots (counted; deleted in Disk Utility, which it opens: their size is not readable), Simulator
+  runtimes, macOS downloads, temporary files, swap, system logs, iPhone updates, purgeable space, and with
+  Full Disk Access apps' containers over 1 GB (Docker's and virtual machines' disks). macOS's own are shown,
+  never cleared. *Asked: a Mac with hundreds of GB of System Data nobody could delete.* What's New from
+  Settings comes in only once the panel is shown. *With Settings kept (battery, or in use), the step came
+  a moment before the panel showed, the fade was left at its start and the page stayed empty.*
+
 - **2026-11-01 14:05** — Storage measures four places at once (one lane per efficiency core, at most four),
   folders read in bulk (`getattrlistbulk`). *54 s → 18 s for 8.9 → 9.4 J (asked: quicker loading); the
   bulk read alone gave 6 %.* Its overview lists as many places as the box holds, then "Everything else".

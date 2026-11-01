@@ -23,7 +23,7 @@ struct WhatsNewPage: View {
                 if fromSettings {
                     swipe.start { [weak model] back in model?.swipeSettings(back: back) }
                     contentIn = false
-                    withAnimation(.spring(duration: 0.45, bounce: 0.1).delay(0.1)) { contentIn = true }
+                    comeIn()
                 } else {
                     swipe.stop()
                     contentIn = true
@@ -36,9 +36,19 @@ struct WhatsNewPage: View {
                 if hidden {
                     model.whatsNewSection = ReleaseNotes.current.sections.first ?? .new
                     model.whatsNewDetails = false
+                } else {
+                    comeIn()
                 }
             }
             .onDisappear { swipe.stop() }
+    }
+
+    /// The cards come in, once the panel is shown. Begun while it was still hidden (Settings kept, the
+    /// page kept from its last time: the step comes a moment before the panel shows), the animation was
+    /// left at its start and the page stayed empty.
+    private func comeIn() {
+        guard !contentIn, !isPanelHidden else { return }
+        withAnimation(.spring(duration: 0.45, bounce: 0.1).delay(0.1)) { contentIn = true }
     }
 }
 

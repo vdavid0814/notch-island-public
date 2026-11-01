@@ -108,6 +108,10 @@ nonisolated enum AppCommand: Sendable, Equatable {
     case showSettingsPane(IslandSettingsPane)
     /// About's Storage page (`settings/storage`): what fills the disk.
     case showStorage
+    /// What's New from About's button (`settings/whatsnew`): in Settings' place, two fingers lead back.
+    case showWhatsNewFromSettings
+    /// Settings' two-finger step back or forward (`demo/swipe?back=1|0`), without the trackpad.
+    case swipeSettings(back: Bool)
     /// A widget's editor in Settings ▸ Widgets (`widget/timer`, `widget/<id>`).
     case editWidget(WidgetTarget)
     /// The same widget opened straight in Customize (`widget/<kind>?customize=1`).
@@ -152,6 +156,7 @@ nonisolated enum AppCommand: Sendable, Equatable {
     /// caller can log them) instead of guessing.
     ///
     ///     open[?page=home|shelf|timer|battery]   close   pin   settings[/general|widgets|activities|permissions|about]
+    ///     settings/storage   settings/whatsnew   demo/swipe[?back=1|0]
     ///     customize   widget/<kind>|<id>   siri   diagnostics/send   diagnostics/baseline
     ///     media/play|pause|toggle|next|previous
     ///     timer[?minutes=N]   timer/cancel   stopwatch   fans/remove-helper   whatsnew[/details?topic=…]
@@ -189,6 +194,8 @@ nonisolated enum AppCommand: Sendable, Equatable {
                 ?? IslandWidgetKind.allCases.first { $0.rawValue.lowercased() == name }.map { .kind($0) }
             return target.map { query["customize"] == "1" ? .customizeWidget($0) : .editWidget($0) }
         case "settings/storage": return .showStorage
+        case "settings/whatsnew": return .showWhatsNewFromSettings
+        case "demo/swipe": return .swipeSettings(back: query["back"] != "0")
         case let route where route.hasPrefix("settings/"):
             return IslandSettingsPane.named(String(route.dropFirst("settings/".count))).map { .showSettingsPane($0) }
         case "customize": return .customize

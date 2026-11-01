@@ -33,6 +33,17 @@ time from the app's log (`storage: measured in`), A B A B:
 Three times quicker for about 0.4 J more; the same sizes found. The notch's Loading band is up a
 third as long.
 
+With System Data's places outside the home folder (macOS downloads, Simulator runtimes, temporary
+files, swap, system logs, apps' containers with Full Disk Access), against the released 0.8.9, same
+setup, A B A B (a video playing in Safari meanwhile, so both are higher than above):
+
+| | CPU ms | P-core ms | Energy | Walk |
+|---|---|---|---|---|
+| 0.8.9 as released | 35 987 / 26 236 | 2 505 / 2 405 | 11.2 / 12.7 J | 17.0 / 14.6 s |
+| With the new places | 32 111 / 28 641 | 3 036 / 3 169 | 11.9 / 12.7 J | 16.5 / 14.8 s |
+
+No difference beyond the runs' spread: the new places are few large files.
+
 The notch's "Loading" dots (30 s during the walk, app and WindowServer coalitions, A B A B):
 
 | | App energy | App wake-ups | WindowServer energy |

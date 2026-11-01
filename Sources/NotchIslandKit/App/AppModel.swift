@@ -568,6 +568,11 @@ import Observation
             showSettings(pane: .about)
             // Once About is up, its drive opened, as a click on it does.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.settingsInfo = .storage }
+        case .swipeSettings(let back):
+            swipeSettings(back: back)
+        case .showWhatsNewFromSettings:
+            showSettings(pane: .about)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.openWhatsNewFromSettings() }
         case .editWidget(.kind(let kind)):
             editWidget(widgets.board.first(of: kind)?.id)
         case .editWidget(.instance(let id)):

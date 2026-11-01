@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.9 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.8.9.1 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -23,6 +23,43 @@ How much energy each animation and the idle state take, measured before and afte
 Swift 6, SwiftUI, macOS 27.
 
 ---
+
+## What's new in v0.8.9.1
+
+System Data's hidden places are shown now too, and What's New no longer comes back empty.
+
+### The biggest changes
+
+- **Hidden System Data.** Storage now lists what System Data holds outside your home folder: macOS downloads, Simulator runtimes, temporary files, swap and system logs, each with what to do about it.
+- **Backup snapshots.** Time Machine's copies kept on the Mac, often hundreds of GB when the backup disk is away, are counted, and Disk Utility opens to remove them.
+- **Docker and VM disks.** With Full Disk Access, apps' containers over 1 GB are listed too, by the app's name.
+- **An empty What's New, fixed.** Going back to Settings with two fingers and forward again could show an empty page.
+
+### Features
+
+- **Purgeable space.** "What is System Data?" says how much macOS frees by itself when space runs low.
+- **iPhone updates.** iOS updates Finder downloaded are safe to delete, and marked so.
+- From 0.8.9: the Storage page in About, Safe to delete / You'd notice / Leave alone on every place, clearing to the Trash on the card, your own files counted, Loading in the notch, Full Disk Access among the permissions, and What's New in pictures.
+
+### Performance
+
+- **Disk measured:** 15–17 seconds for about 200 GB on a MacBook Pro M5, the new places included.
+- **Energy to measure:** 9–13 J for all of it, the same as 0.8.9 measured side by side.
+
+### Fixes
+
+- **Empty What's New.** With Settings kept ready (on battery, or while in use), stepping back to Settings and forward again, or opening What's New from About a second time, could show an empty page.
+
+### Good to know
+
+- **Your folders need access.** Without Full Disk Access, your folders and apps' containers aren't measured.
+- **Snapshot sizes unknown.** Only Disk Utility shows how much Time Machine's snapshots take.
+- **Some stays unexplained.** What only macOS can read stays under Everything else.
+- **Empty Trash is for good.** Everything else goes to the Trash first.
+- **Sizes differ a little.** System Settings counts some places in other rows.
+- **Pages take a moment.** A page loads again if you left it over a minute ago.
+- **Some memory stays.** About 30 MB stays after you first open Widgets, until you quit.
+- **Fan Control.** Only tried on an M5 MacBook Pro. With the fans stopped, the chip gets hot under load.
 
 ## What's new in v0.8.9
 

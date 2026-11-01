@@ -88,6 +88,27 @@ import Testing
     @Test func appFoldersReadAsNames() {
         #expect(StorageScanner.appName(for: "com.example.notinstalled.native") == "Notinstalled")
         #expect(StorageScanner.appName(for: "Steam") == "Steam")
+        // Group containers: `group.` or a team's ten letters before the identifier.
+        #expect(StorageScanner.appName(for: "group.com.notinstalledexample") == "Notinstalledexample")
+        #expect(StorageScanner.appName(for: "UBF8T346G9.Office") == "Office")
+    }
+
+    /// System Data's places outside the home folder: the Simulator's runtimes counted once, as theirs.
+    @Test func systemDataPlaces() {
+        let spots = StorageScanner.catalog(home: FileManager.default.homeDirectoryForCurrentUser)
+        let ids = Set(spots.map(\.id))
+        for id in ["snapshots", "simulator-runtimes", "macos-assets", "temporary", "swap", "system-logs", "ios-updates"] {
+            #expect(ids.contains(id), "\(id)")
+        }
+        let assets = spots.first { $0.id == "macos-assets" }
+        let runtimes = spots.first { $0.id == "simulator-runtimes" }
+        for name in StorageScanner.simulatorRuntimeAssets {
+            #expect(assets?.skips(name) == true)
+            #expect(runtimes?.paths.map(\.lastPathComponent).contains(name) == true)
+        }
+        // Only what macOS itself can't make again is cleared from here; the rest is shown or opened.
+        #expect(spots.first { $0.id == "snapshots" }?.opens?.lastPathComponent == "Disk Utility.app")
+        #expect(spots.filter { ["macos-assets", "temporary", "swap", "system-logs"].contains($0.id) }.allSatisfy { $0.removal == .none })
     }
 
     @Test func fullDiskAccessIsAPermission() {
@@ -98,5 +119,8 @@ import Testing
 
     @Test func route() {
         #expect(AppCommand.parse(URL(string: "notchisland://settings/storage")!) == .showStorage)
+        #expect(AppCommand.parse(URL(string: "notchisland://settings/whatsnew")!) == .showWhatsNewFromSettings)
+        #expect(AppCommand.parse(URL(string: "notchisland://demo/swipe?back=0")!) == .swipeSettings(back: false))
+        #expect(AppCommand.parse(URL(string: "notchisland://demo/swipe")!) == .swipeSettings(back: true))
     }
 }
