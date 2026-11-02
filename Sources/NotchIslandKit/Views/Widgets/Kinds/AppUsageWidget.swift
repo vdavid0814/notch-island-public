@@ -7,6 +7,10 @@ import SwiftUI
 /// says the day used. It reads `AppEnergyRecorder`'s ledger, leased while
 /// shown; a picture shows a sample day and reads nothing.
 ///
+/// Its title is a glass button, as Fan Control's reach is ("Usage"): a click turns it into "Energy", the
+/// energy each app used that day whether the Mac ran on battery or not, in watt-hours, and back
+/// (`WidgetConfig.energy`, kept with the widget).
+///
 /// The list is moved and sized in Customize as a part of its own (its look comes later), the title
 /// and the day as texts (`WidgetLabel`). How many rows: Customize's Settings (`WidgetConfig.count`).
 struct AppUsageWidget: View {
@@ -20,7 +24,13 @@ struct AppUsageWidget: View {
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
 
-    static var title: String { String(localized: "Usage by App") }
+    /// The title, short: the apps are what the rows show.
+    static var title: String { String(localized: "Usage") }
+    static var energyTitle: String { String(localized: "Energy") }
+
+    static func showsEnergy(_ widget: IslandWidget) -> Bool { widget.config.energy == true }
+
+    static func title(_ widget: IslandWidget) -> String { showsEnergy(widget) ? energyTitle : title }
 
     static func titlePoints(inner: CGSize) -> CGFloat { DailyUsageWidget.titlePoints(inner: inner) }
 
@@ -44,8 +54,21 @@ struct AppUsageWidget: View {
         ("com.apple.Photos", "Photos", "/System/Applications/Photos.app", 0.03),
     ].map { AppUsageRow(key: $0.0, name: $0.1, path: $0.2, points: $0.3 * 70, share: $0.3) }
 
+    /// The sample day as Energy by App shows it: 30 Wh in all.
+    static var energySamples: [AppUsageRow] {
+        samples.map { row in
+            var row = row
+            row.joules = row.share * 30 * 3600
+            return row
+        }
+    }
+
     /// What an empty day says: why there is nothing and when there will be.
-    static func emptyText(picked: Bool, onBattery: Bool) -> (title: String, detail: String) {
+    static func emptyText(picked: Bool, onBattery: Bool, energy: Bool = false) -> (title: String, detail: String) {
+        if energy {
+            if picked { return (String(localized: "Nothing counted"), String(localized: "NotchIsland did not count that day.")) }
+            return (String(localized: "Counting…"), String(localized: "The apps appear within five minutes."))
+        }
         if picked { return (String(localized: "Nothing counted"), String(localized: "The Mac did not run on battery that day.")) }
         if onBattery { return (String(localized: "Counting…"), String(localized: "The apps appear when the battery drops a percent.")) }
         return (String(localized: "Not on battery today"), String(localized: "Apps are counted while the Mac runs on battery."))
@@ -56,6 +79,21 @@ struct AppUsageWidget: View {
         points < 0.5 ? "<" + IslandFormat.percent(0.01) : IslandFormat.percent(points / 100)
     }
 
+    /// The energy in watt-hours: "12 Wh", "1.4 Wh"; below one, in milliwatt-hours ("380 mWh", "<1 mWh").
+    static func energyText(_ joules: Double, locale: Locale = .current) -> String {
+        let hours = joules / 3600
+        guard hours >= 0.9995 else {
+            let milli = hours * 1000
+            return milli < 0.5 ? "<1 mWh" : milli.formatted(.number.precision(.fractionLength(0)).locale(locale)) + " mWh"
+        }
+        return hours.formatted(.number.precision(.fractionLength(hours < 10 ? 1 : 0)).locale(locale)) + " Wh"
+    }
+
+    /// The row's figure: its percent, or its energy in Energy by App.
+    static func valueText(_ row: AppUsageRow) -> String {
+        row.joules.map { energyText($0) } ?? pointsText(row.points)
+    }
+
     var body: some View {
         let battery = model.battery
         var calendar = Calendar(identifier: .gregorian)
@@ -63,7 +101,13 @@ struct AppUsageWidget: View {
         let _ = calendar.locale = locale
         let today = calendar.startOfDay(for: fixedDate ?? .now)
         let picked = isPreview ? nil : battery.pickedDay(calendar: calendar)
-        let rows = isPreview ? Self.samples : battery.appUsage(on: picked, calendar: calendar)
+        let energy = Self.showsEnergy(widget)
+        let rows = switch (isPreview, energy) {
+        case (true, false): Self.samples
+        case (true, true): Self.energySamples
+        case (false, false): battery.appUsage(on: picked, calendar: calendar)
+        case (false, true): battery.appEnergyUsage(on: picked, calendar: calendar)
+        }
         let header = Self.headerHeight(widget, inner: size)
         VStack(alignment: .leading, spacing: header > 0 ? 4 : 0) {
             if header > 0 {
@@ -75,7 +119,7 @@ struct AppUsageWidget: View {
                 .frame(height: header)
             }
             AppUsageList(rows: rows, count: Self.count(widget), showsEmpty: !isEditing && (isPreview || battery.appLedger != nil),
-                         empty: Self.emptyText(picked: picked != nil, onBattery: model.power.isOnBattery))
+                         empty: Self.emptyText(picked: picked != nil, onBattery: model.power.isOnBattery, energy: energy))
                 .frame(width: size.width, height: max(size.height - header - (header > 0 ? 4 : 0), 0))
                 .movableElement(.appList, of: widget)
         }
@@ -91,16 +135,34 @@ struct AppUsageWidget: View {
         }
     }
 
-    private var title: some View {
+    /// The title, on Liquid Glass so it reads as the button it is (in the editor, the text alone).
+    @ViewBuilder private var title: some View {
         let points = Self.titlePoints(inner: size)
-        return WidgetLabel(id: .label, text: Self.title, widget: widget, size: points, weight: .semibold, isSecondary: true) {
-            Text(Self.title)
+        let text = Self.title(widget)
+        let label = WidgetLabel(id: .label, text: text, widget: widget, size: points, weight: .semibold, isSecondary: true) {
+            Text(text)
                 .font(.system(size: points, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
-        .movableElement(.label, of: widget)
+        if isEditing {
+            label.movableElement(.label, of: widget)
+        } else {
+            Button(action: switchMeasure) { label }
+                .islandButton(.capsule)
+                .controlSize(.mini)
+                .help(Self.showsEnergy(widget) ? String(localized: "Click for the battery each app used")
+                                               : String(localized: "Click for the energy each app used, on battery or not"))
+                .movableElement(.label, of: widget)
+        }
+    }
+
+    /// Usage by App ⇄ Energy by App, kept with the widget.
+    private func switchMeasure() {
+        guard !isPreview else { return }
+        let energy = !Self.showsEnergy(widget)
+        model.boards.store(containing: widget.id)?.update(widget.id) { $0.config.energy = energy ? true : nil }
     }
 
     private func dayLabel(_ day: Date, today: Date, calendar: Calendar) -> some View {
@@ -164,7 +226,7 @@ struct AppUsageList: View {
                                         .lineLimit(1)
                                         .minimumScaleFactor(0.85)
                                         .frame(maxWidth: .infinity, alignment: .leading)
-                                    Text(AppUsageWidget.pointsText(row.points))
+                                    Text(AppUsageWidget.valueText(row))
                                         .font(.system(size: points, weight: .semibold, design: .rounded).monospacedDigit())
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)

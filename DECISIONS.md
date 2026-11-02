@@ -7,6 +7,12 @@ Format: `YYYY-MM-DD hh:mm` — the decision. *Why.*
 
 ---
 
+- **2026-11-02 10:40** — Usage by App's sweeps run on the charger too (replaces 10-13 15:18's "no timer
+  on the charger"): every 5 min from launch, each sweep's joules kept by day for Energy by App (its
+  title, a glass button, switches; `WidgetConfig.energy`). A day's percents are scaled down to Daily
+  Usage's figure when more were counted. `AppEnergyRecorder.defaultURL` is nil outside the `.app`.
+  *BatteryTests started a `BatteryCenter` whose recorder wrote the user's real file: the tests' made-up
+  drops went to Claude Code, which ran them (Nov 1: 34 points counted for 10 used). ~12 ms a sweep.*
 - **2026-11-01 21:00** — A new track's title (Live Activities ▸ New Track) is a banner nobody asked
   for: it buries no other notice, shows only for a title other than the last one played (no pause,
   resume or gap between tracks), not for what already plays at launch, and waits up to 0.8 s for the

@@ -42,12 +42,46 @@ import Testing
         // A day used before anything was measured: all of it not measured; one unused: nothing.
         #expect(ledger.rows(on: day.addingTimeInterval(86_400), used: 5).map(\.key) == [AppAttribution.unmeasuredKey])
         #expect(ledger.rows(on: day.addingTimeInterval(86_400), used: 0).isEmpty)
+        // More counted than the day used (a test run's made-up drops, Nov 1 2026: 34 for 10): scaled
+        // down to it, each app keeping its share; a day the battery was not used shows nothing.
+        #expect(ledger.rows(on: day, used: 1.5).map(\.points) == [1.375, 0.125])
+        #expect(ledger.rows(on: day, used: 0).isEmpty)
         // A drop with nothing measured goes to macOS.
         #expect(AppEnergyLedger.share(1, by: [:]) == [AppAttribution.systemKey: 1])
         // Old days go, and the apps only they had.
         ledger.add(["b": 1], apps: apps, on: day.addingTimeInterval(9 * 86_400))
         ledger.prune(before: day.addingTimeInterval(86_400))
         #expect(ledger.days.count == 1 && ledger.apps.keys.sorted() == ["b"])
+    }
+
+    @Test func energyByAppCountsEveryJouleOfTheDay() throws {
+        var ledger = AppEnergyLedger()
+        let day = Date(timeIntervalSince1970: 1_000_000)
+        let apps = ["a": AppEnergyApp(name: "Alpha", path: nil)]
+        ledger.addEnergy(["a": 7200, AppAttribution.systemKey: 1800], apps: apps.merging([AppAttribution.systemKey: AppAttribution.system]) { a, _ in a }, on: day)
+        ledger.addEnergy(["a": 1800], apps: apps, on: day)
+        let rows = ledger.energyRows(on: day)
+        #expect(rows.map(\.key) == ["a", AppAttribution.systemKey])
+        #expect(rows.map(\.joules) == [9000, 1800])
+        #expect(rows.first?.share == 9000.0 / 10_800)
+        #expect(ledger.rows(on: day).isEmpty, "energy is no percent of the battery")
+        // A file written before Energy by App reads with none; the energy is written and read back.
+        let old = try JSONDecoder().decode(AppEnergyLedger.self, from: Data(#"{"days":[],"apps":{}}"#.utf8))
+        #expect(old == AppEnergyLedger())
+        #expect(try JSONDecoder().decode(AppEnergyLedger.self, from: JSONEncoder().encode(ledger)) == ledger)
+        // Old days' energy goes too.
+        ledger.prune(before: day.addingTimeInterval(86_400))
+        #expect(ledger.energy.isEmpty && ledger.apps.isEmpty)
+        let locale = Locale(identifier: "en_US")
+        #expect(AppUsageWidget.energyText(9000, locale: locale) == "2.5 Wh")
+        #expect(AppUsageWidget.energyText(36_000 * 1.24, locale: locale) == "12 Wh")
+        #expect(AppUsageWidget.energyText(60, locale: locale) == "17 mWh")
+        #expect(AppUsageWidget.energyText(1, locale: locale) == "<1 mWh")
+    }
+
+    @Test func outsideTheAppNothingReachesTheUsersFile() {
+        // The test runner is no .app: a recorder made with the defaults writes nowhere.
+        #expect(AppEnergyRecorder.defaultURL == nil)
     }
 
     @Test func processesBelongToTheirOutermostApp() {
@@ -71,15 +105,17 @@ import Testing
         let recorder = AppEnergyRecorder(url: url, read: { [counter] in
             [ProcessEnergyReading(pid: 7, start: 1, energyNJ: counter.next())]
         }, resolve: { _ in ("app", AppEnergyApp(name: "App", path: nil)) })
-        recorder.power(onBattery: true, level: 80)    // the baseline
-        recorder.power(onBattery: true, level: 78)    // two percents, the app's
+        recorder.power(onBattery: true, level: 80)    // the baseline, then a joule until unplugged
+        recorder.power(onBattery: true, level: 78)    // two percents, the app's (a joule)
         recorder.power(onBattery: true, level: 79)    // a rise: nothing
-        recorder.power(onBattery: false, level: 79)   // plugged in: nothing more
+        recorder.power(onBattery: false, level: 79)   // plugged in: no percent more, a joule more
         recorder.power(onBattery: false, level: 70)
-        recorder.drain()
+        recorder.stop()
         let saved = try JSONDecoder().decode(AppEnergyLedger.self, from: Data(contentsOf: url))
-        #expect(saved.rows(on: Calendar.autoupdatingCurrent.startOfDay(for: Date())).map(\.points) == [2])
-        #expect(counter.reads == 2)
+        let today = Calendar.autoupdatingCurrent.startOfDay(for: Date())
+        #expect(saved.rows(on: today).map(\.points) == [2])
+        #expect(saved.energyRows(on: today).map(\.joules) == [3])
+        #expect(counter.reads == 4)
     }
 }
 

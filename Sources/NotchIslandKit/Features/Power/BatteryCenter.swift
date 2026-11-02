@@ -257,6 +257,12 @@ nonisolated struct BatteryHistorySnapshot: Sendable, Equatable {
         return appLedger?.rows(on: start, used: used) ?? []
     }
 
+    /// Energy by App: the energy each app used on `day` (nil: today), on battery or not, the most
+    /// first. Needs an `.apps` lease.
+    func appEnergyUsage(on day: Date?, calendar: Calendar = .autoupdatingCurrent, now: Date = Date()) -> [AppUsageRow] {
+        appLedger?.energyRows(on: day ?? calendar.startOfDay(for: now)) ?? []
+    }
+
     /// The picked day, if it is one of the eight still in the history; nil for today.
     func pickedDay(calendar: Calendar = .autoupdatingCurrent, now: Date = Date()) -> Date? {
         guard let selectedDay else { return nil }

@@ -9,7 +9,7 @@ events, volume/brightness and dropped files live there the rest of the time.
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.9 (.dmg)</a>
+  <a href="https://github.com/vdavid0814/notch-island-public/releases/latest/download/NotchIsland.dmg">⬇&nbsp;&nbsp;Download NotchIsland v0.9.1 (.dmg)</a>
 </h2>
 <p align="center">
   <sub>Latest version · macOS 27 · MacBook with a notch (Apple silicon) · <a href="#download">How to install</a></sub>
@@ -24,11 +24,15 @@ Swift 6, SwiftUI, macOS 27.
 
 ---
 
-## What's new in v0.9
+## What's new in v0.9.1
 
-A new song's title in the notch, Listen Again, and the island on a monitor or a Mac without a notch.
+Usage and Energy for each app, a new song's title in the notch, Listen Again, and the island on a monitor.
+(0.9 was not released on its own: everything from it is here.)
 
 ### The biggest changes
+
+- **Energy per app.** Usage by App's title is now a button: click it and the widget shows Energy — how much energy each app used today, on battery or plugged in, in watt-hours. Click again for Usage. It stays as you leave it.
+- **Usage adds up.** The apps' percents now add up to what Daily Usage says the day used. An app could show more of the battery than the whole day used (20 % for one app on a 10 % day); a day spent plugged in now says Nothing counted.
 
 - **A new song's title.** When the next song or video starts, the pill drops a little lower and wider with its title in one line, in the colour of its cover. A title too long for it stands still for half a second, then glides through once.
 - **Listen Again.** With nothing playing, Now Playing shows the last song from Music — its cover, title and artist — instead of Nothing Playing. Listen Again opens Music right at that song, without playing it.
@@ -53,11 +57,16 @@ A new song's title in the notch, Listen Again, and the island on a monitor or a 
 
 ### Fixes
 
+- **Usage adds up.** An app could show more of the battery than the whole day used. Now the apps add up to it.
+- **Days on the charger.** A day spent plugged in could list apps with percents. Now it says Nothing counted.
 - **A black notch on a monitor.** On a screen without a notch, a black shape could stay at the top while the island was closed.
 - **Two scroll bars.** With a mouse connected, Settings' pages could show two scroll bars.
 
 ### Good to know
 
+- **Energy from today.** Energy per app is counted from this version on; earlier days show Nothing counted.
+- **macOS reads low.** The window server and other system parts can't be measured, so macOS reads low in Energy.
+- **Earlier days scaled.** Days counted wrong before keep each app's share, scaled to what the day used.
 - **Music only.** Listen Again offers songs played in Music, not Spotify or videos.
 - **Not in your library?** A song you only streamed opens as a search in Music.
 - **Not over full screen.** A new title doesn't appear while a video plays in full screen.

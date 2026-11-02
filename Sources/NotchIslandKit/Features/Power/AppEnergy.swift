@@ -9,7 +9,8 @@ nonisolated struct AppEnergyApp: Sendable, Codable, Equatable {
 }
 
 /// One row of Usage by App: the battery an app used over a day, in percentage points (the rows of
-/// a day add up to what Daily Usage says the day used), and its share of the day's.
+/// a day add up to what Daily Usage says the day used), and its share of the day's. Energy by App's
+/// rows carry the joules instead.
 nonisolated struct AppUsageRow: Sendable, Equatable, Identifiable {
     var key: String
     var name: String
@@ -18,6 +19,8 @@ nonisolated struct AppUsageRow: Sendable, Equatable, Identifiable {
     var points: Double
     /// Of the day's use, 0…1.
     var share: Double
+    /// The energy it used that day, on battery or not (Energy by App); nil in Usage by App.
+    var joules: Double? = nil
 
     var id: String { key }
     var isSystem: Bool { key == AppAttribution.systemKey }
@@ -26,18 +29,44 @@ nonisolated struct AppUsageRow: Sendable, Equatable, Identifiable {
 
 /// The battery each app used, a day each, as the iPhone's Battery Usage by App counts it: every
 /// percent the battery drops goes to the apps by the energy each used since the drop before.
-/// Kept for the days Daily Usage shows.
+/// Kept for the days Daily Usage shows, with the energy each app used, on battery or not (Energy
+/// by App).
 nonisolated struct AppEnergyLedger: Sendable, Codable, Equatable {
     /// Percentage points by app, by the day's local midnight.
     var days: [Date: [String: Double]] = [:]
     var apps: [String: AppEnergyApp] = [:]
+    /// Joules by app, by the day's local midnight, whatever the Mac ran on. Since Nov 2 2026.
+    var energy: [Date: [String: Double]] = [:]
 
     static let retention = BatteryHistory.retention
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey { case days, apps, energy }
+
+    /// A file written before Energy by App has no `energy`.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        days = try c.decodeIfPresent([Date: [String: Double]].self, forKey: .days) ?? [:]
+        apps = try c.decodeIfPresent([String: AppEnergyApp].self, forKey: .apps) ?? [:]
+        energy = try c.decodeIfPresent([Date: [String: Double]].self, forKey: .energy) ?? [:]
+    }
 
     mutating func add(_ points: [String: Double], apps found: [String: AppEnergyApp], on day: Date) {
         guard !points.isEmpty else { return }
         days[day, default: [:]].merge(points, uniquingKeysWith: +)
-        for key in points.keys { if let app = found[key] { apps[key] = app } }
+        name(points.keys, from: found)
+    }
+
+    /// Joules used since the last sweep, by app.
+    mutating func addEnergy(_ joules: [String: Double], apps found: [String: AppEnergyApp], on day: Date) {
+        guard !joules.isEmpty else { return }
+        energy[day, default: [:]].merge(joules, uniquingKeysWith: +)
+        name(joules.keys, from: found)
+    }
+
+    private mutating func name(_ keys: some Sequence<String>, from found: [String: AppEnergyApp]) {
+        for key in keys { if let app = found[key] { apps[key] = app } }
     }
 
     /// `drop` percentage points shared out by `energy` (joules by app); with no energy measured,
@@ -52,17 +81,22 @@ nonisolated struct AppEnergyLedger: Sendable, Codable, Equatable {
     /// Forgets the days before `oldest`, and the apps only they had.
     mutating func prune(before oldest: Date) {
         days = days.filter { $0.key >= oldest }
-        let used = Set(days.values.flatMap(\.keys))
+        energy = energy.filter { $0.key >= oldest }
+        let used = Set(days.values.flatMap(\.keys)).union(energy.values.flatMap(\.keys))
         apps = apps.filter { used.contains($0.key) }
     }
 
-    /// The day's apps, the most first. With `used` (Daily Usage's figure for the day), what the
-    /// apps were not measured for — the hours before recording began, the app not running — is a
-    /// row of its own, so the rows add up to it.
+    /// The day's apps, the most first. With `used` (Daily Usage's figure for the day) the rows add
+    /// up to it: what the apps were not measured for — the hours before recording began, the app
+    /// not running — is a row of its own, and more than the day used (percents counted twice by
+    /// another copy of the app, a test run) is scaled down to it, each app keeping its share.
     func rows(on day: Date, used: Double? = nil) -> [AppUsageRow] {
         var values = (days[day] ?? [:]).filter { $0.value > 0 }
         let counted = values.values.reduce(0, +)
-        if let used, used - counted >= 0.5 { values[AppAttribution.unmeasuredKey] = used - counted }
+        if let used {
+            if counted > used { values = values.mapValues { $0 * used / counted } }
+            else if used - counted >= 0.5 { values[AppAttribution.unmeasuredKey] = used - counted }
+        }
         let total = values.values.reduce(0, +)
         guard total > 0 else { return [] }
         return values.map { key, value in
@@ -70,6 +104,18 @@ nonisolated struct AppEnergyLedger: Sendable, Codable, Equatable {
             return AppUsageRow(key: key, name: app.name, path: app.path, points: value, share: value / total)
         }
         .sorted { ($0.points, $1.name) > ($1.points, $0.name) }
+    }
+
+    /// Energy by App: the energy each app used on `day`, on battery or not, the most first.
+    func energyRows(on day: Date) -> [AppUsageRow] {
+        let values = (energy[day] ?? [:]).filter { $0.value > 0 }
+        let total = values.values.reduce(0, +)
+        guard total > 0 else { return [] }
+        return values.map { key, joules in
+            let app = apps[key] ?? (key == AppAttribution.systemKey ? AppAttribution.system : AppEnergyApp(name: key, path: nil))
+            return AppUsageRow(key: key, name: app.name, path: app.path, points: 0, share: joules / total, joules: joules)
+        }
+        .sorted { ($0.share, $1.name) > ($1.share, $0.name) }
     }
 }
 
@@ -182,19 +228,28 @@ nonisolated enum AppEnergySweep {
     }
 }
 
-/// Records which apps use the battery: every process's energy counter read at each percent the
-/// battery drops and every five minutes between, while the Mac runs on battery, nothing on the
-/// charger (no timer at all). Each drop goes to the apps by the energy they used since the drop
-/// before, so a day's apps add up to the percent it used. All of it on a background queue of its
-/// own; the ledger is handed to the main thread only while something shows it.
+/// Records which apps use the battery, and the energy each uses on battery or not: every process's
+/// energy counter read every five minutes from the first power reading on, and at each percent the
+/// battery drops. Each drop goes to the apps by the energy they used since the drop before, so a
+/// day's apps add up to the percent it used (Usage by App); every sweep's joules go to the day
+/// whatever the Mac runs on (Energy by App). A sweep is about 12 ms of CPU, so the charger's
+/// sweeps cost nothing anyone could measure. All of it on a background queue of its own; the ledger
+/// is handed to the main thread only while something shows it.
 ///
 /// A process that ends between two sweeps loses its last few minutes, and one that starts and
 /// ends between them is not seen; root's processes (WindowServer, the kernel) cannot be read.
 nonisolated final class AppEnergyRecorder: @unchecked Sendable {
     static let interval: TimeInterval = 300
+    /// Energy by App opened: a sweep first, if the last one is older than this.
+    static let freshness: TimeInterval = 60
 
     /// Percentage points since Oct 13 2026 15:50; `app-energy.json` (joules, an afternoon's) before.
-    static var defaultURL: URL? { DiagnosticsCenter.supportFolder?.appendingPathComponent("app-battery.json") }
+    /// Nil outside the app: a test's made-up readings must not reach the user's file (they did, Oct
+    /// 31 – Nov 2 2026: the tests' "battery" drops went to Claude Code, which ran them).
+    static var defaultURL: URL? {
+        guard Bundle.main.bundleURL.pathExtension == "app" else { return nil }
+        return DiagnosticsCenter.supportFolder?.appendingPathComponent("app-battery.json")
+    }
 
     private let queue = DispatchQueue(label: "com.davidvarga.notchisland.app-energy", qos: .background)
     private let url: URL?
@@ -208,6 +263,7 @@ nonisolated final class AppEnergyRecorder: @unchecked Sendable {
     private var onBattery = false
     private var seen: [pid_t: AppEnergySweep.Seen] = [:]
     private var lastSweep: UInt64?
+    private var sweptAt: Date?
     private var found: [String: AppEnergyApp] = [:]
     /// The battery's level at the last drop (or since unplugging), and each app's energy since.
     private var level: Int?
@@ -228,36 +284,31 @@ nonisolated final class AppEnergyRecorder: @unchecked Sendable {
         self.resolve = resolve
     }
 
-    /// Every real power reading (`PowerMonitor.onRealReading`): unplugging starts the sweeps from a
-    /// baseline, each percent lost on battery is shared out, plugging in stops them.
+    /// Every real power reading (`PowerMonitor.onRealReading`): the first starts the sweeps from a
+    /// baseline, unplugging starts counting percents, each percent lost on battery is shared out,
+    /// plugging in stops counting them (the sweeps go on).
     func power(onBattery value: Bool, level newLevel: Int) {
         queue.async { [self] in
             loadIfNeeded()
+            if timer == nil {
+                sweep()
+                startTimer()
+            }
             if value != onBattery {
-                if value {
-                    onBattery = true
-                    sweep(counting: false)
-                    level = newLevel
-                    pending.removeAll()
-                    startTimer()
-                } else {
-                    // A part of a percent used since the last drop is not one Daily Usage counts.
-                    onBattery = false
-                    stopTimer()
-                    seen.removeAll()
-                    lastSweep = nil
-                    level = nil
-                    pending.removeAll()
-                    save()
-                }
+                // What was used until now, on the source it was used on. A part of a percent used
+                // since the last drop is not one Daily Usage counts.
+                sweep()
+                onBattery = value
+                level = value ? newLevel : nil
+                pending.removeAll()
+                save()
                 return
             }
             guard onBattery, let last = level, newLevel != last else { return }
             if newLevel < last {
-                sweep(counting: true)
+                sweep()
                 let today = Calendar.autoupdatingCurrent.startOfDay(for: now())
-                ledger.add(AppEnergyLedger.share(Double(last - newLevel), by: pending), apps: found.merging(
-                    [AppAttribution.systemKey: AppAttribution.system]) { a, _ in a }, on: today)
+                ledger.add(AppEnergyLedger.share(Double(last - newLevel), by: pending), apps: named, on: today)
                 ledger.prune(before: today.addingTimeInterval(-AppEnergyLedger.retention))
                 pending.removeAll()
                 isDirty = true
@@ -268,12 +319,13 @@ nonisolated final class AppEnergyRecorder: @unchecked Sendable {
         }
     }
 
-    /// Hands the ledger to `watcher` on the main thread now (after a sweep, if on battery and the
-    /// last one is a minute old) and after every sweep until `unwatch()`.
+    /// Hands the ledger to `watcher` on the main thread now (after a sweep, if the last one is a
+    /// minute old, so the day's energy is current) and after every sweep until `unwatch()`.
     func watch(_ watcher: @escaping @MainActor @Sendable (AppEnergyLedger) -> Void) {
         queue.async { [self] in
             loadIfNeeded()
             self.watcher = watcher
+            if timer != nil, sweptAt.map({ now().timeIntervalSince($0) >= Self.freshness }) ?? true { sweep() }
             deliver()
         }
     }
@@ -293,12 +345,23 @@ nonisolated final class AppEnergyRecorder: @unchecked Sendable {
     /// Waits for what is queued (tests).
     func drain() { queue.sync {} }
 
+    /// The apps found, macOS among them.
+    private var named: [String: AppEnergyApp] {
+        found.merging([AppAttribution.systemKey: AppAttribution.system]) { a, _ in a }
+    }
+
     private func startTimer() {
         guard timer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + Self.interval, repeating: Self.interval, leeway: .seconds(30))
         // Between drops: so a process that ends before the next one is counted up to here.
-        timer.setEventHandler { [weak self] in self?.sweep(counting: true) }
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            sweep()
+            ledger.prune(before: Calendar.autoupdatingCurrent.startOfDay(for: now()).addingTimeInterval(-AppEnergyLedger.retention))
+            save()
+            deliver()
+        }
         timer.resume()
         self.timer = timer
     }
@@ -308,7 +371,9 @@ nonisolated final class AppEnergyRecorder: @unchecked Sendable {
         timer = nil
     }
 
-    private func sweep(counting: Bool) {
+    /// Each process's energy since the last sweep: to the day's energy, and on battery to the
+    /// percent being used.
+    private func sweep() {
         let resolve = self.resolve
         var found = self.found
         let readings = read()
@@ -319,7 +384,13 @@ nonisolated final class AppEnergyRecorder: @unchecked Sendable {
         }
         seen = result.seen
         lastSweep = mach_absolute_time()
-        if counting { pending.merge(result.joules, uniquingKeysWith: +) }
+        sweptAt = now()
+        self.found = found
+        if !result.joules.isEmpty {
+            ledger.addEnergy(result.joules, apps: named, on: Calendar.autoupdatingCurrent.startOfDay(for: now()))
+            isDirty = true
+        }
+        if onBattery { pending.merge(result.joules, uniquingKeysWith: +) }
         // The apps still running are remembered between sweeps, and those that used energy since
         // the last drop (named at the next one, ended or not).
         let running = Set(result.seen.values.map(\.key))

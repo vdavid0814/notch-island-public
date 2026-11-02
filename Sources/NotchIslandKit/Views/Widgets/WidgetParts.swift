@@ -39,7 +39,7 @@ import SwiftUI
             case .analogClock: ClockFaceWidget.caption(widget.config, here: .current)
             case .monthCalendar: MonthGrid(date: .now, calendar: .current, locale: .current).title
             case .batteryUsage: DailyUsageWidget.title
-            case .appUsage: AppUsageWidget.title
+            case .appUsage: AppUsageWidget.title(widget)
             case .fanControl: FanControlWidget.modeText(manual: false, access: .unknown)
             default: Readouts.picture(widget).caption
             }

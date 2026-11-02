@@ -14,6 +14,9 @@ nonisolated struct WidgetConfig: Codable, Hashable, Sendable {
     var symbolRows: [Int]?
     /// How far back a graph reaches, in seconds (Fan Control's; nil: its longest).
     var seconds: Int?
+    /// Usage by App shows the energy each app used, on battery or not (Energy by App); nil: the
+    /// battery's percents.
+    var energy: Bool?
 
     static let countRange = 1...8
     /// A graph's reach: ten seconds to ten minutes (the history kept, `ThermalMonitor.window`).
@@ -22,7 +25,7 @@ nonisolated struct WidgetConfig: Codable, Hashable, Sendable {
 
     init() {}
 
-    private enum CodingKeys: String, CodingKey { case timeZone, label, count, symbolRows, seconds }
+    private enum CodingKeys: String, CodingKey { case timeZone, label, count, symbolRows, seconds, energy }
 
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -31,6 +34,7 @@ nonisolated struct WidgetConfig: Codable, Hashable, Sendable {
         count = (try? c.decodeIfPresent(Int.self, forKey: .count)).flatMap { $0 }
         symbolRows = (try? c.decodeIfPresent([Int].self, forKey: .symbolRows)).flatMap { $0 }
         seconds = (try? c.decodeIfPresent(Int.self, forKey: .seconds)).flatMap { $0 }
+        energy = (try? c.decodeIfPresent(Bool.self, forKey: .energy)).flatMap { $0 }
     }
 
     /// An unknown time zone, an empty caption and an out-of-range count are left out.

@@ -265,7 +265,7 @@ private let t0: UInt32 = 1_790_000_000
         let old = BatteryRecord(time: UInt32(Date().timeIntervalSince1970) - 3600, level: 90)
         try write([old], to: url)
         let recorder = BatteryRecorder(url: url)
-        let center = BatteryCenter(recorder: recorder)
+        let center = BatteryCenter(recorder: recorder, appEnergy: AppEnergyRecorder(url: nil))
         center.start(power: PowerMonitor(readState: { reading(88) }), activity: SystemActivity())
         await drain(recorder)
         recorder.powerReading(from: .unknown, to: reading(88))
@@ -288,7 +288,7 @@ private let t0: UInt32 = 1_790_000_000
 
     @Test func aHistoryLoadedBeforeTheFileIsReadHoldsEachRecordOnce() async throws {
         let recorder = BatteryRecorder(url: temporaryHistory())
-        let center = BatteryCenter(recorder: recorder)
+        let center = BatteryCenter(recorder: recorder, appEnergy: AppEnergyRecorder(url: nil))
         center.start(power: PowerMonitor(readState: { reading(88) }), activity: SystemActivity())
         // The launch's reading and a lease both before the file's last record is known.
         recorder.powerReading(from: .unknown, to: reading(88))
@@ -301,7 +301,7 @@ private let t0: UInt32 = 1_790_000_000
 
     @Test func theDetailsAreReadAgainOnlyAfterAPowerChange() async throws {
         let reads = Mutex(0)
-        let center = BatteryCenter(recorder: BatteryRecorder(url: nil)) { power in
+        let center = BatteryCenter(recorder: BatteryRecorder(url: nil), appEnergy: AppEnergyRecorder(url: nil)) { power in
             reads.withLock { $0 += 1 }
             return BatteryDetails.demo(power: power)
         }
@@ -345,7 +345,7 @@ private let t0: UInt32 = 1_790_000_000
     @Test func theDemoIsNeverWrittenAndGivesTheRealHistoryBack() async throws {
         let url = temporaryHistory()
         let recorder = BatteryRecorder(url: url)
-        let center = BatteryCenter(recorder: recorder) { BatteryDetails.demo(power: $0) }
+        let center = BatteryCenter(recorder: recorder, appEnergy: AppEnergyRecorder(url: nil)) { BatteryDetails.demo(power: $0) }
         var state = reading(76)
         let power = PowerMonitor(readState: { state })
         center.start(power: power, activity: SystemActivity())
