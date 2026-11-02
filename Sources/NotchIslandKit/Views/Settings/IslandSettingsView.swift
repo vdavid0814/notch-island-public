@@ -311,23 +311,71 @@ struct AppInfoMenu: View {
 }
 
 /// The close button at the notch's height, in Settings' own window: the window lies over the
-/// island's band, whose button it would take the clicks of.
+/// island's band, whose button it would take the clicks of. A volume or brightness change made
+/// while Settings is open shows here too, beside the notch (asked for): Settings holds the island,
+/// so its level banner has nowhere else to appear.
 struct SettingsCloseBand: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let layout = model.layout
-        NotchSplitBand(split: IslandSettingsView.split(layout), height: layout.notch.height) {
-            EmptyView()
-        } trailing: {
-            Button {
-                model.controller.closeSettings()
-            } label: {
-                Label("Close", systemImage: "xmark")
+        let level = model.banners.current?.levelKind
+        NotchSplitBand(split: IslandSettingsView.split(layout), height: layout.notch.height,
+                       leadingAlignment: .trailing) {
+            if let level {
+                SettingsLevelSymbol(kind: level)
+                    .font(.system(size: layout.notch.height * 0.42, weight: .semibold))
+                    .transition(.opacity)
             }
-            .islandButton(.circle)
-            .controlSize(Metrics.Control.size(fittingBand: layout.notch.height))
-            .help("Close (esc)")
+        } trailing: {
+            HStack(spacing: 8) {
+                if let level {
+                    SettingsLevelReadout(kind: level)
+                        .transition(.opacity)
+                }
+                Spacer(minLength: 0)
+                Button {
+                    model.controller.closeSettings()
+                } label: {
+                    Label("Close", systemImage: "xmark")
+                }
+                .islandButton(.circle)
+                .controlSize(Metrics.Control.size(fittingBand: layout.notch.height))
+                .help("Close (esc)")
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: level)
+    }
+}
+
+/// Left of the notch while Settings is open: the level's symbol (for volume, the mute button). Its
+/// own view, so a key press redraws only it, not the band.
+private struct SettingsLevelSymbol: View {
+    let kind: LevelKind
+
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        LevelLeadingSymbol(kind: kind, reading: model.levels.reading(kind))
+    }
+}
+
+/// Right of the notch while Settings is open: the level pill's small slider and the percentage.
+private struct SettingsLevelReadout: View {
+    static let sliderWidth: CGFloat = 120
+
+    let kind: LevelKind
+
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 8) {
+            LevelSlider(kind: kind)
+                .controlSize(.mini)
+                .frame(width: Self.sliderWidth)
+            LevelValue(reading: model.levels.reading(kind))
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .frame(minWidth: 40, alignment: .leading)
         }
     }
 }

@@ -41,6 +41,7 @@ A new song's title in the notch, Listen Again, and the island on a monitor or a 
 - **Listen Again in General.** It can be turned off there; Nothing Playing then comes back.
 - **The line, your way.** Its length, thickness and how much of it shows are set in Live Activities ▸ Screens Without a Notch.
 - **Switch, picture, options.** Settings' sections start with the switch and its picture; the options fold away while it's off.
+- **Volume in Settings.** With Settings open, a volume or brightness change now shows beside the notch: its symbol on the left, a small slider and the percentage on the right.
 
 ### Performance
 
